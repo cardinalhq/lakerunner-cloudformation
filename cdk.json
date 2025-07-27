@@ -17,6 +17,22 @@
     ]
   },
   "context": {
+    "app": {
+      "dbSecretName": "lakerunner-pg-password",
+      "vpcId": "vpc-0234e8e4444318898",
+      "dbConfig": {
+        "host":    "postgres.postgresql.svc.cluster.local",
+        "port":    "5432",
+        "name":    "metadata",
+        "user":    "explorer",
+        "sslmode": "disable"
+      },
+      "env": {
+        "account": "026090525732",
+        "region":  "us-east-2"
+      }
+    },
+
     "@aws-cdk/aws-lambda:recognizeLayerVersion": true,
     "@aws-cdk/core:checkSecretUsage": true,
     "@aws-cdk/core:target-partitions": [
