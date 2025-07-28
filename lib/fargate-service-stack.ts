@@ -6,6 +6,7 @@ import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import { ServiceConfig } from './configs';
 import * as sqs from 'aws-cdk-lib/aws-sqs';
+import * as ec2 from 'aws-cdk-lib/aws-ec2';
 
 export interface FargateServiceStackProps extends cdk.StackProps {
   readonly cluster: ecs.Cluster;
@@ -15,6 +16,7 @@ export interface FargateServiceStackProps extends cdk.StackProps {
   readonly service: ServiceConfig;
   readonly storageProfilesParam: cdk.aws_ssm.IStringParameter;
   readonly queue: sqs.IQueue;
+  readonly taskSecurityGroup: ec2.ISecurityGroup;  // new
 }
 
 export class FargateServiceStack extends cdk.Stack {
@@ -54,6 +56,7 @@ export class FargateServiceStack extends cdk.Stack {
 
     new ecs.FargateService(this, 'Service', {
       cluster: props.cluster,
+      securityGroups:     [ props.taskSecurityGroup ],
       taskDefinition: taskDef,
       desiredCount: props.service.replicas ?? 1,
       minHealthyPercent: 100,

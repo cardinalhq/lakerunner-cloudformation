@@ -37,6 +37,7 @@ export class CommonInfraStack extends cdk.Stack {
   public readonly queue: sqs.IQueue;
   public readonly taskRole: iam.IRole;
   public readonly storageProfilesParam: ssm.IStringParameter;
+  public readonly taskSecurityGroup: ec2.ISecurityGroup;
 
   constructor(scope: Construct, id: string, props: CommonInfraProps) {
     super(scope, id, props);
@@ -45,6 +46,12 @@ export class CommonInfraStack extends cdk.Stack {
     this.vpc = ec2.Vpc.fromLookup(this, 'Vpc', { vpcId: props.vpcId });
     this.cluster = new Cluster(this, 'Cluster', {
       vpc: this.vpc,
+    });
+
+    // ── Security Group for all Fargate tasks ─────────────────────
+    this.taskSecurityGroup = new ec2.SecurityGroup(this, 'TaskSG', {
+      vpc: this.vpc,
+      allowAllOutbound: true,  // allow egress
     });
 
     // ── SQS Queue ─────────────────────────────────────────────
@@ -100,6 +107,8 @@ export class CommonInfraStack extends cdk.Stack {
       multiAz: false,
     });
 
+    this.dbInstance.connections.allowDefaultPortFrom(this.taskSecurityGroup);
+
     // ── IAM Role for Fargate Tasks ────────────────────────────
     this.taskRole = new iam.Role(this, 'TaskRole', {
       assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
@@ -113,51 +122,51 @@ export class CommonInfraStack extends cdk.Stack {
 
     // in your stack (e.g. lib/common-infra-stack.ts)
 
-const migrationTaskDef = new ecs.FargateTaskDefinition(this, 'MigrationTaskDef', {
-  cpu:            512,
-  memoryLimitMiB: 1024,
-  taskRole:       this.taskRole,  // reuse your same task role
-});
+    const migrationTaskDef = new ecs.FargateTaskDefinition(this, 'MigrationTaskDef', {
+      cpu: 512,
+      memoryLimitMiB: 1024,
+      taskRole: this.taskRole,  // reuse your same task role
+    });
 
-// assume your container image has a "migrate" sub‑command
-const migrator = migrationTaskDef.addContainer('Migrator', {
-  image:   ecs.ContainerImage.fromRegistry('public.ecr.aws/cardinalhq.io/lakerunner:latest'),
-  command: ['/app/bin/lakerunner','migrate'],  // or whatever your migrate entrypoint is
-  logging: ecs.LogDrivers.awsLogs({
-    logGroup:    new logs.LogGroup(this, 'MigrationLogGroup',{ removalPolicy: cdk.RemovalPolicy.DESTROY }),
-    streamPrefix:'migration',
-  }),
-  environment: {
-    LRDB_HOST:   this.dbInstance.dbInstanceEndpointAddress,
-    LRDB_PORT:   this.dbInstance.dbInstanceEndpointPort,
-    LRDB_DBNAME: props.dbConfig.name,
-    LRDB_USER:   props.dbConfig.username,
-  },
-  secrets: {
-    LRDB_PASSWORD: ecs.Secret.fromSecretsManager(this.dbSecret),
-  },
-});
+    // assume your container image has a "migrate" sub‑command
+    const migrator = migrationTaskDef.addContainer('Migrator', {
+      image: ecs.ContainerImage.fromRegistry('public.ecr.aws/cardinalhq.io/lakerunner:latest'),
+      command: ['/app/bin/lakerunner', 'migrate'],  // or whatever your migrate entrypoint is
+      logging: ecs.LogDrivers.awsLogs({
+        logGroup: new logs.LogGroup(this, 'MigrationLogGroup', { removalPolicy: cdk.RemovalPolicy.DESTROY }),
+        streamPrefix: 'migration',
+      }),
+      environment: {
+        LRDB_HOST: this.dbInstance.dbInstanceEndpointAddress,
+        LRDB_PORT: this.dbInstance.dbInstanceEndpointPort,
+        LRDB_DBNAME: props.dbConfig.name,
+        LRDB_USER: props.dbConfig.username,
+      },
+      secrets: {
+        LRDB_PASSWORD: ecs.Secret.fromSecretsManager(this.dbSecret),
+      },
+    });
 
     this.storageProfilesParam = new ssm.StringParameter(this, 'StorageProfilesParam', {
       parameterName: '/lakerunner/storage_profiles',
       stringValue: Fn.sub(
-      [
-        '- bucket: ${BucketName}',
-        '  cloud_provider: aws',
-        '  collector_name: lakerunner',
-        '  insecure_tls: false',
-        '  instance_num: 1',
-        '  organization_id: 12340000-0000-4000-8000-000000000000',
-        '  region: ${AWS::Region}',
-        '  use_path_style: true',
-      ].join('\n'),
-      {
-        BucketName: this.bucket.bucketName,
-      }
+        [
+          '- bucket: ${BucketName}',
+          '  cloud_provider: aws',
+          '  collector_name: lakerunner',
+          '  insecure_tls: false',
+          '  instance_num: 1',
+          '  organization_id: 12340000-0000-4000-8000-000000000000',
+          '  region: ${AWS::Region}',
+          '  use_path_style: true',
+        ].join('\n'),
+        {
+          BucketName: this.bucket.bucketName,
+        }
       ),
       description: 'Storage profiles config',
       tier: ssm.ParameterTier.STANDARD,
     });
     this.storageProfilesParam.applyRemovalPolicy(RemovalPolicy.DESTROY);
-    }
+  }
 }

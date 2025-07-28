@@ -46,6 +46,7 @@ for (const svc of services) {
   new FargateServiceStack(app, svc.name, {
     env,
     cluster:   common.cluster,
+    taskSecurityGroup:   common.taskSecurityGroup,
     taskRole:  common.taskRole,
     dbEnv,
     dbSecret:  common.dbSecret,
