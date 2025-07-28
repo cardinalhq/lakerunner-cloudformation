@@ -19,16 +19,15 @@
   "context": {
     "app": {
       "dbSecretName": "lakerunner-pg-password",
-      "vpcId": "vpc-0234e8e4444318898",
+      "vpcId": "vpc-03e8199c99601b6cb",
       "dbConfig": {
-        "host":    "postgres.postgresql.svc.cluster.local",
         "port":    "5432",
         "name":    "metadata",
-        "user":    "explorer",
-        "sslmode": "disable"
+        "sslmode": "require",
+        "username": "lakerunner"
       },
       "env": {
-        "account": "026090525732",
+        "account": "529370323638",
         "region":  "us-east-2"
       }
     },

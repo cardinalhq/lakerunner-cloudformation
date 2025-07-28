@@ -4,6 +4,7 @@ export interface ServiceConfig {
   readonly command: string[];
   readonly cpu?: number;
   readonly memoryMiB?: number;
+  readonly replicas?: number; // Optional, default is 1
 }
 
 export const services: ServiceConfig[] = [
@@ -13,6 +14,7 @@ export const services: ServiceConfig[] = [
     command: ['/app/bin/lakerunner','ingest-logs'],
     cpu:     512,
     memoryMiB: 1024,
+    replicas: 1,
   },
   {
     name:    'ingest-metrics',
@@ -20,6 +22,7 @@ export const services: ServiceConfig[] = [
     command: ['/app/bin/lakerunner','ingest-metrics'],
     cpu:     512,
     memoryMiB: 1024,
+    replicas: 1,
   },
   // …all 15 services…
 ];

@@ -5,10 +5,13 @@ import { FargateServiceStack } from '../lib/fargate-service-stack';
 import { services }            from '../lib/configs';
 
 interface AppContext {
-  readonly vpcId:       string;
-  readonly dbSecretName:string;
+  readonly vpcId:        string;
+  readonly dbSecretName: string;
   readonly dbConfig: {
-    host: string; port: string; name: string; user: string; sslmode: string;
+    username: string;
+    name:     string;
+    port?:    string;
+    sslmode?: string;
   };
   readonly env: {
     account: string;
@@ -18,32 +21,34 @@ interface AppContext {
 
 const app = new cdk.App();
 const ctx = app.node.getContext('app') as AppContext;
-if (!ctx) throw new Error('Context key "app" is required in cdk.json');
+if (!ctx) throw new Error('Context key "app" missing in cdk.json');
 
 const { vpcId, dbSecretName, dbConfig, env } = ctx;
 
-// 1) Instantiate your CommonInfraStack with the vpcId prop
+// 1) Deploy infra: VPC, Cluster, S3, SQS, RDS + Secret, IAM Role
 const common = new CommonInfraStack(app, 'CommonInfra', {
   env,
-  vpcId,      // ← now legal
+  vpcId,
+  dbSecretName,
+  dbConfig,
 });
 
-// 2) Prepare your shared DB env block
+// 2) Build a little map of LRDB_* vars
 const dbEnv = {
-  LRDB_HOST:    dbConfig.host,
-  LRDB_PORT:    dbConfig.port,
-  LRDB_DBNAME:  dbConfig.name,
-  LRDB_USER:    dbConfig.user,
-  LRDB_SSLMODE: dbConfig.sslmode,
+  LRDB_HOST:   common.dbInstance.dbInstanceEndpointAddress,
+  LRDB_PORT:   common.dbInstance.dbInstanceEndpointPort,
+  LRDB_DBNAME: 'metadata',
+  LRDB_USER:   'lakerunner',
 };
 
-// 3) Spin up one stack per service
+// 3) Deploy all services
 for (const svc of services) {
   new FargateServiceStack(app, svc.name, {
     env,
-    cluster:      common.cluster,
-    dbSecretName,
+    cluster:   common.cluster,
+    taskRole:  common.taskRole,
     dbEnv,
-    service:      svc,
+    dbSecret:  common.dbSecret,
+    service:   svc,
   });
 }
