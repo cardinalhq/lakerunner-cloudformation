@@ -50,5 +50,7 @@ for (const svc of services) {
     dbEnv,
     dbSecret:  common.dbSecret,
     service:   svc,
+    storageProfilesParam: common.storageProfilesParam,
+    queue:   common.queue,
   });
 }

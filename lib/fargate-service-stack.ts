@@ -5,6 +5,7 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import { ServiceConfig } from './configs';
+import * as sqs from 'aws-cdk-lib/aws-sqs';
 
 export interface FargateServiceStackProps extends cdk.StackProps {
   readonly cluster: ecs.Cluster;
@@ -13,6 +14,7 @@ export interface FargateServiceStackProps extends cdk.StackProps {
   readonly dbSecret: secretsmanager.ISecret;
   readonly service: ServiceConfig;
   readonly storageProfilesParam: cdk.aws_ssm.IStringParameter;
+  readonly queue: sqs.IQueue;
 }
 
 export class FargateServiceStack extends cdk.Stack {
@@ -32,20 +34,12 @@ export class FargateServiceStack extends cdk.Stack {
 
     const container = taskDef.addContainer('AppContainer', {
       image: ecs.ContainerImage.fromRegistry(props.service.image),
-      command: [
-        '/bin/sh', '-c',
-        [
-          // echo the YAML into the file
-          'echo "$STORAGE_PROFILES" > /app/config/storage_profiles.yaml',
-          // then launch your app
-          'exec ' + props.service.command.join(' '),
-        ].join(' && ')
-      ],
+      command: props.service.command,
       logging: ecs.LogDrivers.awsLogs({ logGroup, streamPrefix: props.service.name }),
       environment: {
         OTEL_SERVICE_NAME: props.service.name,
         TMPDIR: '/mnt',
-        STORAGE_PROFILE_FILE: '/app/config/storage_profiles.yaml',
+        STORAGE_PROFILE_FILE: 'env:STORAGE_PROFILES',
         ...props.dbEnv,        // LRDB_HOST, LRDB_PORT, LRDB_DBNAME, LRDB_USER
       },
       secrets: {
@@ -53,6 +47,10 @@ export class FargateServiceStack extends cdk.Stack {
         LRDB_PASSWORD: ecs.Secret.fromSecretsManager(props.dbSecret),
       },
     });
+
+    container.addEnvironment('SQS_QUEUE_URL', props.queue.queueUrl);
+    container.addEnvironment('SQS_REGION', this.region);
+    container.addEnvironment('SQS_ROLE_ARN', props.taskRole.roleArn);
 
     new ecs.FargateService(this, 'Service', {
       cluster: props.cluster,
