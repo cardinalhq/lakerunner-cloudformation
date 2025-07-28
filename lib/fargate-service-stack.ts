@@ -44,7 +44,6 @@ export class FargateServiceStack extends cdk.Stack {
         STORAGE_PROFILE_FILE: 'env:STORAGE_PROFILES',
         SQS_QUEUE_URL: props.queue.queueUrl,
         SQS_REGION: this.region,
-        SQS_ROLE_ARN: props.taskRole.roleArn,
         ...props.dbEnv,
       },
       secrets: {

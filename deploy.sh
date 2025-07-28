@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
+
 set -euo pipefail
 
-# if [[ -z "${AWS_ACCOUNT:-}" || -z "${AWS_REGION:-}" ]]; then
-#   echo "ERROR: AWS_ACCOUNT and AWS_REGION must be set" >&2
-#   exit 1
-# fi
+if [[ -z "${AWS_ACCOUNT:-}" || -z "${AWS_REGION:-}" ]]; then
+  echo "ERROR: AWS_ACCOUNT and AWS_REGION must be set" >&2
+  exit 1
+fi
 
-# 1) Ensure infra exists (and exports are updated)
-#cdk bootstrap aws://$AWS_ACCOUNT/$AWS_REGION
+cdk bootstrap aws://$AWS_ACCOUNT/$AWS_REGION
 
 cdk deploy CommonInfra MigrationStack --require-approval never
 
