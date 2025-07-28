@@ -3,6 +3,7 @@ import * as cdk from 'aws-cdk-lib';
 import { CommonInfraStack } from '../lib/common-infra-stack';
 import { FargateServiceStack } from '../lib/fargate-service-stack';
 import { services } from '../lib/configs';
+import { MigrationStack } from '../lib/migration-stack';
 
 interface AppContext {
   readonly vpcId: string;
@@ -25,7 +26,6 @@ if (!ctx) throw new Error('Context key "app" missing in cdk.json');
 
 const { vpcId, dbSecretName, dbConfig, env } = ctx;
 
-// 1) Deploy infra: VPC, Cluster, S3, SQS, RDS + Secret, IAM Role
 const common = new CommonInfraStack(app, 'CommonInfra', {
   env,
   vpcId,
@@ -33,15 +33,29 @@ const common = new CommonInfraStack(app, 'CommonInfra', {
   dbConfig,
 });
 
-// 2) Build a little map of LRDB_* vars
 const dbEnv = {
   LRDB_HOST: common.dbInstance.dbInstanceEndpointAddress,
   LRDB_PORT: common.dbInstance.dbInstanceEndpointPort,
-  LRDB_DBNAME: 'metadata',
-  LRDB_USER: 'lakerunner',
+  LRDB_DBNAME: ctx.dbConfig.name,
+  LRDB_USER: ctx.dbConfig.username,
 };
 
-// 3) Deploy all services
+new MigrationStack(app, 'MigrationStack', {
+  env: ctx.env,
+  cluster: common.cluster,
+  taskRole: common.taskRole,
+  dbEnv: {
+    LRDB_HOST: common.dbInstance.dbInstanceEndpointAddress,
+    LRDB_PORT: common.dbInstance.dbInstanceEndpointPort,
+    LRDB_DBNAME: ctx.dbConfig.name,
+    LRDB_USER: ctx.dbConfig.username,
+  },
+  dbSecretArn: common.dbSecret.secretArn,
+  vpcSubnets: common.vpc.selectSubnets({ subnetType: cdk.aws_ec2.SubnetType.PRIVATE_WITH_EGRESS }).subnets.map(s => s.subnetId),
+  securityGroups: [common.taskSecurityGroup.securityGroupId],
+  dbSecret: common.dbSecret,
+});
+
 for (const svc of services) {
   new FargateServiceStack(app, svc.name, {
     env,

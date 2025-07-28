@@ -16,7 +16,7 @@ export interface FargateServiceStackProps extends cdk.StackProps {
   readonly service: ServiceConfig;
   readonly storageProfilesParam: cdk.aws_ssm.IStringParameter;
   readonly queue: sqs.IQueue;
-  readonly taskSecurityGroup: ec2.ISecurityGroup;  // new
+  readonly taskSecurityGroup: ec2.ISecurityGroup;
 }
 
 export class FargateServiceStack extends cdk.Stack {

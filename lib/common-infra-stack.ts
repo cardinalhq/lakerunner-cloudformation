@@ -14,6 +14,7 @@ import { Fn } from 'aws-cdk-lib';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as ssm from 'aws-cdk-lib/aws-ssm';
+import * as cr from 'aws-cdk-lib/custom-resources';
 
 export interface CommonInfraProps extends cdk.StackProps {
   readonly vpcId: string;
@@ -38,20 +39,39 @@ export class CommonInfraStack extends cdk.Stack {
   public readonly taskRole: iam.IRole;
   public readonly storageProfilesParam: ssm.IStringParameter;
   public readonly taskSecurityGroup: ec2.ISecurityGroup;
+  public readonly runMigration: cr.AwsCustomResource;
 
   constructor(scope: Construct, id: string, props: CommonInfraProps) {
     super(scope, id, props);
 
-    // ── VPC & ECS Cluster ─────────────────────────────────────
     this.vpc = ec2.Vpc.fromLookup(this, 'Vpc', { vpcId: props.vpcId });
+
+    new cdk.CfnOutput(this, 'PrivateSubnetIds', {
+      value: this.vpc
+        .selectSubnets({ subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS })
+        .subnetIds
+        .join(','),
+      exportName: 'CommonInfraPrivateSubnetIds',
+    });
+
     this.cluster = new Cluster(this, 'Cluster', {
       vpc: this.vpc,
+    });
+
+    new cdk.CfnOutput(this, 'ClusterArn', {
+      value: this.cluster.clusterArn,
+      exportName: 'CommonInfraClusterArn',
     });
 
     // ── Security Group for all Fargate tasks ─────────────────────
     this.taskSecurityGroup = new ec2.SecurityGroup(this, 'TaskSG', {
       vpc: this.vpc,
       allowAllOutbound: true,  // allow egress
+    });
+
+    new cdk.CfnOutput(this, 'TaskSecurityGroupId', {
+      value: this.taskSecurityGroup.securityGroupId,
+      exportName: 'CommonInfraTaskSecurityGroupId',
     });
 
     // ── SQS Queue ─────────────────────────────────────────────
@@ -109,43 +129,14 @@ export class CommonInfraStack extends cdk.Stack {
 
     this.dbInstance.connections.allowDefaultPortFrom(this.taskSecurityGroup);
 
-    // ── IAM Role for Fargate Tasks ────────────────────────────
     this.taskRole = new iam.Role(this, 'TaskRole', {
       assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
       description: `Fargate task role: RW S3, consume SQS, read DB secret`,
     });
 
-    // grant exactly the permissions the tasks need:
     this.bucket.grantReadWrite(this.taskRole);
     this.queue.grantConsumeMessages(this.taskRole);
     this.dbSecret.grantRead(this.taskRole);
-
-    // in your stack (e.g. lib/common-infra-stack.ts)
-
-    const migrationTaskDef = new ecs.FargateTaskDefinition(this, 'MigrationTaskDef', {
-      cpu: 512,
-      memoryLimitMiB: 1024,
-      taskRole: this.taskRole,  // reuse your same task role
-    });
-
-    // assume your container image has a "migrate" sub‑command
-    const migrator = migrationTaskDef.addContainer('Migrator', {
-      image: ecs.ContainerImage.fromRegistry('public.ecr.aws/cardinalhq.io/lakerunner:latest'),
-      command: ['/app/bin/lakerunner', 'migrate'],  // or whatever your migrate entrypoint is
-      logging: ecs.LogDrivers.awsLogs({
-        logGroup: new logs.LogGroup(this, 'MigrationLogGroup', { removalPolicy: cdk.RemovalPolicy.DESTROY }),
-        streamPrefix: 'migration',
-      }),
-      environment: {
-        LRDB_HOST: this.dbInstance.dbInstanceEndpointAddress,
-        LRDB_PORT: this.dbInstance.dbInstanceEndpointPort,
-        LRDB_DBNAME: props.dbConfig.name,
-        LRDB_USER: props.dbConfig.username,
-      },
-      secrets: {
-        LRDB_PASSWORD: ecs.Secret.fromSecretsManager(this.dbSecret),
-      },
-    });
 
     this.storageProfilesParam = new ssm.StringParameter(this, 'StorageProfilesParam', {
       parameterName: '/lakerunner/storage_profiles',
