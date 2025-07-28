@@ -42,21 +42,20 @@ export class FargateServiceStack extends cdk.Stack {
         OTEL_SERVICE_NAME: props.service.name,
         TMPDIR: '/mnt',
         STORAGE_PROFILE_FILE: 'env:STORAGE_PROFILES',
-        ...props.dbEnv,        // LRDB_HOST, LRDB_PORT, LRDB_DBNAME, LRDB_USER
+        SQS_QUEUE_URL: props.queue.queueUrl,
+        SQS_REGION: this.region,
+        SQS_ROLE_ARN: props.taskRole.roleArn,
+        ...props.dbEnv,
       },
       secrets: {
         STORAGE_PROFILES: ecs.Secret.fromSsmParameter(props.storageProfilesParam),
-        LRDB_PASSWORD: ecs.Secret.fromSecretsManager(props.dbSecret),
+        LRDB_PASSWORD: ecs.Secret.fromSecretsManager(props.dbSecret, 'password'),
       },
     });
 
-    container.addEnvironment('SQS_QUEUE_URL', props.queue.queueUrl);
-    container.addEnvironment('SQS_REGION', this.region);
-    container.addEnvironment('SQS_ROLE_ARN', props.taskRole.roleArn);
-
     new ecs.FargateService(this, 'Service', {
       cluster: props.cluster,
-      securityGroups:     [ props.taskSecurityGroup ],
+      securityGroups: [props.taskSecurityGroup],
       taskDefinition: taskDef,
       desiredCount: props.service.replicas ?? 1,
       minHealthyPercent: 100,

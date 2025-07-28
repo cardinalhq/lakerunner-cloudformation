@@ -1,21 +1,21 @@
 #!/usr/bin/env node
 import * as cdk from 'aws-cdk-lib';
-import { CommonInfraStack }    from '../lib/common-infra-stack';
+import { CommonInfraStack } from '../lib/common-infra-stack';
 import { FargateServiceStack } from '../lib/fargate-service-stack';
-import { services }            from '../lib/configs';
+import { services } from '../lib/configs';
 
 interface AppContext {
-  readonly vpcId:        string;
+  readonly vpcId: string;
   readonly dbSecretName: string;
   readonly dbConfig: {
     username: string;
-    name:     string;
-    port?:    string;
+    name: string;
+    port?: string;
     sslmode?: string;
   };
   readonly env: {
     account: string;
-    region:  string;
+    region: string;
   };
 }
 
@@ -35,23 +35,23 @@ const common = new CommonInfraStack(app, 'CommonInfra', {
 
 // 2) Build a little map of LRDB_* vars
 const dbEnv = {
-  LRDB_HOST:   common.dbInstance.dbInstanceEndpointAddress,
-  LRDB_PORT:   common.dbInstance.dbInstanceEndpointPort,
+  LRDB_HOST: common.dbInstance.dbInstanceEndpointAddress,
+  LRDB_PORT: common.dbInstance.dbInstanceEndpointPort,
   LRDB_DBNAME: 'metadata',
-  LRDB_USER:   'lakerunner',
+  LRDB_USER: 'lakerunner',
 };
 
 // 3) Deploy all services
 for (const svc of services) {
   new FargateServiceStack(app, svc.name, {
     env,
-    cluster:   common.cluster,
-    taskSecurityGroup:   common.taskSecurityGroup,
-    taskRole:  common.taskRole,
+    cluster: common.cluster,
+    taskSecurityGroup: common.taskSecurityGroup,
+    taskRole: common.taskRole,
     dbEnv,
-    dbSecret:  common.dbSecret,
-    service:   svc,
+    dbSecret: common.dbSecret,
+    service: svc,
     storageProfilesParam: common.storageProfilesParam,
-    queue:   common.queue,
+    queue: common.queue,
   });
 }

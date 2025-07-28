@@ -9,18 +9,18 @@ export interface ServiceConfig {
 
 export const services: ServiceConfig[] = [
   {
-    name:    'ingest-logs',
-    image:   'public.ecr.aws/cardinalhq.io/lakerunner:latest',
-    command: ['/app/bin/lakerunner','ingest-logs'],
-    cpu:     512,
+    name: 'ingest-logs',
+    image: 'public.ecr.aws/cardinalhq.io/lakerunner:latest',
+    command: ['/app/bin/lakerunner', 'ingest-logs'],
+    cpu: 512,
     memoryMiB: 1024,
     replicas: 1,
   },
   {
-    name:    'ingest-metrics',
-    image:   'public.ecr.aws/cardinalhq.io/lakerunner:latest',
-    command: ['/app/bin/lakerunner','ingest-metrics'],
-    cpu:     512,
+    name: 'ingest-metrics',
+    image: 'public.ecr.aws/cardinalhq.io/lakerunner:latest',
+    command: ['/app/bin/lakerunner', 'ingest-metrics'],
+    cpu: 512,
     memoryMiB: 1024,
     replicas: 1,
   },
