@@ -38,6 +38,7 @@ export class CommonInfraStack extends cdk.Stack {
   public readonly queue: sqs.IQueue;
   public readonly taskRole: iam.IRole;
   public readonly storageProfilesParam: ssm.IStringParameter;
+  public readonly apiKeysParam: ssm.IStringParameter;
   public readonly taskSecurityGroup: ec2.ISecurityGroup;
   public readonly runMigration: cr.AwsCustomResource;
 
@@ -66,7 +67,7 @@ export class CommonInfraStack extends cdk.Stack {
     // ── Security Group for all Fargate tasks ─────────────────────
     this.taskSecurityGroup = new ec2.SecurityGroup(this, 'TaskSG', {
       vpc: this.vpc,
-      allowAllOutbound: true,  // allow egress
+      allowAllOutbound: true,
     });
 
     new cdk.CfnOutput(this, 'TaskSecurityGroupId', {
@@ -159,5 +160,17 @@ export class CommonInfraStack extends cdk.Stack {
       tier: ssm.ParameterTier.STANDARD,
     });
     this.storageProfilesParam.applyRemovalPolicy(RemovalPolicy.DESTROY);
+
+    this.apiKeysParam = new ssm.StringParameter(this, 'ApiKeysParam', {
+      parameterName: '/lakerunner/api_keys',
+      stringValue: [
+        '- organization_id: 12340000-0000-4000-8000-000000000000',
+        '  keys:',
+        '    - my-api-key-1',
+      ].join('\n'),
+      description: 'API keys for Lakerunner',
+      tier: ssm.ParameterTier.STANDARD,
+    });
+    this.apiKeysParam.applyRemovalPolicy(RemovalPolicy.DESTROY);
   }
 }
