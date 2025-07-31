@@ -28,6 +28,7 @@ export class FargateServiceStack extends cdk.Stack {
       cpu: props.service.cpu ?? 512,
       memoryLimitMiB: props.service.memoryMiB ?? 1024,
       taskRole: props.taskRole,
+      family: props.service.name + '-task',
     });
 
     const logGroup = new logs.LogGroup(this, 'LogGroup', {
@@ -38,6 +39,7 @@ export class FargateServiceStack extends cdk.Stack {
     const container = taskDef.addContainer('AppContainer', {
       image: ecs.ContainerImage.fromRegistry(props.service.image),
       command: props.service.command,
+      healthCheck: props.service.healthCheck,
       logging: ecs.LogDrivers.awsLogs({ logGroup, streamPrefix: props.service.name }),
       environment: {
         OTEL_SERVICE_NAME: props.service.name,
