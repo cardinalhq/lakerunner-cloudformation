@@ -3,11 +3,12 @@ import ecs from 'aws-cdk-lib/aws-ecs';
 export interface ServiceConfig {
   readonly name: string;
   readonly image: string;
-  readonly command: string[];
+  readonly command?: string[];
   readonly healthCheck?: ecs.HealthCheck;
   readonly cpu?: number;
   readonly memoryMiB?: number;
-  readonly replicas?: number; // Optional, default is 1
+  readonly replicas?: number;
+  readonly environment?: { [key: string]: string };
 }
 
 const goHealthCheck: ecs.HealthCheck = {
@@ -80,5 +81,23 @@ export const services: ServiceConfig[] = [
     memoryMiB: 1024,
     replicas: 1,
     healthCheck: goHealthCheck,
-  }
+  },
+  {
+    name: 'lakerunner-query-api',
+    image: 'public.ecr.aws/cardinalhq.io/lakerunner/query-api:latest',
+    cpu: 2048,
+    memoryMiB: 8192,
+    replicas: 1,
+    environment: {
+      QUERY_WORKER_DEPLOYMENT_NAME: 'lakerunner-query-worker',
+      QUERY_WORKER_SERVICE_NAME: 'lakerunner-query-worker',
+      QUERY_STACK: 'local',
+      METRIC_PREFIX: 'lakerunner-query-api',
+      HOME: '/mnt',
+      NUM_MIN_QUERY_WORKERS: '1',
+      NUM_MAX_QUERY_WORKERS: '4',
+      SPRING_PROFILES_ACTIVE: 'aws',
+      TOKEN_HMAC256_KEY: 'alksdjalksdjalkdjalskdjalskdjalkdjalskjdalskdjalk',
+    },
+  },
 ];

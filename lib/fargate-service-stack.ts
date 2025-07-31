@@ -49,6 +49,7 @@ export class FargateServiceStack extends cdk.Stack {
         SQS_QUEUE_URL: props.queue.queueUrl,
         SQS_REGION: this.region,
         ...props.dbEnv,
+        ...props.service.environment,
       },
       secrets: {
         STORAGE_PROFILES_ENV: ecs.Secret.fromSsmParameter(props.storageProfilesParam),
