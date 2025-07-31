@@ -15,6 +15,7 @@ export interface FargateServiceStackProps extends cdk.StackProps {
   readonly dbSecret: secretsmanager.ISecret;
   readonly service: ServiceConfig;
   readonly storageProfilesParam: cdk.aws_ssm.IStringParameter;
+  readonly apiKeysParam: cdk.aws_ssm.IStringParameter;
   readonly queue: sqs.IQueue;
   readonly taskSecurityGroup: ec2.ISecurityGroup;
 }
@@ -41,13 +42,15 @@ export class FargateServiceStack extends cdk.Stack {
       environment: {
         OTEL_SERVICE_NAME: props.service.name,
         TMPDIR: '/mnt',
-        STORAGE_PROFILE_FILE: 'env:STORAGE_PROFILES',
+        STORAGE_PROFILE_FILE: 'env:STORAGE_PROFILES_ENV',
+        API_KEYS_FILE: 'env:API_KEYS_ENV',
         SQS_QUEUE_URL: props.queue.queueUrl,
         SQS_REGION: this.region,
         ...props.dbEnv,
       },
       secrets: {
-        STORAGE_PROFILES: ecs.Secret.fromSsmParameter(props.storageProfilesParam),
+        STORAGE_PROFILES_ENV: ecs.Secret.fromSsmParameter(props.storageProfilesParam),
+        API_KEYS_ENV: ecs.Secret.fromSsmParameter(props.apiKeysParam),
         LRDB_PASSWORD: ecs.Secret.fromSecretsManager(props.dbSecret, 'password'),
       },
     });
@@ -59,6 +62,7 @@ export class FargateServiceStack extends cdk.Stack {
       desiredCount: props.service.replicas ?? 1,
       minHealthyPercent: 100,
       maxHealthyPercent: 200,
+      serviceName: props.service.name,
     });
   }
 }

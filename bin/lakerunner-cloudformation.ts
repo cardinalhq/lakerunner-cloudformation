@@ -66,6 +66,7 @@ for (const svc of services) {
     dbSecret: common.dbSecret,
     service: svc,
     storageProfilesParam: common.storageProfilesParam,
+    apiKeysParam: common.apiKeysParam,
     queue: common.queue,
   });
 }

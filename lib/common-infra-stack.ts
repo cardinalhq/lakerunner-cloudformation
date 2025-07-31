@@ -36,7 +36,7 @@ export class CommonInfraStack extends cdk.Stack {
   public readonly cluster: Cluster;
   public readonly bucket: s3.IBucket;
   public readonly queue: sqs.IQueue;
-  public readonly taskRole: iam.IRole;
+  public readonly taskRole: iam.Role;
   public readonly storageProfilesParam: ssm.IStringParameter;
   public readonly apiKeysParam: ssm.IStringParameter;
   public readonly taskSecurityGroup: ec2.ISecurityGroup;
@@ -138,6 +138,25 @@ export class CommonInfraStack extends cdk.Stack {
     this.bucket.grantReadWrite(this.taskRole);
     this.queue.grantConsumeMessages(this.taskRole);
     this.dbSecret.grantRead(this.taskRole);
+
+    const serviceArn = cdk.Arn.format({
+      service: 'ecs',
+      resource: 'service',
+      resourceName: `${this.cluster.clusterName}/*`,
+      arnFormat: cdk.ArnFormat.COLON_RESOURCE_NAME,
+    }, this);
+
+    this.taskRole.addToPolicy(new iam.PolicyStatement({
+      actions: [
+        'ecs:ListServices',
+        'ecs:DescribeServices',
+        'ecs:UpdateService',
+      ],
+      resources: [
+        this.cluster.clusterArn,
+        serviceArn,
+      ],
+    }));
 
     this.storageProfilesParam = new ssm.StringParameter(this, 'StorageProfilesParam', {
       parameterName: '/lakerunner/storage_profiles',
