@@ -11,8 +11,7 @@ import * as rds from 'aws-cdk-lib/aws-rds';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import { Duration, RemovalPolicy } from 'aws-cdk-lib';
 import { Fn } from 'aws-cdk-lib';
-import * as ecs from 'aws-cdk-lib/aws-ecs';
-import * as logs from 'aws-cdk-lib/aws-logs';
+import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 import * as ssm from 'aws-cdk-lib/aws-ssm';
 import * as cr from 'aws-cdk-lib/custom-resources';
 
@@ -41,6 +40,7 @@ export class CommonInfraStack extends cdk.Stack {
   public readonly apiKeysParam: ssm.IStringParameter;
   public readonly taskSecurityGroup: ec2.ISecurityGroup;
   public readonly runMigration: cr.AwsCustomResource;
+  public readonly alb: elbv2.ApplicationLoadBalancer;
 
   constructor(scope: Construct, id: string, props: CommonInfraProps) {
     super(scope, id, props);
@@ -69,6 +69,18 @@ export class CommonInfraStack extends cdk.Stack {
       vpc: this.vpc,
       allowAllOutbound: true,
     });
+
+    this.taskSecurityGroup.addIngressRule(
+      this.taskSecurityGroup,
+      ec2.Port.tcp(7101),
+      'Allow query-api to query-worker on 7101'
+    );
+
+    this.taskSecurityGroup.addIngressRule(
+      ec2.Peer.anyIpv4(),
+      ec2.Port.tcp(7101),
+      'Allow query-worker to query-api on 7101'
+    );
 
     new cdk.CfnOutput(this, 'TaskSecurityGroupId', {
       value: this.taskSecurityGroup.securityGroupId,
@@ -143,7 +155,7 @@ export class CommonInfraStack extends cdk.Stack {
       service: 'ecs',
       resource: 'service',
       resourceName: `${this.cluster.clusterName}/*`,
-      arnFormat: cdk.ArnFormat.COLON_RESOURCE_NAME,
+      arnFormat: cdk.ArnFormat.SLASH_RESOURCE_NAME,
     }, this);
 
     this.taskRole.addToPolicy(new iam.PolicyStatement({
@@ -156,6 +168,26 @@ export class CommonInfraStack extends cdk.Stack {
         this.cluster.clusterArn,
         serviceArn,
       ],
+    }));
+
+    const containerInstanceArn = cdk.Arn.format({
+      service: 'ecs',
+      resource: 'container-instance',
+      resourceName: `${this.cluster.clusterName}/*`,
+      arnFormat: cdk.ArnFormat.COLON_RESOURCE_NAME,
+    }, this);
+
+    this.taskRole.addToPolicy(new iam.PolicyStatement({
+      actions: ['ecs:ListTasks'],
+      resources: ['*'],
+      conditions: {
+        ArnEquals: { 'ecs:cluster': this.cluster.clusterArn }
+      }
+    }));
+
+    this.taskRole.addToPolicy(new iam.PolicyStatement({
+      actions: ['ecs:DescribeTasks'],
+      resources: ['*'],
     }));
 
     this.storageProfilesParam = new ssm.StringParameter(this, 'StorageProfilesParam', {
@@ -191,5 +223,11 @@ export class CommonInfraStack extends cdk.Stack {
       tier: ssm.ParameterTier.STANDARD,
     });
     this.apiKeysParam.applyRemovalPolicy(RemovalPolicy.DESTROY);
+
+    this.alb = new elbv2.ApplicationLoadBalancer(this, 'query-api-requests', {
+      vpc: this.vpc,
+      internetFacing: true,
+      securityGroup: this.taskSecurityGroup,
+    });
   }
 }

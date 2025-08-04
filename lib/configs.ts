@@ -9,6 +9,7 @@ export interface ServiceConfig {
   readonly memoryMiB?: number;
   readonly replicas?: number;
   readonly environment?: { [key: string]: string };
+  readonly ingress?: { port: number; desc?: string, attachAlb?: boolean, healthcheckPath?: string };
 }
 
 const goHealthCheck: ecs.HealthCheck = {
@@ -17,6 +18,14 @@ const goHealthCheck: ecs.HealthCheck = {
     'sysinfo',
   ],
 };
+
+const scalaHealthCheck: ecs.HealthCheck = {
+  command: [
+    'curl',
+    '-f',
+    'http://localhost:7101/ready',
+  ],
+}
 
 export const services: ServiceConfig[] = [
   {
@@ -84,11 +93,13 @@ export const services: ServiceConfig[] = [
   },
   {
     name: 'lakerunner-query-api',
-    image: 'public.ecr.aws/cardinalhq.io/lakerunner/query-api:latest',
+    image: 'public.ecr.aws/cardinalhq.io/lakerunner/query-api:latest-dev',
     cpu: 2048,
     memoryMiB: 8192,
     replicas: 1,
+    ingress: { port: 7101, desc: 'Query API', attachAlb: true, healthcheckPath: '/ready' },
     environment: {
+      EXECUTION_ENVIRONMENT: 'ecs',
       QUERY_WORKER_DEPLOYMENT_NAME: 'lakerunner-query-worker',
       QUERY_WORKER_SERVICE_NAME: 'lakerunner-query-worker',
       QUERY_STACK: 'local',
@@ -99,5 +110,20 @@ export const services: ServiceConfig[] = [
       SPRING_PROFILES_ACTIVE: 'aws',
       TOKEN_HMAC256_KEY: 'alksdjalksdjalkdjalskdjalskdjalkdjalskjdalskdjalk',
     },
+    healthCheck: scalaHealthCheck,
   },
+  {
+    name: 'lakerunner-query-worker',
+    image: 'public.ecr.aws/cardinalhq.io/lakerunner/query-worker:latest-dev',
+    cpu: 2048,
+    memoryMiB: 8192,
+    ingress: { port: 7101, desc: 'From Query API' },
+    environment: {
+      METRIC_PREFIX: 'lakerunner-query-worker',
+      HOME: '/mnt',
+      SPRING_PROFILES_ACTIVE: 'aws',
+      TOKEN_HMAC256_KEY: 'alksdjalksdjalkdjalskdjalskdjalkdjalskjdalskdjalk',
+    },
+    healthCheck: scalaHealthCheck,
+  }
 ];

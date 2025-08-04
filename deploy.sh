@@ -54,4 +54,4 @@ aws ecs wait tasks-stopped \
 
 echo "Migration complete."
 
-cdk deploy --all --require-approval never
+cdk deploy --all --require-approval never --concurrency 10

@@ -68,5 +68,7 @@ for (const svc of services) {
     storageProfilesParam: common.storageProfilesParam,
     apiKeysParam: common.apiKeysParam,
     queue: common.queue,
+    vpcId: common.vpc.vpcId,
+    alb: common.alb,
   });
 }
