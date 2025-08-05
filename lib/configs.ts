@@ -144,13 +144,20 @@ export const services: ServiceConfig[] = [
     image: 'grafana/grafana:latest',
     cpu: 512,
     memoryMiB: 1024,
-    //ingress: { port: 3000, desc: 'Grafana', attachAlb: true },
+    ingress: { port: 3000, desc: 'Grafana', attachAlb: true, healthcheckPath: '/api/health' },
     environment: {
       GF_SECURITY_ADMIN_USER: 'admin',
-      GF_SECURITY_ADMIN_PASSWORD: 'admin',
+      GF_SECURITY_ADMIN_PASSWORD: 'f70603aa00e6f67999cc66e336134887',
       GF_SERVER_HTTP_PORT: '3000',
       GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s:%(http_port)s",
       GF_INSTALL_PLUGINS: "https://github.com/cardinalhq/cardinalhq-lakerunner-datasource/raw/refs/heads/main/cardinalhq-lakerunner-datasource.zip;cardinalhq-lakerunner-datasource",
+    },
+    healthCheck: {
+      command: [
+        'curl',
+        '-f',
+        'http://localhost:3000/api/health',
+      ],
     },
   },
 ];
