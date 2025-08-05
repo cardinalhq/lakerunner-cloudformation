@@ -125,5 +125,19 @@ export const services: ServiceConfig[] = [
       TOKEN_HMAC256_KEY: 'alksdjalksdjalkdjalskdjalskdjalkdjalskjdalskdjalk',
     },
     healthCheck: scalaHealthCheck,
-  }
+  },
+  {
+    name: 'grafana',
+    image: 'grafana/grafana:latest',
+    cpu: 512,
+    memoryMiB: 1024,
+    ingress: { port: 3000, desc: 'Grafana', attachAlb: true },
+    environment: {
+      GF_SECURITY_ADMIN_USER: 'admin',
+      GF_SECURITY_ADMIN_PASSWORD: 'admin',
+      GF_SERVER_HTTP_PORT: '3000',
+      GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s:%(http_port)s",
+      GF_INSTALL_PLUGINS: "https://github.com/cardinalhq/cardinalhq-lakerunner-datasource/raw/refs/heads/main/cardinalhq-lakerunner-datasource.zip;cardinalhq-lakerunner-datasource",
+    },
+  },
 ];

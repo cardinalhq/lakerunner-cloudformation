@@ -38,6 +38,7 @@ export class CommonInfraStack extends cdk.Stack {
   public readonly taskRole: iam.Role;
   public readonly storageProfilesParam: ssm.IStringParameter;
   public readonly apiKeysParam: ssm.IStringParameter;
+  public readonly grafanaConfig: ssm.IStringParameter;
   public readonly taskSecurityGroup: ec2.ISecurityGroup;
   public readonly runMigration: cr.AwsCustomResource;
   public readonly alb: elbv2.ApplicationLoadBalancer;
@@ -85,6 +86,12 @@ export class CommonInfraStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'TaskSecurityGroupId', {
       value: this.taskSecurityGroup.securityGroupId,
       exportName: 'CommonInfraTaskSecurityGroupId',
+    });
+
+    this.alb = new elbv2.ApplicationLoadBalancer(this, 'query-api-requests', {
+      vpc: this.vpc,
+      internetFacing: true,
+      securityGroup: this.taskSecurityGroup,
     });
 
     // ── SQS Queue ─────────────────────────────────────────────
@@ -224,10 +231,23 @@ export class CommonInfraStack extends cdk.Stack {
     });
     this.apiKeysParam.applyRemovalPolicy(RemovalPolicy.DESTROY);
 
-    this.alb = new elbv2.ApplicationLoadBalancer(this, 'query-api-requests', {
-      vpc: this.vpc,
-      internetFacing: true,
-      securityGroup: this.taskSecurityGroup,
+    this.grafanaConfig = new ssm.StringParameter(this, 'GrafanaConfig', {
+      parameterName: '/lakerunner/grafana_config',
+      stringValue: [
+        'datasources:',
+        '  - name: Cardinal',
+        '    type: cardinalhq-lakerunner-datasource',
+        '    access: proxy',
+        '    isDefault: true',
+        '    isEditable: true',
+        '    jsonData:',
+        '      customPath: http://' + this.alb.loadBalancerDnsName + ':7101',
+        '    secureJsonData:',
+        '      apiKey: my-api-key-1',
+      ].join('\n'),
+      description: 'Grafana configuration for Lakerunner',
+      tier: ssm.ParameterTier.STANDARD,
     });
+    this.grafanaConfig.applyRemovalPolicy(RemovalPolicy.DESTROY);
   }
 }
