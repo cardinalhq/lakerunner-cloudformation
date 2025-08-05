@@ -35,6 +35,8 @@ export class FargateServiceStack extends cdk.Stack {
 
     var volumes: cdk.aws_ecs.Volume[] = [{ name: 'scratch', }];
 
+    var apArns: string[] = [];
+
     if (props.service.efsMounts) {
       for (const mount of props.service.efsMounts) {
         const apid = props.efs.addAccessPoint(mount.apName, {
@@ -60,6 +62,7 @@ export class FargateServiceStack extends cdk.Stack {
             },
           }
         });
+        apArns.push(apid.accessPointArn);
       }
     }
 
@@ -69,6 +72,9 @@ export class FargateServiceStack extends cdk.Stack {
       taskRole: props.taskRole,
       family: props.service.name + '-task',
       volumes: volumes,
+      runtimePlatform: {
+        cpuArchitecture: ecs.CpuArchitecture.ARM64,
+      }
     });
 
     taskDef.addToExecutionRolePolicy(new iam.PolicyStatement({
@@ -81,13 +87,19 @@ export class FargateServiceStack extends cdk.Stack {
       resources: ['*'],
     }));
 
-    taskDef.addToExecutionRolePolicy(new iam.PolicyStatement({
+    taskDef.addToTaskRolePolicy(new iam.PolicyStatement({
       actions: [
         'elasticfilesystem:ClientMount',
         'elasticfilesystem:ClientWrite',
         'elasticfilesystem:ClientRootAccess',
+        'elasticfilesystem:DescribeFileSystems',
+        'elasticfilesystem:DescribeMountTargets',
+        'elasticfilesystem:DescribeAccessPoints',
       ],
-      resources: [props.efs.fileSystemArn],
+      resources: [
+        props.efs.fileSystemArn,
+        ...apArns,
+      ],
     }));
 
     const logGroup = new logs.LogGroup(this, 'LogGroup', {
@@ -102,6 +114,7 @@ export class FargateServiceStack extends cdk.Stack {
       logging: ecs.LogDrivers.awsLogs({ logGroup, streamPrefix: props.service.name }),
       user: '0', // run as root to allow bind mounts to work
       environment: {
+        BUMP_REVISION: "0",
         OTEL_SERVICE_NAME: props.service.name,
         TMPDIR: '/scratch',
         HOME: '/scratch',

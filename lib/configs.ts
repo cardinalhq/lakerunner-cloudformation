@@ -153,7 +153,7 @@ export const services: ServiceConfig[] = [
       GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s:%(http_port)s",
       GF_INSTALL_PLUGINS: "https://github.com/cardinalhq/cardinalhq-lakerunner-datasource/raw/refs/heads/main/cardinalhq-lakerunner-datasource.zip;cardinalhq-lakerunner-datasource",
     },
-    //efsMounts: [{ containerPath: '/var/lib/grafana', efsPath: '/grafana', apName: 'grafana' }],
+    efsMounts: [{ containerPath: '/var/lib/grafana', efsPath: '/grafana', apName: 'grafana' }],
     healthCheck: {
       command: [
         'curl',

@@ -277,6 +277,7 @@ export class CommonInfraStack extends cdk.Stack {
       vpc: this.vpc,
       securityGroup: this.taskSecurityGroup,
     });
+    this.efs.applyRemovalPolicy(RemovalPolicy.DESTROY);
 
     this.efs.connections.allowDefaultPortFrom(this.taskSecurityGroup);
   }
