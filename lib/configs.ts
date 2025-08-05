@@ -10,6 +10,7 @@ export interface ServiceConfig {
   readonly replicas?: number;
   readonly environment?: { [key: string]: string };
   readonly ingress?: { port: number; desc?: string, attachAlb?: boolean, healthcheckPath?: string };
+  readonly bindMounts?: ecs.MountPoint[];
 }
 
 const goHealthCheck: ecs.HealthCheck = {
@@ -104,13 +105,19 @@ export const services: ServiceConfig[] = [
       QUERY_WORKER_SERVICE_NAME: 'lakerunner-query-worker',
       QUERY_STACK: 'local',
       METRIC_PREFIX: 'lakerunner-query-api',
-      HOME: '/mnt',
       NUM_MIN_QUERY_WORKERS: '1',
       NUM_MAX_QUERY_WORKERS: '4',
       SPRING_PROFILES_ACTIVE: 'aws',
       TOKEN_HMAC256_KEY: 'alksdjalksdjalkdjalskdjalskdjalkdjalskjdalskdjalk',
     },
     healthCheck: scalaHealthCheck,
+    bindMounts: [
+      {
+        containerPath: '/db',
+        readOnly: false,
+        sourceVolume: 'scratch',
+      },
+    ],
   },
   {
     name: 'lakerunner-query-worker',
@@ -120,10 +127,37 @@ export const services: ServiceConfig[] = [
     ingress: { port: 7101, desc: 'From Query API' },
     environment: {
       METRIC_PREFIX: 'lakerunner-query-worker',
-      HOME: '/mnt',
       SPRING_PROFILES_ACTIVE: 'aws',
       TOKEN_HMAC256_KEY: 'alksdjalksdjalkdjalskdjalskdjalkdjalskjdalskdjalk',
     },
     healthCheck: scalaHealthCheck,
-  }
+    bindMounts: [
+      {
+        containerPath: '/db',
+        readOnly: false,
+        sourceVolume: 'scratch',
+      },
+    ],
+  },
+  {
+    name: 'grafana',
+    image: 'grafana/grafana:latest',
+    cpu: 512,
+    memoryMiB: 1024,
+    ingress: { port: 3000, desc: 'Grafana', attachAlb: true, healthcheckPath: '/api/health' },
+    environment: {
+      GF_SECURITY_ADMIN_USER: 'admin',
+      GF_SECURITY_ADMIN_PASSWORD: 'f70603aa00e6f67999cc66e336134887',
+      GF_SERVER_HTTP_PORT: '3000',
+      GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s:%(http_port)s",
+      GF_INSTALL_PLUGINS: "https://github.com/cardinalhq/cardinalhq-lakerunner-datasource/raw/refs/heads/main/cardinalhq-lakerunner-datasource.zip;cardinalhq-lakerunner-datasource",
+    },
+    healthCheck: {
+      command: [
+        'curl',
+        '-f',
+        'http://localhost:3000/api/health',
+      ],
+    },
+  },
 ];

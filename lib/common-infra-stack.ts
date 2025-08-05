@@ -38,6 +38,7 @@ export class CommonInfraStack extends cdk.Stack {
   public readonly taskRole: iam.Role;
   public readonly storageProfilesParam: ssm.IStringParameter;
   public readonly apiKeysParam: ssm.IStringParameter;
+  public readonly grafanaConfig: ssm.IStringParameter;
   public readonly taskSecurityGroup: ec2.ISecurityGroup;
   public readonly runMigration: cr.AwsCustomResource;
   public readonly alb: elbv2.ApplicationLoadBalancer;
@@ -53,6 +54,14 @@ export class CommonInfraStack extends cdk.Stack {
         .subnetIds
         .join(','),
       exportName: 'CommonInfraPrivateSubnetIds',
+    });
+
+    new cdk.CfnOutput(this, 'PublicSubnetIds', {
+      value: this.vpc
+        .selectSubnets({ subnetType: ec2.SubnetType.PUBLIC })
+        .subnetIds
+        .join(','),
+      exportName: 'CommonInfraPublicSubnetIds',
     });
 
     this.cluster = new Cluster(this, 'Cluster', {
@@ -87,6 +96,25 @@ export class CommonInfraStack extends cdk.Stack {
       exportName: 'CommonInfraTaskSecurityGroupId',
     });
 
+    const albSecurityGroup = new ec2.SecurityGroup(this, 'AlbSecurityGroup', {
+      vpc: this.vpc,
+      description: 'Allow HTTP/HTTPS from the internet',
+      allowAllOutbound: true,
+    });
+
+    albSecurityGroup.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(3000), 'Allow HTTP from internet');
+    albSecurityGroup.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(7101), 'Allow HTTPS from internet');
+
+    this.taskSecurityGroup.addIngressRule(albSecurityGroup, ec2.Port.tcp(3000), 'Allow only ALB to grafana on port 3000');
+    this.taskSecurityGroup.addIngressRule(albSecurityGroup, ec2.Port.tcp(7101), 'Allow only ALB to query-api on port 7101');
+
+    this.alb = new elbv2.ApplicationLoadBalancer(this, 'query-api-requests', {
+      vpc: this.vpc,
+      internetFacing: true,
+      securityGroup: this.taskSecurityGroup,
+      vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
+    });
+
     // ── SQS Queue ─────────────────────────────────────────────
     this.queue = new sqs.Queue(this, 'IngestQueue', {
       queueName: 'lakerunner-ingest-queue',
@@ -96,7 +124,7 @@ export class CommonInfraStack extends cdk.Stack {
 
     // ── S3 Bucket + Notifications + Lifecycle ────────────────
     this.bucket = new s3.Bucket(this, 'IngestBucket', {
-      bucketName: 'lakerunner-datalake', // or omit for generated name
+      bucketName: 'lakerunner-datalake',
       removalPolicy: RemovalPolicy.DESTROY,
       autoDeleteObjects: true,
       lifecycleRules: [
@@ -217,17 +245,30 @@ export class CommonInfraStack extends cdk.Stack {
       stringValue: [
         '- organization_id: 12340000-0000-4000-8000-000000000000',
         '  keys:',
-        '    - my-api-key-1',
+        '    - f70603aa00e6f67999cc66e336134887',
       ].join('\n'),
       description: 'API keys for Lakerunner',
       tier: ssm.ParameterTier.STANDARD,
     });
     this.apiKeysParam.applyRemovalPolicy(RemovalPolicy.DESTROY);
 
-    this.alb = new elbv2.ApplicationLoadBalancer(this, 'query-api-requests', {
-      vpc: this.vpc,
-      internetFacing: true,
-      securityGroup: this.taskSecurityGroup,
+    this.grafanaConfig = new ssm.StringParameter(this, 'GrafanaConfig', {
+      parameterName: '/lakerunner/grafana_config',
+      stringValue: [
+        'datasources:',
+        '  - name: Cardinal',
+        '    type: cardinalhq-lakerunner-datasource',
+        '    access: proxy',
+        '    isDefault: true',
+        '    isEditable: true',
+        '    jsonData:',
+        '      customPath: http://' + this.alb.loadBalancerDnsName + ':7101',
+        '    secureJsonData:',
+        '      apiKey: f70603aa00e6f67999cc66e336134887',
+      ].join('\n'),
+      description: 'Grafana configuration for Lakerunner',
+      tier: ssm.ParameterTier.STANDARD,
     });
+    this.grafanaConfig.applyRemovalPolicy(RemovalPolicy.DESTROY);
   }
 }
