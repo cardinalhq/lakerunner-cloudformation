@@ -10,6 +10,7 @@ export interface ServiceConfig {
   readonly replicas?: number;
   readonly environment?: { [key: string]: string };
   readonly ingress?: { port: number; desc?: string, attachAlb?: boolean, healthcheckPath?: string };
+  readonly bindMounts?: ecs.MountPoint[];
 }
 
 const goHealthCheck: ecs.HealthCheck = {
@@ -104,13 +105,19 @@ export const services: ServiceConfig[] = [
       QUERY_WORKER_SERVICE_NAME: 'lakerunner-query-worker',
       QUERY_STACK: 'local',
       METRIC_PREFIX: 'lakerunner-query-api',
-      HOME: '/mnt',
       NUM_MIN_QUERY_WORKERS: '1',
       NUM_MAX_QUERY_WORKERS: '4',
       SPRING_PROFILES_ACTIVE: 'aws',
       TOKEN_HMAC256_KEY: 'alksdjalksdjalkdjalskdjalskdjalkdjalskjdalskdjalk',
     },
     healthCheck: scalaHealthCheck,
+    bindMounts: [
+      {
+        containerPath: '/db',
+        readOnly: false,
+        sourceVolume: 'scratch',
+      },
+    ],
   },
   {
     name: 'lakerunner-query-worker',
@@ -120,18 +127,24 @@ export const services: ServiceConfig[] = [
     ingress: { port: 7101, desc: 'From Query API' },
     environment: {
       METRIC_PREFIX: 'lakerunner-query-worker',
-      HOME: '/mnt',
       SPRING_PROFILES_ACTIVE: 'aws',
       TOKEN_HMAC256_KEY: 'alksdjalksdjalkdjalskdjalskdjalkdjalskjdalskdjalk',
     },
     healthCheck: scalaHealthCheck,
+    bindMounts: [
+      {
+        containerPath: '/db',
+        readOnly: false,
+        sourceVolume: 'scratch',
+      },
+    ],
   },
   {
     name: 'grafana',
     image: 'grafana/grafana:latest',
     cpu: 512,
     memoryMiB: 1024,
-    ingress: { port: 3000, desc: 'Grafana', attachAlb: true },
+    //ingress: { port: 3000, desc: 'Grafana', attachAlb: true },
     environment: {
       GF_SECURITY_ADMIN_USER: 'admin',
       GF_SECURITY_ADMIN_PASSWORD: 'admin',

@@ -36,7 +36,18 @@ export class FargateServiceStack extends cdk.Stack {
       memoryLimitMiB: props.service.memoryMiB ?? 1024,
       taskRole: props.taskRole,
       family: props.service.name + '-task',
+      volumes: [{ name: 'scratch', }],
     });
+
+    taskDef.addToExecutionRolePolicy(new iam.PolicyStatement({
+      actions: [
+        'ssmmessages:CreateControlChannel',
+        'ssmmessages:CreateDataChannel',
+        'ssmmessages:OpenControlChannel',
+        'ssmmessages:OpenDataChannel',
+      ],
+      resources: ['*'],
+    }));
 
     const logGroup = new logs.LogGroup(this, 'LogGroup', {
       logGroupName: `/ecs/${props.service.name}`,
@@ -48,9 +59,11 @@ export class FargateServiceStack extends cdk.Stack {
       command: props.service.command,
       healthCheck: props.service.healthCheck,
       logging: ecs.LogDrivers.awsLogs({ logGroup, streamPrefix: props.service.name }),
+      user: '0', // run as root to allow bind mounts to work
       environment: {
         OTEL_SERVICE_NAME: props.service.name,
-        TMPDIR: '/mnt',
+        TMPDIR: '/scratch',
+        HOME: '/scratch',
         STORAGE_PROFILE_FILE: 'env:STORAGE_PROFILES_ENV',
         API_KEYS_FILE: 'env:API_KEYS_ENV',
         SQS_QUEUE_URL: props.queue.queueUrl,
@@ -67,6 +80,18 @@ export class FargateServiceStack extends cdk.Stack {
       },
     });
 
+    container.addMountPoints({
+      containerPath: '/scratch',
+      readOnly: false,
+      sourceVolume: 'scratch',
+    });
+
+    if (props.service.bindMounts) {
+      for (const mount of props.service.bindMounts) {
+        container.addMountPoints(mount);
+      }
+    }
+
     const ecsService = new ecs.FargateService(this, 'Service', {
       cluster: props.cluster,
       securityGroups: [props.taskSecurityGroup],
@@ -75,6 +100,7 @@ export class FargateServiceStack extends cdk.Stack {
       minHealthyPercent: 100,
       maxHealthyPercent: 200,
       serviceName: props.service.name,
+      enableExecuteCommand: true,
     });
 
     if (props.service.ingress) {
