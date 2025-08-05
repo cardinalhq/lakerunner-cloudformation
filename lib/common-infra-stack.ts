@@ -14,6 +14,7 @@ import { Fn } from 'aws-cdk-lib';
 import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 import * as ssm from 'aws-cdk-lib/aws-ssm';
 import * as cr from 'aws-cdk-lib/custom-resources';
+import * as efs from 'aws-cdk-lib/aws-efs';
 
 export interface CommonInfraProps extends cdk.StackProps {
   readonly vpcId: string;
@@ -42,6 +43,7 @@ export class CommonInfraStack extends cdk.Stack {
   public readonly taskSecurityGroup: ec2.ISecurityGroup;
   public readonly runMigration: cr.AwsCustomResource;
   public readonly alb: elbv2.ApplicationLoadBalancer;
+  public readonly efs: efs.FileSystem;
 
   constructor(scope: Construct, id: string, props: CommonInfraProps) {
     super(scope, id, props);
@@ -270,5 +272,12 @@ export class CommonInfraStack extends cdk.Stack {
       tier: ssm.ParameterTier.STANDARD,
     });
     this.grafanaConfig.applyRemovalPolicy(RemovalPolicy.DESTROY);
+
+    this.efs = new efs.FileSystem(this, 'lakerunner-efs', {
+      vpc: this.vpc,
+      securityGroup: this.taskSecurityGroup,
+    });
+
+    this.efs.connections.allowDefaultPortFrom(this.taskSecurityGroup);
   }
 }

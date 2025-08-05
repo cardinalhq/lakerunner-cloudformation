@@ -8,6 +8,7 @@ import { ServiceConfig } from './configs';
 import * as sqs from 'aws-cdk-lib/aws-sqs';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
+import * as efs from 'aws-cdk-lib/aws-efs';
 
 export interface FargateServiceStackProps extends cdk.StackProps {
   readonly cluster: ecs.Cluster;
@@ -21,6 +22,7 @@ export interface FargateServiceStackProps extends cdk.StackProps {
   readonly taskSecurityGroup: ec2.ISecurityGroup;
   readonly vpcId: string;
   readonly alb?: elbv2.ApplicationLoadBalancer;
+  readonly efs: efs.FileSystem;
 }
 
 export class FargateServiceStack extends cdk.Stack {
@@ -31,12 +33,42 @@ export class FargateServiceStack extends cdk.Stack {
 
     this.vpc = ec2.Vpc.fromLookup(this, 'Vpc', { vpcId: props.vpcId });
 
+    var volumes: cdk.aws_ecs.Volume[] = [{ name: 'scratch', }];
+
+    if (props.service.efsMounts) {
+      for (const mount of props.service.efsMounts) {
+        const apid = props.efs.addAccessPoint(mount.apName, {
+          createAcl: {
+            ownerGid: '0',
+            ownerUid: '0',
+            permissions: '750',
+          },
+          posixUser: {
+            gid: '0',
+            uid: '0',
+          },
+          path: mount.efsPath,
+        });
+        volumes.push({
+          name: 'efs-' + mount.apName,
+          efsVolumeConfiguration: {
+            fileSystemId: props.efs.fileSystemId,
+            transitEncryption: 'ENABLED',
+            authorizationConfig: {
+              accessPointId: apid.accessPointId,
+              iam: 'ENABLED',
+            },
+          }
+        });
+      }
+    }
+
     const taskDef = new ecs.FargateTaskDefinition(this, 'TaskDef', {
       cpu: props.service.cpu ?? 512,
       memoryLimitMiB: props.service.memoryMiB ?? 1024,
       taskRole: props.taskRole,
       family: props.service.name + '-task',
-      volumes: [{ name: 'scratch', }],
+      volumes: volumes,
     });
 
     taskDef.addToExecutionRolePolicy(new iam.PolicyStatement({
@@ -47,6 +79,15 @@ export class FargateServiceStack extends cdk.Stack {
         'ssmmessages:OpenDataChannel',
       ],
       resources: ['*'],
+    }));
+
+    taskDef.addToExecutionRolePolicy(new iam.PolicyStatement({
+      actions: [
+        'elasticfilesystem:ClientMount',
+        'elasticfilesystem:ClientWrite',
+        'elasticfilesystem:ClientRootAccess',
+      ],
+      resources: [props.efs.fileSystemArn],
     }));
 
     const logGroup = new logs.LogGroup(this, 'LogGroup', {
@@ -85,6 +126,16 @@ export class FargateServiceStack extends cdk.Stack {
       readOnly: false,
       sourceVolume: 'scratch',
     });
+
+    if (props.service.efsMounts) {
+      for (const mount of props.service.efsMounts) {
+        container.addMountPoints({
+          containerPath: mount.containerPath,
+          readOnly: false,
+          sourceVolume: 'efs-' + mount.apName,
+        });
+      }
+    }
 
     if (props.service.bindMounts) {
       for (const mount of props.service.bindMounts) {

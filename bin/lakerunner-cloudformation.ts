@@ -70,5 +70,6 @@ for (const svc of services) {
     queue: common.queue,
     vpcId: common.vpc.vpcId,
     alb: common.alb,
+    efs: common.efs,
   });
 }
