@@ -125,7 +125,7 @@ export class FargateServiceStack extends cdk.Stack {
       logging: ecs.LogDrivers.awsLogs({ logGroup, streamPrefix: props.service.name }),
       user: '0', // run as root to allow bind mounts to work
       environment: {
-        BUMP_REVISION: "0",
+        BUMP_REVISION: "1",
         OTEL_SERVICE_NAME: props.service.name,
         TMPDIR: '/scratch',
         HOME: '/scratch',
