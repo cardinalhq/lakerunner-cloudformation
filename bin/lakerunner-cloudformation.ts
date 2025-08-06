@@ -61,7 +61,6 @@ for (const svc of services) {
     env,
     cluster: common.cluster,
     taskSecurityGroup: common.taskSecurityGroup,
-    taskRole: common.taskRole,
     dbEnv,
     dbSecret: common.dbSecret,
     service: svc,
@@ -69,7 +68,5 @@ for (const svc of services) {
     apiKeysParam: common.apiKeysParam,
     queue: common.queue,
     vpcId: common.vpc.vpcId,
-    alb: common.alb,
-    efs: common.efs,
   });
 }

@@ -50,29 +50,8 @@ export class CommonInfraStack extends cdk.Stack {
 
     this.vpc = ec2.Vpc.fromLookup(this, 'Vpc', { vpcId: props.vpcId });
 
-    new cdk.CfnOutput(this, 'PrivateSubnetIds', {
-      value: this.vpc
-        .selectSubnets({ subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS })
-        .subnetIds
-        .join(','),
-      exportName: 'CommonInfraPrivateSubnetIds',
-    });
-
-    new cdk.CfnOutput(this, 'PublicSubnetIds', {
-      value: this.vpc
-        .selectSubnets({ subnetType: ec2.SubnetType.PUBLIC })
-        .subnetIds
-        .join(','),
-      exportName: 'CommonInfraPublicSubnetIds',
-    });
-
     this.cluster = new Cluster(this, 'Cluster', {
       vpc: this.vpc,
-    });
-
-    new cdk.CfnOutput(this, 'ClusterArn', {
-      value: this.cluster.clusterArn,
-      exportName: 'CommonInfraClusterArn',
     });
 
     // ── Security Group for all Fargate tasks ─────────────────────
@@ -92,11 +71,6 @@ export class CommonInfraStack extends cdk.Stack {
       ec2.Port.tcp(7101),
       'Allow query-worker to query-api on 7101'
     );
-
-    new cdk.CfnOutput(this, 'TaskSecurityGroupId', {
-      value: this.taskSecurityGroup.securityGroupId,
-      exportName: 'CommonInfraTaskSecurityGroupId',
-    });
 
     const albSecurityGroup = new ec2.SecurityGroup(this, 'AlbSecurityGroup', {
       vpc: this.vpc,
@@ -280,5 +254,56 @@ export class CommonInfraStack extends cdk.Stack {
     this.efs.applyRemovalPolicy(RemovalPolicy.DESTROY);
 
     this.efs.connections.allowDefaultPortFrom(this.taskSecurityGroup);
+
+    new cdk.CfnOutput(this, 'ClusterArn', {
+      value: this.cluster.clusterArn,
+      exportName: 'CommonInfraClusterArn',
+    });
+
+    new cdk.CfnOutput(this, 'EFSFileSystemId', {
+      exportName: 'CommonInfraEFSFileSystemId',
+      value: this.efs.fileSystemId,
+    });
+
+    new cdk.CfnOutput(this, 'EFSFileSystemArn', {
+      exportName: 'CommonInfraEFSFilesystemArn',
+      value: this.efs.fileSystemArn,
+    });
+
+    new cdk.CfnOutput(this, 'AlbArn', {
+      exportName: 'CommonInfraAlbArn',
+      value: this.alb.loadBalancerArn,
+    });
+
+    new cdk.CfnOutput(this, 'AlbSecurityGroupId', {
+      exportName: 'CommonInfraAlbSG',
+      value: this.alb.connections.securityGroups![0].securityGroupId,
+    });
+
+    new cdk.CfnOutput(this, 'TaskRoleArn', {
+      exportName: 'CommonInfraTaskRoleArn',
+      value: this.taskRole.roleArn,
+    });
+
+    new cdk.CfnOutput(this, 'TaskSecurityGroupId', {
+      value: this.taskSecurityGroup.securityGroupId,
+      exportName: 'CommonInfraTaskSecurityGroupId',
+    });
+
+    new cdk.CfnOutput(this, 'PrivateSubnetIds', {
+      value: this.vpc
+        .selectSubnets({ subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS })
+        .subnetIds
+        .join(','),
+      exportName: 'CommonInfraPrivateSubnetIds',
+    });
+
+    new cdk.CfnOutput(this, 'PublicSubnetIds', {
+      value: this.vpc
+        .selectSubnets({ subnetType: ec2.SubnetType.PUBLIC })
+        .subnetIds
+        .join(','),
+      exportName: 'CommonInfraPublicSubnetIds',
+    });
   }
 }
