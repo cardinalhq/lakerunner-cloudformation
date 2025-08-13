@@ -34,6 +34,8 @@ import * as efs from 'aws-cdk-lib/aws-efs';
 
 export interface CommonInfraProps extends cdk.StackProps {
   readonly vpcId: string;
+  readonly privateSubnetIds: string[];
+  readonly publicSubnetIds: string[];
 
   readonly dbConfig: {
     readonly username: string;
@@ -64,7 +66,12 @@ export class CommonInfraStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: CommonInfraProps) {
     super(scope, id, props);
 
-    this.vpc = ec2.Vpc.fromLookup(this, 'Vpc', { vpcId: props.vpcId });
+    this.vpc = ec2.Vpc.fromVpcAttributes(this, 'Vpc', {
+      vpcId: props.vpcId,
+      availabilityZones: Fn.getAzs(),
+      privateSubnetIds: props.privateSubnetIds,
+      publicSubnetIds: props.publicSubnetIds,
+    });
 
     this.cluster = new Cluster(this, 'Cluster', {
       vpc: this.vpc,

@@ -36,16 +36,11 @@ export interface FargateServiceStackProps extends cdk.StackProps {
   readonly apiKeysParam: cdk.aws_ssm.IStringParameter;
   readonly queue: sqs.IQueue;
   readonly taskSecurityGroup: ec2.ISecurityGroup;
-  readonly vpcId: string;
   readonly alb: elbv2.IApplicationLoadBalancer;
 }
 export class FargateServiceStack extends cdk.Stack {
-  private readonly vpc: ec2.IVpc;
-
   constructor(scope: Construct, id: string, props: FargateServiceStackProps) {
     super(scope, id, props);
-
-    this.vpc = ec2.Vpc.fromLookup(this, 'Vpc', { vpcId: props.vpcId });
 
     const taskRole = iam.Role.fromRoleArn(this, 'ImportedTaskRole',
       Fn.importValue('CommonInfraTaskRoleArn'),
