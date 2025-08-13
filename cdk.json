@@ -17,20 +17,6 @@
     ]
   },
   "context": {
-    "app": {
-      "dbSecretName": "lakerunner-pg-password",
-      "vpcId": "vpc-03e8199c99601b6cb",
-      "dbConfig": {
-        "port": "5432",
-        "name": "metadata",
-        "sslmode": "require",
-        "username": "lakerunner"
-      },
-      "env": {
-        "account": "529370323638",
-        "region": "us-east-2"
-      }
-    },
     "@aws-cdk/aws-lambda:recognizeLayerVersion": true,
     "@aws-cdk/core:checkSecretUsage": true,
     "@aws-cdk/core:target-partitions": [

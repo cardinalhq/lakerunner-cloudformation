@@ -33,16 +33,12 @@ import * as cr from 'aws-cdk-lib/custom-resources';
 import * as efs from 'aws-cdk-lib/aws-efs';
 
 export interface CommonInfraProps extends cdk.StackProps {
-  readonly vpcId: string;
-
   readonly dbConfig: {
     readonly username: string;
     readonly name: string;
     readonly port?: string;
     readonly sslmode?: string;
   };
-
-  readonly dbSecretName: string;
 }
 
 export class CommonInfraStack extends cdk.Stack {
@@ -64,7 +60,68 @@ export class CommonInfraStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: CommonInfraProps) {
     super(scope, id, props);
 
-    this.vpc = ec2.Vpc.fromLookup(this, 'Vpc', { vpcId: props.vpcId });
+    const vpcId = new cdk.CfnParameter(this, 'VpcId', {
+      type: 'AWS::EC2::VPC::Id',
+      description: 'ID of the VPC to deploy resources into',
+    });
+
+    const privateSubnetIds = new cdk.CfnParameter(this, 'PrivateSubnetIds', {
+      type: 'String',
+      description: 'Comma-separated private subnet IDs (at least 2)',
+    });
+
+    const publicSubnetIds = new cdk.CfnParameter(this, 'PublicSubnetIds', {
+      type: 'String',
+      description: 'Comma-separated public subnet IDs (at least 2)',
+    });
+
+    const privateSubnetRouteTableIds = new cdk.CfnParameter(
+      this,
+      'PrivateSubnetRouteTableIds',
+      {
+        type: 'String',
+        description: 'Comma-separated route table IDs for the private subnets',
+      },
+    );
+
+    const publicSubnetRouteTableIds = new cdk.CfnParameter(
+      this,
+      'PublicSubnetRouteTableIds',
+      {
+        type: 'String',
+        description: 'Comma-separated route table IDs for the public subnets',
+      },
+    );
+
+    const dbSecretName = new cdk.CfnParameter(this, 'DbSecretName', {
+      type: 'String',
+      default: 'lakerunner-pg-password',
+    });
+
+    const azs = Fn.getAzs();
+    const allAzs = [Fn.select(0, azs), Fn.select(1, azs)];
+
+    const privateSubnets = Fn.split(',', privateSubnetIds.valueAsString, 2);
+    const publicSubnets = Fn.split(',', publicSubnetIds.valueAsString, 2);
+    const privateRouteTables = Fn.split(
+      ',',
+      privateSubnetRouteTableIds.valueAsString,
+      2,
+    );
+    const publicRouteTables = Fn.split(
+      ',',
+      publicSubnetRouteTableIds.valueAsString,
+      2,
+    );
+
+    this.vpc = ec2.Vpc.fromVpcAttributes(this, 'Vpc', {
+      vpcId: vpcId.valueAsString,
+      availabilityZones: allAzs,
+      privateSubnetIds: privateSubnets,
+      privateSubnetRouteTableIds: privateRouteTables,
+      publicSubnetIds: publicSubnets,
+      publicSubnetRouteTableIds: publicRouteTables,
+    });
 
     this.cluster = new Cluster(this, 'Cluster', {
       vpc: this.vpc,
@@ -154,7 +211,7 @@ export class CommonInfraStack extends cdk.Stack {
 
     // ── Create the Secret with your username in the template ─────────
     this.dbSecret = new secretsmanager.Secret(this, 'DbSecret', {
-      secretName: props.dbSecretName,
+      secretName: dbSecretName.valueAsString,
       generateSecretString: {
         secretStringTemplate: JSON.stringify({ username: props.dbConfig.username }),
         generateStringKey: 'password',
@@ -176,7 +233,11 @@ export class CommonInfraStack extends cdk.Stack {
       multiAz: false,
     });
 
-    this.dbInstance.connections.allowDefaultPortFrom(this.taskSecurityGroup);
+    this.dbInstance.connections.securityGroups[0].addIngressRule(
+      this.taskSecurityGroup,
+      ec2.Port.tcp(Number(props.dbConfig.port ?? '5432')),
+      'Allow tasks to reach the database',
+    );
 
     this.taskRole = new iam.Role(this, 'TaskRole', {
       assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
@@ -279,13 +340,22 @@ export class CommonInfraStack extends cdk.Stack {
     });
     this.grafanaConfig.applyRemovalPolicy(RemovalPolicy.DESTROY);
 
+    const efsSecurityGroup = new ec2.SecurityGroup(this, 'EfsSecurityGroup', {
+      vpc: this.vpc,
+      allowAllOutbound: true,
+    });
+
     this.efs = new efs.FileSystem(this, 'lakerunner-efs', {
       vpc: this.vpc,
-      securityGroup: this.taskSecurityGroup,
+      securityGroup: efsSecurityGroup,
     });
     this.efs.applyRemovalPolicy(RemovalPolicy.DESTROY);
 
-    this.efs.connections.allowDefaultPortFrom(this.taskSecurityGroup);
+    efsSecurityGroup.addIngressRule(
+      this.taskSecurityGroup,
+      ec2.Port.tcp(2049),
+      'Allow tasks to access EFS',
+    );
 
     new cdk.CfnOutput(this, 'ClusterArn', {
       value: this.cluster.clusterArn,
@@ -322,20 +392,5 @@ export class CommonInfraStack extends cdk.Stack {
       exportName: 'CommonInfraTaskSecurityGroupId',
     });
 
-    new cdk.CfnOutput(this, 'PrivateSubnetIds', {
-      value: this.vpc
-        .selectSubnets({ subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS })
-        .subnetIds
-        .join(','),
-      exportName: 'CommonInfraPrivateSubnetIds',
-    });
-
-    new cdk.CfnOutput(this, 'PublicSubnetIds', {
-      value: this.vpc
-        .selectSubnets({ subnetType: ec2.SubnetType.PUBLIC })
-        .subnetIds
-        .join(','),
-      exportName: 'CommonInfraPublicSubnetIds',
-    });
   }
 }

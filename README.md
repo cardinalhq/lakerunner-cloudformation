@@ -5,18 +5,20 @@ Fargate.
 
 ## Usage
 
-1. Set the AWS_REGION environment variable to the target region for the deployment.
-1. Set the AWS_ACCOUNT environment variable to the AWS account you are using.
-1. Have working credentials for that account.  See below for the resources deployed.
-1. run `./deploy.sh`
-1. Wait patiently.  Starting from scratch, it will take at least 5 minutes to complete.
+1. Install dependencies with `npm install`.
+2. Run `npx cdk synth` to generate CloudFormation templates in `cdk.out/`.
+3. Deploy the templates in your AWS account using the CloudFormation console or CLI.
 
-What this does:
+When launching the stacks you will be prompted for a small set of parameters:
 
-1. Bootstraps CDK in your account, if needed.
-1. Deploy "common infrastructure" which consists of some SGs, IAM roles, ECS cluster, RDS cluster, and EFS.
-1. Run an ECS job will to configure and migrate the RDS database schema.
-1. Deploy the various ECS services that make Lakerunner work.
+* **VpcId** – the existing VPC ID to deploy into.
+* **PrivateSubnetIds** – comma separated list of private subnet IDs.
+* **PublicSubnetIds** – comma separated list of public subnet IDs.
+* **PrivateSubnetRouteTableIds** – comma separated route table IDs for the private subnets.
+* **PublicSubnetRouteTableIds** – comma separated route table IDs for the public subnets.
+* **DbSecretName** – optional name for the database secret (defaults to `lakerunner-pg-password`).
+
+The account and region are automatically detected when the CloudFormation stack is created. No CDK bootstrap or credentials are required just to synthesize the templates.
 
 ## Requirements
 
