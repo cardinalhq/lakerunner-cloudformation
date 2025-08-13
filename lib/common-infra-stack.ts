@@ -33,18 +33,12 @@ import * as cr from 'aws-cdk-lib/custom-resources';
 import * as efs from 'aws-cdk-lib/aws-efs';
 
 export interface CommonInfraProps extends cdk.StackProps {
-  readonly vpcId: string;
-  readonly privateSubnetIds: string[];
-  readonly publicSubnetIds: string[];
-
   readonly dbConfig: {
     readonly username: string;
     readonly name: string;
     readonly port?: string;
     readonly sslmode?: string;
   };
-
-  readonly dbSecretName: string;
 }
 
 export class CommonInfraStack extends cdk.Stack {
@@ -66,11 +60,37 @@ export class CommonInfraStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: CommonInfraProps) {
     super(scope, id, props);
 
+    const vpcId = new cdk.CfnParameter(this, 'VpcId', {
+      type: 'AWS::EC2::VPC::Id',
+      description: 'ID of the VPC to deploy resources into',
+    });
+
+    const privateSubnetIds = new cdk.CfnParameter(this, 'PrivateSubnetIds', {
+      type: 'String',
+      description: 'Comma-separated private subnet IDs (at least 2)',
+    });
+
+    const publicSubnetIds = new cdk.CfnParameter(this, 'PublicSubnetIds', {
+      type: 'String',
+      description: 'Comma-separated public subnet IDs (at least 2)',
+    });
+
+    const dbSecretName = new cdk.CfnParameter(this, 'DbSecretName', {
+      type: 'String',
+      default: 'lakerunner-pg-password',
+    });
+
+    const azs = Fn.getAzs();
+    const allAzs = [Fn.select(0, azs), Fn.select(1, azs)];
+
+    const privateSubnets = Fn.split(',', privateSubnetIds.valueAsString, 2);
+    const publicSubnets = Fn.split(',', publicSubnetIds.valueAsString, 2);
+
     this.vpc = ec2.Vpc.fromVpcAttributes(this, 'Vpc', {
-      vpcId: props.vpcId,
-      availabilityZones: Fn.getAzs(),
-      privateSubnetIds: props.privateSubnetIds,
-      publicSubnetIds: props.publicSubnetIds,
+      vpcId: vpcId.valueAsString,
+      availabilityZones: allAzs,
+      privateSubnetIds: privateSubnets,
+      publicSubnetIds: publicSubnets,
     });
 
     this.cluster = new Cluster(this, 'Cluster', {
@@ -161,7 +181,7 @@ export class CommonInfraStack extends cdk.Stack {
 
     // ── Create the Secret with your username in the template ─────────
     this.dbSecret = new secretsmanager.Secret(this, 'DbSecret', {
-      secretName: props.dbSecretName,
+      secretName: dbSecretName.valueAsString,
       generateSecretString: {
         secretStringTemplate: JSON.stringify({ username: props.dbConfig.username }),
         generateStringKey: 'password',
@@ -329,20 +349,5 @@ export class CommonInfraStack extends cdk.Stack {
       exportName: 'CommonInfraTaskSecurityGroupId',
     });
 
-    new cdk.CfnOutput(this, 'PrivateSubnetIds', {
-      value: this.vpc
-        .selectSubnets({ subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS })
-        .subnetIds
-        .join(','),
-      exportName: 'CommonInfraPrivateSubnetIds',
-    });
-
-    new cdk.CfnOutput(this, 'PublicSubnetIds', {
-      value: this.vpc
-        .selectSubnets({ subnetType: ec2.SubnetType.PUBLIC })
-        .subnetIds
-        .join(','),
-      exportName: 'CommonInfraPublicSubnetIds',
-    });
   }
 }

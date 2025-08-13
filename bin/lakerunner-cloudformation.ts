@@ -7,26 +7,6 @@ import { MigrationStack } from '../lib/migration-stack';
 
 const app = new cdk.App();
 
-const vpcId = new cdk.CfnParameter(app, 'VpcId', {
-  type: 'AWS::EC2::VPC::Id',
-  description: 'ID of the VPC to deploy resources into',
-});
-
-const privateSubnetIds = new cdk.CfnParameter(app, 'PrivateSubnetIds', {
-  type: 'List<AWS::EC2::Subnet::Id>',
-  description: 'Private subnet IDs for workloads',
-});
-
-const publicSubnetIds = new cdk.CfnParameter(app, 'PublicSubnetIds', {
-  type: 'List<AWS::EC2::Subnet::Id>',
-  description: 'Public subnet IDs for load balancers',
-});
-
-const dbSecretName = new cdk.CfnParameter(app, 'DbSecretName', {
-  type: 'String',
-  default: 'lakerunner-pg-password',
-});
-
 const dbConfig = {
   username: 'lakerunner',
   name: 'metadata',
@@ -34,13 +14,7 @@ const dbConfig = {
   sslmode: 'require',
 };
 
-const common = new CommonInfraStack(app, 'CommonInfra', {
-  vpcId: vpcId.valueAsString,
-  privateSubnetIds: privateSubnetIds.valueAsList,
-  publicSubnetIds: publicSubnetIds.valueAsList,
-  dbSecretName: dbSecretName.valueAsString,
-  dbConfig,
-});
+const common = new CommonInfraStack(app, 'CommonInfra', { dbConfig });
 
 const dbEnv = {
   LRDB_HOST: common.dbInstance.dbInstanceEndpointAddress,
@@ -54,9 +28,9 @@ new MigrationStack(app, 'MigrationStack', {
   taskRole: common.taskRole,
   dbEnv,
   dbSecretArn: common.dbSecret.secretArn,
-  vpcSubnets: common.vpc
-    .selectSubnets({ subnetType: cdk.aws_ec2.SubnetType.PRIVATE_WITH_EGRESS })
-    .subnets.map(s => s.subnetId),
+  vpcSubnets: common.vpc.selectSubnets({
+    subnetType: cdk.aws_ec2.SubnetType.PRIVATE_WITH_EGRESS,
+  }).subnetIds,
   securityGroups: [common.taskSecurityGroup.securityGroupId],
   dbSecret: common.dbSecret,
 });
