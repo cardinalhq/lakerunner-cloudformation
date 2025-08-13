@@ -14,7 +14,17 @@ const dbConfig = {
   sslmode: 'require',
 };
 
-const common = new CommonInfraStack(app, 'CommonInfra', { dbConfig });
+const vpcId = app.node.tryGetContext('vpcId');
+if (!vpcId) {
+  throw new Error('context variable "vpcId" is required: cdk synth -c vpcId=vpc-123');
+}
+
+const env = {
+  account: process.env.CDK_DEFAULT_ACCOUNT || process.env.AWS_ACCOUNT_ID || '000000000000',
+  region: process.env.CDK_DEFAULT_REGION || process.env.AWS_REGION || 'us-east-1',
+};
+
+const common = new CommonInfraStack(app, 'CommonInfra', { dbConfig, vpcId, env });
 
 const dbEnv = {
   LRDB_HOST: common.dbInstance.dbInstanceEndpointAddress,
@@ -33,6 +43,7 @@ new MigrationStack(app, 'MigrationStack', {
   }).subnetIds,
   securityGroups: [common.taskSecurityGroup.securityGroupId],
   dbSecret: common.dbSecret,
+  env,
 });
 
 for (const svc of services) {
@@ -46,5 +57,6 @@ for (const svc of services) {
     apiKeysParam: common.apiKeysParam,
     queue: common.queue,
     alb: common.alb,
+    env,
   });
 }

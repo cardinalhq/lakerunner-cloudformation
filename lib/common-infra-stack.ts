@@ -39,6 +39,7 @@ export interface CommonInfraProps extends cdk.StackProps {
     readonly port?: string;
     readonly sslmode?: string;
   };
+  readonly vpcId: string;
 }
 
 export class CommonInfraStack extends cdk.Stack {
@@ -60,18 +61,13 @@ export class CommonInfraStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: CommonInfraProps) {
     super(scope, id, props);
 
-    const vpcId = new cdk.CfnParameter(this, 'VpcId', {
-      type: 'AWS::EC2::VPC::Id',
-      description: 'ID of the VPC to deploy resources into',
-    });
-
     const dbSecretName = new cdk.CfnParameter(this, 'DbSecretName', {
       type: 'String',
       default: 'lakerunner-pg-password',
     });
 
     this.vpc = ec2.Vpc.fromLookup(this, 'Vpc', {
-      vpcId: vpcId.valueAsString,
+      vpcId: props.vpcId,
     });
 
     this.cluster = new Cluster(this, 'Cluster', {

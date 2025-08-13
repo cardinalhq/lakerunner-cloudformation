@@ -9,9 +9,15 @@ Fargate.
 2. Run `npx cdk synth` to generate CloudFormation templates in `cdk.out/`.
 3. Deploy the templates in your AWS account using the CloudFormation console or CLI.
 
-When launching the stacks you will be prompted for a small set of parameters:
+When synthesizing you must supply the ID of an existing VPC so the stack can
+look up subnet details. Pass it as a context variable:
 
-* **VpcId** – the existing VPC ID to deploy into.
+```
+npx cdk synth -c vpcId=vpc-0123456789abcdef0
+```
+
+During deployment you will be prompted for a single parameter:
+
 * **DbSecretName** – optional name for the database secret (defaults to `lakerunner-pg-password`).
 
 The account and region are automatically detected when the CloudFormation stack is created. No CDK bootstrap or credentials are required just to synthesize the templates.
