@@ -75,6 +75,24 @@ export class CommonInfraStack extends cdk.Stack {
       description: 'Comma-separated public subnet IDs (at least 2)',
     });
 
+    const privateSubnetRouteTableIds = new cdk.CfnParameter(
+      this,
+      'PrivateSubnetRouteTableIds',
+      {
+        type: 'String',
+        description: 'Comma-separated route table IDs for the private subnets',
+      },
+    );
+
+    const publicSubnetRouteTableIds = new cdk.CfnParameter(
+      this,
+      'PublicSubnetRouteTableIds',
+      {
+        type: 'String',
+        description: 'Comma-separated route table IDs for the public subnets',
+      },
+    );
+
     const dbSecretName = new cdk.CfnParameter(this, 'DbSecretName', {
       type: 'String',
       default: 'lakerunner-pg-password',
@@ -85,12 +103,24 @@ export class CommonInfraStack extends cdk.Stack {
 
     const privateSubnets = Fn.split(',', privateSubnetIds.valueAsString, 2);
     const publicSubnets = Fn.split(',', publicSubnetIds.valueAsString, 2);
+    const privateRouteTables = Fn.split(
+      ',',
+      privateSubnetRouteTableIds.valueAsString,
+      2,
+    );
+    const publicRouteTables = Fn.split(
+      ',',
+      publicSubnetRouteTableIds.valueAsString,
+      2,
+    );
 
     this.vpc = ec2.Vpc.fromVpcAttributes(this, 'Vpc', {
       vpcId: vpcId.valueAsString,
       availabilityZones: allAzs,
       privateSubnetIds: privateSubnets,
+      privateSubnetRouteTableIds: privateRouteTables,
       publicSubnetIds: publicSubnets,
+      publicSubnetRouteTableIds: publicRouteTables,
     });
 
     this.cluster = new Cluster(this, 'Cluster', {
@@ -203,7 +233,11 @@ export class CommonInfraStack extends cdk.Stack {
       multiAz: false,
     });
 
-    this.dbInstance.connections.allowDefaultPortFrom(this.taskSecurityGroup);
+    this.dbInstance.connections.securityGroups[0].addIngressRule(
+      this.taskSecurityGroup,
+      ec2.Port.tcp(Number(props.dbConfig.port ?? '5432')),
+      'Allow tasks to reach the database',
+    );
 
     this.taskRole = new iam.Role(this, 'TaskRole', {
       assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
@@ -306,13 +340,22 @@ export class CommonInfraStack extends cdk.Stack {
     });
     this.grafanaConfig.applyRemovalPolicy(RemovalPolicy.DESTROY);
 
+    const efsSecurityGroup = new ec2.SecurityGroup(this, 'EfsSecurityGroup', {
+      vpc: this.vpc,
+      allowAllOutbound: true,
+    });
+
     this.efs = new efs.FileSystem(this, 'lakerunner-efs', {
       vpc: this.vpc,
-      securityGroup: this.taskSecurityGroup,
+      securityGroup: efsSecurityGroup,
     });
     this.efs.applyRemovalPolicy(RemovalPolicy.DESTROY);
 
-    this.efs.connections.allowDefaultPortFrom(this.taskSecurityGroup);
+    efsSecurityGroup.addIngressRule(
+      this.taskSecurityGroup,
+      ec2.Port.tcp(2049),
+      'Allow tasks to access EFS',
+    );
 
     new cdk.CfnOutput(this, 'ClusterArn', {
       value: this.cluster.clusterArn,

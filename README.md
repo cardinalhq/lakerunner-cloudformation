@@ -14,6 +14,8 @@ When launching the stacks you will be prompted for a small set of parameters:
 * **VpcId** – the existing VPC ID to deploy into.
 * **PrivateSubnetIds** – comma separated list of private subnet IDs.
 * **PublicSubnetIds** – comma separated list of public subnet IDs.
+* **PrivateSubnetRouteTableIds** – comma separated route table IDs for the private subnets.
+* **PublicSubnetRouteTableIds** – comma separated route table IDs for the public subnets.
 * **DbSecretName** – optional name for the database secret (defaults to `lakerunner-pg-password`).
 
 The account and region are automatically detected when the CloudFormation stack is created. No CDK bootstrap or credentials are required just to synthesize the templates.

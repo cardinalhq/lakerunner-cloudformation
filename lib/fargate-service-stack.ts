@@ -194,7 +194,8 @@ export class FargateServiceStack extends cdk.Stack {
     if (props.service.ingress) {
       const { port, desc } = props.service.ingress;
 
-      ecsService.connections.allowInternally(
+      props.taskSecurityGroup.addIngressRule(
+        props.taskSecurityGroup,
         ec2.Port.tcp(port),
         desc ?? `ingress for ${props.service.name}:${port}`,
       );
