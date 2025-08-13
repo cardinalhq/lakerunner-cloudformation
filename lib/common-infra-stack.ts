@@ -65,62 +65,13 @@ export class CommonInfraStack extends cdk.Stack {
       description: 'ID of the VPC to deploy resources into',
     });
 
-    const privateSubnetIds = new cdk.CfnParameter(this, 'PrivateSubnetIds', {
-      type: 'String',
-      description: 'Comma-separated private subnet IDs (at least 2)',
-    });
-
-    const publicSubnetIds = new cdk.CfnParameter(this, 'PublicSubnetIds', {
-      type: 'String',
-      description: 'Comma-separated public subnet IDs (at least 2)',
-    });
-
-    const privateSubnetRouteTableIds = new cdk.CfnParameter(
-      this,
-      'PrivateSubnetRouteTableIds',
-      {
-        type: 'String',
-        description: 'Comma-separated route table IDs for the private subnets',
-      },
-    );
-
-    const publicSubnetRouteTableIds = new cdk.CfnParameter(
-      this,
-      'PublicSubnetRouteTableIds',
-      {
-        type: 'String',
-        description: 'Comma-separated route table IDs for the public subnets',
-      },
-    );
-
     const dbSecretName = new cdk.CfnParameter(this, 'DbSecretName', {
       type: 'String',
       default: 'lakerunner-pg-password',
     });
 
-    const azs = Fn.getAzs();
-    const allAzs = [Fn.select(0, azs), Fn.select(1, azs)];
-
-    const privateSubnets = Fn.split(',', privateSubnetIds.valueAsString, 2);
-    const publicSubnets = Fn.split(',', publicSubnetIds.valueAsString, 2);
-    const privateRouteTables = Fn.split(
-      ',',
-      privateSubnetRouteTableIds.valueAsString,
-      2,
-    );
-    const publicRouteTables = Fn.split(
-      ',',
-      publicSubnetRouteTableIds.valueAsString,
-      2,
-    );
-
-    this.vpc = ec2.Vpc.fromVpcAttributes(this, 'Vpc', {
+    this.vpc = ec2.Vpc.fromLookup(this, 'Vpc', {
       vpcId: vpcId.valueAsString,
-      availabilityZones: allAzs,
-      privateSubnetIds: privateSubnets,
-      privateSubnetRouteTableIds: privateRouteTables,
-      publicSubnetIds: publicSubnets,
-      publicSubnetRouteTableIds: publicRouteTables,
     });
 
     this.cluster = new Cluster(this, 'Cluster', {
@@ -177,7 +128,7 @@ export class CommonInfraStack extends cdk.Stack {
       vpc: this.vpc,
       internetFacing: true,
       securityGroup: albSecurityGroup,
-      vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
+      vpcSubnets: { subnets: this.vpc.publicSubnets },
     });
 
     // ── SQS Queue ─────────────────────────────────────────────
@@ -225,7 +176,7 @@ export class CommonInfraStack extends cdk.Stack {
       engine: rds.DatabaseInstanceEngine.postgres({ version: rds.PostgresEngineVersion.VER_17 }),
       instanceType: ec2.InstanceType.of(ec2.InstanceClass.BURSTABLE3, ec2.InstanceSize.MEDIUM),
       vpc: this.vpc,
-      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+      vpcSubnets: { subnets: this.vpc.privateSubnets },
       credentials: rds.Credentials.fromSecret(this.dbSecret),
       databaseName: props.dbConfig.name,
       removalPolicy: RemovalPolicy.DESTROY,
@@ -390,6 +341,16 @@ export class CommonInfraStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'TaskSecurityGroupId', {
       value: this.taskSecurityGroup.securityGroupId,
       exportName: 'CommonInfraTaskSecurityGroupId',
+    });
+
+    new cdk.CfnOutput(this, 'PrivateSubnetIds', {
+      exportName: 'CommonInfraPrivateSubnetIds',
+      value: this.vpc.privateSubnets.map((s) => s.subnetId).join(','),
+    });
+
+    new cdk.CfnOutput(this, 'PublicSubnetIds', {
+      exportName: 'CommonInfraPublicSubnetIds',
+      value: this.vpc.publicSubnets.map((s) => s.subnetId).join(','),
     });
 
   }
