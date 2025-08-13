@@ -68,5 +68,6 @@ for (const svc of services) {
     apiKeysParam: common.apiKeysParam,
     queue: common.queue,
     vpcId: common.vpc.vpcId,
+    alb: common.alb,
   });
 }
