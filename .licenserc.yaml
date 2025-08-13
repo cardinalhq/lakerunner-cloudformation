@@ -1,0 +1,36 @@
+header:
+  license:
+    spdx-id: AGPL-3.0-only
+    copyright-owner: CardinalHQ, Inc
+    copyright-year: 2025
+
+  paths-ignore:
+    - 'bin'
+    - 'buildtime'
+    - '**/*.md'
+    - 'NOTICE'
+    - 'LICENSE'
+    - .gitignore
+    - .dockerignore
+    - .github
+    - .licenserc.yaml
+    - .npmignore
+    - '**/*.yaml'
+    - '**/*.yml'
+    - '**/*.json'
+    - '**/*.mermaid'
+    - go.sum
+    - go.mod
+    - go.work
+    - go.work.sum
+    - '**/testdata/**'
+    - .idea
+    - '**/*.sql.go'
+    - '**/*.sql'
+    - '**/*db/batch.go'
+    - '**/*db/db.go'
+    - '**/*db/models.go'
+    - '**/*db/querier.go'
+    - '**/*db/copyfrom.go'
+
+  comment: on-failure
