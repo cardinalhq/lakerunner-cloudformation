@@ -78,16 +78,32 @@ export class CommonInfraStack extends cdk.Stack {
       allowAllOutbound: true,
     });
 
-    albSecurityGroup.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(3000), 'Allow HTTP from internet');
-    albSecurityGroup.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(7101), 'Allow HTTPS from internet');
+    albSecurityGroup.addIngressRule(
+      ec2.Peer.anyIpv4(),
+      ec2.Port.tcp(3000),
+      'Allow HTTP from internet',
+    );
+    albSecurityGroup.addIngressRule(
+      ec2.Peer.anyIpv4(),
+      ec2.Port.tcp(7101),
+      'Allow HTTPS from internet',
+    );
 
-    this.taskSecurityGroup.addIngressRule(albSecurityGroup, ec2.Port.tcp(3000), 'Allow only ALB to grafana on port 3000');
-    this.taskSecurityGroup.addIngressRule(albSecurityGroup, ec2.Port.tcp(7101), 'Allow only ALB to query-api on port 7101');
+    this.taskSecurityGroup.addIngressRule(
+      albSecurityGroup,
+      ec2.Port.tcp(3000),
+      'Allow only ALB to grafana on port 3000',
+    );
+    this.taskSecurityGroup.addIngressRule(
+      albSecurityGroup,
+      ec2.Port.tcp(7101),
+      'Allow only ALB to query-api on port 7101',
+    );
 
     this.alb = new elbv2.ApplicationLoadBalancer(this, 'query-api-requests', {
       vpc: this.vpc,
       internetFacing: true,
-      securityGroup: this.taskSecurityGroup,
+      securityGroup: albSecurityGroup,
       vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
     });
 
@@ -277,7 +293,7 @@ export class CommonInfraStack extends cdk.Stack {
 
     new cdk.CfnOutput(this, 'AlbSecurityGroupId', {
       exportName: 'CommonInfraAlbSG',
-      value: this.alb.connections.securityGroups![0].securityGroupId,
+      value: albSecurityGroup.securityGroupId,
     });
 
     new cdk.CfnOutput(this, 'TaskRoleArn', {

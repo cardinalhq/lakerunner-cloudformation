@@ -10,7 +10,6 @@ import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 import * as efs from 'aws-cdk-lib/aws-efs';
 import { Fn } from 'aws-cdk-lib';
-import { ApplicationLoadBalancer } from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 
 export interface FargateServiceStackProps extends cdk.StackProps {
   readonly cluster: ecs.Cluster;
@@ -22,6 +21,7 @@ export interface FargateServiceStackProps extends cdk.StackProps {
   readonly queue: sqs.IQueue;
   readonly taskSecurityGroup: ec2.ISecurityGroup;
   readonly vpcId: string;
+  readonly alb: elbv2.IApplicationLoadBalancer;
 }
 export class FargateServiceStack extends cdk.Stack {
   private readonly vpc: ec2.IVpc;
@@ -178,11 +178,7 @@ export class FargateServiceStack extends cdk.Stack {
       enableExecuteCommand: true,
     });
 
-    const alb = ApplicationLoadBalancer.fromApplicationLoadBalancerAttributes(this, 'ImportedAlb', {
-      loadBalancerArn: Fn.importValue('CommonInfraAlbArn'),
-      securityGroupId: Fn.importValue('CommonInfraAlbSG'),
-      vpc: this.vpc,
-    });
+    const alb = props.alb;
 
     if (props.service.ingress) {
       const { port, desc } = props.service.ingress;
