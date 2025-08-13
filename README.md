@@ -9,8 +9,9 @@ Fargate.
 2. Run `npx cdk synth` to generate CloudFormation templates in `cdk.out/`.
 3. Deploy the templates in your AWS account using the CloudFormation console or CLI.
 
-When synthesizing you must supply the ID of an existing VPC so the stack can
-look up subnet details. Pass it as a context variable:
+When synthesizing the stack looks up subnet details for an existing VPC. A
+placeholder VPC ID is provided in `cdk.json` so `npx cdk synth` works out of
+the box. Override it with your own VPC ID by passing a context variable:
 
 ```
 npx cdk synth -c vpcId=vpc-0123456789abcdef0
