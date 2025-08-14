@@ -14,18 +14,14 @@
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 from troposphere import (
-  And,
   AWSObject,
-  Condition,
-  Equals,
   Export,
   GetAtt,
-  If,
   ImportValue,
-  Not,
   Output,
   Parameter,
   Ref,
+  Split,
   Sub,
   Template,
 )
@@ -39,6 +35,16 @@ from troposphere.ecs import (
   TaskDefinition,
 )
 from troposphere.awslambda import Function, Code
+import yaml
+import os
+
+def load_defaults(config_file="defaults.yaml"):
+    """Load default configuration from YAML file"""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    config_path = os.path.join(script_dir, config_file)
+
+    with open(config_path, 'r') as f:
+        return yaml.safe_load(f)
 
 class RunEcsTask(AWSObject):
     resource_type = "Custom::RunEcsTask"
@@ -54,66 +60,22 @@ class RunEcsTask(AWSObject):
 t = Template()
 t.set_description("Lakerunner DB migration (single template): defines TaskDefinition and runs it via Custom Resource.")
 
+# Load defaults for image configuration
+defaults = load_defaults()
+images = defaults.get('images', {})
+
 # -----------------------
 # Parameters (with console hints)
 # -----------------------
 CommonInfraStackName = t.add_parameter(Parameter(
     "CommonInfraStackName", Type="String", Default="",
-    Description="OPTIONAL: Name of the CommonInfra stack to import values from. If set, blank fields below will be auto-filled."
+    Description="REQUIRED: Name of the CommonInfra stack to import values from."
 ))
 
-ClusterArn = t.add_parameter(Parameter(
-    "ClusterArn", Type="String", Default="",
-    Description="ECS Cluster ARN. Leave blank to import from CommonInfra if CommonInfraStackName is set."
-))
-
-Subnets = t.add_parameter(Parameter(
-    "Subnets", Type="List<AWS::EC2::Subnet::Id>",
-    Description="REQUIRED: Private subnet IDs (two or more AZs recommended)."
-))
-SecurityGroups = t.add_parameter(Parameter(
-    "SecurityGroups", Type="List<AWS::EC2::SecurityGroup::Id>",
-    Description="REQUIRED: Security groups for the task (must reach RDS 5432)."
-))
-AssignPublicIp = t.add_parameter(Parameter(
-    "AssignPublicIp", Type="String", Default="DISABLED",
-    AllowedValues=["ENABLED", "DISABLED"],
-    Description="Whether to assign a public IP to the task ENI. Use DISABLED for private subnets."
-))
-
-TaskRoleArn = t.add_parameter(Parameter(
-    "TaskRoleArn", Type="String",
-    Description="REQUIRED: IAM Task Role ARN (should allow secretsmanager:GetSecretValue on the DB secret)."
-))
-
-DbSecretArn = t.add_parameter(Parameter(
-    "DbSecretArn", Type="String", Default="",
-    Description="Secrets Manager ARN with {username,password}. Leave blank to import from CommonInfra if CommonInfraStackName is set."
-))
 ContainerImage = t.add_parameter(Parameter(
     "ContainerImage", Type="String",
-    Default="public.ecr.aws/cardinalhq.io/lakerunner:latest",
+    Default=images.get('migration', 'public.ecr.aws/cardinalhq.io/lakerunner:latest'),
     Description="Migration container image."
-))
-DbHost = t.add_parameter(Parameter(
-    "DbHost", Type="String", Default="",
-    Description="Postgres endpoint hostname. Leave blank to import from CommonInfra if CommonInfraStackName is set."
-))
-DbName = t.add_parameter(Parameter(
-    "DbName", Type="String", Default="metadata",
-    Description="Postgres database name."
-))
-DbUser = t.add_parameter(Parameter(
-    "DbUser", Type="String", Default="lakerunner",
-    Description="Postgres username (should match the secret's 'username')."
-))
-DbPort = t.add_parameter(Parameter(
-    "DbPort", Type="String", Default="5432",
-    Description="Postgres port (usually 5432)."
-))
-DbSSLMode = t.add_parameter(Parameter(
-    "DbSSLMode", Type="String", Default="prefer",
-    Description="sslmode (disable, allow, prefer, require, verify-ca, verify-full)."
 ))
 Cpu = t.add_parameter(Parameter(
     "Cpu", Type="String", Default="512",
@@ -124,66 +86,33 @@ MemoryMiB = t.add_parameter(Parameter(
     Description="Fargate Memory MiB (e.g., 512/1024/2048)."
 ))
 
-# Optional: nice parameter groups/labels in the Console
 t.set_metadata({
     "AWS::CloudFormation::Interface": {
         "ParameterGroups": [
-            {"Label": {"default": "Where to run"}, "Parameters": ["ClusterArn", "Subnets", "SecurityGroups", "AssignPublicIp"]},
+            {"Label": {"default": "CommonInfra Stack"}, "Parameters": ["CommonInfraStackName"]},
             {"Label": {"default": "Task Sizing"}, "Parameters": ["Cpu", "MemoryMiB"]},
             {"Label": {"default": "Container Image"}, "Parameters": ["ContainerImage"]},
-            {"Label": {"default": "Database Connection"}, "Parameters": ["DbHost", "DbName", "DbUser", "DbPort", "DbSSLMode", "DbSecretArn"]},
-            {"Label": {"default": "Permissions"}, "Parameters": ["TaskRoleArn"]},
         ],
         "ParameterLabels": {
-            "ClusterArn": {"default": "ECS Cluster ARN"},
-            "Subnets": {"default": "Private Subnets"},
-            "SecurityGroups": {"default": "Task Security Groups"},
-            "AssignPublicIp": {"default": "Assign Public IP"},
+            "CommonInfraStackName": {"default": "CommonInfra Stack Name"},
             "Cpu": {"default": "Fargate CPU"},
             "MemoryMiB": {"default": "Fargate Memory (MiB)"},
             "ContainerImage": {"default": "Migration Image"},
-            "DbHost": {"default": "DB Hostname"},
-            "DbName": {"default": "DB Name"},
-            "DbUser": {"default": "DB User"},
-            "DbPort": {"default": "DB Port"},
-            "DbSSLMode": {"default": "DB sslmode"},
-            "DbSecretArn": {"default": "DB Secret ARN"},
-            "TaskRoleArn": {"default": "Task Role ARN"},
         }
     }
 })
 
-t.add_condition("HasCI", Not(Equals(Ref(CommonInfraStackName), "")))
-t.add_condition("NoClusterArn", Equals(Ref(ClusterArn), ""))
-t.add_condition("NoDbHost", Equals(Ref(DbHost), ""))
-t.add_condition("NoDbSecretArn", Equals(Ref(DbSecretArn), ""))
-
-t.add_condition("UseClusterImport", And(Condition("HasCI"), Condition("NoClusterArn")))
-t.add_condition("UseDbHostImport", And(Condition("HasCI"), Condition("NoDbHost")))
-t.add_condition("UseDbSecretImport", And(Condition("HasCI"), Condition("NoDbSecretArn")))
 
 # Helper: build "${CommonInfraStackName}-Suffix"
 def ci_export(suffix):
     # Sub returns a string like "mystack-ClusterArn"
     return Sub("${CommonInfraStackName}-%s" % suffix)
 
-ClusterArnValue = If(
-    "UseClusterImport",
-    ImportValue(ci_export("ClusterArn")),
-    Ref(ClusterArn)
-)
-
-DbHostValue = If(
-    "UseDbHostImport",
-    ImportValue(ci_export("DbEndpoint")),
-    Ref(DbHost)
-)
-
-DbSecretArnValue = If(
-    "UseDbSecretImport",
-    ImportValue(ci_export("DbSecretArn")),
-    Ref(DbSecretArn)
-)
+ClusterArnValue = ImportValue(ci_export("ClusterArn"))
+DbHostValue = ImportValue(ci_export("DbEndpoint"))
+DbSecretArnValue = ImportValue(ci_export("DbSecretArn"))
+SecurityGroupsValue = ImportValue(ci_export("TaskSGId"))
+PrivateSubnetsValue = Split(",", ImportValue(ci_export("PrivateSubnets")))
 
 # -----------------------
 # CloudWatch Logs
@@ -192,6 +121,37 @@ LogGroupRes = t.add_resource(LogGroup(
     "MigrationLogGroup",
     LogGroupName=Sub("/lakerunner/migration/${AWS::StackName}"),
     RetentionInDays=14
+))
+
+# -----------------------
+# Task Role (runtime permissions for the migration task)
+# -----------------------
+TaskRole = t.add_resource(Role(
+    "MigrationTaskRole",
+    AssumeRolePolicyDocument={
+        "Version": "2012-10-17",
+        "Statement": [{
+            "Effect": "Allow",
+            "Principal": {"Service": "ecs-tasks.amazonaws.com"},
+            "Action": "sts:AssumeRole"
+        }]
+    },
+    Policies=[
+        Policy(
+            "MigrationTaskPolicy",
+            PolicyName="MigrationTaskPolicy",
+            PolicyDocument={
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Effect": "Allow",
+                        "Action": ["secretsmanager:GetSecretValue"],
+                        "Resource": [DbSecretArnValue]
+                    }
+                ]
+            }
+        )
+    ]
 ))
 
 # -----------------------
@@ -209,6 +169,22 @@ ExecutionRole = t.add_resource(Role(
     },
     ManagedPolicyArns=[
         "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+    ],
+    Policies=[
+        Policy(
+            "TaskExecutionSecretsPolicy",
+            PolicyName="TaskExecutionSecretsPolicy",
+            PolicyDocument={
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Effect": "Allow",
+                        "Action": ["secretsmanager:GetSecretValue"],
+                        "Resource": [Sub("${SecretArn}*", SecretArn=DbSecretArnValue)]
+                    }
+                ]
+            }
+        )
     ]
 ))
 
@@ -223,7 +199,7 @@ TaskDef = t.add_resource(TaskDefinition(
     NetworkMode="awsvpc",
     RequiresCompatibilities=["FARGATE"],
     ExecutionRoleArn=GetAtt(ExecutionRole, "Arn"),
-    TaskRoleArn=Ref(TaskRoleArn),
+    TaskRoleArn=GetAtt(TaskRole, "Arn"),
     ContainerDefinitions=[
         ContainerDefinition(
             Name="Migrator",
@@ -239,10 +215,10 @@ TaskDef = t.add_resource(TaskDefinition(
             ),
             Environment=[
                 Environment(Name="LRDB_HOST", Value=DbHostValue),
-                Environment(Name="LRDB_PORT", Value=Ref(DbPort)),
-                Environment(Name="LRDB_NAME", Value=Ref(DbName)),
-                Environment(Name="LRDB_USER", Value=Ref(DbUser)),
-                Environment(Name="LRDB_SSLMODE", Value=Ref(DbSSLMode)),
+                Environment(Name="LRDB_PORT", Value="5432"),
+                Environment(Name="LRDB_DBNAME", Value="lakerunner"),
+                Environment(Name="LRDB_USER", Value="lakerunner"),
+                Environment(Name="LRDB_SSLMODE", Value="require"),
             ],
             Secrets=[
                 EcsSecret(Name="LRDB_PASSWORD", ValueFrom=Sub("${S}:password::", S=DbSecretArnValue))
@@ -272,7 +248,7 @@ LambdaRole = t.add_resource(Role(
                     # ECS
                     {"Effect":"Allow","Action":["ecs:RunTask","ecs:DescribeTasks"],"Resource":"*"},
                     # Pass the roles embedded in the taskdef
-                    {"Effect":"Allow","Action":["iam:PassRole"],"Resource":[Ref(TaskRoleArn), GetAtt(ExecutionRole, "Arn")]},
+                    {"Effect":"Allow","Action":["iam:PassRole"],"Resource":[GetAtt(TaskRole, "Arn"), GetAtt(ExecutionRole, "Arn")]},
                 ]
             }
         )
@@ -314,7 +290,6 @@ def handler(event, context):
     props = event.get("ResourceProperties", {})
 
     if reqtype == "Delete":
-        # No-op; nothing to tear down
         send(event, context, "SUCCESS", {"Message":"Delete no-op"})
         return
 
@@ -403,11 +378,11 @@ RunnerFn = t.add_resource(Function(
 RunMigration = t.add_resource(RunEcsTask(
     "RunMigration",
     ServiceToken=GetAtt(RunnerFn, "Arn"),
-    ClusterArn=ClusterArnValue,  # use the import/override value
+    ClusterArn=ClusterArnValue,
     TaskDefinitionArn=GetAtt(TaskDef, "TaskDefinitionArn"),
-    Subnets=Ref(Subnets),
-    SecurityGroups=Ref(SecurityGroups),  # or SecurityGroupsValue if you implemented the optional bit
-    AssignPublicIp=Ref(AssignPublicIp)
+    Subnets=PrivateSubnetsValue,
+    SecurityGroups=[SecurityGroupsValue],
+    AssignPublicIp="DISABLED"
 ))
 
 # -----------------------

@@ -13,6 +13,8 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 
+import yaml
+import os
 from troposphere import (
     Template, Parameter, Ref, Sub, GetAtt, If, Equals, NoValue, Export, Output,
     Select, Not, Tags
@@ -34,7 +36,7 @@ from troposphere.rds import DBInstance, DBSubnetGroup
 from troposphere.ssm import Parameter as SsmParameter
 
 t = Template()
-t.set_description("CommonInfra (bootstrap-free, customer-uploadable). Always creates ECS, RDS(Postgres), and EFS. ALB optional.")
+t.set_description("CommonInfra stack for Lakerunner.")
 
 # -----------------------
 # Parameters (with helpful descriptions)
@@ -44,11 +46,13 @@ VpcId = t.add_parameter(Parameter(
     Type="AWS::EC2::VPC::Id",
     Description="REQUIRED: VPC where resources will be created."
 ))
+
 PublicSubnets = t.add_parameter(Parameter(
     "PublicSubnets",
     Type="List<AWS::EC2::Subnet::Id>",
     Description="REQUIRED: Public subnet IDs (for ALB). Provide at least two in different AZs."
 ))
+
 PrivateSubnets = t.add_parameter(Parameter(
     "PrivateSubnets",
     Type="List<AWS::EC2::Subnet::Id>",
@@ -63,24 +67,19 @@ CreateAlb = t.add_parameter(Parameter(
     Description="Create an internet-facing Application Load Balancer with listeners on 7101 and 3000. Set to 'No' to skip."
 ))
 
-BucketName = t.add_parameter(Parameter(
-    "BucketName",
+# Configuration overrides (optional multi-line parameters)
+ApiKeysOverride = t.add_parameter(Parameter(
+    "ApiKeysOverride",
     Type="String",
     Default="",
-    Description="OPTIONAL: S3 bucket name for ingest (must be globally unique). Leave blank to auto-name."
+    Description="OPTIONAL: Custom API keys configuration in YAML format. Leave blank to use defaults from defaults.yaml. Example: - organization_id: xxx\\n  keys:\\n    - keyvalue"
 ))
 
-DbName = t.add_parameter(Parameter(
-    "DbName",
+StorageProfilesOverride = t.add_parameter(Parameter(
+    "StorageProfilesOverride",
     Type="String",
-    Default="metadata",
-    Description="Database name to create in the new Postgres instance. Not used for existing DBs (this stack always creates)."
-))
-DbUsername = t.add_parameter(Parameter(
-    "DbUsername",
-    Type="String",
-    Default="lakerunner",
-    Description="Admin/master username stored in Secrets Manager. Password is randomly generated at deploy time."
+    Default="",
+    Description="OPTIONAL: Custom storage profiles configuration in YAML format. Leave blank to use defaults from defaults.yaml. Bucket name and region will be auto-filled."
 ))
 
 # -----------------------
@@ -98,12 +97,8 @@ t.set_metadata({
                 "Parameters": ["CreateAlb"]
             },
             {
-                "Label": {"default": "Storage & Ingest"},
-                "Parameters": ["BucketName"]
-            },
-            {
-                "Label": {"default": "Database"},
-                "Parameters": ["DbName", "DbUsername"]
+                "Label": {"default": "Configuration Overrides (Advanced)"},
+                "Parameters": ["ApiKeysOverride", "StorageProfilesOverride"]
             }
         ],
         "ParameterLabels": {
@@ -111,9 +106,8 @@ t.set_metadata({
             "PublicSubnets": {"default": "Public Subnets (for ALB)"},
             "PrivateSubnets": {"default": "Private Subnets (for ECS/RDS/EFS)"},
             "CreateAlb": {"default": "Create Application Load Balancer?"},
-            "BucketName": {"default": "Ingest Bucket Name (optional)"},
-            "DbName": {"default": "Postgres Database Name"},
-            "DbUsername": {"default": "Postgres Admin Username"},
+            "ApiKeysOverride": {"default": "Custom API Keys (YAML)"},
+            "StorageProfilesOverride": {"default": "Custom Storage Profiles (YAML)"}
         }
     }
 })
@@ -122,7 +116,17 @@ t.set_metadata({
 # Conditions
 # -----------------------
 t.add_condition("CreateAlbCond", Equals(Ref(CreateAlb), "Yes"))
-t.add_condition("HasBucketName", Not(Equals(Ref(BucketName), "")))
+t.add_condition("HasApiKeysOverride", Not(Equals(Ref(ApiKeysOverride), "")))
+t.add_condition("HasStorageProfilesOverride", Not(Equals(Ref(StorageProfilesOverride), "")))
+
+# Helper function to load defaults
+def load_defaults():
+    """Load default configuration from defaults.yaml"""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    config_path = os.path.join(script_dir, "defaults.yaml")
+
+    with open(config_path, 'r') as f:
+        return yaml.safe_load(f)
 
 # -----------------------
 # Security Groups
@@ -147,6 +151,17 @@ t.add_resource(SecurityGroupIngress(
     ToPort=7101,
     SourceSecurityGroupId=Ref(TaskSG),
     Description="task-to-task 7101",
+))
+
+# Allow tasks to connect to PostgreSQL database
+t.add_resource(SecurityGroupIngress(
+    "TaskSGDbSelf",
+    GroupId=Ref(TaskSG),
+    IpProtocol="tcp",
+    FromPort=5432,
+    ToPort=5432,
+    SourceSecurityGroupId=Ref(TaskSG),
+    Description="task-to-database PostgreSQL",
 ))
 
 # ALB SG (only if creating ALB)
@@ -263,7 +278,6 @@ QueueRes = t.add_resource(Queue(
 
 BucketRes = t.add_resource(Bucket(
     "IngestBucket",
-    BucketName=If("HasBucketName", Ref(BucketName), Ref("AWS::NoValue")),
     LifecycleConfiguration=LifecycleConfiguration(
         Rules=[LifecycleRule(Prefix="otel-raw/", Status="Enabled", ExpirationInDays=10)]
     ),
@@ -305,7 +319,7 @@ t.add_resource(QueuePolicy(
 DbSecret = t.add_resource(Secret(
     "DbSecret",
     GenerateSecretString=GenerateSecretString(
-        SecretStringTemplate=Sub('{"username":"${U}"}', U=Ref(DbUsername)),
+        SecretStringTemplate='{"username":"lakerunner"}',
         GenerateStringKey="password",
         ExcludePunctuation=True,
     ),
@@ -321,10 +335,10 @@ DbSubnets = t.add_resource(DBSubnetGroup(
     SubnetIds=Ref(PrivateSubnets)
 ))
 DbRes = t.add_resource(DBInstance(
-    "MetadataDb",
+    "LakerunnerDb",
     Engine="postgres",
     EngineVersion="17",
-    DBName=Ref(DbName),
+    DBName="lakerunner",
     DBInstanceClass="db.t3.medium",
     PubliclyAccessible=False,
     MultiAZ=False,
@@ -339,7 +353,7 @@ DbRes = t.add_resource(DBInstance(
 ))
 
 DbEndpoint = GetAtt(DbRes, "Endpoint.Address")
-DbPort = GetAtt(DbRes, "Endpoint.Port")  # Postgres default is 5432; we don't make it configurable
+DbPort = GetAtt(DbRes, "Endpoint.Port")
 
 t.add_output(Output("DbEndpoint", Value=DbEndpoint, Export=Export(name=Sub("${AWS::StackName}-DbEndpoint"))))
 t.add_output(Output("DbPort", Value=DbPort, Export=Export(name=Sub("${AWS::StackName}-DbPort"))))
@@ -368,33 +382,58 @@ t.add_resource(MountTarget(
 
 t.add_output(Output("EfsId", Value=Ref(Fs), Export=Export(name=Sub("${AWS::StackName}-EfsId"))))
 
+# Load defaults for SSM parameters
+defaults = load_defaults()
+
 # -----------------------
-# SSM params (examples)
+# SSM params with defaults and overrides
 # -----------------------
-t.add_resource(SsmParameter(
-    "StorageProfilesParam",
-    Name="/lakerunner/storage_profiles",
-    Type="String",
-    Value=Sub(
-        "- bucket: ${Bucket}\n  cloud_provider: aws\n  collector_name: lakerunner\n  insecure_tls: false\n  instance_num: 1\n  organization_id: 12340000-0000-4000-8000-000000000000\n  region: ${AWS::Region}\n  use_path_style: true",
-        Bucket=Ref(BucketRes)
-    ),
-    Description="Storage profiles config",
-))
+# API Keys parameter - use override if provided, otherwise use defaults
+api_keys_yaml = yaml.dump(defaults['api_keys'], default_flow_style=False)
 t.add_resource(SsmParameter(
     "ApiKeysParam",
     Name="/lakerunner/api_keys",
     Type="String",
-    Value="- organization_id: 12340000-0000-4000-8000-000000000000\n  keys:\n    - f70603aa00e6f67999cc66e336134887",
-    Description="API keys",
+    Value=If(
+        "HasApiKeysOverride",
+        Ref(ApiKeysOverride),
+        api_keys_yaml
+    ),
+    Description="API keys configuration",
 ))
 
-# Optional outputs for ALB
+# Storage Profiles parameter - use override if provided, otherwise use defaults with substitutions
+storage_profiles_default = yaml.dump(defaults['storage_profiles'], default_flow_style=False)
+# Replace placeholders with CloudFormation substitutions
+storage_profiles_default_cf = storage_profiles_default.replace("${BUCKET_NAME}", "${Bucket}").replace("${AWS_REGION}", "${AWS::Region}")
+
+t.add_resource(SsmParameter(
+    "StorageProfilesParam",
+    Name="/lakerunner/storage_profiles",
+    Type="String",
+    Value=If(
+        "HasStorageProfilesOverride",
+        Ref(StorageProfilesOverride),
+        Sub(storage_profiles_default_cf, Bucket=Ref(BucketRes))
+    ),
+    Description="Storage profiles configuration",
+))
+
+
+# -----------------------
+# Outputs (for access in other stacks)
+# -----------------------
 t.add_output(Output(
     "AlbDNS",
     Condition="CreateAlbCond",
     Value=GetAtt(Alb, "DNSName"),
     Export=Export(name=Sub("${AWS::StackName}-AlbDNS"))
+))
+t.add_output(Output(
+    "AlbArn",
+    Condition="CreateAlbCond",
+    Value=Ref(Alb),
+    Export=Export(name=Sub("${AWS::StackName}-AlbArn"))
 ))
 t.add_output(Output(
     "Tg7101Arn",
@@ -412,6 +451,23 @@ t.add_output(Output(
     "TaskSecurityGroupId",
     Value=Ref(TaskSG),
     Export=Export(name=Sub("${AWS::StackName}-TaskSGId"))
+))
+t.add_output(Output(
+    "PrivateSubnetsOut",
+    Value=Sub("${Subnet1},${Subnet2}", Subnet1=Select(0, Ref(PrivateSubnets)), Subnet2=Select(1, Ref(PrivateSubnets))),
+    Export=Export(name=Sub("${AWS::StackName}-PrivateSubnets"))
+))
+t.add_output(Output(
+    "VpcIdOut",
+    Value=Ref(VpcId),
+    Export=Export(name=Sub("${AWS::StackName}-VpcId"))
+))
+
+# Export CreateAlb parameter value so Services template can auto-detect ALB presence
+t.add_output(Output(
+    "CreateAlbValue",
+    Value=Ref(CreateAlb),
+    Export=Export(name=Sub("${AWS::StackName}-CreateAlb"))
 ))
 
 print(t.to_yaml())

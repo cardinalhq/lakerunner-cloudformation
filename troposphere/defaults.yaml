@@ -1,0 +1,173 @@
+# Default configuration for Lakerunner deployment
+# This file contains initial state for API keys, storage profiles, service configurations, and container images
+
+# API Keys configuration
+api_keys:
+  - organization_id: 12340000-0000-4000-8000-000000000000
+    keys:
+      - f70603aa00e6f67999cc66e336134887
+
+# Storage Profiles configuration
+storage_profiles:
+  - bucket: "${BUCKET_NAME}"  # Will be replaced with actual bucket name
+    cloud_provider: aws
+    collector_name: lakerunner
+    insecure_tls: false
+    instance_num: 1
+    organization_id: 12340000-0000-4000-8000-000000000000
+    region: "${AWS_REGION}"  # Will be replaced with actual region
+    use_path_style: true
+
+# Container Images configuration
+images:
+  migration: "public.ecr.aws/cardinalhq.io/lakerunner:latest"
+  go_services: "public.ecr.aws/cardinalhq.io/lakerunner:latest"
+  query_api: "public.ecr.aws/cardinalhq.io/lakerunner/query-api:latest"
+  query_worker: "public.ecr.aws/cardinalhq.io/lakerunner/query-worker:latest"
+  grafana: "grafana/grafana:latest"
+
+# Service configurations (moved from services.yaml for centralization)
+services:
+  lakerunner-pubsub-sqs:
+    image: "public.ecr.aws/cardinalhq.io/lakerunner:latest"
+    command: ["/app/bin/lakerunner", "pubsub", "sqs"]
+    cpu: 1024
+    memory_mib: 2048
+    replicas: 1
+    health_check:
+      type: "go"
+      command: ["/app/bin/lakerunner", "sysinfo"]
+    environment: {}
+
+  lakerunner-ingest-logs:
+    image: "public.ecr.aws/cardinalhq.io/lakerunner:latest"
+    command: ["/app/bin/lakerunner", "ingest-logs"]
+    cpu: 1024
+    memory_mib: 2048
+    replicas: 1
+    health_check:
+      type: "go"
+      command: ["/app/bin/lakerunner", "sysinfo"]
+    environment: {}
+
+  lakerunner-ingest-metrics:
+    image: "public.ecr.aws/cardinalhq.io/lakerunner:latest"
+    command: ["/app/bin/lakerunner", "ingest-metrics"]
+    cpu: 1024
+    memory_mib: 2048
+    replicas: 1
+    health_check:
+      type: "go"
+      command: ["/app/bin/lakerunner", "sysinfo"]
+    environment: {}
+
+  lakerunner-compact-logs:
+    image: "public.ecr.aws/cardinalhq.io/lakerunner:latest"
+    command: ["/app/bin/lakerunner", "compact-logs"]
+    cpu: 1024
+    memory_mib: 2048
+    replicas: 1
+    health_check:
+      type: "go"
+      command: ["/app/bin/lakerunner", "sysinfo"]
+    environment: {}
+
+  lakerunner-compact-metrics:
+    image: "public.ecr.aws/cardinalhq.io/lakerunner:latest"
+    command: ["/app/bin/lakerunner", "compact-metrics"]
+    cpu: 1024
+    memory_mib: 2048
+    replicas: 1
+    health_check:
+      type: "go"
+      command: ["/app/bin/lakerunner", "sysinfo"]
+    environment: {}
+
+  lakerunner-rollup-metrics:
+    image: "public.ecr.aws/cardinalhq.io/lakerunner:latest"
+    command: ["/app/bin/lakerunner", "rollup-metrics"]
+    cpu: 1024
+    memory_mib: 2048
+    replicas: 1
+    health_check:
+      type: "go"
+      command: ["/app/bin/lakerunner", "sysinfo"]
+    environment: {}
+
+  lakerunner-sweeper:
+    image: "public.ecr.aws/cardinalhq.io/lakerunner:latest"
+    command: ["/app/bin/lakerunner", "sweeper"]
+    cpu: 256
+    memory_mib: 512
+    replicas: 1
+    health_check:
+      type: "go"
+      command: ["/app/bin/lakerunner", "sysinfo"]
+    environment: {}
+
+  lakerunner-query-api:
+    image: "public.ecr.aws/cardinalhq.io/lakerunner/query-api:latest"
+    cpu: 2048
+    memory_mib: 8192
+    replicas: 1
+    ingress:
+      port: 7101
+      attach_alb: true
+      health_check_path: "/ready"
+    environment:
+      EXECUTION_ENVIRONMENT: "ecs"
+      QUERY_WORKER_DEPLOYMENT_NAME: "lakerunner-query-worker"
+      QUERY_WORKER_SERVICE_NAME: "lakerunner-query-worker"
+      QUERY_STACK: "local"
+      METRIC_PREFIX: "lakerunner-query-api"
+      NUM_MIN_QUERY_WORKERS: "1"
+      NUM_MAX_QUERY_WORKERS: "4"
+      SPRING_PROFILES_ACTIVE: "aws"
+    health_check:
+      type: "scala"
+      command: ["curl", "-f", "http://localhost:7101/ready"]
+    bind_mounts:
+      - container_path: "/db"
+        source_volume: "scratch"
+        read_only: false
+
+  lakerunner-query-worker:
+    image: "public.ecr.aws/cardinalhq.io/lakerunner/query-worker:latest"
+    cpu: 2048
+    memory_mib: 8192
+    replicas: 1
+    ingress:
+      port: 7101
+      description: "From Query API"
+    environment:
+      METRIC_PREFIX: "lakerunner-query-worker"
+      SPRING_PROFILES_ACTIVE: "aws"
+    health_check:
+      type: "scala"
+      command: ["curl", "-f", "http://localhost:7101/ready"]
+    bind_mounts:
+      - container_path: "/db"
+        source_volume: "scratch"
+        read_only: false
+
+  grafana:
+    image: "grafana/grafana:latest"
+    cpu: 512
+    memory_mib: 1024
+    replicas: 1
+    ingress:
+      port: 3000
+      attach_alb: true
+      health_check_path: "/api/health"
+    environment:
+      GF_SECURITY_ADMIN_USER: "admin"
+      GF_SERVER_HTTP_PORT: "3000"
+      GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s:%(http_port)s"
+      GF_INSTALL_PLUGINS: "https://github.com/cardinalhq/cardinalhq-lakerunner-datasource/raw/refs/heads/main/cardinalhq-lakerunner-datasource.zip;cardinalhq-lakerunner-datasource"
+    efs_mounts:
+      - container_path: "/var/lib/grafana"
+        efs_path: "/grafana"
+        access_point_name: "grafana"
+    health_check:
+      type: "curl"
+      command: ["curl", "-f", "http://localhost:3000/api/health"]

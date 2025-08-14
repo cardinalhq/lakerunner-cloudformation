@@ -2,11 +2,15 @@ Conditions:
   CreateAlbCond: !Equals
     - !Ref 'CreateAlb'
     - 'Yes'
-  HasBucketName: !Not
+  HasApiKeysOverride: !Not
     - !Equals
-      - !Ref 'BucketName'
+      - !Ref 'ApiKeysOverride'
       - ''
-Description: CommonInfra (bootstrap-free, customer-uploadable). Always creates ECS, RDS(Postgres), and EFS. ALB optional.
+  HasStorageProfilesOverride: !Not
+    - !Equals
+      - !Ref 'StorageProfilesOverride'
+      - ''
+Description: CommonInfra stack for Lakerunner.
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
@@ -21,30 +25,29 @@ Metadata:
         Parameters:
           - CreateAlb
       - Label:
-          default: Storage & Ingest
+          default: Configuration Overrides (Advanced)
         Parameters:
-          - BucketName
-      - Label:
-          default: Database
-        Parameters:
-          - DbName
-          - DbUsername
+          - ApiKeysOverride
+          - StorageProfilesOverride
     ParameterLabels:
-      BucketName:
-        default: Ingest Bucket Name (optional)
+      ApiKeysOverride:
+        default: Custom API Keys (YAML)
       CreateAlb:
         default: Create Application Load Balancer?
-      DbName:
-        default: Postgres Database Name
-      DbUsername:
-        default: Postgres Admin Username
       PrivateSubnets:
         default: Private Subnets (for ECS/RDS/EFS)
       PublicSubnets:
         default: Public Subnets (for ALB)
+      StorageProfilesOverride:
+        default: Custom Storage Profiles (YAML)
       VpcId:
         default: VPC Id
 Outputs:
+  AlbArn:
+    Condition: CreateAlbCond
+    Export:
+      Name: !Sub '${AWS::StackName}-AlbArn'
+    Value: !Ref 'Alb'
   AlbDNS:
     Condition: CreateAlbCond
     Export:
@@ -54,14 +57,18 @@ Outputs:
     Export:
       Name: !Sub '${AWS::StackName}-ClusterArn'
     Value: !GetAtt 'Cluster.Arn'
+  CreateAlbValue:
+    Export:
+      Name: !Sub '${AWS::StackName}-CreateAlb'
+    Value: !Ref 'CreateAlb'
   DbEndpoint:
     Export:
       Name: !Sub '${AWS::StackName}-DbEndpoint'
-    Value: !GetAtt 'MetadataDb.Endpoint.Address'
+    Value: !GetAtt 'LakerunnerDb.Endpoint.Address'
   DbPort:
     Export:
       Name: !Sub '${AWS::StackName}-DbPort'
-    Value: !GetAtt 'MetadataDb.Endpoint.Port'
+    Value: !GetAtt 'LakerunnerDb.Endpoint.Port'
   DbSecretArnOut:
     Export:
       Name: !Sub '${AWS::StackName}-DbSecretArn'
@@ -70,6 +77,17 @@ Outputs:
     Export:
       Name: !Sub '${AWS::StackName}-EfsId'
     Value: !Ref 'Efs'
+  PrivateSubnetsOut:
+    Export:
+      Name: !Sub '${AWS::StackName}-PrivateSubnets'
+    Value: !Sub
+      - ${Subnet1},${Subnet2}
+      - Subnet1: !Select
+          - 0
+          - !Ref 'PrivateSubnets'
+        Subnet2: !Select
+          - 1
+          - !Ref 'PrivateSubnets'
   TaskSecurityGroupId:
     Export:
       Name: !Sub '${AWS::StackName}-TaskSGId'
@@ -84,10 +102,14 @@ Outputs:
     Export:
       Name: !Sub '${AWS::StackName}-Tg7101Arn'
     Value: !Ref 'Tg7101'
+  VpcIdOut:
+    Export:
+      Name: !Sub '${AWS::StackName}-VpcId'
+    Value: !Ref 'VpcId'
 Parameters:
-  BucketName:
+  ApiKeysOverride:
     Default: ''
-    Description: 'OPTIONAL: S3 bucket name for ingest (must be globally unique). Leave blank to auto-name.'
+    Description: 'OPTIONAL: Custom API keys configuration in YAML format. Leave blank to use defaults from defaults.yaml. Example: - organization_id: xxx\n  keys:\n    - keyvalue'
     Type: String
   CreateAlb:
     AllowedValues:
@@ -96,20 +118,16 @@ Parameters:
     Default: 'Yes'
     Description: Create an internet-facing Application Load Balancer with listeners on 7101 and 3000. Set to 'No' to skip.
     Type: String
-  DbName:
-    Default: metadata
-    Description: Database name to create in the new Postgres instance. Not used for existing DBs (this stack always creates).
-    Type: String
-  DbUsername:
-    Default: lakerunner
-    Description: Admin/master username stored in Secrets Manager. Password is randomly generated at deploy time.
-    Type: String
   PrivateSubnets:
     Description: 'REQUIRED: Private subnet IDs (for RDS/ECS/EFS). Provide at least two in different AZs.'
     Type: List<AWS::EC2::Subnet::Id>
   PublicSubnets:
     Description: 'REQUIRED: Public subnet IDs (for ALB). Provide at least two in different AZs.'
     Type: List<AWS::EC2::Subnet::Id>
+  StorageProfilesOverride:
+    Default: ''
+    Description: 'OPTIONAL: Custom storage profiles configuration in YAML format. Leave blank to use defaults from defaults.yaml. Bucket name and region will be auto-filled.'
+    Type: String
   VpcId:
     Description: 'REQUIRED: VPC where resources will be created.'
     Type: AWS::EC2::VPC::Id
@@ -156,10 +174,13 @@ Resources:
     Type: AWS::EC2::SecurityGroup
   ApiKeysParam:
     Properties:
-      Description: API keys
+      Description: API keys configuration
       Name: /lakerunner/api_keys
       Type: String
-      Value: "- organization_id: 12340000-0000-4000-8000-000000000000\n  keys:\n    - f70603aa00e6f67999cc66e336134887"
+      Value: !If
+        - HasApiKeysOverride
+        - !Ref 'ApiKeysOverride'
+        - "- keys:\n  - f70603aa00e6f67999cc66e336134887\n  organization_id: 12340000-0000-4000-8000-000000000000\n"
     Type: AWS::SSM::Parameter
   Cluster:
     Properties:
@@ -170,9 +191,7 @@ Resources:
       GenerateSecretString:
         ExcludePunctuation: true
         GenerateStringKey: password
-        SecretStringTemplate: !Sub
-          - '{"username":"${U}"}'
-          - U: !Ref 'DbUsername'
+        SecretStringTemplate: '{"username":"lakerunner"}'
     Type: AWS::SecretsManager::Secret
   DbSubnetGroup:
     Properties:
@@ -206,10 +225,6 @@ Resources:
     Type: AWS::EFS::MountTarget
   IngestBucket:
     Properties:
-      BucketName: !If
-        - HasBucketName
-        - !Ref 'BucketName'
-        - !Ref 'AWS::NoValue'
       LifecycleConfiguration:
         Rules:
           - ExpirationInDays: 10
@@ -263,6 +278,28 @@ Resources:
       Queues:
         - !Ref 'IngestQueue'
     Type: AWS::SQS::QueuePolicy
+  LakerunnerDb:
+    Properties:
+      AllocatedStorage: '100'
+      CopyTagsToSnapshot: true
+      DBInstanceClass: db.t3.medium
+      DBName: lakerunner
+      DBSubnetGroupName: !Ref 'DbSubnetGroup'
+      DeletionProtection: false
+      Engine: postgres
+      EngineVersion: '17'
+      MasterUserPassword: !Sub
+        - '{{resolve:secretsmanager:${S}:SecretString:password}}'
+        - S: !Ref 'DbSecret'
+      MasterUsername: !Sub
+        - '{{resolve:secretsmanager:${S}:SecretString:username}}'
+        - S: !Ref 'DbSecret'
+      MultiAZ: false
+      PubliclyAccessible: false
+      StorageType: gp3
+      VPCSecurityGroups:
+        - !Ref 'TaskSG'
+    Type: AWS::RDS::DBInstance
   Listener3000:
     Condition: CreateAlbCond
     Properties:
@@ -283,37 +320,18 @@ Resources:
       Port: '7101'
       Protocol: HTTP
     Type: AWS::ElasticLoadBalancingV2::Listener
-  MetadataDb:
-    Properties:
-      AllocatedStorage: '100'
-      CopyTagsToSnapshot: true
-      DBInstanceClass: db.t3.medium
-      DBName: !Ref 'DbName'
-      DBSubnetGroupName: !Ref 'DbSubnetGroup'
-      DeletionProtection: false
-      Engine: postgres
-      EngineVersion: '17'
-      MasterUserPassword: !Sub
-        - '{{resolve:secretsmanager:${S}:SecretString:password}}'
-        - S: !Ref 'DbSecret'
-      MasterUsername: !Sub
-        - '{{resolve:secretsmanager:${S}:SecretString:username}}'
-        - S: !Ref 'DbSecret'
-      MultiAZ: false
-      PubliclyAccessible: false
-      StorageType: gp3
-      VPCSecurityGroups:
-        - !Ref 'TaskSG'
-    Type: AWS::RDS::DBInstance
   StorageProfilesParam:
     Properties:
-      Description: Storage profiles config
+      Description: Storage profiles configuration
       Name: /lakerunner/storage_profiles
       Type: String
-      Value: !Sub
-        - "- bucket: ${Bucket}\n  cloud_provider: aws\n  collector_name: lakerunner\n  insecure_tls: false\n  instance_num: 1\n  organization_id: 12340000-0000-4000-8000-000000000000\n  region: ${AWS::Region}\n\
-          \  use_path_style: true"
-        - Bucket: !Ref 'IngestBucket'
+      Value: !If
+        - HasStorageProfilesOverride
+        - !Ref 'StorageProfilesOverride'
+        - !Sub
+          - "- bucket: ${Bucket}\n  cloud_provider: aws\n  collector_name: lakerunner\n  insecure_tls: false\n  instance_num: 1\n  organization_id: 12340000-0000-4000-8000-000000000000\n  region: ${AWS::Region}\n\
+            \  use_path_style: true\n"
+          - Bucket: !Ref 'IngestBucket'
     Type: AWS::SSM::Parameter
   TaskFromAlb3000:
     Condition: CreateAlbCond
@@ -352,6 +370,15 @@ Resources:
       IpProtocol: tcp
       SourceSecurityGroupId: !Ref 'TaskSG'
       ToPort: 7101
+    Type: AWS::EC2::SecurityGroupIngress
+  TaskSGDbSelf:
+    Properties:
+      Description: task-to-database PostgreSQL
+      FromPort: 5432
+      GroupId: !Ref 'TaskSG'
+      IpProtocol: tcp
+      SourceSecurityGroupId: !Ref 'TaskSG'
+      ToPort: 5432
     Type: AWS::EC2::SecurityGroupIngress
   Tg3000:
     Condition: CreateAlbCond
