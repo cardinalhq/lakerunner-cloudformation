@@ -51,16 +51,11 @@ def create_services_template():
     services = config.get('services', {})
     
     # -----------------------
-    # Parameters with deploy-time overrides
+    # Parameters (simplified - always imports from CommonInfra)
     # -----------------------
     CommonInfraStackName = t.add_parameter(Parameter(
-        "CommonInfraStackName", Type="String", Default="",
-        Description="OPTIONAL: Name of the CommonInfra stack to import values from. If set, blank fields below will be auto-filled."
-    ))
-    
-    ClusterArn = t.add_parameter(Parameter(
-        "ClusterArn", Type="String", Default="",
-        Description="ECS Cluster ARN. Leave blank to import from CommonInfra if CommonInfraStackName is set."
+        "CommonInfraStackName", Type="String",
+        Description="REQUIRED: Name of the CommonInfra stack to import infrastructure values from."
     ))
     
     VpcId = t.add_parameter(Parameter(
@@ -71,21 +66,6 @@ def create_services_template():
     PrivateSubnets = t.add_parameter(Parameter(
         "PrivateSubnets", Type="List<AWS::EC2::Subnet::Id>",
         Description="REQUIRED: Private subnet IDs for ECS services."
-    ))
-    
-    TaskSecurityGroupId = t.add_parameter(Parameter(
-        "TaskSecurityGroupId", Type="AWS::EC2::SecurityGroup::Id",
-        Description="REQUIRED: Security group ID for ECS tasks."
-    ))
-    
-    DbSecretArn = t.add_parameter(Parameter(
-        "DbSecretArn", Type="String", Default="",
-        Description="Database secret ARN. Leave blank to import from CommonInfra if CommonInfraStackName is set."
-    ))
-    
-    DbHost = t.add_parameter(Parameter(
-        "DbHost", Type="String", Default="",
-        Description="Database hostname. Leave blank to import from CommonInfra if CommonInfraStackName is set."
     ))
     
     DbPort = t.add_parameter(Parameter(
@@ -108,16 +88,6 @@ def create_services_template():
         Description="Database SSL mode."
     ))
     
-    AlbArn = t.add_parameter(Parameter(
-        "AlbArn", Type="String", Default="",
-        Description="ALB ARN for services with ingress. Leave blank to import from CommonInfra if CommonInfraStackName is set."
-    ))
-    
-    EfsFileSystemId = t.add_parameter(Parameter(
-        "EfsFileSystemId", Type="String", Default="",
-        Description="EFS File System ID. Leave blank to import from CommonInfra if CommonInfraStackName is set."
-    ))
-    
     # Global service overrides
     GlobalImageOverride = t.add_parameter(Parameter(
         "GlobalImageOverride", Type="String", Default="",
@@ -135,11 +105,11 @@ def create_services_template():
             "ParameterGroups": [
                 {
                     "Label": {"default": "Infrastructure References"},
-                    "Parameters": ["CommonInfraStackName", "ClusterArn", "VpcId", "PrivateSubnets", "TaskSecurityGroupId", "AlbArn", "EfsFileSystemId"]
+                    "Parameters": ["CommonInfraStackName", "VpcId", "PrivateSubnets", "TaskSecurityGroupId"]
                 },
                 {
                     "Label": {"default": "Database Connection"},
-                    "Parameters": ["DbSecretArn", "DbHost", "DbPort", "DbName", "DbUser", "DbSSLMode"]
+                    "Parameters": ["DbPort", "DbName", "DbUser", "DbSSLMode"]
                 },
                 {
                     "Label": {"default": "Global Overrides"},
@@ -148,14 +118,9 @@ def create_services_template():
             ],
             "ParameterLabels": {
                 "CommonInfraStackName": {"default": "Common Infra Stack Name"},
-                "ClusterArn": {"default": "ECS Cluster ARN"},
                 "VpcId": {"default": "VPC ID"},
                 "PrivateSubnets": {"default": "Private Subnets"},
-                "TaskSecurityGroupId": {"default": "Task Security Group"},
-                "AlbArn": {"default": "Load Balancer ARN"},
-                "EfsFileSystemId": {"default": "EFS File System ID"},
-                "DbSecretArn": {"default": "Database Secret ARN"},
-                "DbHost": {"default": "Database Host"},
+                "TaskSecurityGroupId": {"default": "Task Security Group ID"},
                 "DbPort": {"default": "Database Port"},
                 "DbName": {"default": "Database Name"},
                 "DbUser": {"default": "Database User"},
@@ -167,34 +132,23 @@ def create_services_template():
     })
     
     # -----------------------
-    # Conditions for importing from CommonInfra
+    # Conditions
     # -----------------------
-    t.add_condition("HasCI", Not(Equals(Ref(CommonInfraStackName), "")))
-    t.add_condition("NoClusterArn", Equals(Ref(ClusterArn), ""))
-    t.add_condition("NoDbSecretArn", Equals(Ref(DbSecretArn), ""))
-    t.add_condition("NoDbHost", Equals(Ref(DbHost), ""))
-    t.add_condition("NoAlbArn", Equals(Ref(AlbArn), ""))
-    t.add_condition("NoEfsId", Equals(Ref(EfsFileSystemId), ""))
     t.add_condition("HasGlobalImageOverride", Not(Equals(Ref(GlobalImageOverride), "")))
     t.add_condition("HasGlobalReplicasOverride", Not(Equals(Ref(GlobalReplicasOverride), "")))
-    
-    from troposphere import Condition
-    t.add_condition("UseClusterImport", And(Condition("HasCI"), Condition("NoClusterArn")))
-    t.add_condition("UseDbSecretImport", And(Condition("HasCI"), Condition("NoDbSecretArn")))
-    t.add_condition("UseDbHostImport", And(Condition("HasCI"), Condition("NoDbHost")))
-    t.add_condition("UseAlbImport", And(Condition("HasCI"), Condition("NoAlbArn")))
-    t.add_condition("UseEfsImport", And(Condition("HasCI"), Condition("NoEfsId")))
+    t.add_condition("NoTaskSecurityGroupId", Equals(Ref(TaskSecurityGroupId), ""))
     
     # Helper function for imports
     def ci_export(suffix):
         return Sub("${CommonInfraStackName}-%s" % suffix, CommonInfraStackName=Ref(CommonInfraStackName))
     
-    # Resolved values
-    ClusterArnValue = If("UseClusterImport", ImportValue(ci_export("ClusterArn")), Ref(ClusterArn))
-    DbSecretArnValue = If("UseDbSecretImport", ImportValue(ci_export("DbSecretArn")), Ref(DbSecretArn))
-    DbHostValue = If("UseDbHostImport", ImportValue(ci_export("DbEndpoint")), Ref(DbHost))
-    AlbArnValue = If("UseAlbImport", ImportValue(ci_export("AlbArn")), Ref(AlbArn))
-    EfsIdValue = If("UseEfsImport", ImportValue(ci_export("EfsId")), Ref(EfsFileSystemId))
+    # Resolved values (always import from CommonInfra except for explicitly provided values)
+    ClusterArnValue = ImportValue(ci_export("ClusterArn"))
+    DbSecretArnValue = ImportValue(ci_export("DbSecretArn")) 
+    DbHostValue = ImportValue(ci_export("DbEndpoint"))
+    AlbArnValue = ImportValue(ci_export("AlbArn"))
+    EfsIdValue = ImportValue(ci_export("EfsId"))
+    TaskSecurityGroupIdValue = If("NoTaskSecurityGroupId", ImportValue(ci_export("TaskSGId")), Ref(TaskSecurityGroupId))
     
     # -----------------------
     # Task Execution Role (shared by all services)
@@ -585,7 +539,7 @@ def create_services_template():
             NetworkConfiguration=NetworkConfiguration(
                 AwsvpcConfiguration=AwsvpcConfiguration(
                     Subnets=Ref(PrivateSubnets),
-                    SecurityGroups=[Ref(TaskSecurityGroupId)]
+                    SecurityGroups=[TaskSecurityGroupIdValue]
                 )
             ),
             EnableExecuteCommand=True
@@ -633,10 +587,8 @@ def create_services_template():
     # ALB Listeners (if we have target groups)
     # -----------------------
     if target_groups:
-        # Create condition to check if we have an ALB (either provided directly or via import)
-        t.add_condition("HasAlbDirect", Not(Equals(Ref(AlbArn), "")))
-        from troposphere import Or
-        t.add_condition("HasAlb", Or(Condition("HasAlbDirect"), Condition("UseAlbImport")))
+        # We always import ALB ARN from CommonInfra, so ALB availability depends on CommonInfra having ALB
+        pass  # No condition needed - ALB listeners are always created when target groups exist
         
         # Create listeners for each unique port
         ports_created = set()
@@ -645,7 +597,6 @@ def create_services_template():
             if port not in ports_created:
                 listener = t.add_resource(Listener(
                     f"Listener{port}",
-                    Condition="HasAlb",
                     LoadBalancerArn=AlbArnValue,
                     Port=str(port),
                     Protocol="HTTP",
