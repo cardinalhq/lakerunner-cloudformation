@@ -603,10 +603,6 @@ Resources:
                     Fn::Sub:
                       - ${CommonInfraStackName}-DbSecretArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: GF_SECURITY_ADMIN_PASSWORD
-              ValueFrom: !Sub
-                - '${SecretArn}:password::'
-                - SecretArn: !Ref 'GrafanaAdminSecret'
           User: '0'
       Cpu: '512'
       ExecutionRoleArn: !GetAtt 'TaskExecutionRole.Arn'
@@ -1226,10 +1222,6 @@ Resources:
                     Fn::Sub:
                       - ${CommonInfraStackName}-DbSecretArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: TOKEN_HMAC256_KEY
-              ValueFrom: !Sub
-                - '${SecretArn}:token_hmac256_key::'
-                - SecretArn: !Ref 'TokenHmacSecret'
           User: '0'
       Cpu: '2048'
       ExecutionRoleArn: !GetAtt 'TaskExecutionRole.Arn'
@@ -1336,10 +1328,6 @@ Resources:
                     Fn::Sub:
                       - ${CommonInfraStackName}-DbSecretArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: TOKEN_HMAC256_KEY
-              ValueFrom: !Sub
-                - '${SecretArn}:token_hmac256_key::'
-                - SecretArn: !Ref 'TokenHmacSecret'
           User: '0'
       Cpu: '2048'
       ExecutionRoleArn: !GetAtt 'TaskExecutionRole.Arn'
@@ -1537,10 +1525,10 @@ Resources:
                       - ${CommonInfraStackName}-DbSecretArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
           User: '0'
-      Cpu: '1024'
+      Cpu: '256'
       ExecutionRoleArn: !GetAtt 'TaskExecutionRole.Arn'
       Family: lakerunner-sweeper-task
-      Memory: '2048'
+      Memory: '512'
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE

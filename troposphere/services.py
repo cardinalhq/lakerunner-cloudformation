@@ -32,7 +32,7 @@ from troposphere.efs import AccessPoint, PosixUser, RootDirectory, CreationInfo
 from troposphere.logs import LogGroup
 from troposphere.secretsmanager import Secret, GenerateSecretString
 
-def load_service_config(config_file="services.yaml"):
+def load_service_config(config_file="defaults.yaml"):
     """Load service configuration from YAML file"""
     script_dir = os.path.dirname(os.path.abspath(__file__))
     config_path = os.path.join(script_dir, config_file)
@@ -60,14 +60,14 @@ def create_services_template():
 
     # Container image overrides for air-gapped deployments
     GoServicesImage = t.add_parameter(Parameter(
-        "GoServicesImage", Type="String", 
+        "GoServicesImage", Type="String",
         Default="public.ecr.aws/cardinalhq.io/lakerunner:latest",
         Description="Container image for Go services (pubsub, ingest, compact, etc.)"
     ))
 
     QueryApiImage = t.add_parameter(Parameter(
         "QueryApiImage", Type="String",
-        Default="public.ecr.aws/cardinalhq.io/lakerunner/query-api:latest-dev", 
+        Default="public.ecr.aws/cardinalhq.io/lakerunner/query-api:latest-dev",
         Description="Container image for query-api service"
     ))
 
@@ -99,7 +99,7 @@ def create_services_template():
             "ParameterLabels": {
                 "CommonInfraStackName": {"default": "Common Infra Stack Name"},
                 "GoServicesImage": {"default": "Go Services Image"},
-                "QueryApiImage": {"default": "Query API Image"}, 
+                "QueryApiImage": {"default": "Query API Image"},
                 "QueryWorkerImage": {"default": "Query Worker Image"},
                 "GrafanaImage": {"default": "Grafana Image"}
             }

@@ -2,6 +2,14 @@ Conditions:
   CreateAlbCond: !Equals
     - !Ref 'CreateAlb'
     - 'Yes'
+  HasApiKeysOverride: !Not
+    - !Equals
+      - !Ref 'ApiKeysOverride'
+      - ''
+  HasStorageProfilesOverride: !Not
+    - !Equals
+      - !Ref 'StorageProfilesOverride'
+      - ''
 Description: CommonInfra stack for Lakerunner.
 Metadata:
   AWS::CloudFormation::Interface:
@@ -16,13 +24,22 @@ Metadata:
           default: Load Balancer
         Parameters:
           - CreateAlb
+      - Label:
+          default: Configuration Overrides (Advanced)
+        Parameters:
+          - ApiKeysOverride
+          - StorageProfilesOverride
     ParameterLabels:
+      ApiKeysOverride:
+        default: Custom API Keys (YAML)
       CreateAlb:
         default: Create Application Load Balancer?
       PrivateSubnets:
         default: Private Subnets (for ECS/RDS/EFS)
       PublicSubnets:
         default: Public Subnets (for ALB)
+      StorageProfilesOverride:
+        default: Custom Storage Profiles (YAML)
       VpcId:
         default: VPC Id
 Outputs:
@@ -86,6 +103,10 @@ Outputs:
       Name: !Sub '${AWS::StackName}-VpcId'
     Value: !Ref 'VpcId'
 Parameters:
+  ApiKeysOverride:
+    Default: ''
+    Description: 'OPTIONAL: Custom API keys configuration in YAML format. Leave blank to use defaults from defaults.yaml. Example: - organization_id: xxx\n  keys:\n    - keyvalue'
+    Type: String
   CreateAlb:
     AllowedValues:
       - 'Yes'
@@ -99,6 +120,10 @@ Parameters:
   PublicSubnets:
     Description: 'REQUIRED: Public subnet IDs (for ALB). Provide at least two in different AZs.'
     Type: List<AWS::EC2::Subnet::Id>
+  StorageProfilesOverride:
+    Default: ''
+    Description: 'OPTIONAL: Custom storage profiles configuration in YAML format. Leave blank to use defaults from defaults.yaml. Bucket name and region will be auto-filled.'
+    Type: String
   VpcId:
     Description: 'REQUIRED: VPC where resources will be created.'
     Type: AWS::EC2::VPC::Id
@@ -145,10 +170,13 @@ Resources:
     Type: AWS::EC2::SecurityGroup
   ApiKeysParam:
     Properties:
-      Description: API keys
+      Description: API keys configuration
       Name: /lakerunner/api_keys
       Type: String
-      Value: "- organization_id: 12340000-0000-4000-8000-000000000000\n  keys:\n    - f70603aa00e6f67999cc66e336134887"
+      Value: !If
+        - HasApiKeysOverride
+        - !Ref 'ApiKeysOverride'
+        - "- keys:\n  - f70603aa00e6f67999cc66e336134887\n  organization_id: 12340000-0000-4000-8000-000000000000\n"
     Type: AWS::SSM::Parameter
   Cluster:
     Properties:
@@ -290,13 +318,16 @@ Resources:
     Type: AWS::ElasticLoadBalancingV2::Listener
   StorageProfilesParam:
     Properties:
-      Description: Storage profiles config
+      Description: Storage profiles configuration
       Name: /lakerunner/storage_profiles
       Type: String
-      Value: !Sub
-        - "- bucket: ${Bucket}\n  cloud_provider: aws\n  collector_name: lakerunner\n  insecure_tls: false\n  instance_num: 1\n  organization_id: 12340000-0000-4000-8000-000000000000\n  region: ${AWS::Region}\n\
-          \  use_path_style: true"
-        - Bucket: !Ref 'IngestBucket'
+      Value: !If
+        - HasStorageProfilesOverride
+        - !Ref 'StorageProfilesOverride'
+        - !Sub
+          - "- bucket: ${Bucket}\n  cloud_provider: aws\n  collector_name: lakerunner\n  insecure_tls: false\n  instance_num: 1\n  organization_id: 12340000-0000-4000-8000-000000000000\n  region: ${AWS::Region}\n\
+            \  use_path_style: true\n"
+          - Bucket: !Ref 'IngestBucket'
     Type: AWS::SSM::Parameter
   TaskFromAlb3000:
     Condition: CreateAlbCond
