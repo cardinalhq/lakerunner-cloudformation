@@ -36,20 +36,20 @@ def load_service_config(config_file="services.yaml"):
     """Load service configuration from YAML file"""
     script_dir = os.path.dirname(os.path.abspath(__file__))
     config_path = os.path.join(script_dir, config_file)
-    
+
     with open(config_path, 'r') as f:
         return yaml.safe_load(f)
 
 def create_services_template():
     """Create CloudFormation template for all services"""
-    
+
     t = Template()
     t.set_description("Lakerunner Services: ECS services, task definitions, IAM roles, and ALB integration")
-    
+
     # Load service configurations
     config = load_service_config()
     services = config.get('services', {})
-    
+
     # -----------------------
     # Parameters (simplified - always imports from CommonInfra)
     # -----------------------
@@ -57,43 +57,43 @@ def create_services_template():
         "CommonInfraStackName", Type="String",
         Description="REQUIRED: Name of the CommonInfra stack to import infrastructure values from."
     ))
-    
+
     VpcId = t.add_parameter(Parameter(
         "VpcId", Type="AWS::EC2::VPC::Id",
         Description="REQUIRED: VPC ID where services will run."
     ))
-    
+
     PrivateSubnets = t.add_parameter(Parameter(
         "PrivateSubnets", Type="List<AWS::EC2::Subnet::Id>",
         Description="REQUIRED: Private subnet IDs for ECS services."
     ))
-    
+
     DbPort = t.add_parameter(Parameter(
         "DbPort", Type="String", Default="5432",
         Description="Database port."
     ))
-    
+
     DbName = t.add_parameter(Parameter(
-        "DbName", Type="String", Default="metadata",
+        "DbName", Type="String", Default="lakerunner",
         Description="Database name."
     ))
-    
+
     DbUser = t.add_parameter(Parameter(
-        "DbUser", Type="String", Default="lakerunner", 
+        "DbUser", Type="String", Default="lakerunner",
         Description="Database username."
     ))
-    
+
     # Global service overrides
     GlobalImageOverride = t.add_parameter(Parameter(
         "GlobalImageOverride", Type="String", Default="",
         Description="OPTIONAL: Override all service images with this value (useful for testing)"
     ))
-    
+
     GlobalReplicasOverride = t.add_parameter(Parameter(
         "GlobalReplicasOverride", Type="String", Default="",
         Description="OPTIONAL: Override replica count for all services (useful for scaling)"
     ))
-    
+
     # Parameter groups for console
     t.set_metadata({
         "AWS::CloudFormation::Interface": {
@@ -123,25 +123,25 @@ def create_services_template():
             }
         }
     })
-    
+
     # -----------------------
     # Conditions
     # -----------------------
     t.add_condition("HasGlobalImageOverride", Not(Equals(Ref(GlobalImageOverride), "")))
     t.add_condition("HasGlobalReplicasOverride", Not(Equals(Ref(GlobalReplicasOverride), "")))
-    
+
     # Helper function for imports
     def ci_export(suffix):
         return Sub("${CommonInfraStackName}-%s" % suffix, CommonInfraStackName=Ref(CommonInfraStackName))
-    
+
     # Resolved values (always import from CommonInfra)
     ClusterArnValue = ImportValue(ci_export("ClusterArn"))
-    DbSecretArnValue = ImportValue(ci_export("DbSecretArn")) 
+    DbSecretArnValue = ImportValue(ci_export("DbSecretArn"))
     DbHostValue = ImportValue(ci_export("DbEndpoint"))
     AlbArnValue = ImportValue(ci_export("AlbArn"))
     EfsIdValue = ImportValue(ci_export("EfsId"))
     TaskSecurityGroupIdValue = ImportValue(ci_export("TaskSGId"))
-    
+
     # -----------------------
     # Task Execution Role (shared by all services)
     # -----------------------
@@ -179,7 +179,7 @@ def create_services_template():
                             "Effect": "Allow",
                             "Action": [
                                 "ssmmessages:CreateControlChannel",
-                                "ssmmessages:CreateDataChannel", 
+                                "ssmmessages:CreateDataChannel",
                                 "ssmmessages:OpenControlChannel",
                                 "ssmmessages:OpenDataChannel"
                             ],
@@ -190,7 +190,7 @@ def create_services_template():
             )
         ]
     ))
-    
+
     # -----------------------
     # Task Role (shared by all services)
     # -----------------------
@@ -249,7 +249,7 @@ def create_services_template():
                             "Effect": "Allow",
                             "Action": [
                                 "ecs:ListServices",
-                                "ecs:DescribeServices", 
+                                "ecs:DescribeServices",
                                 "ecs:UpdateService",
                                 "ecs:ListTasks",
                                 "ecs:DescribeTasks"
@@ -273,7 +273,7 @@ def create_services_template():
             )
         ]
     ))
-    
+
     # -----------------------
     # Application Secrets
     # -----------------------
@@ -289,10 +289,10 @@ def create_services_template():
             PasswordLength=64
         )
     ))
-    
+
     # Grafana admin password secret
     grafana_secret = t.add_resource(Secret(
-        "GrafanaAdminSecret", 
+        "GrafanaAdminSecret",
         Name=Sub("${AWS::StackName}-grafana-admin"),
         Description="Grafana admin password",
         GenerateSecretString=GenerateSecretString(
@@ -302,7 +302,7 @@ def create_services_template():
             PasswordLength=32
         )
     ))
-    
+
     # Output the Grafana admin password secret ARN so users can retrieve it
     t.add_output(Output(
         "GrafanaAdminSecretArn",
@@ -310,7 +310,7 @@ def create_services_template():
         Value=Ref(grafana_secret),
         Export=Export(Sub("${AWS::StackName}-GrafanaAdminSecretArn"))
     ))
-    
+
     # Collect services that need EFS access points
     services_needing_efs = {}
     for service_name, service_config in services.items():
@@ -318,7 +318,7 @@ def create_services_template():
         for mount in efs_mounts:
             access_point_name = mount['access_point_name']
             services_needing_efs[access_point_name] = mount
-    
+
     # Create EFS access points
     access_points = {}
     for ap_name, mount_config in services_needing_efs.items():
@@ -339,27 +339,27 @@ def create_services_template():
             ),
             AccessPointTags=Tags(Name=Sub("${AWS::StackName}-" + ap_name))
         ))
-    
+
     # Keep track of target groups for ALB integration
     target_groups = {}
-    
+
     # -----------------------
     # Create services
     # -----------------------
     for service_name, service_config in services.items():
         safe_name = service_name.replace('-', '').replace('_', '')
         title_name = ''.join(word.capitalize() for word in service_name.replace('-', '_').split('_'))
-        
+
         # Create log group
         log_group = t.add_resource(LogGroup(
             f"LogGroup{title_name}",
             LogGroupName=Sub(f"/ecs/{service_name}"),
             RetentionInDays=14
         ))
-        
+
         # Build volumes list
         volumes = [Volume(Name="scratch")]
-        
+
         # Add EFS volumes
         efs_mounts = service_config.get('efs_mounts', [])
         for mount in efs_mounts:
@@ -376,7 +376,7 @@ def create_services_template():
                         )
                     )
                 ))
-        
+
         # Build environment variables
         base_env = [
             Environment(Name="BUMP_REVISION", Value="1"),
@@ -395,41 +395,41 @@ def create_services_template():
             Environment(Name="LRDB_USER", Value=Ref(DbUser)),
             Environment(Name="LRDB_SSLMODE", Value="require")
         ]
-        
+
         # Add service-specific environment variables (excluding sensitive ones)
         service_env = service_config.get('environment', {})
         sensitive_keys = {'TOKEN_HMAC256_KEY', 'GF_SECURITY_ADMIN_PASSWORD'}
         for key, value in service_env.items():
             if key not in sensitive_keys:
                 base_env.append(Environment(Name=key, Value=value))
-        
+
         # Build secrets
         secrets = [
             EcsSecret(Name="STORAGE_PROFILES_ENV", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles")),
             EcsSecret(Name="API_KEYS_ENV", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys")),
             EcsSecret(Name="LRDB_PASSWORD", ValueFrom=Sub("${SecretArn}:password::", SecretArn=DbSecretArnValue))
         ]
-        
+
         # Add service-specific secrets for sensitive environment variables
         if 'TOKEN_HMAC256_KEY' in service_env:
             secrets.append(EcsSecret(
-                Name="TOKEN_HMAC256_KEY", 
+                Name="TOKEN_HMAC256_KEY",
                 ValueFrom=Sub("${SecretArn}:token_hmac256_key::", SecretArn=Ref(token_secret))
             ))
-        
+
         if 'GF_SECURITY_ADMIN_PASSWORD' in service_env:
             secrets.append(EcsSecret(
-                Name="GF_SECURITY_ADMIN_PASSWORD", 
+                Name="GF_SECURITY_ADMIN_PASSWORD",
                 ValueFrom=Sub("${SecretArn}:password::", SecretArn=Ref(grafana_secret))
             ))
-        
+
         # Build mount points
         mount_points = [MountPoint(
             ContainerPath="/scratch",
             SourceVolume="scratch",
             ReadOnly=False
         )]
-        
+
         # Add EFS mount points
         for mount in efs_mounts:
             ap_name = mount['access_point_name']
@@ -438,7 +438,7 @@ def create_services_template():
                 SourceVolume=f"efs-{ap_name}",
                 ReadOnly=False
             ))
-        
+
         # Add bind mounts
         bind_mounts = service_config.get('bind_mounts', [])
         for mount in bind_mounts:
@@ -447,7 +447,7 @@ def create_services_template():
                 SourceVolume=mount['source_volume'],
                 ReadOnly=mount.get('read_only', False)
             ))
-        
+
         # Build health check
         health_check_config = service_config.get('health_check', {})
         health_check = None
@@ -459,7 +459,7 @@ def create_services_template():
                 Retries=3,
                 StartPeriod=60
             )
-        
+
         # Build port mappings
         port_mappings = []
         ingress = service_config.get('ingress')
@@ -468,14 +468,14 @@ def create_services_template():
                 ContainerPort=ingress['port'],
                 Protocol="tcp"
             ))
-        
+
         # Create container definition
         container_image = If(
             "HasGlobalImageOverride",
             Ref(GlobalImageOverride),
             service_config['image']
         )
-        
+
         container = ContainerDefinition(
             Name="AppContainer",
             Image=container_image,
@@ -495,7 +495,7 @@ def create_services_template():
                 }
             )
         )
-        
+
         # Create task definition
         task_def = t.add_resource(TaskDefinition(
             f"TaskDef{title_name}",
@@ -513,14 +513,14 @@ def create_services_template():
                 OperatingSystemFamily="LINUX"
             )
         ))
-        
+
         # Create ECS service
         desired_count = If(
             "HasGlobalReplicasOverride",
             Ref(GlobalReplicasOverride),
             str(service_config.get('replicas', 1))
         )
-        
+
         ecs_service = t.add_resource(Service(
             f"Service{title_name}",
             ServiceName=service_name,
@@ -536,12 +536,12 @@ def create_services_template():
             ),
             EnableExecuteCommand=True
         ))
-        
+
         # Create ALB target group if service has ingress with attach_alb
         if ingress and ingress.get('attach_alb'):
             port = ingress['port']
             health_check_path = ingress.get('health_check_path', '/')
-            
+
             target_group = t.add_resource(TargetGroup(
                 f"TargetGroup{title_name}",
                 Name=Sub(f"${{AWS::StackName}}-{service_name}"[:32]),  # ALB TG names are limited to 32 chars
@@ -561,27 +561,27 @@ def create_services_template():
                     TargetGroupAttribute(Key="deregistration_delay.timeout_seconds", Value="30")
                 ]
             ))
-            
+
             target_groups[service_name] = {
                 'target_group': target_group,
                 'port': port,
                 'service': ecs_service
             }
-            
+
             # Add service to target group
             ecs_service.LoadBalancers = [EcsLoadBalancer(
                 ContainerName="AppContainer",
                 ContainerPort=port,
                 TargetGroupArn=Ref(target_group)
             )]
-    
+
     # -----------------------
     # ALB Listeners (if we have target groups)
     # -----------------------
     if target_groups:
         # We always import ALB ARN from CommonInfra, so ALB availability depends on CommonInfra having ALB
         pass  # No condition needed - ALB listeners are always created when target groups exist
-        
+
         # Create listeners for each unique port
         ports_created = set()
         for service_name, tg_info in target_groups.items():
@@ -598,7 +598,7 @@ def create_services_template():
                     )]
                 ))
                 ports_created.add(port)
-    
+
     # -----------------------
     # Outputs
     # -----------------------
@@ -607,13 +607,13 @@ def create_services_template():
         Value=GetAtt(TaskRole, "Arn"),
         Export=Export(name=Sub("${AWS::StackName}-TaskRoleArn"))
     ))
-    
+
     t.add_output(Output(
-        "ExecutionRoleArn", 
+        "ExecutionRoleArn",
         Value=GetAtt(ExecutionRole, "Arn"),
         Export=Export(name=Sub("${AWS::StackName}-ExecutionRoleArn"))
     ))
-    
+
     # Output service ARNs
     for service_name, _ in services.items():
         title_name = ''.join(word.capitalize() for word in service_name.replace('-', '_').split('_'))
@@ -622,7 +622,7 @@ def create_services_template():
             Value=Ref(f"Service{title_name}"),
             Export=Export(name=Sub(f"${{AWS::StackName}}-{service_name}-ServiceArn"))
         ))
-    
+
     return t
 
 if __name__ == "__main__":

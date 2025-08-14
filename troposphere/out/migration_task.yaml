@@ -126,7 +126,7 @@ Parameters:
     Description: Postgres endpoint hostname. Leave blank to import from CommonInfra if CommonInfraStackName is set.
     Type: String
   DbName:
-    Default: metadata
+    Default: lakerunner
     Description: Postgres database name.
     Type: String
   DbPort:

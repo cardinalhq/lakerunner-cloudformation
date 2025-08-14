@@ -34,7 +34,7 @@ from troposphere.rds import DBInstance, DBSubnetGroup
 from troposphere.ssm import Parameter as SsmParameter
 
 t = Template()
-t.set_description("CommonInfra (bootstrap-free, customer-uploadable). Always creates ECS, RDS(Postgres), and EFS. ALB optional.")
+t.set_description("CommonInfra stack for Lakerunner.")
 
 # -----------------------
 # Parameters (with helpful descriptions)
@@ -44,11 +44,13 @@ VpcId = t.add_parameter(Parameter(
     Type="AWS::EC2::VPC::Id",
     Description="REQUIRED: VPC where resources will be created."
 ))
+
 PublicSubnets = t.add_parameter(Parameter(
     "PublicSubnets",
     Type="List<AWS::EC2::Subnet::Id>",
     Description="REQUIRED: Public subnet IDs (for ALB). Provide at least two in different AZs."
 ))
+
 PrivateSubnets = t.add_parameter(Parameter(
     "PrivateSubnets",
     Type="List<AWS::EC2::Subnet::Id>",
@@ -61,26 +63,6 @@ CreateAlb = t.add_parameter(Parameter(
     AllowedValues=["Yes", "No"],
     Default="Yes",
     Description="Create an internet-facing Application Load Balancer with listeners on 7101 and 3000. Set to 'No' to skip."
-))
-
-BucketName = t.add_parameter(Parameter(
-    "BucketName",
-    Type="String",
-    Default="",
-    Description="OPTIONAL: S3 bucket name for ingest (must be globally unique). Leave blank to auto-name."
-))
-
-DbName = t.add_parameter(Parameter(
-    "DbName",
-    Type="String",
-    Default="metadata",
-    Description="Database name to create in the new Postgres instance. Not used for existing DBs (this stack always creates)."
-))
-DbUsername = t.add_parameter(Parameter(
-    "DbUsername",
-    Type="String",
-    Default="lakerunner",
-    Description="Admin/master username stored in Secrets Manager. Password is randomly generated at deploy time."
 ))
 
 # -----------------------
@@ -96,24 +78,13 @@ t.set_metadata({
             {
                 "Label": {"default": "Load Balancer"},
                 "Parameters": ["CreateAlb"]
-            },
-            {
-                "Label": {"default": "Storage & Ingest"},
-                "Parameters": ["BucketName"]
-            },
-            {
-                "Label": {"default": "Database"},
-                "Parameters": ["DbName", "DbUsername"]
             }
         ],
         "ParameterLabels": {
             "VpcId": {"default": "VPC Id"},
             "PublicSubnets": {"default": "Public Subnets (for ALB)"},
             "PrivateSubnets": {"default": "Private Subnets (for ECS/RDS/EFS)"},
-            "CreateAlb": {"default": "Create Application Load Balancer?"},
-            "BucketName": {"default": "Ingest Bucket Name (optional)"},
-            "DbName": {"default": "Postgres Database Name"},
-            "DbUsername": {"default": "Postgres Admin Username"},
+            "CreateAlb": {"default": "Create Application Load Balancer?"}
         }
     }
 })
@@ -122,7 +93,6 @@ t.set_metadata({
 # Conditions
 # -----------------------
 t.add_condition("CreateAlbCond", Equals(Ref(CreateAlb), "Yes"))
-t.add_condition("HasBucketName", Not(Equals(Ref(BucketName), "")))
 
 # -----------------------
 # Security Groups
@@ -263,7 +233,6 @@ QueueRes = t.add_resource(Queue(
 
 BucketRes = t.add_resource(Bucket(
     "IngestBucket",
-    BucketName=If("HasBucketName", Ref(BucketName), Ref("AWS::NoValue")),
     LifecycleConfiguration=LifecycleConfiguration(
         Rules=[LifecycleRule(Prefix="otel-raw/", Status="Enabled", ExpirationInDays=10)]
     ),
@@ -305,7 +274,7 @@ t.add_resource(QueuePolicy(
 DbSecret = t.add_resource(Secret(
     "DbSecret",
     GenerateSecretString=GenerateSecretString(
-        SecretStringTemplate=Sub('{"username":"${U}"}', U=Ref(DbUsername)),
+        SecretStringTemplate='{"username":"lakerunner"}',
         GenerateStringKey="password",
         ExcludePunctuation=True,
     ),
@@ -321,10 +290,10 @@ DbSubnets = t.add_resource(DBSubnetGroup(
     SubnetIds=Ref(PrivateSubnets)
 ))
 DbRes = t.add_resource(DBInstance(
-    "MetadataDb",
+    "LakerunnerDb",
     Engine="postgres",
     EngineVersion="17",
-    DBName=Ref(DbName),
+    DBName="lakerunner",
     DBInstanceClass="db.t3.medium",
     PubliclyAccessible=False,
     MultiAZ=False,

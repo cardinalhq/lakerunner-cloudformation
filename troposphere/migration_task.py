@@ -100,7 +100,7 @@ DbHost = t.add_parameter(Parameter(
     Description="Postgres endpoint hostname. Leave blank to import from CommonInfra if CommonInfraStackName is set."
 ))
 DbName = t.add_parameter(Parameter(
-    "DbName", Type="String", Default="metadata",
+    "DbName", Type="String", Default="lakerunner",
     Description="Postgres database name."
 ))
 DbUser = t.add_parameter(Parameter(

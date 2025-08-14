@@ -104,7 +104,7 @@ Parameters:
     Description: 'REQUIRED: Name of the CommonInfra stack to import infrastructure values from.'
     Type: String
   DbName:
-    Default: metadata
+    Default: lakerunner
     Description: Database name.
     Type: String
   DbPort:

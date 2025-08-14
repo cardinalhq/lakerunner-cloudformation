@@ -2,11 +2,7 @@ Conditions:
   CreateAlbCond: !Equals
     - !Ref 'CreateAlb'
     - 'Yes'
-  HasBucketName: !Not
-    - !Equals
-      - !Ref 'BucketName'
-      - ''
-Description: CommonInfra (bootstrap-free, customer-uploadable). Always creates ECS, RDS(Postgres), and EFS. ALB optional.
+Description: CommonInfra stack for Lakerunner.
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
@@ -20,24 +16,9 @@ Metadata:
           default: Load Balancer
         Parameters:
           - CreateAlb
-      - Label:
-          default: Storage & Ingest
-        Parameters:
-          - BucketName
-      - Label:
-          default: Database
-        Parameters:
-          - DbName
-          - DbUsername
     ParameterLabels:
-      BucketName:
-        default: Ingest Bucket Name (optional)
       CreateAlb:
         default: Create Application Load Balancer?
-      DbName:
-        default: Postgres Database Name
-      DbUsername:
-        default: Postgres Admin Username
       PrivateSubnets:
         default: Private Subnets (for ECS/RDS/EFS)
       PublicSubnets:
@@ -57,11 +38,11 @@ Outputs:
   DbEndpoint:
     Export:
       Name: !Sub '${AWS::StackName}-DbEndpoint'
-    Value: !GetAtt 'MetadataDb.Endpoint.Address'
+    Value: !GetAtt 'LakerunnerDb.Endpoint.Address'
   DbPort:
     Export:
       Name: !Sub '${AWS::StackName}-DbPort'
-    Value: !GetAtt 'MetadataDb.Endpoint.Port'
+    Value: !GetAtt 'LakerunnerDb.Endpoint.Port'
   DbSecretArnOut:
     Export:
       Name: !Sub '${AWS::StackName}-DbSecretArn'
@@ -85,24 +66,12 @@ Outputs:
       Name: !Sub '${AWS::StackName}-Tg7101Arn'
     Value: !Ref 'Tg7101'
 Parameters:
-  BucketName:
-    Default: ''
-    Description: 'OPTIONAL: S3 bucket name for ingest (must be globally unique). Leave blank to auto-name.'
-    Type: String
   CreateAlb:
     AllowedValues:
       - 'Yes'
       - 'No'
     Default: 'Yes'
     Description: Create an internet-facing Application Load Balancer with listeners on 7101 and 3000. Set to 'No' to skip.
-    Type: String
-  DbName:
-    Default: metadata
-    Description: Database name to create in the new Postgres instance. Not used for existing DBs (this stack always creates).
-    Type: String
-  DbUsername:
-    Default: lakerunner
-    Description: Admin/master username stored in Secrets Manager. Password is randomly generated at deploy time.
     Type: String
   PrivateSubnets:
     Description: 'REQUIRED: Private subnet IDs (for RDS/ECS/EFS). Provide at least two in different AZs.'
@@ -170,9 +139,7 @@ Resources:
       GenerateSecretString:
         ExcludePunctuation: true
         GenerateStringKey: password
-        SecretStringTemplate: !Sub
-          - '{"username":"${U}"}'
-          - U: !Ref 'DbUsername'
+        SecretStringTemplate: '{"username":"lakerunner"}'
     Type: AWS::SecretsManager::Secret
   DbSubnetGroup:
     Properties:
@@ -206,10 +173,6 @@ Resources:
     Type: AWS::EFS::MountTarget
   IngestBucket:
     Properties:
-      BucketName: !If
-        - HasBucketName
-        - !Ref 'BucketName'
-        - !Ref 'AWS::NoValue'
       LifecycleConfiguration:
         Rules:
           - ExpirationInDays: 10
@@ -263,6 +226,28 @@ Resources:
       Queues:
         - !Ref 'IngestQueue'
     Type: AWS::SQS::QueuePolicy
+  LakerunnerDb:
+    Properties:
+      AllocatedStorage: '100'
+      CopyTagsToSnapshot: true
+      DBInstanceClass: db.t3.medium
+      DBName: lakerunner
+      DBSubnetGroupName: !Ref 'DbSubnetGroup'
+      DeletionProtection: false
+      Engine: postgres
+      EngineVersion: '17'
+      MasterUserPassword: !Sub
+        - '{{resolve:secretsmanager:${S}:SecretString:password}}'
+        - S: !Ref 'DbSecret'
+      MasterUsername: !Sub
+        - '{{resolve:secretsmanager:${S}:SecretString:username}}'
+        - S: !Ref 'DbSecret'
+      MultiAZ: false
+      PubliclyAccessible: false
+      StorageType: gp3
+      VPCSecurityGroups:
+        - !Ref 'TaskSG'
+    Type: AWS::RDS::DBInstance
   Listener3000:
     Condition: CreateAlbCond
     Properties:
@@ -283,28 +268,6 @@ Resources:
       Port: '7101'
       Protocol: HTTP
     Type: AWS::ElasticLoadBalancingV2::Listener
-  MetadataDb:
-    Properties:
-      AllocatedStorage: '100'
-      CopyTagsToSnapshot: true
-      DBInstanceClass: db.t3.medium
-      DBName: !Ref 'DbName'
-      DBSubnetGroupName: !Ref 'DbSubnetGroup'
-      DeletionProtection: false
-      Engine: postgres
-      EngineVersion: '17'
-      MasterUserPassword: !Sub
-        - '{{resolve:secretsmanager:${S}:SecretString:password}}'
-        - S: !Ref 'DbSecret'
-      MasterUsername: !Sub
-        - '{{resolve:secretsmanager:${S}:SecretString:username}}'
-        - S: !Ref 'DbSecret'
-      MultiAZ: false
-      PubliclyAccessible: false
-      StorageType: gp3
-      VPCSecurityGroups:
-        - !Ref 'TaskSG'
-    Type: AWS::RDS::DBInstance
   StorageProfilesParam:
     Properties:
       Description: Storage profiles config
