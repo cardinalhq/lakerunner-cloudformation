@@ -96,6 +96,7 @@ The migration task will run automatically and the stack will complete when migra
 Deploy `out/services.yaml` for all Lakerunner microservices. Required parameters:
 
 - **CommonInfraStackName** – Name of the CommonInfra stack (e.g., "lakerunner-common")
+- **CreateAlb** – Must match the CommonInfra CreateAlb setting ("Yes" or "No")
 
 Optional parameters (for air-gapped deployments):
 
@@ -111,6 +112,7 @@ aws cloudformation create-stack \
   --stack-name lakerunner-services \
   --template-body file://out/services.yaml \
   --parameters ParameterKey=CommonInfraStackName,ParameterValue=lakerunner-common \
+               ParameterKey=CreateAlb,ParameterValue=Yes \
   --capabilities CAPABILITY_IAM
 ```
 

@@ -1,9 +1,6 @@
 Conditions:
   HasAlb: !Equals
-    - !ImportValue
-      Fn::Sub:
-        - ${CommonInfraStackName}-CreateAlb
-        - CommonInfraStackName: !Ref 'CommonInfraStackName'
+    - !Ref 'CreateAlb'
     - 'Yes'
 Description: 'Lakerunner Services: ECS services, task definitions, IAM roles, and ALB integration'
 Metadata:
@@ -13,6 +10,7 @@ Metadata:
           default: Infrastructure
         Parameters:
           - CommonInfraStackName
+          - CreateAlb
       - Label:
           default: Container Images
         Parameters:
@@ -23,6 +21,8 @@ Metadata:
     ParameterLabels:
       CommonInfraStackName:
         default: Common Infra Stack Name
+      CreateAlb:
+        default: ALB Created in CommonInfra?
       GoServicesImage:
         default: Go Services Image
       GrafanaImage:
@@ -88,6 +88,13 @@ Outputs:
 Parameters:
   CommonInfraStackName:
     Description: 'REQUIRED: Name of the CommonInfra stack to import infrastructure values from.'
+    Type: String
+  CreateAlb:
+    AllowedValues:
+      - 'Yes'
+      - 'No'
+    Default: 'Yes'
+    Description: Must match the CreateAlb parameter from CommonInfra. Set to 'No' if ALB was not created.
     Type: String
   GoServicesImage:
     Default: public.ecr.aws/cardinalhq.io/lakerunner:latest

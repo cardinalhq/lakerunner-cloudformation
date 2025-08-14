@@ -89,7 +89,7 @@ def create_services_template():
             "ParameterGroups": [
                 {
                     "Label": {"default": "Infrastructure"},
-                    "Parameters": ["CommonInfraStackName"]
+                    "Parameters": ["CommonInfraStackName", "CreateAlb"]
                 },
                 {
                     "Label": {"default": "Container Images"},
@@ -98,6 +98,7 @@ def create_services_template():
             ],
             "ParameterLabels": {
                 "CommonInfraStackName": {"default": "Common Infra Stack Name"},
+                "CreateAlb": {"default": "ALB Created in CommonInfra?"},
                 "GoServicesImage": {"default": "Go Services Image"},
                 "QueryApiImage": {"default": "Query API Image"},
                 "QueryWorkerImage": {"default": "Query Worker Image"},
@@ -120,12 +121,16 @@ def create_services_template():
     VpcIdValue = ImportValue(ci_export("VpcId"))
     PrivateSubnetsValue = Split(",", ImportValue(ci_export("PrivateSubnets")))
 
-    # Import the CreateAlb parameter value from CommonInfra stack
-    # CommonInfra exports its CreateAlb parameter so we can detect ALB presence automatically
-    CreateAlbValue = ImportValue(ci_export("CreateAlb"))
+    # Add parameter for ALB presence (must match CommonInfra setting)
+    CreateAlb = t.add_parameter(Parameter(
+        "CreateAlb", Type="String",
+        Default="Yes",
+        AllowedValues=["Yes", "No"],
+        Description="Must match the CreateAlb parameter from CommonInfra. Set to 'No' if ALB was not created."
+    ))
 
-    # Condition for ALB resources - based on CommonInfra's CreateAlb parameter
-    t.add_condition("HasAlb", Equals(CreateAlbValue, "Yes"))
+    # Condition for ALB resources
+    t.add_condition("HasAlb", Equals(Ref(CreateAlb), "Yes"))
 
     # -----------------------
     # Task Execution Role (shared by all services)
