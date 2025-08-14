@@ -30,6 +30,7 @@ from troposphere.elasticloadbalancingv2 import TargetGroup, TargetGroupAttribute
 from troposphere.elasticloadbalancingv2 import Action as AlbAction
 from troposphere.efs import AccessPoint, PosixUser, RootDirectory, CreationInfo
 from troposphere.logs import LogGroup
+from troposphere.secretsmanager import Secret, GenerateSecretString
 
 def load_service_config(config_file="services.yaml"):
     """Load service configuration from YAML file"""
@@ -294,7 +295,8 @@ def create_services_template():
                                 "secretsmanager:GetSecretValue"
                             ],
                             "Resource": [
-                                DbSecretArnValue
+                                DbSecretArnValue,
+                                Sub("arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*")
                             ]
                         },
                         {
@@ -324,6 +326,43 @@ def create_services_template():
                 }
             )
         ]
+    ))
+    
+    # -----------------------
+    # Application Secrets
+    # -----------------------
+    # TOKEN_HMAC256_KEY secret for query API and worker
+    token_secret = t.add_resource(Secret(
+        "TokenHmacSecret",
+        Name=Sub("${AWS::StackName}-token-hmac256-key"),
+        Description="HMAC256 key for token signing/verification",
+        GenerateSecretString=GenerateSecretString(
+            SecretStringTemplate='{}',
+            GenerateStringKey='token_hmac256_key',
+            ExcludeCharacters=' "\\@/',
+            PasswordLength=64
+        )
+    ))
+    
+    # Grafana admin password secret
+    grafana_secret = t.add_resource(Secret(
+        "GrafanaAdminSecret", 
+        Name=Sub("${AWS::StackName}-grafana-admin"),
+        Description="Grafana admin password",
+        GenerateSecretString=GenerateSecretString(
+            SecretStringTemplate='{"username": "admin"}',
+            GenerateStringKey='password',
+            ExcludeCharacters=' "\\@/',
+            PasswordLength=32
+        )
+    ))
+    
+    # Output the Grafana admin password secret ARN so users can retrieve it
+    t.add_output(Output(
+        "GrafanaAdminSecretArn",
+        Description="ARN of the Grafana admin password secret. Use AWS CLI to retrieve: aws secretsmanager get-secret-value --secret-id <ARN>",
+        Value=Ref(grafana_secret),
+        Export=Export(Sub("${AWS::StackName}-GrafanaAdminSecretArn"))
     ))
     
     # Collect services that need EFS access points
@@ -411,10 +450,12 @@ def create_services_template():
             Environment(Name="LRDB_SSLMODE", Value=Ref(DbSSLMode))
         ]
         
-        # Add service-specific environment variables
+        # Add service-specific environment variables (excluding sensitive ones)
         service_env = service_config.get('environment', {})
+        sensitive_keys = {'TOKEN_HMAC256_KEY', 'GF_SECURITY_ADMIN_PASSWORD'}
         for key, value in service_env.items():
-            base_env.append(Environment(Name=key, Value=value))
+            if key not in sensitive_keys:
+                base_env.append(Environment(Name=key, Value=value))
         
         # Build secrets
         secrets = [
@@ -422,6 +463,19 @@ def create_services_template():
             EcsSecret(Name="API_KEYS_ENV", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys")),
             EcsSecret(Name="LRDB_PASSWORD", ValueFrom=Sub("${SecretArn}:password::", SecretArn=DbSecretArnValue))
         ]
+        
+        # Add service-specific secrets for sensitive environment variables
+        if 'TOKEN_HMAC256_KEY' in service_env:
+            secrets.append(EcsSecret(
+                Name="TOKEN_HMAC256_KEY", 
+                ValueFrom=Sub("${SecretArn}:token_hmac256_key::", SecretArn=Ref(token_secret))
+            ))
+        
+        if 'GF_SECURITY_ADMIN_PASSWORD' in service_env:
+            secrets.append(EcsSecret(
+                Name="GF_SECURITY_ADMIN_PASSWORD", 
+                ValueFrom=Sub("${SecretArn}:password::", SecretArn=Ref(grafana_secret))
+            ))
         
         # Build mount points
         mount_points = [MountPoint(
@@ -579,7 +633,10 @@ def create_services_template():
     # ALB Listeners (if we have target groups)
     # -----------------------
     if target_groups:
-        t.add_condition("HasAlb", Not(Equals(AlbArnValue, "")))
+        # Create condition to check if we have an ALB (either provided directly or via import)
+        t.add_condition("HasAlbDirect", Not(Equals(Ref(AlbArn), "")))
+        from troposphere import Or
+        t.add_condition("HasAlb", Or(Condition("HasAlbDirect"), Condition("UseAlbImport")))
         
         # Create listeners for each unique port
         ports_created = set()

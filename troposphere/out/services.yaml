@@ -1,13 +1,10 @@
 Conditions:
-  HasAlb: !Not
+  HasAlb: !Or
+    - !Condition 'HasAlbDirect'
+    - !Condition 'UseAlbImport'
+  HasAlbDirect: !Not
     - !Equals
-      - !If
-        - UseAlbImport
-        - !ImportValue
-          Fn::Sub:
-            - ${CommonInfraStackName}-AlbArn
-            - CommonInfraStackName: !Ref 'CommonInfraStackName'
-        - !Ref 'AlbArn'
+      - !Ref 'AlbArn'
       - ''
   HasCI: !Not
     - !Equals
@@ -115,6 +112,11 @@ Outputs:
     Export:
       Name: !Sub '${AWS::StackName}-ExecutionRoleArn'
     Value: !GetAtt 'TaskExecutionRole.Arn'
+  GrafanaAdminSecretArn:
+    Description: 'ARN of the Grafana admin password secret. Use AWS CLI to retrieve: aws secretsmanager get-secret-value --secret-id <ARN>'
+    Export:
+      Name: !Sub '${AWS::StackName}-GrafanaAdminSecretArn'
+    Value: !Ref 'GrafanaAdminSecret'
   ServiceGrafanaArn:
     Export:
       Name: !Sub '${AWS::StackName}-grafana-ServiceArn'
@@ -240,6 +242,16 @@ Resources:
           Permissions: '750'
         Path: /grafana
     Type: AWS::EFS::AccessPoint
+  GrafanaAdminSecret:
+    Properties:
+      Description: Grafana admin password
+      GenerateSecretString:
+        ExcludeCharacters: ' "\@/'
+        GenerateStringKey: password
+        PasswordLength: 32
+        SecretStringTemplate: '{"username": "admin"}'
+      Name: !Sub '${AWS::StackName}-grafana-admin'
+    Type: AWS::SecretsManager::Secret
   Listener3000:
     Condition: HasAlb
     Properties:
@@ -655,8 +667,6 @@ Resources:
               Value: !Ref 'DbSSLMode'
             - Name: GF_SECURITY_ADMIN_USER
               Value: admin
-            - Name: GF_SECURITY_ADMIN_PASSWORD
-              Value: f70603aa00e6f67999cc66e336134887
             - Name: GF_SERVER_HTTP_PORT
               Value: '3000'
             - Name: GF_SERVER_ROOT_URL
@@ -708,6 +718,10 @@ Resources:
                         - ${CommonInfraStackName}-DbSecretArn
                         - CommonInfraStackName: !Ref 'CommonInfraStackName'
                     - !Ref 'DbSecretArn'
+            - Name: GF_SECURITY_ADMIN_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !Ref 'GrafanaAdminSecret'
           User: '0'
       Cpu: '512'
       ExecutionRoleArn: !GetAtt 'TaskExecutionRole.Arn'
@@ -1339,8 +1353,6 @@ Resources:
               Value: '4'
             - Name: SPRING_PROFILES_ACTIVE
               Value: aws
-            - Name: TOKEN_HMAC256_KEY
-              Value: alksdjalksdjalkdjalskdjalskdjalkdjalskjdalskdjalk
           HealthCheck:
             Command:
               - curl
@@ -1386,6 +1398,10 @@ Resources:
                         - ${CommonInfraStackName}-DbSecretArn
                         - CommonInfraStackName: !Ref 'CommonInfraStackName'
                     - !Ref 'DbSecretArn'
+            - Name: TOKEN_HMAC256_KEY
+              ValueFrom: !Sub
+                - '${SecretArn}:token_hmac256_key::'
+                - SecretArn: !Ref 'TokenHmacSecret'
           User: '0'
       Cpu: '2048'
       ExecutionRoleArn: !GetAtt 'TaskExecutionRole.Arn'
@@ -1456,8 +1472,6 @@ Resources:
               Value: lakerunner-query-worker
             - Name: SPRING_PROFILES_ACTIVE
               Value: aws
-            - Name: TOKEN_HMAC256_KEY
-              Value: alksdjalksdjalkdjalskdjalskdjalkdjalskjdalskdjalk
           HealthCheck:
             Command:
               - curl
@@ -1503,6 +1517,10 @@ Resources:
                         - ${CommonInfraStackName}-DbSecretArn
                         - CommonInfraStackName: !Ref 'CommonInfraStackName'
                     - !Ref 'DbSecretArn'
+            - Name: TOKEN_HMAC256_KEY
+              ValueFrom: !Sub
+                - '${SecretArn}:token_hmac256_key::'
+                - SecretArn: !Ref 'TokenHmacSecret'
           User: '0'
       Cpu: '2048'
       ExecutionRoleArn: !GetAtt 'TaskExecutionRole.Arn'
@@ -1802,6 +1820,7 @@ Resources:
                         - ${CommonInfraStackName}-DbSecretArn
                         - CommonInfraStackName: !Ref 'CommonInfraStackName'
                     - !Ref 'DbSecretArn'
+                  - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*'
               - Action:
                   - ecs:ListServices
                   - ecs:DescribeServices
@@ -1823,4 +1842,14 @@ Resources:
           PolicyName: S3AndSQSAccess
       RoleName: !Sub '${AWS::StackName}-task-role'
     Type: AWS::IAM::Role
+  TokenHmacSecret:
+    Properties:
+      Description: HMAC256 key for token signing/verification
+      GenerateSecretString:
+        ExcludeCharacters: ' "\@/'
+        GenerateStringKey: token_hmac256_key
+        PasswordLength: 64
+        SecretStringTemplate: '{}'
+      Name: !Sub '${AWS::StackName}-token-hmac256-key'
+    Type: AWS::SecretsManager::Secret
 
