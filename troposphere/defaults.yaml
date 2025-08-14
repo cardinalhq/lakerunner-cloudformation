@@ -98,7 +98,7 @@ services:
     environment: {}
 
   lakerunner-query-api:
-    image: "public.ecr.aws/cardinalhq.io/lakerunner/query-api:latest-dev"
+    image: "public.ecr.aws/cardinalhq.io/lakerunner/query-api:latest"
     cpu: 2048
     memory_mib: 8192
     replicas: 1
@@ -124,7 +124,7 @@ services:
         read_only: false
 
   lakerunner-query-worker:
-    image: "public.ecr.aws/cardinalhq.io/lakerunner/query-worker:latest-dev"
+    image: "public.ecr.aws/cardinalhq.io/lakerunner/query-worker:latest"
     cpu: 2048
     memory_mib: 8192
     replicas: 1
