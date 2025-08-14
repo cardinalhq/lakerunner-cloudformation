@@ -551,70 +551,40 @@ def create_services_template():
             EnableExecuteCommand=True
         ))
 
-        # Create ALB target group if service has ingress with attach_alb AND ALB exists
+        # Store target group mapping for ALB services (use common stack target groups)
         if ingress and ingress.get('attach_alb'):
             port = ingress['port']
-            health_check_path = ingress.get('health_check_path', '/')
 
-            # Build target group name within 32 character limit
-            tg_name_template = f"${{AWS::StackName}}-{short_service_name(service_name)}"
-            target_group = t.add_resource(TargetGroup(
-                f"TargetGroup{title_name}",
-                Condition="HasAlb",
-                Name=Sub(tg_name_template),
-                Port=port,
-                Protocol="HTTP",
-                VpcId=VpcIdValue,
-                TargetType="ip",
-                HealthCheckPath=health_check_path,
-                HealthCheckProtocol="HTTP",
-                HealthCheckIntervalSeconds=30,
-                HealthCheckTimeoutSeconds=5,
-                HealthyThresholdCount=2,
-                UnhealthyThresholdCount=3,
-                Matcher=Matcher(HttpCode="200"),
-                TargetGroupAttributes=[
-                    TargetGroupAttribute(Key="stickiness.enabled", Value="false"),
-                    TargetGroupAttribute(Key="deregistration_delay.timeout_seconds", Value="30")
-                ]
-            ))
+            # Map to the appropriate target group created in CommonInfra stack
+            if port == 7101:
+                target_group_arn = ImportValue(ci_export("Tg7101Arn"))
+            elif port == 3000:
+                target_group_arn = ImportValue(ci_export("Tg3000Arn"))
+            else:
+                # For other ports, we'd need to add them to the common stack
+                target_group_arn = None
 
-            target_groups[service_name] = {
-                'target_group': target_group,
-                'port': port,
-                'service': ecs_service
-            }
+            if target_group_arn:
+                target_groups[service_name] = {
+                    'target_group_arn': target_group_arn,
+                    'port': port,
+                    'service': ecs_service
+                }
 
         # Add LoadBalancer configuration only if ALB exists and service has ALB ingress
-        if ingress and ingress.get('attach_alb'):
+        if ingress and ingress.get('attach_alb') and service_name in target_groups:
             # LoadBalancers property is set conditionally
             ecs_service.LoadBalancers = If("HasAlb", [EcsLoadBalancer(
                 ContainerName="AppContainer",
                 ContainerPort=ingress['port'],
-                TargetGroupArn=Ref(target_groups[service_name]['target_group'])
+                TargetGroupArn=target_groups[service_name]['target_group_arn']
             )], NoValue)
 
     # -----------------------
-    # ALB Listeners (if we have target groups AND ALB exists)
+    # ALB integration - use target groups created in common stack
     # -----------------------
-    if target_groups:
-        # Create listeners for each unique port (only if ALB exists)
-        ports_created = set()
-        for service_name, tg_info in target_groups.items():
-            port = tg_info['port']
-            if port not in ports_created:
-                listener = t.add_resource(Listener(
-                    f"Listener{port}",
-                    Condition="HasAlb",
-                    LoadBalancerArn=ImportValue(ci_export("AlbArn")),
-                    Port=str(port),
-                    Protocol="HTTP",
-                    DefaultActions=[AlbAction(
-                        Type="forward",
-                        TargetGroupArn=Ref(tg_info['target_group'])
-                    )]
-                ))
-                ports_created.add(port)
+    # Note: Listeners and target groups are created in the CommonInfra stack
+    # We just need to attach our services to the existing target groups
 
     # -----------------------
     # Outputs

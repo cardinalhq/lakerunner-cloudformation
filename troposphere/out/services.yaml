@@ -184,32 +184,6 @@ Resources:
         SecretStringTemplate: '{"username": "admin"}'
       Name: !Sub '${AWS::StackName}-grafana'
     Type: AWS::SecretsManager::Secret
-  Listener3000:
-    Condition: HasAlb
-    Properties:
-      DefaultActions:
-        - TargetGroupArn: !Ref 'TargetGroupGrafana'
-          Type: forward
-      LoadBalancerArn: !ImportValue
-        Fn::Sub:
-          - ${CommonInfraStackName}-AlbArn
-          - CommonInfraStackName: !Ref 'CommonInfraStackName'
-      Port: '3000'
-      Protocol: HTTP
-    Type: AWS::ElasticLoadBalancingV2::Listener
-  Listener7101:
-    Condition: HasAlb
-    Properties:
-      DefaultActions:
-        - TargetGroupArn: !Ref 'TargetGroupLakerunnerQueryApi'
-          Type: forward
-      LoadBalancerArn: !ImportValue
-        Fn::Sub:
-          - ${CommonInfraStackName}-AlbArn
-          - CommonInfraStackName: !Ref 'CommonInfraStackName'
-      Port: '7101'
-      Protocol: HTTP
-    Type: AWS::ElasticLoadBalancingV2::Listener
   LogGroupGrafana:
     Properties:
       LogGroupName: !Sub '/ecs/grafana'
@@ -273,7 +247,10 @@ Resources:
         - HasAlb
         - - ContainerName: AppContainer
             ContainerPort: 3000
-            TargetGroupArn: !Ref 'TargetGroupGrafana'
+            TargetGroupArn: !ImportValue
+              Fn::Sub:
+                - ${CommonInfraStackName}-Tg3000Arn
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
         - !Ref 'AWS::NoValue'
       NetworkConfiguration:
         AwsvpcConfiguration:
@@ -429,7 +406,10 @@ Resources:
         - HasAlb
         - - ContainerName: AppContainer
             ContainerPort: 7101
-            TargetGroupArn: !Ref 'TargetGroupLakerunnerQueryApi'
+            TargetGroupArn: !ImportValue
+              Fn::Sub:
+                - ${CommonInfraStackName}-Tg7101Arn
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
         - !Ref 'AWS::NoValue'
       NetworkConfiguration:
         AwsvpcConfiguration:
@@ -522,56 +502,6 @@ Resources:
       ServiceName: lakerunner-sweeper
       TaskDefinition: !Ref 'TaskDefLakerunnerSweeper'
     Type: AWS::ECS::Service
-  TargetGroupGrafana:
-    Condition: HasAlb
-    Properties:
-      HealthCheckIntervalSeconds: 30
-      HealthCheckPath: /api/health
-      HealthCheckProtocol: HTTP
-      HealthCheckTimeoutSeconds: 5
-      HealthyThresholdCount: 2
-      Matcher:
-        HttpCode: '200'
-      Name: !Sub '${AWS::StackName}-grafana'
-      Port: 3000
-      Protocol: HTTP
-      TargetGroupAttributes:
-        - Key: stickiness.enabled
-          Value: 'false'
-        - Key: deregistration_delay.timeout_seconds
-          Value: '30'
-      TargetType: ip
-      UnhealthyThresholdCount: 3
-      VpcId: !ImportValue
-        Fn::Sub:
-          - ${CommonInfraStackName}-VpcId
-          - CommonInfraStackName: !Ref 'CommonInfraStackName'
-    Type: AWS::ElasticLoadBalancingV2::TargetGroup
-  TargetGroupLakerunnerQueryApi:
-    Condition: HasAlb
-    Properties:
-      HealthCheckIntervalSeconds: 30
-      HealthCheckPath: /ready
-      HealthCheckProtocol: HTTP
-      HealthCheckTimeoutSeconds: 5
-      HealthyThresholdCount: 2
-      Matcher:
-        HttpCode: '200'
-      Name: !Sub '${AWS::StackName}-lr-qapi'
-      Port: 7101
-      Protocol: HTTP
-      TargetGroupAttributes:
-        - Key: stickiness.enabled
-          Value: 'false'
-        - Key: deregistration_delay.timeout_seconds
-          Value: '30'
-      TargetType: ip
-      UnhealthyThresholdCount: 3
-      VpcId: !ImportValue
-        Fn::Sub:
-          - ${CommonInfraStackName}-VpcId
-          - CommonInfraStackName: !Ref 'CommonInfraStackName'
-    Type: AWS::ElasticLoadBalancingV2::TargetGroup
   TaskDefGrafana:
     Properties:
       ContainerDefinitions:
