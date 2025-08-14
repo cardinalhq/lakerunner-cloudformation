@@ -1,0 +1,387 @@
+Conditions:
+  HasCI: !Not
+    - !Equals
+      - !Ref 'CommonInfraStackName'
+      - ''
+  NoClusterArn: !Equals
+    - !Ref 'ClusterArn'
+    - ''
+  NoDbHost: !Equals
+    - !Ref 'DbHost'
+    - ''
+  NoDbSecretArn: !Equals
+    - !Ref 'DbSecretArn'
+    - ''
+  UseClusterImport: !And
+    - !Condition 'HasCI'
+    - !Condition 'NoClusterArn'
+  UseDbHostImport: !And
+    - !Condition 'HasCI'
+    - !Condition 'NoDbHost'
+  UseDbSecretImport: !And
+    - !Condition 'HasCI'
+    - !Condition 'NoDbSecretArn'
+Description: 'Lakerunner DB migration (single template): defines TaskDefinition and runs it via Custom Resource.'
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Where to run
+        Parameters:
+          - ClusterArn
+          - Subnets
+          - SecurityGroups
+          - AssignPublicIp
+      - Label:
+          default: Task Sizing
+        Parameters:
+          - Cpu
+          - MemoryMiB
+      - Label:
+          default: Container Image
+        Parameters:
+          - ContainerImage
+      - Label:
+          default: Database Connection
+        Parameters:
+          - DbHost
+          - DbName
+          - DbUser
+          - DbPort
+          - DbSSLMode
+          - DbSecretArn
+      - Label:
+          default: Permissions
+        Parameters:
+          - TaskRoleArn
+    ParameterLabels:
+      AssignPublicIp:
+        default: Assign Public IP
+      ClusterArn:
+        default: ECS Cluster ARN
+      ContainerImage:
+        default: Migration Image
+      Cpu:
+        default: Fargate CPU
+      DbHost:
+        default: DB Hostname
+      DbName:
+        default: DB Name
+      DbPort:
+        default: DB Port
+      DbSSLMode:
+        default: DB sslmode
+      DbSecretArn:
+        default: DB Secret ARN
+      DbUser:
+        default: DB User
+      MemoryMiB:
+        default: Fargate Memory (MiB)
+      SecurityGroups:
+        default: Task Security Groups
+      Subnets:
+        default: Private Subnets
+      TaskRoleArn:
+        default: Task Role ARN
+Outputs:
+  LogGroupName:
+    Export:
+      Name: !Sub '${AWS::StackName}-LogGroup'
+    Value: !Ref 'MigrationLogGroup'
+  RunMigrationId:
+    Export:
+      Name: !Sub '${AWS::StackName}-RunMigrationId'
+    Value: !Ref 'RunMigration'
+  RunnerFunctionArn:
+    Export:
+      Name: !Sub '${AWS::StackName}-RunnerFnArn'
+    Value: !GetAtt 'RunEcsTaskFunction.Arn'
+  TaskDefinitionArn:
+    Export:
+      Name: !Sub '${AWS::StackName}-TaskDefinitionArn'
+    Value: !GetAtt 'MigrationTaskDef.TaskDefinitionArn'
+Parameters:
+  AssignPublicIp:
+    AllowedValues:
+      - ENABLED
+      - DISABLED
+    Default: DISABLED
+    Description: Whether to assign a public IP to the task ENI. Use DISABLED for private subnets.
+    Type: String
+  ClusterArn:
+    Default: ''
+    Description: ECS Cluster ARN. Leave blank to import from CommonInfra if CommonInfraStackName is set.
+    Type: String
+  CommonInfraStackName:
+    Default: ''
+    Description: 'OPTIONAL: Name of the CommonInfra stack to import values from. If set, blank fields below will be auto-filled.'
+    Type: String
+  ContainerImage:
+    Default: public.ecr.aws/cardinalhq.io/lakerunner:latest
+    Description: Migration container image.
+    Type: String
+  Cpu:
+    Default: '512'
+    Description: Fargate CPU units (e.g., 256/512/1024).
+    Type: String
+  DbHost:
+    Default: ''
+    Description: Postgres endpoint hostname. Leave blank to import from CommonInfra if CommonInfraStackName is set.
+    Type: String
+  DbName:
+    Default: metadata
+    Description: Postgres database name.
+    Type: String
+  DbPort:
+    Default: '5432'
+    Description: Postgres port (usually 5432).
+    Type: String
+  DbSSLMode:
+    Default: prefer
+    Description: sslmode (disable, allow, prefer, require, verify-ca, verify-full).
+    Type: String
+  DbSecretArn:
+    Default: ''
+    Description: Secrets Manager ARN with {username,password}. Leave blank to import from CommonInfra if CommonInfraStackName is set.
+    Type: String
+  DbUser:
+    Default: lakerunner
+    Description: Postgres username (should match the secret's 'username').
+    Type: String
+  MemoryMiB:
+    Default: '1024'
+    Description: Fargate Memory MiB (e.g., 512/1024/2048).
+    Type: String
+  SecurityGroups:
+    Description: 'REQUIRED: Security groups for the task (must reach RDS 5432).'
+    Type: List<AWS::EC2::SecurityGroup::Id>
+  Subnets:
+    Description: 'REQUIRED: Private subnet IDs (two or more AZs recommended).'
+    Type: List<AWS::EC2::Subnet::Id>
+  TaskRoleArn:
+    Description: 'REQUIRED: IAM Task Role ARN (should allow secretsmanager:GetSecretValue on the DB secret).'
+    Type: String
+Resources:
+  MigrationLogGroup:
+    Properties:
+      LogGroupName: !Sub '/lakerunner/migration/${AWS::StackName}'
+      RetentionInDays: 14
+    Type: AWS::Logs::LogGroup
+  MigrationTaskDef:
+    Properties:
+      ContainerDefinitions:
+        - Command:
+            - /app/bin/lakerunner
+            - migrate
+          Environment:
+            - Name: LRDB_HOST
+              Value: !If
+                - UseDbHostImport
+                - !ImportValue
+                  Fn::Sub: ${CommonInfraStackName}-DbEndpoint
+                - !Ref 'DbHost'
+            - Name: LRDB_PORT
+              Value: !Ref 'DbPort'
+            - Name: LRDB_NAME
+              Value: !Ref 'DbName'
+            - Name: LRDB_USER
+              Value: !Ref 'DbUser'
+            - Name: LRDB_SSLMODE
+              Value: !Ref 'DbSSLMode'
+          Image: !Ref 'ContainerImage'
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref 'MigrationLogGroup'
+              awslogs-region: !Sub '${AWS::Region}'
+              awslogs-stream-prefix: migration
+          Name: Migrator
+          Secrets:
+            - Name: LRDB_PASSWORD
+              ValueFrom: !Sub
+                - '${S}:password::'
+                - S: !If
+                    - UseDbSecretImport
+                    - !ImportValue
+                      Fn::Sub: ${CommonInfraStackName}-DbSecretArn
+                    - !Ref 'DbSecretArn'
+      Cpu: !Ref 'Cpu'
+      ExecutionRoleArn: !GetAtt 'TaskExecutionRole.Arn'
+      Family: lakerunner-migration
+      Memory: !Ref 'MemoryMiB'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      TaskRoleArn: !Ref 'TaskRoleArn'
+    Type: AWS::ECS::TaskDefinition
+  RunEcsTaskFunction:
+    Properties:
+      Code:
+        ZipFile: |2
+
+          import json, time, urllib.request, boto3
+
+          ecs = boto3.client("ecs")
+
+          def send(event, context, status, data=None, reason=""):
+              resp = {
+                  "Status": status,
+                  "Reason": f"{reason} See CloudWatch Logs for details: {context.log_stream_name}",
+                  "PhysicalResourceId": event.get("PhysicalResourceId") or "RunEcsTask",
+                  "StackId": event["StackId"],
+                  "RequestId": event["RequestId"],
+                  "LogicalResourceId": event["LogicalResourceId"],
+                  "NoEcho": False,
+                  "Data": data or {}
+              }
+              body = json.dumps(resp).encode("utf-8")
+              req = urllib.request.Request(event["ResponseURL"], data=body, method="PUT")
+              req.add_header("content-type","")
+              req.add_header("content-length", str(len(body)))
+              try:
+                  with urllib.request.urlopen(req) as r:
+                      r.read()
+              except Exception as e:
+                  print("Failed to send response:", e)
+
+          def handler(event, context):
+              print("Event:", json.dumps(event))
+              reqtype = event["RequestType"]
+              props = event.get("ResourceProperties", {})
+
+              if reqtype == "Delete":
+                  # No-op; nothing to tear down
+                  send(event, context, "SUCCESS", {"Message":"Delete no-op"})
+                  return
+
+              cluster = props["ClusterArn"]
+              taskdef = props["TaskDefinitionArn"]
+              subnets = props["Subnets"]
+              sgs = props["SecurityGroups"]
+              assign = props.get("AssignPublicIp","DISABLED")
+
+              try:
+                  run = ecs.run_task(
+                      cluster=cluster,
+                      taskDefinition=taskdef,
+                      launchType="FARGATE",
+                      platformVersion="LATEST",
+                      networkConfiguration={
+                          "awsvpcConfiguration": {
+                              "subnets": subnets,
+                              "securityGroups": sgs,
+                              "assignPublicIp": assign
+                          }
+                      },
+                      count=1
+                  )
+                  failures = run.get("failures",[])
+                  if failures:
+                      reason = "; ".join(f.get("reason","unknown") for f in failures)
+                      send(event, context, "FAILED", {"RunFailures": failures}, reason=f"RunTask failures: {reason}")
+                      return
+
+                  tasks = run.get("tasks", [])
+                  if not tasks:
+                      send(event, context, "FAILED", {"Message":"ecs.run_task returned no tasks"}, reason="No task started")
+                      return
+
+                  task_arn = tasks[0]["taskArn"]
+                  print("Started task:", task_arn)
+
+                  deadline = time.time() + 14*60
+                  last_status = None
+                  while time.time() < deadline:
+                      d = ecs.describe_tasks(cluster=cluster, tasks=[task_arn])
+                      ts = d.get("tasks", [])
+                      if not ts:
+                          send(event, context, "FAILED", {"Message":"Task disappeared"}, reason="DescribeTasks returned no tasks")
+                          return
+                      t = ts[0]
+                      last_status = t.get("lastStatus","UNKNOWN")
+                      print("Status:", last_status)
+                      if last_status == "STOPPED":
+                          bad = []
+                          for c in t.get("containers",[]):
+                              code = c.get("exitCode")
+                              name = c.get("name")
+                              if code is None or code != 0:
+                                  bad.append({"name": name, "exitCode": code})
+                          if bad:
+                              send(event, context, "FAILED",
+                                   {"TaskArn": task_arn, "StoppedReason": t.get("stoppedReason"), "BadContainers": bad},
+                                   reason=f"Container(s) non-zero exit: {bad}")
+                              return
+                          send(event, context, "SUCCESS",
+                               {"TaskArn": task_arn, "StoppedReason": t.get("stoppedReason","")})
+                          return
+                      time.sleep(6)
+
+                  send(event, context, "FAILED", {"TaskArn": task_arn, "LastStatus": last_status}, reason="Timeout waiting for STOPPED")
+
+              except Exception as e:
+                  print("Exception:", e)
+                  send(event, context, "FAILED", {"Error": str(e)}, reason=str(e))
+      Handler: index.handler
+      Role: !GetAtt 'RunnerLambdaRole.Arn'
+      Runtime: python3.13
+      Timeout: 900
+    Type: AWS::Lambda::Function
+  RunMigration:
+    Properties:
+      AssignPublicIp: !Ref 'AssignPublicIp'
+      ClusterArn: !If
+        - UseClusterImport
+        - !ImportValue
+          Fn::Sub: ${CommonInfraStackName}-ClusterArn
+        - !Ref 'ClusterArn'
+      SecurityGroups: !Ref 'SecurityGroups'
+      ServiceToken: !GetAtt 'RunEcsTaskFunction.Arn'
+      Subnets: !Ref 'Subnets'
+      TaskDefinitionArn: !GetAtt 'MigrationTaskDef.TaskDefinitionArn'
+    Type: Custom::RunEcsTask
+  RunnerLambdaRole:
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+        Version: '2012-10-17'
+      Policies:
+        - PolicyDocument:
+            Statement:
+              - Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Effect: Allow
+                Resource: '*'
+              - Action:
+                  - ecs:RunTask
+                  - ecs:DescribeTasks
+                Effect: Allow
+                Resource: '*'
+              - Action:
+                  - iam:PassRole
+                Effect: Allow
+                Resource:
+                  - !Ref 'TaskRoleArn'
+                  - !GetAtt 'TaskExecutionRole.Arn'
+            Version: '2012-10-17'
+          PolicyName: RunnerInlinePolicy
+    Type: AWS::IAM::Role
+  TaskExecutionRole:
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+        Version: '2012-10-17'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+    Type: AWS::IAM::Role
+

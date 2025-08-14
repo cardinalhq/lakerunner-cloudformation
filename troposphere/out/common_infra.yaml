@@ -1,0 +1,378 @@
+Conditions:
+  CreateAlbCond: !Equals
+    - !Ref 'CreateAlb'
+    - 'Yes'
+  HasBucketName: !Not
+    - !Equals
+      - !Ref 'BucketName'
+      - ''
+Description: CommonInfra (bootstrap-free, customer-uploadable). Always creates ECS, RDS(Postgres), and EFS. ALB optional.
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Networking
+        Parameters:
+          - VpcId
+          - PublicSubnets
+          - PrivateSubnets
+      - Label:
+          default: Load Balancer
+        Parameters:
+          - CreateAlb
+      - Label:
+          default: Storage & Ingest
+        Parameters:
+          - BucketName
+      - Label:
+          default: Database
+        Parameters:
+          - DbName
+          - DbUsername
+    ParameterLabels:
+      BucketName:
+        default: Ingest Bucket Name (optional)
+      CreateAlb:
+        default: Create Application Load Balancer?
+      DbName:
+        default: Postgres Database Name
+      DbUsername:
+        default: Postgres Admin Username
+      PrivateSubnets:
+        default: Private Subnets (for ECS/RDS/EFS)
+      PublicSubnets:
+        default: Public Subnets (for ALB)
+      VpcId:
+        default: VPC Id
+Outputs:
+  AlbDNS:
+    Condition: CreateAlbCond
+    Export:
+      Name: !Sub '${AWS::StackName}-AlbDNS'
+    Value: !GetAtt 'Alb.DNSName'
+  ClusterArn:
+    Export:
+      Name: !Sub '${AWS::StackName}-ClusterArn'
+    Value: !GetAtt 'Cluster.Arn'
+  DbEndpoint:
+    Export:
+      Name: !Sub '${AWS::StackName}-DbEndpoint'
+    Value: !GetAtt 'MetadataDb.Endpoint.Address'
+  DbPort:
+    Export:
+      Name: !Sub '${AWS::StackName}-DbPort'
+    Value: !GetAtt 'MetadataDb.Endpoint.Port'
+  DbSecretArnOut:
+    Export:
+      Name: !Sub '${AWS::StackName}-DbSecretArn'
+    Value: !Ref 'DbSecret'
+  EfsId:
+    Export:
+      Name: !Sub '${AWS::StackName}-EfsId'
+    Value: !Ref 'Efs'
+  TaskSecurityGroupId:
+    Export:
+      Name: !Sub '${AWS::StackName}-TaskSGId'
+    Value: !Ref 'TaskSG'
+  Tg3000Arn:
+    Condition: CreateAlbCond
+    Export:
+      Name: !Sub '${AWS::StackName}-Tg3000Arn'
+    Value: !Ref 'Tg3000'
+  Tg7101Arn:
+    Condition: CreateAlbCond
+    Export:
+      Name: !Sub '${AWS::StackName}-Tg7101Arn'
+    Value: !Ref 'Tg7101'
+Parameters:
+  BucketName:
+    Default: ''
+    Description: 'OPTIONAL: S3 bucket name for ingest (must be globally unique). Leave blank to auto-name.'
+    Type: String
+  CreateAlb:
+    AllowedValues:
+      - 'Yes'
+      - 'No'
+    Default: 'Yes'
+    Description: Create an internet-facing Application Load Balancer with listeners on 7101 and 3000. Set to 'No' to skip.
+    Type: String
+  DbName:
+    Default: metadata
+    Description: Database name to create in the new Postgres instance. Not used for existing DBs (this stack always creates).
+    Type: String
+  DbUsername:
+    Default: lakerunner
+    Description: Admin/master username stored in Secrets Manager. Password is randomly generated at deploy time.
+    Type: String
+  PrivateSubnets:
+    Description: 'REQUIRED: Private subnet IDs (for RDS/ECS/EFS). Provide at least two in different AZs.'
+    Type: List<AWS::EC2::Subnet::Id>
+  PublicSubnets:
+    Description: 'REQUIRED: Public subnet IDs (for ALB). Provide at least two in different AZs.'
+    Type: List<AWS::EC2::Subnet::Id>
+  VpcId:
+    Description: 'REQUIRED: VPC where resources will be created.'
+    Type: AWS::EC2::VPC::Id
+Resources:
+  Alb:
+    Condition: CreateAlbCond
+    Properties:
+      Name: !Sub '${AWS::StackName}-alb'
+      Scheme: internet-facing
+      SecurityGroups:
+        - !Ref 'AlbSecurityGroup'
+      Subnets: !Ref 'PublicSubnets'
+      Type: application
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+  Alb3000Open:
+    Condition: CreateAlbCond
+    Properties:
+      CidrIp: '0.0.0.0/0'
+      Description: HTTP 3000
+      FromPort: 3000
+      GroupId: !Ref 'AlbSecurityGroup'
+      IpProtocol: tcp
+      ToPort: 3000
+    Type: AWS::EC2::SecurityGroupIngress
+  Alb7101Open:
+    Condition: CreateAlbCond
+    Properties:
+      CidrIp: '0.0.0.0/0'
+      Description: HTTP 7101
+      FromPort: 7101
+      GroupId: !Ref 'AlbSecurityGroup'
+      IpProtocol: tcp
+      ToPort: 7101
+    Type: AWS::EC2::SecurityGroupIngress
+  AlbSecurityGroup:
+    Condition: CreateAlbCond
+    Properties:
+      GroupDescription: Security group for ALB
+      SecurityGroupEgress:
+        - CidrIp: '0.0.0.0/0'
+          Description: Allow all outbound
+          IpProtocol: '-1'
+      VpcId: !Ref 'VpcId'
+    Type: AWS::EC2::SecurityGroup
+  ApiKeysParam:
+    Properties:
+      Description: API keys
+      Name: /lakerunner/api_keys
+      Type: String
+      Value: "- organization_id: 12340000-0000-4000-8000-000000000000\n  keys:\n    - f70603aa00e6f67999cc66e336134887"
+    Type: AWS::SSM::Parameter
+  Cluster:
+    Properties:
+      ClusterName: !Sub '${AWS::StackName}-cluster'
+    Type: AWS::ECS::Cluster
+  DbSecret:
+    Properties:
+      GenerateSecretString:
+        ExcludePunctuation: true
+        GenerateStringKey: password
+        SecretStringTemplate: !Sub
+          - '{"username":"${U}"}'
+          - U: !Ref 'DbUsername'
+    Type: AWS::SecretsManager::Secret
+  DbSubnetGroup:
+    Properties:
+      DBSubnetGroupDescription: DB subnets
+      SubnetIds: !Ref 'PrivateSubnets'
+    Type: AWS::RDS::DBSubnetGroup
+  Efs:
+    Properties:
+      Encrypted: true
+      FileSystemTags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-efs'
+    Type: AWS::EFS::FileSystem
+  EfsMt1:
+    Properties:
+      FileSystemId: !Ref 'Efs'
+      SecurityGroups:
+        - !Ref 'TaskSG'
+      SubnetId: !Select
+        - 0
+        - !Ref 'PrivateSubnets'
+    Type: AWS::EFS::MountTarget
+  EfsMt2:
+    Properties:
+      FileSystemId: !Ref 'Efs'
+      SecurityGroups:
+        - !Ref 'TaskSG'
+      SubnetId: !Select
+        - 1
+        - !Ref 'PrivateSubnets'
+    Type: AWS::EFS::MountTarget
+  IngestBucket:
+    Properties:
+      BucketName: !If
+        - HasBucketName
+        - !Ref 'BucketName'
+        - !Ref 'AWS::NoValue'
+      LifecycleConfiguration:
+        Rules:
+          - ExpirationInDays: 10
+            Prefix: otel-raw/
+            Status: Enabled
+      NotificationConfiguration:
+        QueueConfigurations:
+          - Event: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: otel-raw/
+            Queue: !GetAtt 'IngestQueue.Arn'
+          - Event: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: logs-raw/
+            Queue: !GetAtt 'IngestQueue.Arn'
+          - Event: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: metrics-raw/
+            Queue: !GetAtt 'IngestQueue.Arn'
+    Type: AWS::S3::Bucket
+  IngestQueue:
+    Properties:
+      MessageRetentionPeriod: 345600
+      QueueName: lakerunner-ingest-queue
+    Type: AWS::SQS::Queue
+  IngestQueuePolicy:
+    Properties:
+      PolicyDocument:
+        Statement:
+          - Action:
+              - sqs:GetQueueAttributes
+              - sqs:GetQueueUrl
+              - sqs:SendMessage
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref 'AWS::AccountId'
+            Effect: Allow
+            Principal:
+              Service: s3.amazonaws.com
+            Resource: !GetAtt 'IngestQueue.Arn'
+        Version: '2012-10-17'
+      Queues:
+        - !Ref 'IngestQueue'
+    Type: AWS::SQS::QueuePolicy
+  Listener3000:
+    Condition: CreateAlbCond
+    Properties:
+      DefaultActions:
+        - TargetGroupArn: !Ref 'Tg3000'
+          Type: forward
+      LoadBalancerArn: !Ref 'Alb'
+      Port: '3000'
+      Protocol: HTTP
+    Type: AWS::ElasticLoadBalancingV2::Listener
+  Listener7101:
+    Condition: CreateAlbCond
+    Properties:
+      DefaultActions:
+        - TargetGroupArn: !Ref 'Tg7101'
+          Type: forward
+      LoadBalancerArn: !Ref 'Alb'
+      Port: '7101'
+      Protocol: HTTP
+    Type: AWS::ElasticLoadBalancingV2::Listener
+  MetadataDb:
+    Properties:
+      AllocatedStorage: '100'
+      CopyTagsToSnapshot: true
+      DBInstanceClass: db.t3.medium
+      DBName: !Ref 'DbName'
+      DBSubnetGroupName: !Ref 'DbSubnetGroup'
+      DeletionProtection: false
+      Engine: postgres
+      EngineVersion: '17'
+      MasterUserPassword: !Sub
+        - '{{resolve:secretsmanager:${S}:SecretString:password}}'
+        - S: !Ref 'DbSecret'
+      MasterUsername: !Sub
+        - '{{resolve:secretsmanager:${S}:SecretString:username}}'
+        - S: !Ref 'DbSecret'
+      MultiAZ: false
+      PubliclyAccessible: false
+      StorageType: gp3
+      VPCSecurityGroups:
+        - !Ref 'TaskSG'
+    Type: AWS::RDS::DBInstance
+  StorageProfilesParam:
+    Properties:
+      Description: Storage profiles config
+      Name: /lakerunner/storage_profiles
+      Type: String
+      Value: !Sub
+        - "- bucket: ${Bucket}\n  cloud_provider: aws\n  collector_name: lakerunner\n  insecure_tls: false\n  instance_num: 1\n  organization_id: 12340000-0000-4000-8000-000000000000\n  region: ${AWS::Region}\n\
+          \  use_path_style: true"
+        - Bucket: !Ref 'IngestBucket'
+    Type: AWS::SSM::Parameter
+  TaskFromAlb3000:
+    Condition: CreateAlbCond
+    Properties:
+      Description: ALB to tasks 3000
+      FromPort: 3000
+      GroupId: !Ref 'TaskSG'
+      IpProtocol: tcp
+      SourceSecurityGroupId: !Ref 'AlbSecurityGroup'
+      ToPort: 3000
+    Type: AWS::EC2::SecurityGroupIngress
+  TaskFromAlb7101:
+    Condition: CreateAlbCond
+    Properties:
+      Description: ALB to tasks 7101
+      FromPort: 7101
+      GroupId: !Ref 'TaskSG'
+      IpProtocol: tcp
+      SourceSecurityGroupId: !Ref 'AlbSecurityGroup'
+      ToPort: 7101
+    Type: AWS::EC2::SecurityGroupIngress
+  TaskSG:
+    Properties:
+      GroupDescription: Security group for ECS tasks
+      SecurityGroupEgress:
+        - CidrIp: '0.0.0.0/0'
+          Description: Allow all outbound
+          IpProtocol: '-1'
+      VpcId: !Ref 'VpcId'
+    Type: AWS::EC2::SecurityGroup
+  TaskSG7101Self:
+    Properties:
+      Description: task-to-task 7101
+      FromPort: 7101
+      GroupId: !Ref 'TaskSG'
+      IpProtocol: tcp
+      SourceSecurityGroupId: !Ref 'TaskSG'
+      ToPort: 7101
+    Type: AWS::EC2::SecurityGroupIngress
+  Tg3000:
+    Condition: CreateAlbCond
+    Properties:
+      Port: 3000
+      Protocol: HTTP
+      TargetGroupAttributes:
+        - Key: stickiness.enabled
+          Value: 'false'
+      TargetType: ip
+      VpcId: !Ref 'VpcId'
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+  Tg7101:
+    Condition: CreateAlbCond
+    Properties:
+      Port: 7101
+      Protocol: HTTP
+      TargetGroupAttributes:
+        - Key: stickiness.enabled
+          Value: 'false'
+      TargetType: ip
+      VpcId: !Ref 'VpcId'
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+

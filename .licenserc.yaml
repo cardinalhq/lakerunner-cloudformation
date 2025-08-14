@@ -32,5 +32,6 @@ header:
     - '**/*db/models.go'
     - '**/*db/querier.go'
     - '**/*db/copyfrom.go'
+    - '**/requirements.txt'
 
   comment: on-failure
