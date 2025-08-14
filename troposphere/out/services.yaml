@@ -35,12 +35,12 @@ Outputs:
   ExecutionRoleArn:
     Export:
       Name: !Sub '${AWS::StackName}-ExecutionRoleArn'
-    Value: !GetAtt 'TaskExecutionRole.Arn'
+    Value: !GetAtt 'ExecRole.Arn'
   GrafanaAdminSecretArn:
     Description: 'ARN of the Grafana admin password secret. Use AWS CLI to retrieve: aws secretsmanager get-secret-value --secret-id <ARN>'
     Export:
       Name: !Sub '${AWS::StackName}-GrafanaAdminSecretArn'
-    Value: !Ref 'GrafanaAdminSecret'
+    Value: !Ref 'GrafanaSecret'
   ServiceGrafanaArn:
     Export:
       Name: !Sub '${AWS::StackName}-grafana-ServiceArn'
@@ -132,7 +132,49 @@ Resources:
           Permissions: '750'
         Path: /grafana
     Type: AWS::EFS::AccessPoint
-  GrafanaAdminSecret:
+  ExecRole:
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+        Version: '2012-10-17'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyDocument:
+            Statement:
+              - Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                Effect: Allow
+                Resource:
+                  - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/*'
+              - Action:
+                  - ssmmessages:CreateControlChannel
+                  - ssmmessages:CreateDataChannel
+                  - ssmmessages:OpenControlChannel
+                  - ssmmessages:OpenDataChannel
+                Effect: Allow
+                Resource: '*'
+              - Action:
+                  - secretsmanager:GetSecretValue
+                Effect: Allow
+                Resource:
+                  - !Sub
+                    - ${SecretArn}*
+                    - SecretArn: !ImportValue
+                        Fn::Sub:
+                          - ${CommonInfraStackName}-DbSecretArn
+                          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                  - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*'
+            Version: '2012-10-17'
+          PolicyName: SSMParameterAccess
+      RoleName: !Sub '${AWS::StackName}-exec-role'
+    Type: AWS::IAM::Role
+  GrafanaSecret:
     Properties:
       Description: Grafana admin password
       GenerateSecretString:
@@ -140,7 +182,7 @@ Resources:
         GenerateStringKey: password
         PasswordLength: 32
         SecretStringTemplate: '{"username": "admin"}'
-      Name: !Sub '${AWS::StackName}-grafana-admin'
+      Name: !Sub '${AWS::StackName}-grafana'
     Type: AWS::SecretsManager::Secret
   Listener3000:
     Condition: HasAlb
@@ -515,7 +557,7 @@ Resources:
       HealthyThresholdCount: 2
       Matcher:
         HttpCode: '200'
-      Name: !Sub '${AWS::StackName}-lakerunner-que'
+      Name: !Sub '${AWS::StackName}-lr-qapi'
       Port: 7101
       Protocol: HTTP
       TargetGroupAttributes:
@@ -627,7 +669,7 @@ Resources:
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
           User: '0'
       Cpu: '512'
-      ExecutionRoleArn: !GetAtt 'TaskExecutionRole.Arn'
+      ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
       Family: grafana-task
       Memory: '1024'
       NetworkMode: awsvpc
@@ -735,7 +777,7 @@ Resources:
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
           User: '0'
       Cpu: '1024'
-      ExecutionRoleArn: !GetAtt 'TaskExecutionRole.Arn'
+      ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
       Family: lakerunner-compact-logs-task
       Memory: '2048'
       NetworkMode: awsvpc
@@ -833,7 +875,7 @@ Resources:
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
           User: '0'
       Cpu: '1024'
-      ExecutionRoleArn: !GetAtt 'TaskExecutionRole.Arn'
+      ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
       Family: lakerunner-compact-metrics-task
       Memory: '2048'
       NetworkMode: awsvpc
@@ -931,7 +973,7 @@ Resources:
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
           User: '0'
       Cpu: '1024'
-      ExecutionRoleArn: !GetAtt 'TaskExecutionRole.Arn'
+      ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
       Family: lakerunner-ingest-logs-task
       Memory: '2048'
       NetworkMode: awsvpc
@@ -1029,7 +1071,7 @@ Resources:
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
           User: '0'
       Cpu: '1024'
-      ExecutionRoleArn: !GetAtt 'TaskExecutionRole.Arn'
+      ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
       Family: lakerunner-ingest-metrics-task
       Memory: '2048'
       NetworkMode: awsvpc
@@ -1128,7 +1170,7 @@ Resources:
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
           User: '0'
       Cpu: '1024'
-      ExecutionRoleArn: !GetAtt 'TaskExecutionRole.Arn'
+      ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
       Family: lakerunner-pubsub-sqs-task
       Memory: '2048'
       NetworkMode: awsvpc
@@ -1246,7 +1288,7 @@ Resources:
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
           User: '0'
       Cpu: '2048'
-      ExecutionRoleArn: !GetAtt 'TaskExecutionRole.Arn'
+      ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
       Family: lakerunner-query-api-task
       Memory: '8192'
       NetworkMode: awsvpc
@@ -1352,7 +1394,7 @@ Resources:
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
           User: '0'
       Cpu: '2048'
-      ExecutionRoleArn: !GetAtt 'TaskExecutionRole.Arn'
+      ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
       Family: lakerunner-query-worker-task
       Memory: '8192'
       NetworkMode: awsvpc
@@ -1450,7 +1492,7 @@ Resources:
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
           User: '0'
       Cpu: '1024'
-      ExecutionRoleArn: !GetAtt 'TaskExecutionRole.Arn'
+      ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
       Family: lakerunner-rollup-metrics-task
       Memory: '2048'
       NetworkMode: awsvpc
@@ -1548,7 +1590,7 @@ Resources:
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
           User: '0'
       Cpu: '256'
-      ExecutionRoleArn: !GetAtt 'TaskExecutionRole.Arn'
+      ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
       Family: lakerunner-sweeper-task
       Memory: '512'
       NetworkMode: awsvpc
@@ -1561,48 +1603,6 @@ Resources:
       Volumes:
         - Name: scratch
     Type: AWS::ECS::TaskDefinition
-  TaskExecutionRole:
-    Properties:
-      AssumeRolePolicyDocument:
-        Statement:
-          - Action: sts:AssumeRole
-            Effect: Allow
-            Principal:
-              Service: ecs-tasks.amazonaws.com
-        Version: '2012-10-17'
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
-      Policies:
-        - PolicyDocument:
-            Statement:
-              - Action:
-                  - ssm:GetParameter
-                  - ssm:GetParameters
-                Effect: Allow
-                Resource:
-                  - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/*'
-              - Action:
-                  - ssmmessages:CreateControlChannel
-                  - ssmmessages:CreateDataChannel
-                  - ssmmessages:OpenControlChannel
-                  - ssmmessages:OpenDataChannel
-                Effect: Allow
-                Resource: '*'
-              - Action:
-                  - secretsmanager:GetSecretValue
-                Effect: Allow
-                Resource:
-                  - !Sub
-                    - ${SecretArn}*
-                    - SecretArn: !ImportValue
-                        Fn::Sub:
-                          - ${CommonInfraStackName}-DbSecretArn
-                          - CommonInfraStackName: !Ref 'CommonInfraStackName'
-                  - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*'
-            Version: '2012-10-17'
-          PolicyName: SSMParameterAccess
-      RoleName: !Sub '${AWS::StackName}-execution-role'
-    Type: AWS::IAM::Role
   TaskRole:
     Properties:
       AssumeRolePolicyDocument:
@@ -1663,7 +1663,7 @@ Resources:
           PolicyName: S3AndSQSAccess
       RoleName: !Sub '${AWS::StackName}-task-role'
     Type: AWS::IAM::Role
-  TokenHmacSecret:
+  TokenSecret:
     Properties:
       Description: HMAC256 key for token signing/verification
       GenerateSecretString:
@@ -1671,6 +1671,6 @@ Resources:
         GenerateStringKey: token_hmac256_key
         PasswordLength: 64
         SecretStringTemplate: '{}'
-      Name: !Sub '${AWS::StackName}-token-hmac256-key'
+      Name: !Sub '${AWS::StackName}-token-key'
     Type: AWS::SecretsManager::Secret
 

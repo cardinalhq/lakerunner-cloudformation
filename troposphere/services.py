@@ -112,6 +112,19 @@ def create_services_template():
     def ci_export(suffix):
         return Sub("${CommonInfraStackName}-%s" % suffix, CommonInfraStackName=Ref(CommonInfraStackName))
 
+    # Helper function to shorten service names for ALB target groups (32 char limit)
+    def short_service_name(service_name):
+        # Replace lakerunner with lr, remove hyphens, abbreviate common words
+        short = service_name.replace('lakerunner-', 'lr-')
+        short = short.replace('query-api', 'qapi')
+        short = short.replace('query-worker', 'qwork')
+        short = short.replace('ingest-', 'ing-')
+        short = short.replace('compact-', 'cmp-')
+        short = short.replace('rollup-', 'rol-')
+        short = short.replace('metrics', 'met')
+        short = short.replace('pubsub', 'pub')
+        return short
+
     # Resolved values (always import from CommonInfra)
     ClusterArnValue = ImportValue(ci_export("ClusterArn"))
     DbSecretArnValue = ImportValue(ci_export("DbSecretArn"))
@@ -137,8 +150,8 @@ def create_services_template():
     # Task Execution Role (shared by all services)
     # -----------------------
     ExecutionRole = t.add_resource(Role(
-        "TaskExecutionRole",
-        RoleName=Sub("${AWS::StackName}-execution-role"),
+        "ExecRole",
+        RoleName=Sub("${AWS::StackName}-exec-role"),
         AssumeRolePolicyDocument={
             "Version": "2012-10-17",
             "Statement": [{
@@ -280,8 +293,8 @@ def create_services_template():
     # -----------------------
     # TOKEN_HMAC256_KEY secret for query API and worker
     token_secret = t.add_resource(Secret(
-        "TokenHmacSecret",
-        Name=Sub("${AWS::StackName}-token-hmac256-key"),
+        "TokenSecret",
+        Name=Sub("${AWS::StackName}-token-key"),
         Description="HMAC256 key for token signing/verification",
         GenerateSecretString=GenerateSecretString(
             SecretStringTemplate='{}',
@@ -293,8 +306,8 @@ def create_services_template():
 
     # Grafana admin password secret
     grafana_secret = t.add_resource(Secret(
-        "GrafanaAdminSecret",
-        Name=Sub("${AWS::StackName}-grafana-admin"),
+        "GrafanaSecret",
+        Name=Sub("${AWS::StackName}-grafana"),
         Description="Grafana admin password",
         GenerateSecretString=GenerateSecretString(
             SecretStringTemplate='{"username": "admin"}',
@@ -543,10 +556,12 @@ def create_services_template():
             port = ingress['port']
             health_check_path = ingress.get('health_check_path', '/')
 
+            # Build target group name within 32 character limit
+            tg_name_template = f"${{AWS::StackName}}-{short_service_name(service_name)}"
             target_group = t.add_resource(TargetGroup(
                 f"TargetGroup{title_name}",
                 Condition="HasAlb",
-                Name=Sub(f"${{AWS::StackName}}-{service_name}"[:32]),  # ALB TG names are limited to 32 chars
+                Name=Sub(tg_name_template),
                 Port=port,
                 Protocol="HTTP",
                 VpcId=VpcIdValue,
