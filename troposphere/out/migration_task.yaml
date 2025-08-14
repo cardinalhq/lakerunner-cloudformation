@@ -76,7 +76,7 @@ Resources:
                 Fn::Sub: ${CommonInfraStackName}-DbEndpoint
             - Name: LRDB_PORT
               Value: '5432'
-            - Name: LRDB_NAME
+            - Name: LRDB_DBNAME
               Value: lakerunner
             - Name: LRDB_USER
               Value: lakerunner

@@ -202,7 +202,7 @@ TaskDef = t.add_resource(TaskDefinition(
             Environment=[
                 Environment(Name="LRDB_HOST", Value=DbHostValue),
                 Environment(Name="LRDB_PORT", Value="5432"),
-                Environment(Name="LRDB_NAME", Value="lakerunner"),
+                Environment(Name="LRDB_DBNAME", Value="lakerunner"),
                 Environment(Name="LRDB_USER", Value="lakerunner"),
                 Environment(Name="LRDB_SSLMODE", Value="require"),
             ],

@@ -376,7 +376,7 @@ def create_services_template():
             Environment(Name="ECS_WORKER_SERVICE_NAME", Value="lakerunner-query-worker"),
             Environment(Name="LRDB_HOST", Value=DbHostValue),
             Environment(Name="LRDB_PORT", Value=DbPortValue),
-            Environment(Name="LRDB_NAME", Value="lakerunner"),
+            Environment(Name="LRDB_DBNAME", Value="lakerunner"),
             Environment(Name="LRDB_USER", Value="lakerunner"),
             Environment(Name="LRDB_SSLMODE", Value="require")
         ]

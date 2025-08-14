@@ -565,7 +565,7 @@ Resources:
                 Fn::Sub:
                   - ${CommonInfraStackName}-DbPort
                   - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: LRDB_NAME
+            - Name: LRDB_DBNAME
               Value: lakerunner
             - Name: LRDB_USER
               Value: lakerunner
@@ -687,7 +687,7 @@ Resources:
                 Fn::Sub:
                   - ${CommonInfraStackName}-DbPort
                   - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: LRDB_NAME
+            - Name: LRDB_DBNAME
               Value: lakerunner
             - Name: LRDB_USER
               Value: lakerunner
@@ -785,7 +785,7 @@ Resources:
                 Fn::Sub:
                   - ${CommonInfraStackName}-DbPort
                   - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: LRDB_NAME
+            - Name: LRDB_DBNAME
               Value: lakerunner
             - Name: LRDB_USER
               Value: lakerunner
@@ -883,7 +883,7 @@ Resources:
                 Fn::Sub:
                   - ${CommonInfraStackName}-DbPort
                   - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: LRDB_NAME
+            - Name: LRDB_DBNAME
               Value: lakerunner
             - Name: LRDB_USER
               Value: lakerunner
@@ -981,7 +981,7 @@ Resources:
                 Fn::Sub:
                   - ${CommonInfraStackName}-DbPort
                   - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: LRDB_NAME
+            - Name: LRDB_DBNAME
               Value: lakerunner
             - Name: LRDB_USER
               Value: lakerunner
@@ -1080,7 +1080,7 @@ Resources:
                 Fn::Sub:
                   - ${CommonInfraStackName}-DbPort
                   - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: LRDB_NAME
+            - Name: LRDB_DBNAME
               Value: lakerunner
             - Name: LRDB_USER
               Value: lakerunner
@@ -1176,7 +1176,7 @@ Resources:
                 Fn::Sub:
                   - ${CommonInfraStackName}-DbPort
                   - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: LRDB_NAME
+            - Name: LRDB_DBNAME
               Value: lakerunner
             - Name: LRDB_USER
               Value: lakerunner
@@ -1294,7 +1294,7 @@ Resources:
                 Fn::Sub:
                   - ${CommonInfraStackName}-DbPort
                   - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: LRDB_NAME
+            - Name: LRDB_DBNAME
               Value: lakerunner
             - Name: LRDB_USER
               Value: lakerunner
@@ -1402,7 +1402,7 @@ Resources:
                 Fn::Sub:
                   - ${CommonInfraStackName}-DbPort
                   - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: LRDB_NAME
+            - Name: LRDB_DBNAME
               Value: lakerunner
             - Name: LRDB_USER
               Value: lakerunner
@@ -1500,7 +1500,7 @@ Resources:
                 Fn::Sub:
                   - ${CommonInfraStackName}-DbPort
                   - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: LRDB_NAME
+            - Name: LRDB_DBNAME
               Value: lakerunner
             - Name: LRDB_USER
               Value: lakerunner
