@@ -309,6 +309,7 @@ QueueRes = t.add_resource(Queue(
 
 BucketRes = t.add_resource(Bucket(
     "IngestBucket",
+    DeletionPolicy="Delete",
     LifecycleConfiguration=LifecycleConfiguration(
         Rules=[LifecycleRule(Prefix="otel-raw/", Status="Enabled", ExpirationInDays=10)]
     ),
