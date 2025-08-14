@@ -111,10 +111,6 @@ DbPort = t.add_parameter(Parameter(
     "DbPort", Type="String", Default="5432",
     Description="Postgres port (usually 5432)."
 ))
-DbSSLMode = t.add_parameter(Parameter(
-    "DbSSLMode", Type="String", Default="prefer",
-    Description="sslmode (disable, allow, prefer, require, verify-ca, verify-full)."
-))
 Cpu = t.add_parameter(Parameter(
     "Cpu", Type="String", Default="512",
     Description="Fargate CPU units (e.g., 256/512/1024)."
@@ -131,7 +127,7 @@ t.set_metadata({
             {"Label": {"default": "Where to run"}, "Parameters": ["ClusterArn", "Subnets", "SecurityGroups", "AssignPublicIp"]},
             {"Label": {"default": "Task Sizing"}, "Parameters": ["Cpu", "MemoryMiB"]},
             {"Label": {"default": "Container Image"}, "Parameters": ["ContainerImage"]},
-            {"Label": {"default": "Database Connection"}, "Parameters": ["DbHost", "DbName", "DbUser", "DbPort", "DbSSLMode", "DbSecretArn"]},
+            {"Label": {"default": "Database Connection"}, "Parameters": ["DbHost", "DbName", "DbUser", "DbPort", "DbSecretArn"]},
             {"Label": {"default": "Permissions"}, "Parameters": ["TaskRoleArn"]},
         ],
         "ParameterLabels": {
@@ -146,7 +142,6 @@ t.set_metadata({
             "DbName": {"default": "DB Name"},
             "DbUser": {"default": "DB User"},
             "DbPort": {"default": "DB Port"},
-            "DbSSLMode": {"default": "DB sslmode"},
             "DbSecretArn": {"default": "DB Secret ARN"},
             "TaskRoleArn": {"default": "Task Role ARN"},
         }
@@ -242,7 +237,7 @@ TaskDef = t.add_resource(TaskDefinition(
                 Environment(Name="LRDB_PORT", Value=Ref(DbPort)),
                 Environment(Name="LRDB_NAME", Value=Ref(DbName)),
                 Environment(Name="LRDB_USER", Value=Ref(DbUser)),
-                Environment(Name="LRDB_SSLMODE", Value=Ref(DbSSLMode)),
+                Environment(Name="LRDB_SSLMODE", Value="require"),
             ],
             Secrets=[
                 EcsSecret(Name="LRDB_PASSWORD", ValueFrom=Sub("${S}:password::", S=DbSecretArnValue))

@@ -83,11 +83,6 @@ def create_services_template():
         Description="Database username."
     ))
     
-    DbSSLMode = t.add_parameter(Parameter(
-        "DbSSLMode", Type="String", Default="prefer",
-        Description="Database SSL mode."
-    ))
-    
     # Global service overrides
     GlobalImageOverride = t.add_parameter(Parameter(
         "GlobalImageOverride", Type="String", Default="",
@@ -105,11 +100,11 @@ def create_services_template():
             "ParameterGroups": [
                 {
                     "Label": {"default": "Infrastructure References"},
-                    "Parameters": ["CommonInfraStackName", "VpcId", "PrivateSubnets", "TaskSecurityGroupId"]
+                    "Parameters": ["CommonInfraStackName", "VpcId", "PrivateSubnets"]
                 },
                 {
                     "Label": {"default": "Database Connection"},
-                    "Parameters": ["DbPort", "DbName", "DbUser", "DbSSLMode"]
+                    "Parameters": ["DbPort", "DbName", "DbUser"]
                 },
                 {
                     "Label": {"default": "Global Overrides"},
@@ -120,11 +115,9 @@ def create_services_template():
                 "CommonInfraStackName": {"default": "Common Infra Stack Name"},
                 "VpcId": {"default": "VPC ID"},
                 "PrivateSubnets": {"default": "Private Subnets"},
-                "TaskSecurityGroupId": {"default": "Task Security Group ID"},
                 "DbPort": {"default": "Database Port"},
                 "DbName": {"default": "Database Name"},
                 "DbUser": {"default": "Database User"},
-                "DbSSLMode": {"default": "Database SSL Mode"},
                 "GlobalImageOverride": {"default": "Global Image Override"},
                 "GlobalReplicasOverride": {"default": "Global Replicas Override"}
             }
@@ -136,19 +129,18 @@ def create_services_template():
     # -----------------------
     t.add_condition("HasGlobalImageOverride", Not(Equals(Ref(GlobalImageOverride), "")))
     t.add_condition("HasGlobalReplicasOverride", Not(Equals(Ref(GlobalReplicasOverride), "")))
-    t.add_condition("NoTaskSecurityGroupId", Equals(Ref(TaskSecurityGroupId), ""))
     
     # Helper function for imports
     def ci_export(suffix):
         return Sub("${CommonInfraStackName}-%s" % suffix, CommonInfraStackName=Ref(CommonInfraStackName))
     
-    # Resolved values (always import from CommonInfra except for explicitly provided values)
+    # Resolved values (always import from CommonInfra)
     ClusterArnValue = ImportValue(ci_export("ClusterArn"))
     DbSecretArnValue = ImportValue(ci_export("DbSecretArn")) 
     DbHostValue = ImportValue(ci_export("DbEndpoint"))
     AlbArnValue = ImportValue(ci_export("AlbArn"))
     EfsIdValue = ImportValue(ci_export("EfsId"))
-    TaskSecurityGroupIdValue = If("NoTaskSecurityGroupId", ImportValue(ci_export("TaskSGId")), Ref(TaskSecurityGroupId))
+    TaskSecurityGroupIdValue = ImportValue(ci_export("TaskSGId"))
     
     # -----------------------
     # Task Execution Role (shared by all services)
@@ -401,7 +393,7 @@ def create_services_template():
             Environment(Name="LRDB_PORT", Value=Ref(DbPort)),
             Environment(Name="LRDB_NAME", Value=Ref(DbName)),
             Environment(Name="LRDB_USER", Value=Ref(DbUser)),
-            Environment(Name="LRDB_SSLMODE", Value=Ref(DbSSLMode))
+            Environment(Name="LRDB_SSLMODE", Value="require")
         ]
         
         # Add service-specific environment variables (excluding sensitive ones)

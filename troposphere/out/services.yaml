@@ -7,9 +7,6 @@ Conditions:
     - !Equals
       - !Ref 'GlobalReplicasOverride'
       - ''
-  NoTaskSecurityGroupId: !Equals
-    - !Ref 'TaskSecurityGroupId'
-    - ''
 Description: 'Lakerunner Services: ECS services, task definitions, IAM roles, and ALB integration'
 Metadata:
   AWS::CloudFormation::Interface:
@@ -20,14 +17,12 @@ Metadata:
           - CommonInfraStackName
           - VpcId
           - PrivateSubnets
-          - TaskSecurityGroupId
       - Label:
           default: Database Connection
         Parameters:
           - DbPort
           - DbName
           - DbUser
-          - DbSSLMode
       - Label:
           default: Global Overrides
         Parameters:
@@ -40,8 +35,6 @@ Metadata:
         default: Database Name
       DbPort:
         default: Database Port
-      DbSSLMode:
-        default: Database SSL Mode
       DbUser:
         default: Database User
       GlobalImageOverride:
@@ -50,8 +43,6 @@ Metadata:
         default: Global Replicas Override
       PrivateSubnets:
         default: Private Subnets
-      TaskSecurityGroupId:
-        default: Task Security Group ID
       VpcId:
         default: VPC ID
 Outputs:
@@ -120,10 +111,6 @@ Parameters:
     Default: '5432'
     Description: Database port.
     Type: String
-  DbSSLMode:
-    Default: prefer
-    Description: Database SSL mode.
-    Type: String
   DbUser:
     Default: lakerunner
     Description: Database username.
@@ -139,10 +126,6 @@ Parameters:
   PrivateSubnets:
     Description: 'REQUIRED: Private subnet IDs for ECS services.'
     Type: List<AWS::EC2::Subnet::Id>
-  TaskSecurityGroupId:
-    Default: ''
-    Description: Security group ID for ECS tasks. Leave blank to import from CommonInfra.
-    Type: String
   VpcId:
     Description: 'REQUIRED: VPC ID where services will run.'
     Type: AWS::EC2::VPC::Id
@@ -269,13 +252,10 @@ Resources:
       NetworkConfiguration:
         AwsvpcConfiguration:
           SecurityGroups:
-            - !If
-              - NoTaskSecurityGroupId
-              - !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-TaskSGId
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
-              - !Ref 'TaskSecurityGroupId'
+            - !ImportValue
+              Fn::Sub:
+                - ${CommonInfraStackName}-TaskSGId
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
           Subnets: !Ref 'PrivateSubnets'
       ServiceName: grafana
       TaskDefinition: !Ref 'TaskDefGrafana'
@@ -295,13 +275,10 @@ Resources:
       NetworkConfiguration:
         AwsvpcConfiguration:
           SecurityGroups:
-            - !If
-              - NoTaskSecurityGroupId
-              - !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-TaskSGId
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
-              - !Ref 'TaskSecurityGroupId'
+            - !ImportValue
+              Fn::Sub:
+                - ${CommonInfraStackName}-TaskSGId
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
           Subnets: !Ref 'PrivateSubnets'
       ServiceName: lakerunner-compact-logs
       TaskDefinition: !Ref 'TaskDefLakerunnerCompactLogs'
@@ -321,13 +298,10 @@ Resources:
       NetworkConfiguration:
         AwsvpcConfiguration:
           SecurityGroups:
-            - !If
-              - NoTaskSecurityGroupId
-              - !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-TaskSGId
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
-              - !Ref 'TaskSecurityGroupId'
+            - !ImportValue
+              Fn::Sub:
+                - ${CommonInfraStackName}-TaskSGId
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
           Subnets: !Ref 'PrivateSubnets'
       ServiceName: lakerunner-compact-metrics
       TaskDefinition: !Ref 'TaskDefLakerunnerCompactMetrics'
@@ -347,13 +321,10 @@ Resources:
       NetworkConfiguration:
         AwsvpcConfiguration:
           SecurityGroups:
-            - !If
-              - NoTaskSecurityGroupId
-              - !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-TaskSGId
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
-              - !Ref 'TaskSecurityGroupId'
+            - !ImportValue
+              Fn::Sub:
+                - ${CommonInfraStackName}-TaskSGId
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
           Subnets: !Ref 'PrivateSubnets'
       ServiceName: lakerunner-ingest-logs
       TaskDefinition: !Ref 'TaskDefLakerunnerIngestLogs'
@@ -373,13 +344,10 @@ Resources:
       NetworkConfiguration:
         AwsvpcConfiguration:
           SecurityGroups:
-            - !If
-              - NoTaskSecurityGroupId
-              - !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-TaskSGId
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
-              - !Ref 'TaskSecurityGroupId'
+            - !ImportValue
+              Fn::Sub:
+                - ${CommonInfraStackName}-TaskSGId
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
           Subnets: !Ref 'PrivateSubnets'
       ServiceName: lakerunner-ingest-metrics
       TaskDefinition: !Ref 'TaskDefLakerunnerIngestMetrics'
@@ -399,13 +367,10 @@ Resources:
       NetworkConfiguration:
         AwsvpcConfiguration:
           SecurityGroups:
-            - !If
-              - NoTaskSecurityGroupId
-              - !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-TaskSGId
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
-              - !Ref 'TaskSecurityGroupId'
+            - !ImportValue
+              Fn::Sub:
+                - ${CommonInfraStackName}-TaskSGId
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
           Subnets: !Ref 'PrivateSubnets'
       ServiceName: lakerunner-pubsub-sqs
       TaskDefinition: !Ref 'TaskDefLakerunnerPubsubSqs'
@@ -429,13 +394,10 @@ Resources:
       NetworkConfiguration:
         AwsvpcConfiguration:
           SecurityGroups:
-            - !If
-              - NoTaskSecurityGroupId
-              - !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-TaskSGId
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
-              - !Ref 'TaskSecurityGroupId'
+            - !ImportValue
+              Fn::Sub:
+                - ${CommonInfraStackName}-TaskSGId
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
           Subnets: !Ref 'PrivateSubnets'
       ServiceName: lakerunner-query-api
       TaskDefinition: !Ref 'TaskDefLakerunnerQueryApi'
@@ -455,13 +417,10 @@ Resources:
       NetworkConfiguration:
         AwsvpcConfiguration:
           SecurityGroups:
-            - !If
-              - NoTaskSecurityGroupId
-              - !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-TaskSGId
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
-              - !Ref 'TaskSecurityGroupId'
+            - !ImportValue
+              Fn::Sub:
+                - ${CommonInfraStackName}-TaskSGId
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
           Subnets: !Ref 'PrivateSubnets'
       ServiceName: lakerunner-query-worker
       TaskDefinition: !Ref 'TaskDefLakerunnerQueryWorker'
@@ -481,13 +440,10 @@ Resources:
       NetworkConfiguration:
         AwsvpcConfiguration:
           SecurityGroups:
-            - !If
-              - NoTaskSecurityGroupId
-              - !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-TaskSGId
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
-              - !Ref 'TaskSecurityGroupId'
+            - !ImportValue
+              Fn::Sub:
+                - ${CommonInfraStackName}-TaskSGId
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
           Subnets: !Ref 'PrivateSubnets'
       ServiceName: lakerunner-rollup-metrics
       TaskDefinition: !Ref 'TaskDefLakerunnerRollupMetrics'
@@ -507,13 +463,10 @@ Resources:
       NetworkConfiguration:
         AwsvpcConfiguration:
           SecurityGroups:
-            - !If
-              - NoTaskSecurityGroupId
-              - !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-TaskSGId
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
-              - !Ref 'TaskSecurityGroupId'
+            - !ImportValue
+              Fn::Sub:
+                - ${CommonInfraStackName}-TaskSGId
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
           Subnets: !Ref 'PrivateSubnets'
       ServiceName: lakerunner-sweeper
       TaskDefinition: !Ref 'TaskDefLakerunnerSweeper'
@@ -604,7 +557,7 @@ Resources:
             - Name: LRDB_USER
               Value: !Ref 'DbUser'
             - Name: LRDB_SSLMODE
-              Value: !Ref 'DbSSLMode'
+              Value: require
             - Name: GF_SECURITY_ADMIN_USER
               Value: admin
             - Name: GF_SERVER_HTTP_PORT
@@ -730,7 +683,7 @@ Resources:
             - Name: LRDB_USER
               Value: !Ref 'DbUser'
             - Name: LRDB_SSLMODE
-              Value: !Ref 'DbSSLMode'
+              Value: require
           HealthCheck:
             Command:
               - /app/bin/lakerunner
@@ -828,7 +781,7 @@ Resources:
             - Name: LRDB_USER
               Value: !Ref 'DbUser'
             - Name: LRDB_SSLMODE
-              Value: !Ref 'DbSSLMode'
+              Value: require
           HealthCheck:
             Command:
               - /app/bin/lakerunner
@@ -926,7 +879,7 @@ Resources:
             - Name: LRDB_USER
               Value: !Ref 'DbUser'
             - Name: LRDB_SSLMODE
-              Value: !Ref 'DbSSLMode'
+              Value: require
           HealthCheck:
             Command:
               - /app/bin/lakerunner
@@ -1024,7 +977,7 @@ Resources:
             - Name: LRDB_USER
               Value: !Ref 'DbUser'
             - Name: LRDB_SSLMODE
-              Value: !Ref 'DbSSLMode'
+              Value: require
           HealthCheck:
             Command:
               - /app/bin/lakerunner
@@ -1123,7 +1076,7 @@ Resources:
             - Name: LRDB_USER
               Value: !Ref 'DbUser'
             - Name: LRDB_SSLMODE
-              Value: !Ref 'DbSSLMode'
+              Value: require
           HealthCheck:
             Command:
               - /app/bin/lakerunner
@@ -1219,7 +1172,7 @@ Resources:
             - Name: LRDB_USER
               Value: !Ref 'DbUser'
             - Name: LRDB_SSLMODE
-              Value: !Ref 'DbSSLMode'
+              Value: require
             - Name: EXECUTION_ENVIRONMENT
               Value: ecs
             - Name: QUERY_WORKER_DEPLOYMENT_NAME
@@ -1341,7 +1294,7 @@ Resources:
             - Name: LRDB_USER
               Value: !Ref 'DbUser'
             - Name: LRDB_SSLMODE
-              Value: !Ref 'DbSSLMode'
+              Value: require
             - Name: METRIC_PREFIX
               Value: lakerunner-query-worker
             - Name: SPRING_PROFILES_ACTIVE
@@ -1453,7 +1406,7 @@ Resources:
             - Name: LRDB_USER
               Value: !Ref 'DbUser'
             - Name: LRDB_SSLMODE
-              Value: !Ref 'DbSSLMode'
+              Value: require
           HealthCheck:
             Command:
               - /app/bin/lakerunner
@@ -1551,7 +1504,7 @@ Resources:
             - Name: LRDB_USER
               Value: !Ref 'DbUser'
             - Name: LRDB_SSLMODE
-              Value: !Ref 'DbSSLMode'
+              Value: require
           HealthCheck:
             Command:
               - /app/bin/lakerunner
