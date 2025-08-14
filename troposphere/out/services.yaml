@@ -525,7 +525,7 @@ Resources:
               Value: !Ref 'AWS::Region'
             - Name: ECS_WORKER_CLUSTER_NAME
               Value: !Select
-                - 5
+                - 1
                 - !Split
                   - /
                   - !ImportValue
@@ -647,7 +647,7 @@ Resources:
               Value: !Ref 'AWS::Region'
             - Name: ECS_WORKER_CLUSTER_NAME
               Value: !Select
-                - 5
+                - 1
                 - !Split
                   - /
                   - !ImportValue
@@ -745,7 +745,7 @@ Resources:
               Value: !Ref 'AWS::Region'
             - Name: ECS_WORKER_CLUSTER_NAME
               Value: !Select
-                - 5
+                - 1
                 - !Split
                   - /
                   - !ImportValue
@@ -843,7 +843,7 @@ Resources:
               Value: !Ref 'AWS::Region'
             - Name: ECS_WORKER_CLUSTER_NAME
               Value: !Select
-                - 5
+                - 1
                 - !Split
                   - /
                   - !ImportValue
@@ -941,7 +941,7 @@ Resources:
               Value: !Ref 'AWS::Region'
             - Name: ECS_WORKER_CLUSTER_NAME
               Value: !Select
-                - 5
+                - 1
                 - !Split
                   - /
                   - !ImportValue
@@ -1040,7 +1040,7 @@ Resources:
               Value: !Ref 'AWS::Region'
             - Name: ECS_WORKER_CLUSTER_NAME
               Value: !Select
-                - 5
+                - 1
                 - !Split
                   - /
                   - !ImportValue
@@ -1136,7 +1136,7 @@ Resources:
               Value: !Ref 'AWS::Region'
             - Name: ECS_WORKER_CLUSTER_NAME
               Value: !Select
-                - 5
+                - 1
                 - !Split
                   - /
                   - !ImportValue
@@ -1254,7 +1254,7 @@ Resources:
               Value: !Ref 'AWS::Region'
             - Name: ECS_WORKER_CLUSTER_NAME
               Value: !Select
-                - 5
+                - 1
                 - !Split
                   - /
                   - !ImportValue
@@ -1362,7 +1362,7 @@ Resources:
               Value: !Ref 'AWS::Region'
             - Name: ECS_WORKER_CLUSTER_NAME
               Value: !Select
-                - 5
+                - 1
                 - !Split
                   - /
                   - !ImportValue
@@ -1460,7 +1460,7 @@ Resources:
               Value: !Ref 'AWS::Region'
             - Name: ECS_WORKER_CLUSTER_NAME
               Value: !Select
-                - 5
+                - 1
                 - !Split
                   - /
                   - !ImportValue

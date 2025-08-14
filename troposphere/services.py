@@ -401,7 +401,7 @@ def create_services_template():
             Environment(Name="API_KEYS_FILE", Value="env:API_KEYS_ENV"),
             Environment(Name="SQS_QUEUE_URL", Value=Sub("https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/lakerunner-ingest-queue")),
             Environment(Name="SQS_REGION", Value=Ref("AWS::Region")),
-            Environment(Name="ECS_WORKER_CLUSTER_NAME", Value=Select(5, Split("/", ClusterArnValue))),
+            Environment(Name="ECS_WORKER_CLUSTER_NAME", Value=Select(1, Split("/", ClusterArnValue))),
             Environment(Name="ECS_WORKER_SERVICE_NAME", Value="lakerunner-query-worker"),
             Environment(Name="LRDB_HOST", Value=DbHostValue),
             Environment(Name="LRDB_PORT", Value=DbPortValue),
