@@ -21,7 +21,7 @@ from troposphere import (
 )
 from troposphere.ec2 import SecurityGroup, SecurityGroupIngress
 from troposphere.ecs import Cluster
-from troposphere.elasticloadbalancingv2 import LoadBalancer, Listener, TargetGroup
+from troposphere.elasticloadbalancingv2 import LoadBalancer, Listener, TargetGroup, Matcher
 from troposphere.elasticloadbalancingv2 import Action as AlbAction
 from troposphere.elasticloadbalancingv2 import TargetGroupAttribute
 from troposphere.s3 import (
@@ -164,6 +164,17 @@ t.add_resource(SecurityGroupIngress(
     Description="task-to-database PostgreSQL",
 ))
 
+# Allow tasks to connect to EFS (NFS port 2049)
+t.add_resource(SecurityGroupIngress(
+    "TaskSGEfsSelf",
+    GroupId=Ref(TaskSG),
+    IpProtocol="tcp",
+    FromPort=2049,
+    ToPort=2049,
+    SourceSecurityGroupId=Ref(TaskSG),
+    Description="task-to-EFS NFS",
+))
+
 # ALB SG (only if creating ALB)
 AlbSG = t.add_resource(SecurityGroup(
     "AlbSecurityGroup",
@@ -226,7 +237,17 @@ Tg7101 = t.add_resource(TargetGroup(
     Port=7101, Protocol="HTTP",
     VpcId=Ref(VpcId),
     TargetType="ip",
-    TargetGroupAttributes=[TargetGroupAttribute(Key="stickiness.enabled", Value="false")]
+    HealthCheckPath="/ready",
+    HealthCheckProtocol="HTTP",
+    HealthCheckIntervalSeconds=30,
+    HealthCheckTimeoutSeconds=5,
+    HealthyThresholdCount=2,
+    UnhealthyThresholdCount=3,
+    Matcher=Matcher(HttpCode="200"),
+    TargetGroupAttributes=[
+        TargetGroupAttribute(Key="stickiness.enabled", Value="false"),
+        TargetGroupAttribute(Key="deregistration_delay.timeout_seconds", Value="30")
+    ]
 ))
 Tg3000 = t.add_resource(TargetGroup(
     "Tg3000",
@@ -234,7 +255,17 @@ Tg3000 = t.add_resource(TargetGroup(
     Port=3000, Protocol="HTTP",
     VpcId=Ref(VpcId),
     TargetType="ip",
-    TargetGroupAttributes=[TargetGroupAttribute(Key="stickiness.enabled", Value="false")]
+    HealthCheckPath="/api/health",
+    HealthCheckProtocol="HTTP",
+    HealthCheckIntervalSeconds=30,
+    HealthCheckTimeoutSeconds=5,
+    HealthyThresholdCount=2,
+    UnhealthyThresholdCount=3,
+    Matcher=Matcher(HttpCode="200"),
+    TargetGroupAttributes=[
+        TargetGroupAttribute(Key="stickiness.enabled", Value="false"),
+        TargetGroupAttribute(Key="deregistration_delay.timeout_seconds", Value="30")
+    ]
 ))
 
 t.add_resource(Listener(

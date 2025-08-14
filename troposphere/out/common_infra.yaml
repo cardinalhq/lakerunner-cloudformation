@@ -380,26 +380,55 @@ Resources:
       SourceSecurityGroupId: !Ref 'TaskSG'
       ToPort: 5432
     Type: AWS::EC2::SecurityGroupIngress
+  TaskSGEfsSelf:
+    Properties:
+      Description: task-to-EFS NFS
+      FromPort: 2049
+      GroupId: !Ref 'TaskSG'
+      IpProtocol: tcp
+      SourceSecurityGroupId: !Ref 'TaskSG'
+      ToPort: 2049
+    Type: AWS::EC2::SecurityGroupIngress
   Tg3000:
     Condition: CreateAlbCond
     Properties:
+      HealthCheckIntervalSeconds: 30
+      HealthCheckPath: /api/health
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      Matcher:
+        HttpCode: '200'
       Port: 3000
       Protocol: HTTP
       TargetGroupAttributes:
         - Key: stickiness.enabled
           Value: 'false'
+        - Key: deregistration_delay.timeout_seconds
+          Value: '30'
       TargetType: ip
+      UnhealthyThresholdCount: 3
       VpcId: !Ref 'VpcId'
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
   Tg7101:
     Condition: CreateAlbCond
     Properties:
+      HealthCheckIntervalSeconds: 30
+      HealthCheckPath: /ready
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      Matcher:
+        HttpCode: '200'
       Port: 7101
       Protocol: HTTP
       TargetGroupAttributes:
         - Key: stickiness.enabled
           Value: 'false'
+        - Key: deregistration_delay.timeout_seconds
+          Value: '30'
       TargetType: ip
+      UnhealthyThresholdCount: 3
       VpcId: !Ref 'VpcId'
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
 
