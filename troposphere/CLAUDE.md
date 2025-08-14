@@ -42,6 +42,16 @@ The templates use a unified configuration approach:
 
 The build system uses a Python virtual environment with dependencies in the `requirements.txt` file.
 
+### Testing Changes
+
+When making changes to templates, always use the virtual environment to test:
+
+1. `source .venv/bin/activate` - Activate the virtual environment
+1. `./build.sh` - Regenerate all templates and run validation
+1. `cfn-lint out/*.yaml` - Run additional validation if needed
+
+All templates must pass cfn-lint validation (errors must be fixed, warnings are acceptable if safe).
+
 ## Key Design Patterns
 
 ### Cross-Stack Resource Sharing
