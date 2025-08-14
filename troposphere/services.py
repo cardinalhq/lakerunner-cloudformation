@@ -51,7 +51,7 @@ def create_services_template():
     services = config.get('services', {})
 
     # -----------------------
-    # Parameters (simplified - always imports from CommonInfra)
+    # Parameters (imports from CommonInfra)
     # -----------------------
     CommonInfraStackName = t.add_parameter(Parameter(
         "CommonInfraStackName", Type="String",

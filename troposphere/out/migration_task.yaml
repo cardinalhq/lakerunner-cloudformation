@@ -44,7 +44,7 @@ Outputs:
 Parameters:
   CommonInfraStackName:
     Default: ''
-    Description: 'OPTIONAL: Name of the CommonInfra stack to import values from. If set, blank fields below will be auto-filled.'
+    Description: 'REQUIRED: Name of the CommonInfra stack to import values from.'
     Type: String
   ContainerImage:
     Default: public.ecr.aws/cardinalhq.io/lakerunner:latest
@@ -162,7 +162,6 @@ Resources:
               props = event.get("ResourceProperties", {})
 
               if reqtype == "Delete":
-                  # No-op; nothing to tear down
                   send(event, context, "SUCCESS", {"Message":"Delete no-op"})
                   return
 

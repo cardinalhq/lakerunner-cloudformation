@@ -308,7 +308,7 @@ DbRes = t.add_resource(DBInstance(
 ))
 
 DbEndpoint = GetAtt(DbRes, "Endpoint.Address")
-DbPort = GetAtt(DbRes, "Endpoint.Port")  # Postgres default is 5432; we don't make it configurable
+DbPort = GetAtt(DbRes, "Endpoint.Port")
 
 t.add_output(Output("DbEndpoint", Value=DbEndpoint, Export=Export(name=Sub("${AWS::StackName}-DbEndpoint"))))
 t.add_output(Output("DbPort", Value=DbPort, Export=Export(name=Sub("${AWS::StackName}-DbPort"))))
@@ -358,7 +358,10 @@ t.add_resource(SsmParameter(
     Description="API keys",
 ))
 
-# Optional outputs for ALB
+
+# -----------------------
+# Outputs (for access in other stacks)
+# -----------------------
 t.add_output(Output(
     "AlbDNS",
     Condition="CreateAlbCond",

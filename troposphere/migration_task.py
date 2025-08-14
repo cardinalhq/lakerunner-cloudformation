@@ -14,15 +14,10 @@
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 from troposphere import (
-  And,
   AWSObject,
-  Condition,
-  Equals,
   Export,
   GetAtt,
-  If,
   ImportValue,
-  Not,
   Output,
   Parameter,
   Ref,
@@ -60,7 +55,7 @@ t.set_description("Lakerunner DB migration (single template): defines TaskDefini
 # -----------------------
 CommonInfraStackName = t.add_parameter(Parameter(
     "CommonInfraStackName", Type="String", Default="",
-    Description="OPTIONAL: Name of the CommonInfra stack to import values from. If set, blank fields below will be auto-filled."
+    Description="REQUIRED: Name of the CommonInfra stack to import values from."
 ))
 
 ContainerImage = t.add_parameter(Parameter(
@@ -77,7 +72,6 @@ MemoryMiB = t.add_parameter(Parameter(
     Description="Fargate Memory MiB (e.g., 512/1024/2048)."
 ))
 
-# Optional: nice parameter groups/labels in the Console
 t.set_metadata({
     "AWS::CloudFormation::Interface": {
         "ParameterGroups": [
@@ -94,14 +88,12 @@ t.set_metadata({
     }
 })
 
-# Always import from CommonInfra - no conditions needed
 
 # Helper: build "${CommonInfraStackName}-Suffix"
 def ci_export(suffix):
     # Sub returns a string like "mystack-ClusterArn"
     return Sub("${CommonInfraStackName}-%s" % suffix)
 
-# Resolved values (always import from CommonInfra)
 ClusterArnValue = ImportValue(ci_export("ClusterArn"))
 DbHostValue = ImportValue(ci_export("DbEndpoint"))
 DbSecretArnValue = ImportValue(ci_export("DbSecretArn"))
@@ -268,7 +260,6 @@ def handler(event, context):
     props = event.get("ResourceProperties", {})
 
     if reqtype == "Delete":
-        # No-op; nothing to tear down
         send(event, context, "SUCCESS", {"Message":"Delete no-op"})
         return
 
