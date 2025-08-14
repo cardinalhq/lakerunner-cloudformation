@@ -1552,8 +1552,16 @@ Resources:
                   - s3:ListBucket
                 Effect: Allow
                 Resource:
-                  - !Sub 'arn:aws:s3:::lakerunner-*'
-                  - !Sub 'arn:aws:s3:::lakerunner-*/*'
+                  - !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-BucketArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                  - !Sub
+                    - ${BucketArn}/*
+                    - BucketArn: !ImportValue
+                        Fn::Sub:
+                          - ${CommonInfraStackName}-BucketArn
+                          - CommonInfraStackName: !Ref 'CommonInfraStackName'
               - Action:
                   - sqs:ReceiveMessage
                   - sqs:DeleteMessage

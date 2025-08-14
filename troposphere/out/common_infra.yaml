@@ -53,6 +53,14 @@ Outputs:
     Export:
       Name: !Sub '${AWS::StackName}-AlbDNS'
     Value: !GetAtt 'Alb.DNSName'
+  BucketArn:
+    Export:
+      Name: !Sub '${AWS::StackName}-BucketArn'
+    Value: !GetAtt 'IngestBucket.Arn'
+  BucketName:
+    Export:
+      Name: !Sub '${AWS::StackName}-BucketName'
+    Value: !Ref 'IngestBucket'
   ClusterArn:
     Export:
       Name: !Sub '${AWS::StackName}-ClusterArn'

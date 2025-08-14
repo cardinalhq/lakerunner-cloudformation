@@ -413,6 +413,10 @@ t.add_resource(MountTarget(
 
 t.add_output(Output("EfsId", Value=Ref(Fs), Export=Export(name=Sub("${AWS::StackName}-EfsId"))))
 
+# Export S3 bucket name for IAM policies in other stacks
+t.add_output(Output("BucketName", Value=Ref(BucketRes), Export=Export(name=Sub("${AWS::StackName}-BucketName"))))
+t.add_output(Output("BucketArn", Value=GetAtt(BucketRes, "Arn"), Export=Export(name=Sub("${AWS::StackName}-BucketArn"))))
+
 # Load defaults for SSM parameters
 defaults = load_defaults()
 

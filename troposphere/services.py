@@ -134,6 +134,7 @@ def create_services_template():
     TaskSecurityGroupIdValue = ImportValue(ci_export("TaskSGId"))
     VpcIdValue = ImportValue(ci_export("VpcId"))
     PrivateSubnetsValue = Split(",", ImportValue(ci_export("PrivateSubnets")))
+    BucketArnValue = ImportValue(ci_export("BucketArn"))
 
     # Add parameter for ALB presence (must match CommonInfra setting)
     CreateAlb = t.add_parameter(Parameter(
@@ -234,8 +235,8 @@ def create_services_template():
                                 "s3:ListBucket"
                             ],
                             "Resource": [
-                                Sub("arn:aws:s3:::lakerunner-*"),
-                                Sub("arn:aws:s3:::lakerunner-*/*")
+                                BucketArnValue,
+                                Sub("${BucketArn}/*", BucketArn=BucketArnValue)
                             ]
                         },
                         {
