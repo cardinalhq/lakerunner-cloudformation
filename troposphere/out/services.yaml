@@ -1,0 +1,1826 @@
+Conditions:
+  HasAlb: !Not
+    - !Equals
+      - !If
+        - UseAlbImport
+        - !ImportValue
+          Fn::Sub:
+            - ${CommonInfraStackName}-AlbArn
+            - CommonInfraStackName: !Ref 'CommonInfraStackName'
+        - !Ref 'AlbArn'
+      - ''
+  HasCI: !Not
+    - !Equals
+      - !Ref 'CommonInfraStackName'
+      - ''
+  HasGlobalImageOverride: !Not
+    - !Equals
+      - !Ref 'GlobalImageOverride'
+      - ''
+  HasGlobalReplicasOverride: !Not
+    - !Equals
+      - !Ref 'GlobalReplicasOverride'
+      - ''
+  NoAlbArn: !Equals
+    - !Ref 'AlbArn'
+    - ''
+  NoClusterArn: !Equals
+    - !Ref 'ClusterArn'
+    - ''
+  NoDbHost: !Equals
+    - !Ref 'DbHost'
+    - ''
+  NoDbSecretArn: !Equals
+    - !Ref 'DbSecretArn'
+    - ''
+  NoEfsId: !Equals
+    - !Ref 'EfsFileSystemId'
+    - ''
+  UseAlbImport: !And
+    - !Condition 'HasCI'
+    - !Condition 'NoAlbArn'
+  UseClusterImport: !And
+    - !Condition 'HasCI'
+    - !Condition 'NoClusterArn'
+  UseDbHostImport: !And
+    - !Condition 'HasCI'
+    - !Condition 'NoDbHost'
+  UseDbSecretImport: !And
+    - !Condition 'HasCI'
+    - !Condition 'NoDbSecretArn'
+  UseEfsImport: !And
+    - !Condition 'HasCI'
+    - !Condition 'NoEfsId'
+Description: 'Lakerunner Services: ECS services, task definitions, IAM roles, and ALB integration'
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Infrastructure References
+        Parameters:
+          - CommonInfraStackName
+          - ClusterArn
+          - VpcId
+          - PrivateSubnets
+          - TaskSecurityGroupId
+          - AlbArn
+          - EfsFileSystemId
+      - Label:
+          default: Database Connection
+        Parameters:
+          - DbSecretArn
+          - DbHost
+          - DbPort
+          - DbName
+          - DbUser
+          - DbSSLMode
+      - Label:
+          default: Global Overrides
+        Parameters:
+          - GlobalImageOverride
+          - GlobalReplicasOverride
+    ParameterLabels:
+      AlbArn:
+        default: Load Balancer ARN
+      ClusterArn:
+        default: ECS Cluster ARN
+      CommonInfraStackName:
+        default: Common Infra Stack Name
+      DbHost:
+        default: Database Host
+      DbName:
+        default: Database Name
+      DbPort:
+        default: Database Port
+      DbSSLMode:
+        default: Database SSL Mode
+      DbSecretArn:
+        default: Database Secret ARN
+      DbUser:
+        default: Database User
+      EfsFileSystemId:
+        default: EFS File System ID
+      GlobalImageOverride:
+        default: Global Image Override
+      GlobalReplicasOverride:
+        default: Global Replicas Override
+      PrivateSubnets:
+        default: Private Subnets
+      TaskSecurityGroupId:
+        default: Task Security Group
+      VpcId:
+        default: VPC ID
+Outputs:
+  ExecutionRoleArn:
+    Export:
+      Name: !Sub '${AWS::StackName}-ExecutionRoleArn'
+    Value: !GetAtt 'TaskExecutionRole.Arn'
+  ServiceGrafanaArn:
+    Export:
+      Name: !Sub '${AWS::StackName}-grafana-ServiceArn'
+    Value: !Ref 'ServiceGrafana'
+  ServiceLakerunnerCompactLogsArn:
+    Export:
+      Name: !Sub '${AWS::StackName}-lakerunner-compact-logs-ServiceArn'
+    Value: !Ref 'ServiceLakerunnerCompactLogs'
+  ServiceLakerunnerCompactMetricsArn:
+    Export:
+      Name: !Sub '${AWS::StackName}-lakerunner-compact-metrics-ServiceArn'
+    Value: !Ref 'ServiceLakerunnerCompactMetrics'
+  ServiceLakerunnerIngestLogsArn:
+    Export:
+      Name: !Sub '${AWS::StackName}-lakerunner-ingest-logs-ServiceArn'
+    Value: !Ref 'ServiceLakerunnerIngestLogs'
+  ServiceLakerunnerIngestMetricsArn:
+    Export:
+      Name: !Sub '${AWS::StackName}-lakerunner-ingest-metrics-ServiceArn'
+    Value: !Ref 'ServiceLakerunnerIngestMetrics'
+  ServiceLakerunnerPubsubSqsArn:
+    Export:
+      Name: !Sub '${AWS::StackName}-lakerunner-pubsub-sqs-ServiceArn'
+    Value: !Ref 'ServiceLakerunnerPubsubSqs'
+  ServiceLakerunnerQueryApiArn:
+    Export:
+      Name: !Sub '${AWS::StackName}-lakerunner-query-api-ServiceArn'
+    Value: !Ref 'ServiceLakerunnerQueryApi'
+  ServiceLakerunnerQueryWorkerArn:
+    Export:
+      Name: !Sub '${AWS::StackName}-lakerunner-query-worker-ServiceArn'
+    Value: !Ref 'ServiceLakerunnerQueryWorker'
+  ServiceLakerunnerRollupMetricsArn:
+    Export:
+      Name: !Sub '${AWS::StackName}-lakerunner-rollup-metrics-ServiceArn'
+    Value: !Ref 'ServiceLakerunnerRollupMetrics'
+  ServiceLakerunnerSweeperArn:
+    Export:
+      Name: !Sub '${AWS::StackName}-lakerunner-sweeper-ServiceArn'
+    Value: !Ref 'ServiceLakerunnerSweeper'
+  TaskRoleArn:
+    Export:
+      Name: !Sub '${AWS::StackName}-TaskRoleArn'
+    Value: !GetAtt 'TaskRole.Arn'
+Parameters:
+  AlbArn:
+    Default: ''
+    Description: ALB ARN for services with ingress. Leave blank to import from CommonInfra if CommonInfraStackName is set.
+    Type: String
+  ClusterArn:
+    Default: ''
+    Description: ECS Cluster ARN. Leave blank to import from CommonInfra if CommonInfraStackName is set.
+    Type: String
+  CommonInfraStackName:
+    Default: ''
+    Description: 'OPTIONAL: Name of the CommonInfra stack to import values from. If set, blank fields below will be auto-filled.'
+    Type: String
+  DbHost:
+    Default: ''
+    Description: Database hostname. Leave blank to import from CommonInfra if CommonInfraStackName is set.
+    Type: String
+  DbName:
+    Default: metadata
+    Description: Database name.
+    Type: String
+  DbPort:
+    Default: '5432'
+    Description: Database port.
+    Type: String
+  DbSSLMode:
+    Default: prefer
+    Description: Database SSL mode.
+    Type: String
+  DbSecretArn:
+    Default: ''
+    Description: Database secret ARN. Leave blank to import from CommonInfra if CommonInfraStackName is set.
+    Type: String
+  DbUser:
+    Default: lakerunner
+    Description: Database username.
+    Type: String
+  EfsFileSystemId:
+    Default: ''
+    Description: EFS File System ID. Leave blank to import from CommonInfra if CommonInfraStackName is set.
+    Type: String
+  GlobalImageOverride:
+    Default: ''
+    Description: 'OPTIONAL: Override all service images with this value (useful for testing)'
+    Type: String
+  GlobalReplicasOverride:
+    Default: ''
+    Description: 'OPTIONAL: Override replica count for all services (useful for scaling)'
+    Type: String
+  PrivateSubnets:
+    Description: 'REQUIRED: Private subnet IDs for ECS services.'
+    Type: List<AWS::EC2::Subnet::Id>
+  TaskSecurityGroupId:
+    Description: 'REQUIRED: Security group ID for ECS tasks.'
+    Type: AWS::EC2::SecurityGroup::Id
+  VpcId:
+    Description: 'REQUIRED: VPC ID where services will run.'
+    Type: AWS::EC2::VPC::Id
+Resources:
+  EfsAccessPointGrafana:
+    Properties:
+      AccessPointTags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-grafana'
+      FileSystemId: !If
+        - UseEfsImport
+        - !ImportValue
+          Fn::Sub:
+            - ${CommonInfraStackName}-EfsId
+            - CommonInfraStackName: !Ref 'CommonInfraStackName'
+        - !Ref 'EfsFileSystemId'
+      PosixUser:
+        Gid: '0'
+        Uid: '0'
+      RootDirectory:
+        CreationInfo:
+          OwnerGid: '0'
+          OwnerUid: '0'
+          Permissions: '750'
+        Path: /grafana
+    Type: AWS::EFS::AccessPoint
+  Listener3000:
+    Condition: HasAlb
+    Properties:
+      DefaultActions:
+        - TargetGroupArn: !Ref 'TargetGroupGrafana'
+          Type: forward
+      LoadBalancerArn: !If
+        - UseAlbImport
+        - !ImportValue
+          Fn::Sub:
+            - ${CommonInfraStackName}-AlbArn
+            - CommonInfraStackName: !Ref 'CommonInfraStackName'
+        - !Ref 'AlbArn'
+      Port: '3000'
+      Protocol: HTTP
+    Type: AWS::ElasticLoadBalancingV2::Listener
+  Listener7101:
+    Condition: HasAlb
+    Properties:
+      DefaultActions:
+        - TargetGroupArn: !Ref 'TargetGroupLakerunnerQueryApi'
+          Type: forward
+      LoadBalancerArn: !If
+        - UseAlbImport
+        - !ImportValue
+          Fn::Sub:
+            - ${CommonInfraStackName}-AlbArn
+            - CommonInfraStackName: !Ref 'CommonInfraStackName'
+        - !Ref 'AlbArn'
+      Port: '7101'
+      Protocol: HTTP
+    Type: AWS::ElasticLoadBalancingV2::Listener
+  LogGroupGrafana:
+    Properties:
+      LogGroupName: !Sub '/ecs/grafana'
+      RetentionInDays: 14
+    Type: AWS::Logs::LogGroup
+  LogGroupLakerunnerCompactLogs:
+    Properties:
+      LogGroupName: !Sub '/ecs/lakerunner-compact-logs'
+      RetentionInDays: 14
+    Type: AWS::Logs::LogGroup
+  LogGroupLakerunnerCompactMetrics:
+    Properties:
+      LogGroupName: !Sub '/ecs/lakerunner-compact-metrics'
+      RetentionInDays: 14
+    Type: AWS::Logs::LogGroup
+  LogGroupLakerunnerIngestLogs:
+    Properties:
+      LogGroupName: !Sub '/ecs/lakerunner-ingest-logs'
+      RetentionInDays: 14
+    Type: AWS::Logs::LogGroup
+  LogGroupLakerunnerIngestMetrics:
+    Properties:
+      LogGroupName: !Sub '/ecs/lakerunner-ingest-metrics'
+      RetentionInDays: 14
+    Type: AWS::Logs::LogGroup
+  LogGroupLakerunnerPubsubSqs:
+    Properties:
+      LogGroupName: !Sub '/ecs/lakerunner-pubsub-sqs'
+      RetentionInDays: 14
+    Type: AWS::Logs::LogGroup
+  LogGroupLakerunnerQueryApi:
+    Properties:
+      LogGroupName: !Sub '/ecs/lakerunner-query-api'
+      RetentionInDays: 14
+    Type: AWS::Logs::LogGroup
+  LogGroupLakerunnerQueryWorker:
+    Properties:
+      LogGroupName: !Sub '/ecs/lakerunner-query-worker'
+      RetentionInDays: 14
+    Type: AWS::Logs::LogGroup
+  LogGroupLakerunnerRollupMetrics:
+    Properties:
+      LogGroupName: !Sub '/ecs/lakerunner-rollup-metrics'
+      RetentionInDays: 14
+    Type: AWS::Logs::LogGroup
+  LogGroupLakerunnerSweeper:
+    Properties:
+      LogGroupName: !Sub '/ecs/lakerunner-sweeper'
+      RetentionInDays: 14
+    Type: AWS::Logs::LogGroup
+  ServiceGrafana:
+    Properties:
+      Cluster: !If
+        - UseClusterImport
+        - !ImportValue
+          Fn::Sub:
+            - ${CommonInfraStackName}-ClusterArn
+            - CommonInfraStackName: !Ref 'CommonInfraStackName'
+        - !Ref 'ClusterArn'
+      DesiredCount: !If
+        - HasGlobalReplicasOverride
+        - !Ref 'GlobalReplicasOverride'
+        - '1'
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      LoadBalancers:
+        - ContainerName: AppContainer
+          ContainerPort: 3000
+          TargetGroupArn: !Ref 'TargetGroupGrafana'
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          SecurityGroups:
+            - !Ref 'TaskSecurityGroupId'
+          Subnets: !Ref 'PrivateSubnets'
+      ServiceName: grafana
+      TaskDefinition: !Ref 'TaskDefGrafana'
+    Type: AWS::ECS::Service
+  ServiceLakerunnerCompactLogs:
+    Properties:
+      Cluster: !If
+        - UseClusterImport
+        - !ImportValue
+          Fn::Sub:
+            - ${CommonInfraStackName}-ClusterArn
+            - CommonInfraStackName: !Ref 'CommonInfraStackName'
+        - !Ref 'ClusterArn'
+      DesiredCount: !If
+        - HasGlobalReplicasOverride
+        - !Ref 'GlobalReplicasOverride'
+        - '1'
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          SecurityGroups:
+            - !Ref 'TaskSecurityGroupId'
+          Subnets: !Ref 'PrivateSubnets'
+      ServiceName: lakerunner-compact-logs
+      TaskDefinition: !Ref 'TaskDefLakerunnerCompactLogs'
+    Type: AWS::ECS::Service
+  ServiceLakerunnerCompactMetrics:
+    Properties:
+      Cluster: !If
+        - UseClusterImport
+        - !ImportValue
+          Fn::Sub:
+            - ${CommonInfraStackName}-ClusterArn
+            - CommonInfraStackName: !Ref 'CommonInfraStackName'
+        - !Ref 'ClusterArn'
+      DesiredCount: !If
+        - HasGlobalReplicasOverride
+        - !Ref 'GlobalReplicasOverride'
+        - '1'
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          SecurityGroups:
+            - !Ref 'TaskSecurityGroupId'
+          Subnets: !Ref 'PrivateSubnets'
+      ServiceName: lakerunner-compact-metrics
+      TaskDefinition: !Ref 'TaskDefLakerunnerCompactMetrics'
+    Type: AWS::ECS::Service
+  ServiceLakerunnerIngestLogs:
+    Properties:
+      Cluster: !If
+        - UseClusterImport
+        - !ImportValue
+          Fn::Sub:
+            - ${CommonInfraStackName}-ClusterArn
+            - CommonInfraStackName: !Ref 'CommonInfraStackName'
+        - !Ref 'ClusterArn'
+      DesiredCount: !If
+        - HasGlobalReplicasOverride
+        - !Ref 'GlobalReplicasOverride'
+        - '1'
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          SecurityGroups:
+            - !Ref 'TaskSecurityGroupId'
+          Subnets: !Ref 'PrivateSubnets'
+      ServiceName: lakerunner-ingest-logs
+      TaskDefinition: !Ref 'TaskDefLakerunnerIngestLogs'
+    Type: AWS::ECS::Service
+  ServiceLakerunnerIngestMetrics:
+    Properties:
+      Cluster: !If
+        - UseClusterImport
+        - !ImportValue
+          Fn::Sub:
+            - ${CommonInfraStackName}-ClusterArn
+            - CommonInfraStackName: !Ref 'CommonInfraStackName'
+        - !Ref 'ClusterArn'
+      DesiredCount: !If
+        - HasGlobalReplicasOverride
+        - !Ref 'GlobalReplicasOverride'
+        - '1'
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          SecurityGroups:
+            - !Ref 'TaskSecurityGroupId'
+          Subnets: !Ref 'PrivateSubnets'
+      ServiceName: lakerunner-ingest-metrics
+      TaskDefinition: !Ref 'TaskDefLakerunnerIngestMetrics'
+    Type: AWS::ECS::Service
+  ServiceLakerunnerPubsubSqs:
+    Properties:
+      Cluster: !If
+        - UseClusterImport
+        - !ImportValue
+          Fn::Sub:
+            - ${CommonInfraStackName}-ClusterArn
+            - CommonInfraStackName: !Ref 'CommonInfraStackName'
+        - !Ref 'ClusterArn'
+      DesiredCount: !If
+        - HasGlobalReplicasOverride
+        - !Ref 'GlobalReplicasOverride'
+        - '1'
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          SecurityGroups:
+            - !Ref 'TaskSecurityGroupId'
+          Subnets: !Ref 'PrivateSubnets'
+      ServiceName: lakerunner-pubsub-sqs
+      TaskDefinition: !Ref 'TaskDefLakerunnerPubsubSqs'
+    Type: AWS::ECS::Service
+  ServiceLakerunnerQueryApi:
+    Properties:
+      Cluster: !If
+        - UseClusterImport
+        - !ImportValue
+          Fn::Sub:
+            - ${CommonInfraStackName}-ClusterArn
+            - CommonInfraStackName: !Ref 'CommonInfraStackName'
+        - !Ref 'ClusterArn'
+      DesiredCount: !If
+        - HasGlobalReplicasOverride
+        - !Ref 'GlobalReplicasOverride'
+        - '1'
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      LoadBalancers:
+        - ContainerName: AppContainer
+          ContainerPort: 7101
+          TargetGroupArn: !Ref 'TargetGroupLakerunnerQueryApi'
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          SecurityGroups:
+            - !Ref 'TaskSecurityGroupId'
+          Subnets: !Ref 'PrivateSubnets'
+      ServiceName: lakerunner-query-api
+      TaskDefinition: !Ref 'TaskDefLakerunnerQueryApi'
+    Type: AWS::ECS::Service
+  ServiceLakerunnerQueryWorker:
+    Properties:
+      Cluster: !If
+        - UseClusterImport
+        - !ImportValue
+          Fn::Sub:
+            - ${CommonInfraStackName}-ClusterArn
+            - CommonInfraStackName: !Ref 'CommonInfraStackName'
+        - !Ref 'ClusterArn'
+      DesiredCount: !If
+        - HasGlobalReplicasOverride
+        - !Ref 'GlobalReplicasOverride'
+        - '1'
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          SecurityGroups:
+            - !Ref 'TaskSecurityGroupId'
+          Subnets: !Ref 'PrivateSubnets'
+      ServiceName: lakerunner-query-worker
+      TaskDefinition: !Ref 'TaskDefLakerunnerQueryWorker'
+    Type: AWS::ECS::Service
+  ServiceLakerunnerRollupMetrics:
+    Properties:
+      Cluster: !If
+        - UseClusterImport
+        - !ImportValue
+          Fn::Sub:
+            - ${CommonInfraStackName}-ClusterArn
+            - CommonInfraStackName: !Ref 'CommonInfraStackName'
+        - !Ref 'ClusterArn'
+      DesiredCount: !If
+        - HasGlobalReplicasOverride
+        - !Ref 'GlobalReplicasOverride'
+        - '1'
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          SecurityGroups:
+            - !Ref 'TaskSecurityGroupId'
+          Subnets: !Ref 'PrivateSubnets'
+      ServiceName: lakerunner-rollup-metrics
+      TaskDefinition: !Ref 'TaskDefLakerunnerRollupMetrics'
+    Type: AWS::ECS::Service
+  ServiceLakerunnerSweeper:
+    Properties:
+      Cluster: !If
+        - UseClusterImport
+        - !ImportValue
+          Fn::Sub:
+            - ${CommonInfraStackName}-ClusterArn
+            - CommonInfraStackName: !Ref 'CommonInfraStackName'
+        - !Ref 'ClusterArn'
+      DesiredCount: !If
+        - HasGlobalReplicasOverride
+        - !Ref 'GlobalReplicasOverride'
+        - '1'
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          SecurityGroups:
+            - !Ref 'TaskSecurityGroupId'
+          Subnets: !Ref 'PrivateSubnets'
+      ServiceName: lakerunner-sweeper
+      TaskDefinition: !Ref 'TaskDefLakerunnerSweeper'
+    Type: AWS::ECS::Service
+  TargetGroupGrafana:
+    Properties:
+      HealthCheckIntervalSeconds: 30
+      HealthCheckPath: /api/health
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      Matcher:
+        HttpCode: '200'
+      Name: !Sub '${AWS::StackName}-grafana'
+      Port: 3000
+      Protocol: HTTP
+      TargetGroupAttributes:
+        - Key: stickiness.enabled
+          Value: 'false'
+        - Key: deregistration_delay.timeout_seconds
+          Value: '30'
+      TargetType: ip
+      UnhealthyThresholdCount: 3
+      VpcId: !Ref 'VpcId'
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+  TargetGroupLakerunnerQueryApi:
+    Properties:
+      HealthCheckIntervalSeconds: 30
+      HealthCheckPath: /ready
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      Matcher:
+        HttpCode: '200'
+      Name: !Sub '${AWS::StackName}-lakerunner-que'
+      Port: 7101
+      Protocol: HTTP
+      TargetGroupAttributes:
+        - Key: stickiness.enabled
+          Value: 'false'
+        - Key: deregistration_delay.timeout_seconds
+          Value: '30'
+      TargetType: ip
+      UnhealthyThresholdCount: 3
+      VpcId: !Ref 'VpcId'
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+  TaskDefGrafana:
+    Properties:
+      ContainerDefinitions:
+        - Command: []
+          Environment:
+            - Name: BUMP_REVISION
+              Value: '1'
+            - Name: OTEL_SERVICE_NAME
+              Value: grafana
+            - Name: TMPDIR
+              Value: /scratch
+            - Name: HOME
+              Value: /scratch
+            - Name: STORAGE_PROFILE_FILE
+              Value: env:STORAGE_PROFILES_ENV
+            - Name: API_KEYS_FILE
+              Value: env:API_KEYS_ENV
+            - Name: SQS_QUEUE_URL
+              Value: !Sub 'https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/lakerunner-ingest-queue'
+            - Name: SQS_REGION
+              Value: !Ref 'AWS::Region'
+            - Name: ECS_WORKER_CLUSTER_NAME
+              Value: !Select
+                - 5
+                - !Split
+                  - /
+                  - !If
+                    - UseClusterImport
+                    - !ImportValue
+                      Fn::Sub:
+                        - ${CommonInfraStackName}-ClusterArn
+                        - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                    - !Ref 'ClusterArn'
+            - Name: ECS_WORKER_SERVICE_NAME
+              Value: lakerunner-query-worker
+            - Name: LRDB_HOST
+              Value: !If
+                - UseDbHostImport
+                - !ImportValue
+                  Fn::Sub:
+                    - ${CommonInfraStackName}-DbEndpoint
+                    - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                - !Ref 'DbHost'
+            - Name: LRDB_PORT
+              Value: !Ref 'DbPort'
+            - Name: LRDB_NAME
+              Value: !Ref 'DbName'
+            - Name: LRDB_USER
+              Value: !Ref 'DbUser'
+            - Name: LRDB_SSLMODE
+              Value: !Ref 'DbSSLMode'
+            - Name: GF_SECURITY_ADMIN_USER
+              Value: admin
+            - Name: GF_SECURITY_ADMIN_PASSWORD
+              Value: f70603aa00e6f67999cc66e336134887
+            - Name: GF_SERVER_HTTP_PORT
+              Value: '3000'
+            - Name: GF_SERVER_ROOT_URL
+              Value: '%(protocol)s://%(domain)s:%(http_port)s'
+            - Name: GF_INSTALL_PLUGINS
+              Value: https://github.com/cardinalhq/cardinalhq-lakerunner-datasource/raw/refs/heads/main/cardinalhq-lakerunner-datasource.zip;cardinalhq-lakerunner-datasource
+          HealthCheck:
+            Command:
+              - curl
+              - -f
+              - http://localhost:3000/api/health
+            Interval: 30
+            Retries: 3
+            StartPeriod: 60
+            Timeout: 5
+          Image: !If
+            - HasGlobalImageOverride
+            - !Ref 'GlobalImageOverride'
+            - grafana/grafana:latest
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref 'LogGroupGrafana'
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: grafana
+          MountPoints:
+            - ContainerPath: /scratch
+              ReadOnly: false
+              SourceVolume: scratch
+            - ContainerPath: /var/lib/grafana
+              ReadOnly: false
+              SourceVolume: efs-grafana
+          Name: AppContainer
+          PortMappings:
+            - ContainerPort: 3000
+              Protocol: tcp
+          Secrets:
+            - Name: STORAGE_PROFILES_ENV
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
+            - Name: API_KEYS_ENV
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
+            - Name: LRDB_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !If
+                    - UseDbSecretImport
+                    - !ImportValue
+                      Fn::Sub:
+                        - ${CommonInfraStackName}-DbSecretArn
+                        - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                    - !Ref 'DbSecretArn'
+          User: '0'
+      Cpu: '512'
+      ExecutionRoleArn: !GetAtt 'TaskExecutionRole.Arn'
+      Family: grafana-task
+      Memory: '1024'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      RuntimePlatform:
+        CpuArchitecture: ARM64
+        OperatingSystemFamily: LINUX
+      TaskRoleArn: !GetAtt 'TaskRole.Arn'
+      Volumes:
+        - Name: scratch
+        - EFSVolumeConfiguration:
+            AuthorizationConfig:
+              AccessPointId: !Ref 'EfsAccessPointGrafana'
+              IAM: ENABLED
+            FilesystemId: !If
+              - UseEfsImport
+              - !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-EfsId
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+              - !Ref 'EfsFileSystemId'
+            TransitEncryption: ENABLED
+          Name: efs-grafana
+    Type: AWS::ECS::TaskDefinition
+  TaskDefLakerunnerCompactLogs:
+    Properties:
+      ContainerDefinitions:
+        - Command:
+            - /app/bin/lakerunner
+            - compact-logs
+          Environment:
+            - Name: BUMP_REVISION
+              Value: '1'
+            - Name: OTEL_SERVICE_NAME
+              Value: lakerunner-compact-logs
+            - Name: TMPDIR
+              Value: /scratch
+            - Name: HOME
+              Value: /scratch
+            - Name: STORAGE_PROFILE_FILE
+              Value: env:STORAGE_PROFILES_ENV
+            - Name: API_KEYS_FILE
+              Value: env:API_KEYS_ENV
+            - Name: SQS_QUEUE_URL
+              Value: !Sub 'https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/lakerunner-ingest-queue'
+            - Name: SQS_REGION
+              Value: !Ref 'AWS::Region'
+            - Name: ECS_WORKER_CLUSTER_NAME
+              Value: !Select
+                - 5
+                - !Split
+                  - /
+                  - !If
+                    - UseClusterImport
+                    - !ImportValue
+                      Fn::Sub:
+                        - ${CommonInfraStackName}-ClusterArn
+                        - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                    - !Ref 'ClusterArn'
+            - Name: ECS_WORKER_SERVICE_NAME
+              Value: lakerunner-query-worker
+            - Name: LRDB_HOST
+              Value: !If
+                - UseDbHostImport
+                - !ImportValue
+                  Fn::Sub:
+                    - ${CommonInfraStackName}-DbEndpoint
+                    - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                - !Ref 'DbHost'
+            - Name: LRDB_PORT
+              Value: !Ref 'DbPort'
+            - Name: LRDB_NAME
+              Value: !Ref 'DbName'
+            - Name: LRDB_USER
+              Value: !Ref 'DbUser'
+            - Name: LRDB_SSLMODE
+              Value: !Ref 'DbSSLMode'
+          HealthCheck:
+            Command:
+              - /app/bin/lakerunner
+              - sysinfo
+            Interval: 30
+            Retries: 3
+            StartPeriod: 60
+            Timeout: 5
+          Image: !If
+            - HasGlobalImageOverride
+            - !Ref 'GlobalImageOverride'
+            - public.ecr.aws/cardinalhq.io/lakerunner:latest
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref 'LogGroupLakerunnerCompactLogs'
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: lakerunner-compact-logs
+          MountPoints:
+            - ContainerPath: /scratch
+              ReadOnly: false
+              SourceVolume: scratch
+          Name: AppContainer
+          PortMappings: []
+          Secrets:
+            - Name: STORAGE_PROFILES_ENV
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
+            - Name: API_KEYS_ENV
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
+            - Name: LRDB_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !If
+                    - UseDbSecretImport
+                    - !ImportValue
+                      Fn::Sub:
+                        - ${CommonInfraStackName}-DbSecretArn
+                        - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                    - !Ref 'DbSecretArn'
+          User: '0'
+      Cpu: '1024'
+      ExecutionRoleArn: !GetAtt 'TaskExecutionRole.Arn'
+      Family: lakerunner-compact-logs-task
+      Memory: '2048'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      RuntimePlatform:
+        CpuArchitecture: ARM64
+        OperatingSystemFamily: LINUX
+      TaskRoleArn: !GetAtt 'TaskRole.Arn'
+      Volumes:
+        - Name: scratch
+    Type: AWS::ECS::TaskDefinition
+  TaskDefLakerunnerCompactMetrics:
+    Properties:
+      ContainerDefinitions:
+        - Command:
+            - /app/bin/lakerunner
+            - compact-metrics
+          Environment:
+            - Name: BUMP_REVISION
+              Value: '1'
+            - Name: OTEL_SERVICE_NAME
+              Value: lakerunner-compact-metrics
+            - Name: TMPDIR
+              Value: /scratch
+            - Name: HOME
+              Value: /scratch
+            - Name: STORAGE_PROFILE_FILE
+              Value: env:STORAGE_PROFILES_ENV
+            - Name: API_KEYS_FILE
+              Value: env:API_KEYS_ENV
+            - Name: SQS_QUEUE_URL
+              Value: !Sub 'https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/lakerunner-ingest-queue'
+            - Name: SQS_REGION
+              Value: !Ref 'AWS::Region'
+            - Name: ECS_WORKER_CLUSTER_NAME
+              Value: !Select
+                - 5
+                - !Split
+                  - /
+                  - !If
+                    - UseClusterImport
+                    - !ImportValue
+                      Fn::Sub:
+                        - ${CommonInfraStackName}-ClusterArn
+                        - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                    - !Ref 'ClusterArn'
+            - Name: ECS_WORKER_SERVICE_NAME
+              Value: lakerunner-query-worker
+            - Name: LRDB_HOST
+              Value: !If
+                - UseDbHostImport
+                - !ImportValue
+                  Fn::Sub:
+                    - ${CommonInfraStackName}-DbEndpoint
+                    - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                - !Ref 'DbHost'
+            - Name: LRDB_PORT
+              Value: !Ref 'DbPort'
+            - Name: LRDB_NAME
+              Value: !Ref 'DbName'
+            - Name: LRDB_USER
+              Value: !Ref 'DbUser'
+            - Name: LRDB_SSLMODE
+              Value: !Ref 'DbSSLMode'
+          HealthCheck:
+            Command:
+              - /app/bin/lakerunner
+              - sysinfo
+            Interval: 30
+            Retries: 3
+            StartPeriod: 60
+            Timeout: 5
+          Image: !If
+            - HasGlobalImageOverride
+            - !Ref 'GlobalImageOverride'
+            - public.ecr.aws/cardinalhq.io/lakerunner:latest
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref 'LogGroupLakerunnerCompactMetrics'
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: lakerunner-compact-metrics
+          MountPoints:
+            - ContainerPath: /scratch
+              ReadOnly: false
+              SourceVolume: scratch
+          Name: AppContainer
+          PortMappings: []
+          Secrets:
+            - Name: STORAGE_PROFILES_ENV
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
+            - Name: API_KEYS_ENV
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
+            - Name: LRDB_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !If
+                    - UseDbSecretImport
+                    - !ImportValue
+                      Fn::Sub:
+                        - ${CommonInfraStackName}-DbSecretArn
+                        - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                    - !Ref 'DbSecretArn'
+          User: '0'
+      Cpu: '1024'
+      ExecutionRoleArn: !GetAtt 'TaskExecutionRole.Arn'
+      Family: lakerunner-compact-metrics-task
+      Memory: '2048'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      RuntimePlatform:
+        CpuArchitecture: ARM64
+        OperatingSystemFamily: LINUX
+      TaskRoleArn: !GetAtt 'TaskRole.Arn'
+      Volumes:
+        - Name: scratch
+    Type: AWS::ECS::TaskDefinition
+  TaskDefLakerunnerIngestLogs:
+    Properties:
+      ContainerDefinitions:
+        - Command:
+            - /app/bin/lakerunner
+            - ingest-logs
+          Environment:
+            - Name: BUMP_REVISION
+              Value: '1'
+            - Name: OTEL_SERVICE_NAME
+              Value: lakerunner-ingest-logs
+            - Name: TMPDIR
+              Value: /scratch
+            - Name: HOME
+              Value: /scratch
+            - Name: STORAGE_PROFILE_FILE
+              Value: env:STORAGE_PROFILES_ENV
+            - Name: API_KEYS_FILE
+              Value: env:API_KEYS_ENV
+            - Name: SQS_QUEUE_URL
+              Value: !Sub 'https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/lakerunner-ingest-queue'
+            - Name: SQS_REGION
+              Value: !Ref 'AWS::Region'
+            - Name: ECS_WORKER_CLUSTER_NAME
+              Value: !Select
+                - 5
+                - !Split
+                  - /
+                  - !If
+                    - UseClusterImport
+                    - !ImportValue
+                      Fn::Sub:
+                        - ${CommonInfraStackName}-ClusterArn
+                        - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                    - !Ref 'ClusterArn'
+            - Name: ECS_WORKER_SERVICE_NAME
+              Value: lakerunner-query-worker
+            - Name: LRDB_HOST
+              Value: !If
+                - UseDbHostImport
+                - !ImportValue
+                  Fn::Sub:
+                    - ${CommonInfraStackName}-DbEndpoint
+                    - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                - !Ref 'DbHost'
+            - Name: LRDB_PORT
+              Value: !Ref 'DbPort'
+            - Name: LRDB_NAME
+              Value: !Ref 'DbName'
+            - Name: LRDB_USER
+              Value: !Ref 'DbUser'
+            - Name: LRDB_SSLMODE
+              Value: !Ref 'DbSSLMode'
+          HealthCheck:
+            Command:
+              - /app/bin/lakerunner
+              - sysinfo
+            Interval: 30
+            Retries: 3
+            StartPeriod: 60
+            Timeout: 5
+          Image: !If
+            - HasGlobalImageOverride
+            - !Ref 'GlobalImageOverride'
+            - public.ecr.aws/cardinalhq.io/lakerunner:latest
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref 'LogGroupLakerunnerIngestLogs'
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: lakerunner-ingest-logs
+          MountPoints:
+            - ContainerPath: /scratch
+              ReadOnly: false
+              SourceVolume: scratch
+          Name: AppContainer
+          PortMappings: []
+          Secrets:
+            - Name: STORAGE_PROFILES_ENV
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
+            - Name: API_KEYS_ENV
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
+            - Name: LRDB_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !If
+                    - UseDbSecretImport
+                    - !ImportValue
+                      Fn::Sub:
+                        - ${CommonInfraStackName}-DbSecretArn
+                        - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                    - !Ref 'DbSecretArn'
+          User: '0'
+      Cpu: '1024'
+      ExecutionRoleArn: !GetAtt 'TaskExecutionRole.Arn'
+      Family: lakerunner-ingest-logs-task
+      Memory: '2048'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      RuntimePlatform:
+        CpuArchitecture: ARM64
+        OperatingSystemFamily: LINUX
+      TaskRoleArn: !GetAtt 'TaskRole.Arn'
+      Volumes:
+        - Name: scratch
+    Type: AWS::ECS::TaskDefinition
+  TaskDefLakerunnerIngestMetrics:
+    Properties:
+      ContainerDefinitions:
+        - Command:
+            - /app/bin/lakerunner
+            - ingest-metrics
+          Environment:
+            - Name: BUMP_REVISION
+              Value: '1'
+            - Name: OTEL_SERVICE_NAME
+              Value: lakerunner-ingest-metrics
+            - Name: TMPDIR
+              Value: /scratch
+            - Name: HOME
+              Value: /scratch
+            - Name: STORAGE_PROFILE_FILE
+              Value: env:STORAGE_PROFILES_ENV
+            - Name: API_KEYS_FILE
+              Value: env:API_KEYS_ENV
+            - Name: SQS_QUEUE_URL
+              Value: !Sub 'https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/lakerunner-ingest-queue'
+            - Name: SQS_REGION
+              Value: !Ref 'AWS::Region'
+            - Name: ECS_WORKER_CLUSTER_NAME
+              Value: !Select
+                - 5
+                - !Split
+                  - /
+                  - !If
+                    - UseClusterImport
+                    - !ImportValue
+                      Fn::Sub:
+                        - ${CommonInfraStackName}-ClusterArn
+                        - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                    - !Ref 'ClusterArn'
+            - Name: ECS_WORKER_SERVICE_NAME
+              Value: lakerunner-query-worker
+            - Name: LRDB_HOST
+              Value: !If
+                - UseDbHostImport
+                - !ImportValue
+                  Fn::Sub:
+                    - ${CommonInfraStackName}-DbEndpoint
+                    - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                - !Ref 'DbHost'
+            - Name: LRDB_PORT
+              Value: !Ref 'DbPort'
+            - Name: LRDB_NAME
+              Value: !Ref 'DbName'
+            - Name: LRDB_USER
+              Value: !Ref 'DbUser'
+            - Name: LRDB_SSLMODE
+              Value: !Ref 'DbSSLMode'
+          HealthCheck:
+            Command:
+              - /app/bin/lakerunner
+              - sysinfo
+            Interval: 30
+            Retries: 3
+            StartPeriod: 60
+            Timeout: 5
+          Image: !If
+            - HasGlobalImageOverride
+            - !Ref 'GlobalImageOverride'
+            - public.ecr.aws/cardinalhq.io/lakerunner:latest
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref 'LogGroupLakerunnerIngestMetrics'
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: lakerunner-ingest-metrics
+          MountPoints:
+            - ContainerPath: /scratch
+              ReadOnly: false
+              SourceVolume: scratch
+          Name: AppContainer
+          PortMappings: []
+          Secrets:
+            - Name: STORAGE_PROFILES_ENV
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
+            - Name: API_KEYS_ENV
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
+            - Name: LRDB_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !If
+                    - UseDbSecretImport
+                    - !ImportValue
+                      Fn::Sub:
+                        - ${CommonInfraStackName}-DbSecretArn
+                        - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                    - !Ref 'DbSecretArn'
+          User: '0'
+      Cpu: '1024'
+      ExecutionRoleArn: !GetAtt 'TaskExecutionRole.Arn'
+      Family: lakerunner-ingest-metrics-task
+      Memory: '2048'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      RuntimePlatform:
+        CpuArchitecture: ARM64
+        OperatingSystemFamily: LINUX
+      TaskRoleArn: !GetAtt 'TaskRole.Arn'
+      Volumes:
+        - Name: scratch
+    Type: AWS::ECS::TaskDefinition
+  TaskDefLakerunnerPubsubSqs:
+    Properties:
+      ContainerDefinitions:
+        - Command:
+            - /app/bin/lakerunner
+            - pubsub
+            - sqs
+          Environment:
+            - Name: BUMP_REVISION
+              Value: '1'
+            - Name: OTEL_SERVICE_NAME
+              Value: lakerunner-pubsub-sqs
+            - Name: TMPDIR
+              Value: /scratch
+            - Name: HOME
+              Value: /scratch
+            - Name: STORAGE_PROFILE_FILE
+              Value: env:STORAGE_PROFILES_ENV
+            - Name: API_KEYS_FILE
+              Value: env:API_KEYS_ENV
+            - Name: SQS_QUEUE_URL
+              Value: !Sub 'https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/lakerunner-ingest-queue'
+            - Name: SQS_REGION
+              Value: !Ref 'AWS::Region'
+            - Name: ECS_WORKER_CLUSTER_NAME
+              Value: !Select
+                - 5
+                - !Split
+                  - /
+                  - !If
+                    - UseClusterImport
+                    - !ImportValue
+                      Fn::Sub:
+                        - ${CommonInfraStackName}-ClusterArn
+                        - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                    - !Ref 'ClusterArn'
+            - Name: ECS_WORKER_SERVICE_NAME
+              Value: lakerunner-query-worker
+            - Name: LRDB_HOST
+              Value: !If
+                - UseDbHostImport
+                - !ImportValue
+                  Fn::Sub:
+                    - ${CommonInfraStackName}-DbEndpoint
+                    - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                - !Ref 'DbHost'
+            - Name: LRDB_PORT
+              Value: !Ref 'DbPort'
+            - Name: LRDB_NAME
+              Value: !Ref 'DbName'
+            - Name: LRDB_USER
+              Value: !Ref 'DbUser'
+            - Name: LRDB_SSLMODE
+              Value: !Ref 'DbSSLMode'
+          HealthCheck:
+            Command:
+              - /app/bin/lakerunner
+              - sysinfo
+            Interval: 30
+            Retries: 3
+            StartPeriod: 60
+            Timeout: 5
+          Image: !If
+            - HasGlobalImageOverride
+            - !Ref 'GlobalImageOverride'
+            - public.ecr.aws/cardinalhq.io/lakerunner:latest
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref 'LogGroupLakerunnerPubsubSqs'
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: lakerunner-pubsub-sqs
+          MountPoints:
+            - ContainerPath: /scratch
+              ReadOnly: false
+              SourceVolume: scratch
+          Name: AppContainer
+          PortMappings: []
+          Secrets:
+            - Name: STORAGE_PROFILES_ENV
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
+            - Name: API_KEYS_ENV
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
+            - Name: LRDB_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !If
+                    - UseDbSecretImport
+                    - !ImportValue
+                      Fn::Sub:
+                        - ${CommonInfraStackName}-DbSecretArn
+                        - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                    - !Ref 'DbSecretArn'
+          User: '0'
+      Cpu: '1024'
+      ExecutionRoleArn: !GetAtt 'TaskExecutionRole.Arn'
+      Family: lakerunner-pubsub-sqs-task
+      Memory: '2048'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      RuntimePlatform:
+        CpuArchitecture: ARM64
+        OperatingSystemFamily: LINUX
+      TaskRoleArn: !GetAtt 'TaskRole.Arn'
+      Volumes:
+        - Name: scratch
+    Type: AWS::ECS::TaskDefinition
+  TaskDefLakerunnerQueryApi:
+    Properties:
+      ContainerDefinitions:
+        - Command: []
+          Environment:
+            - Name: BUMP_REVISION
+              Value: '1'
+            - Name: OTEL_SERVICE_NAME
+              Value: lakerunner-query-api
+            - Name: TMPDIR
+              Value: /scratch
+            - Name: HOME
+              Value: /scratch
+            - Name: STORAGE_PROFILE_FILE
+              Value: env:STORAGE_PROFILES_ENV
+            - Name: API_KEYS_FILE
+              Value: env:API_KEYS_ENV
+            - Name: SQS_QUEUE_URL
+              Value: !Sub 'https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/lakerunner-ingest-queue'
+            - Name: SQS_REGION
+              Value: !Ref 'AWS::Region'
+            - Name: ECS_WORKER_CLUSTER_NAME
+              Value: !Select
+                - 5
+                - !Split
+                  - /
+                  - !If
+                    - UseClusterImport
+                    - !ImportValue
+                      Fn::Sub:
+                        - ${CommonInfraStackName}-ClusterArn
+                        - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                    - !Ref 'ClusterArn'
+            - Name: ECS_WORKER_SERVICE_NAME
+              Value: lakerunner-query-worker
+            - Name: LRDB_HOST
+              Value: !If
+                - UseDbHostImport
+                - !ImportValue
+                  Fn::Sub:
+                    - ${CommonInfraStackName}-DbEndpoint
+                    - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                - !Ref 'DbHost'
+            - Name: LRDB_PORT
+              Value: !Ref 'DbPort'
+            - Name: LRDB_NAME
+              Value: !Ref 'DbName'
+            - Name: LRDB_USER
+              Value: !Ref 'DbUser'
+            - Name: LRDB_SSLMODE
+              Value: !Ref 'DbSSLMode'
+            - Name: EXECUTION_ENVIRONMENT
+              Value: ecs
+            - Name: QUERY_WORKER_DEPLOYMENT_NAME
+              Value: lakerunner-query-worker
+            - Name: QUERY_WORKER_SERVICE_NAME
+              Value: lakerunner-query-worker
+            - Name: QUERY_STACK
+              Value: local
+            - Name: METRIC_PREFIX
+              Value: lakerunner-query-api
+            - Name: NUM_MIN_QUERY_WORKERS
+              Value: '1'
+            - Name: NUM_MAX_QUERY_WORKERS
+              Value: '4'
+            - Name: SPRING_PROFILES_ACTIVE
+              Value: aws
+            - Name: TOKEN_HMAC256_KEY
+              Value: alksdjalksdjalkdjalskdjalskdjalkdjalskjdalskdjalk
+          HealthCheck:
+            Command:
+              - curl
+              - -f
+              - http://localhost:7101/ready
+            Interval: 30
+            Retries: 3
+            StartPeriod: 60
+            Timeout: 5
+          Image: !If
+            - HasGlobalImageOverride
+            - !Ref 'GlobalImageOverride'
+            - public.ecr.aws/cardinalhq.io/lakerunner/query-api:latest-dev
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref 'LogGroupLakerunnerQueryApi'
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: lakerunner-query-api
+          MountPoints:
+            - ContainerPath: /scratch
+              ReadOnly: false
+              SourceVolume: scratch
+            - ContainerPath: /db
+              ReadOnly: false
+              SourceVolume: scratch
+          Name: AppContainer
+          PortMappings:
+            - ContainerPort: 7101
+              Protocol: tcp
+          Secrets:
+            - Name: STORAGE_PROFILES_ENV
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
+            - Name: API_KEYS_ENV
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
+            - Name: LRDB_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !If
+                    - UseDbSecretImport
+                    - !ImportValue
+                      Fn::Sub:
+                        - ${CommonInfraStackName}-DbSecretArn
+                        - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                    - !Ref 'DbSecretArn'
+          User: '0'
+      Cpu: '2048'
+      ExecutionRoleArn: !GetAtt 'TaskExecutionRole.Arn'
+      Family: lakerunner-query-api-task
+      Memory: '8192'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      RuntimePlatform:
+        CpuArchitecture: ARM64
+        OperatingSystemFamily: LINUX
+      TaskRoleArn: !GetAtt 'TaskRole.Arn'
+      Volumes:
+        - Name: scratch
+    Type: AWS::ECS::TaskDefinition
+  TaskDefLakerunnerQueryWorker:
+    Properties:
+      ContainerDefinitions:
+        - Command: []
+          Environment:
+            - Name: BUMP_REVISION
+              Value: '1'
+            - Name: OTEL_SERVICE_NAME
+              Value: lakerunner-query-worker
+            - Name: TMPDIR
+              Value: /scratch
+            - Name: HOME
+              Value: /scratch
+            - Name: STORAGE_PROFILE_FILE
+              Value: env:STORAGE_PROFILES_ENV
+            - Name: API_KEYS_FILE
+              Value: env:API_KEYS_ENV
+            - Name: SQS_QUEUE_URL
+              Value: !Sub 'https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/lakerunner-ingest-queue'
+            - Name: SQS_REGION
+              Value: !Ref 'AWS::Region'
+            - Name: ECS_WORKER_CLUSTER_NAME
+              Value: !Select
+                - 5
+                - !Split
+                  - /
+                  - !If
+                    - UseClusterImport
+                    - !ImportValue
+                      Fn::Sub:
+                        - ${CommonInfraStackName}-ClusterArn
+                        - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                    - !Ref 'ClusterArn'
+            - Name: ECS_WORKER_SERVICE_NAME
+              Value: lakerunner-query-worker
+            - Name: LRDB_HOST
+              Value: !If
+                - UseDbHostImport
+                - !ImportValue
+                  Fn::Sub:
+                    - ${CommonInfraStackName}-DbEndpoint
+                    - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                - !Ref 'DbHost'
+            - Name: LRDB_PORT
+              Value: !Ref 'DbPort'
+            - Name: LRDB_NAME
+              Value: !Ref 'DbName'
+            - Name: LRDB_USER
+              Value: !Ref 'DbUser'
+            - Name: LRDB_SSLMODE
+              Value: !Ref 'DbSSLMode'
+            - Name: METRIC_PREFIX
+              Value: lakerunner-query-worker
+            - Name: SPRING_PROFILES_ACTIVE
+              Value: aws
+            - Name: TOKEN_HMAC256_KEY
+              Value: alksdjalksdjalkdjalskdjalskdjalkdjalskjdalskdjalk
+          HealthCheck:
+            Command:
+              - curl
+              - -f
+              - http://localhost:7101/ready
+            Interval: 30
+            Retries: 3
+            StartPeriod: 60
+            Timeout: 5
+          Image: !If
+            - HasGlobalImageOverride
+            - !Ref 'GlobalImageOverride'
+            - public.ecr.aws/cardinalhq.io/lakerunner/query-worker:latest-dev
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref 'LogGroupLakerunnerQueryWorker'
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: lakerunner-query-worker
+          MountPoints:
+            - ContainerPath: /scratch
+              ReadOnly: false
+              SourceVolume: scratch
+            - ContainerPath: /db
+              ReadOnly: false
+              SourceVolume: scratch
+          Name: AppContainer
+          PortMappings:
+            - ContainerPort: 7101
+              Protocol: tcp
+          Secrets:
+            - Name: STORAGE_PROFILES_ENV
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
+            - Name: API_KEYS_ENV
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
+            - Name: LRDB_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !If
+                    - UseDbSecretImport
+                    - !ImportValue
+                      Fn::Sub:
+                        - ${CommonInfraStackName}-DbSecretArn
+                        - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                    - !Ref 'DbSecretArn'
+          User: '0'
+      Cpu: '2048'
+      ExecutionRoleArn: !GetAtt 'TaskExecutionRole.Arn'
+      Family: lakerunner-query-worker-task
+      Memory: '8192'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      RuntimePlatform:
+        CpuArchitecture: ARM64
+        OperatingSystemFamily: LINUX
+      TaskRoleArn: !GetAtt 'TaskRole.Arn'
+      Volumes:
+        - Name: scratch
+    Type: AWS::ECS::TaskDefinition
+  TaskDefLakerunnerRollupMetrics:
+    Properties:
+      ContainerDefinitions:
+        - Command:
+            - /app/bin/lakerunner
+            - rollup-metrics
+          Environment:
+            - Name: BUMP_REVISION
+              Value: '1'
+            - Name: OTEL_SERVICE_NAME
+              Value: lakerunner-rollup-metrics
+            - Name: TMPDIR
+              Value: /scratch
+            - Name: HOME
+              Value: /scratch
+            - Name: STORAGE_PROFILE_FILE
+              Value: env:STORAGE_PROFILES_ENV
+            - Name: API_KEYS_FILE
+              Value: env:API_KEYS_ENV
+            - Name: SQS_QUEUE_URL
+              Value: !Sub 'https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/lakerunner-ingest-queue'
+            - Name: SQS_REGION
+              Value: !Ref 'AWS::Region'
+            - Name: ECS_WORKER_CLUSTER_NAME
+              Value: !Select
+                - 5
+                - !Split
+                  - /
+                  - !If
+                    - UseClusterImport
+                    - !ImportValue
+                      Fn::Sub:
+                        - ${CommonInfraStackName}-ClusterArn
+                        - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                    - !Ref 'ClusterArn'
+            - Name: ECS_WORKER_SERVICE_NAME
+              Value: lakerunner-query-worker
+            - Name: LRDB_HOST
+              Value: !If
+                - UseDbHostImport
+                - !ImportValue
+                  Fn::Sub:
+                    - ${CommonInfraStackName}-DbEndpoint
+                    - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                - !Ref 'DbHost'
+            - Name: LRDB_PORT
+              Value: !Ref 'DbPort'
+            - Name: LRDB_NAME
+              Value: !Ref 'DbName'
+            - Name: LRDB_USER
+              Value: !Ref 'DbUser'
+            - Name: LRDB_SSLMODE
+              Value: !Ref 'DbSSLMode'
+          HealthCheck:
+            Command:
+              - /app/bin/lakerunner
+              - sysinfo
+            Interval: 30
+            Retries: 3
+            StartPeriod: 60
+            Timeout: 5
+          Image: !If
+            - HasGlobalImageOverride
+            - !Ref 'GlobalImageOverride'
+            - public.ecr.aws/cardinalhq.io/lakerunner:latest
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref 'LogGroupLakerunnerRollupMetrics'
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: lakerunner-rollup-metrics
+          MountPoints:
+            - ContainerPath: /scratch
+              ReadOnly: false
+              SourceVolume: scratch
+          Name: AppContainer
+          PortMappings: []
+          Secrets:
+            - Name: STORAGE_PROFILES_ENV
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
+            - Name: API_KEYS_ENV
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
+            - Name: LRDB_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !If
+                    - UseDbSecretImport
+                    - !ImportValue
+                      Fn::Sub:
+                        - ${CommonInfraStackName}-DbSecretArn
+                        - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                    - !Ref 'DbSecretArn'
+          User: '0'
+      Cpu: '1024'
+      ExecutionRoleArn: !GetAtt 'TaskExecutionRole.Arn'
+      Family: lakerunner-rollup-metrics-task
+      Memory: '2048'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      RuntimePlatform:
+        CpuArchitecture: ARM64
+        OperatingSystemFamily: LINUX
+      TaskRoleArn: !GetAtt 'TaskRole.Arn'
+      Volumes:
+        - Name: scratch
+    Type: AWS::ECS::TaskDefinition
+  TaskDefLakerunnerSweeper:
+    Properties:
+      ContainerDefinitions:
+        - Command:
+            - /app/bin/lakerunner
+            - sweeper
+          Environment:
+            - Name: BUMP_REVISION
+              Value: '1'
+            - Name: OTEL_SERVICE_NAME
+              Value: lakerunner-sweeper
+            - Name: TMPDIR
+              Value: /scratch
+            - Name: HOME
+              Value: /scratch
+            - Name: STORAGE_PROFILE_FILE
+              Value: env:STORAGE_PROFILES_ENV
+            - Name: API_KEYS_FILE
+              Value: env:API_KEYS_ENV
+            - Name: SQS_QUEUE_URL
+              Value: !Sub 'https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/lakerunner-ingest-queue'
+            - Name: SQS_REGION
+              Value: !Ref 'AWS::Region'
+            - Name: ECS_WORKER_CLUSTER_NAME
+              Value: !Select
+                - 5
+                - !Split
+                  - /
+                  - !If
+                    - UseClusterImport
+                    - !ImportValue
+                      Fn::Sub:
+                        - ${CommonInfraStackName}-ClusterArn
+                        - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                    - !Ref 'ClusterArn'
+            - Name: ECS_WORKER_SERVICE_NAME
+              Value: lakerunner-query-worker
+            - Name: LRDB_HOST
+              Value: !If
+                - UseDbHostImport
+                - !ImportValue
+                  Fn::Sub:
+                    - ${CommonInfraStackName}-DbEndpoint
+                    - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                - !Ref 'DbHost'
+            - Name: LRDB_PORT
+              Value: !Ref 'DbPort'
+            - Name: LRDB_NAME
+              Value: !Ref 'DbName'
+            - Name: LRDB_USER
+              Value: !Ref 'DbUser'
+            - Name: LRDB_SSLMODE
+              Value: !Ref 'DbSSLMode'
+          HealthCheck:
+            Command:
+              - /app/bin/lakerunner
+              - sysinfo
+            Interval: 30
+            Retries: 3
+            StartPeriod: 60
+            Timeout: 5
+          Image: !If
+            - HasGlobalImageOverride
+            - !Ref 'GlobalImageOverride'
+            - public.ecr.aws/cardinalhq.io/lakerunner:latest
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref 'LogGroupLakerunnerSweeper'
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: lakerunner-sweeper
+          MountPoints:
+            - ContainerPath: /scratch
+              ReadOnly: false
+              SourceVolume: scratch
+          Name: AppContainer
+          PortMappings: []
+          Secrets:
+            - Name: STORAGE_PROFILES_ENV
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
+            - Name: API_KEYS_ENV
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
+            - Name: LRDB_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !If
+                    - UseDbSecretImport
+                    - !ImportValue
+                      Fn::Sub:
+                        - ${CommonInfraStackName}-DbSecretArn
+                        - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                    - !Ref 'DbSecretArn'
+          User: '0'
+      Cpu: '1024'
+      ExecutionRoleArn: !GetAtt 'TaskExecutionRole.Arn'
+      Family: lakerunner-sweeper-task
+      Memory: '2048'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      RuntimePlatform:
+        CpuArchitecture: ARM64
+        OperatingSystemFamily: LINUX
+      TaskRoleArn: !GetAtt 'TaskRole.Arn'
+      Volumes:
+        - Name: scratch
+    Type: AWS::ECS::TaskDefinition
+  TaskExecutionRole:
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+        Version: '2012-10-17'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyDocument:
+            Statement:
+              - Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                Effect: Allow
+                Resource:
+                  - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/*'
+              - Action:
+                  - ssmmessages:CreateControlChannel
+                  - ssmmessages:CreateDataChannel
+                  - ssmmessages:OpenControlChannel
+                  - ssmmessages:OpenDataChannel
+                Effect: Allow
+                Resource: '*'
+            Version: '2012-10-17'
+          PolicyName: SSMParameterAccess
+      RoleName: !Sub '${AWS::StackName}-execution-role'
+    Type: AWS::IAM::Role
+  TaskRole:
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+        Version: '2012-10-17'
+      Policies:
+        - PolicyDocument:
+            Statement:
+              - Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                Effect: Allow
+                Resource:
+                  - !Sub 'arn:aws:s3:::lakerunner-*'
+                  - !Sub 'arn:aws:s3:::lakerunner-*/*'
+              - Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Effect: Allow
+                Resource:
+                  - !Sub 'arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:lakerunner-*'
+              - Action:
+                  - secretsmanager:GetSecretValue
+                Effect: Allow
+                Resource:
+                  - !If
+                    - UseDbSecretImport
+                    - !ImportValue
+                      Fn::Sub:
+                        - ${CommonInfraStackName}-DbSecretArn
+                        - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                    - !Ref 'DbSecretArn'
+              - Action:
+                  - ecs:ListServices
+                  - ecs:DescribeServices
+                  - ecs:UpdateService
+                  - ecs:ListTasks
+                  - ecs:DescribeTasks
+                Effect: Allow
+                Resource: '*'
+              - Action:
+                  - elasticfilesystem:ClientMount
+                  - elasticfilesystem:ClientWrite
+                  - elasticfilesystem:ClientRootAccess
+                  - elasticfilesystem:DescribeFileSystems
+                  - elasticfilesystem:DescribeMountTargets
+                  - elasticfilesystem:DescribeAccessPoints
+                Effect: Allow
+                Resource: '*'
+            Version: '2012-10-17'
+          PolicyName: S3AndSQSAccess
+      RoleName: !Sub '${AWS::StackName}-task-role'
+    Type: AWS::IAM::Role
+

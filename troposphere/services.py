@@ -1,0 +1,630 @@
+#!/usr/bin/env python3
+# Copyright (C) 2025 CardinalHQ, Inc
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as
+# published by the Free Software Foundation, version 3.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program. If not, see <http://www.gnu.org/licenses/>.
+
+import yaml
+import os
+from troposphere import (
+    Template, Parameter, Ref, Sub, GetAtt, If, Equals, NoValue, Export, Output,
+    Select, Not, Tags, ImportValue, Join, And, Split
+)
+from troposphere.ecs import (
+    Service, TaskDefinition, ContainerDefinition, Environment,
+    LogConfiguration, Secret as EcsSecret, Volume, MountPoint,
+    HealthCheck, PortMapping, RuntimePlatform, NetworkConfiguration, AwsvpcConfiguration,
+    LoadBalancer as EcsLoadBalancer, EFSVolumeConfiguration, AuthorizationConfig
+)
+from troposphere.iam import Role, Policy
+from troposphere.elasticloadbalancingv2 import TargetGroup, TargetGroupAttribute, Listener, Matcher
+from troposphere.elasticloadbalancingv2 import Action as AlbAction
+from troposphere.efs import AccessPoint, PosixUser, RootDirectory, CreationInfo
+from troposphere.logs import LogGroup
+
+def load_service_config(config_file="services.yaml"):
+    """Load service configuration from YAML file"""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    config_path = os.path.join(script_dir, config_file)
+    
+    with open(config_path, 'r') as f:
+        return yaml.safe_load(f)
+
+def create_services_template():
+    """Create CloudFormation template for all services"""
+    
+    t = Template()
+    t.set_description("Lakerunner Services: ECS services, task definitions, IAM roles, and ALB integration")
+    
+    # Load service configurations
+    config = load_service_config()
+    services = config.get('services', {})
+    
+    # -----------------------
+    # Parameters with deploy-time overrides
+    # -----------------------
+    CommonInfraStackName = t.add_parameter(Parameter(
+        "CommonInfraStackName", Type="String", Default="",
+        Description="OPTIONAL: Name of the CommonInfra stack to import values from. If set, blank fields below will be auto-filled."
+    ))
+    
+    ClusterArn = t.add_parameter(Parameter(
+        "ClusterArn", Type="String", Default="",
+        Description="ECS Cluster ARN. Leave blank to import from CommonInfra if CommonInfraStackName is set."
+    ))
+    
+    VpcId = t.add_parameter(Parameter(
+        "VpcId", Type="AWS::EC2::VPC::Id",
+        Description="REQUIRED: VPC ID where services will run."
+    ))
+    
+    PrivateSubnets = t.add_parameter(Parameter(
+        "PrivateSubnets", Type="List<AWS::EC2::Subnet::Id>",
+        Description="REQUIRED: Private subnet IDs for ECS services."
+    ))
+    
+    TaskSecurityGroupId = t.add_parameter(Parameter(
+        "TaskSecurityGroupId", Type="AWS::EC2::SecurityGroup::Id",
+        Description="REQUIRED: Security group ID for ECS tasks."
+    ))
+    
+    DbSecretArn = t.add_parameter(Parameter(
+        "DbSecretArn", Type="String", Default="",
+        Description="Database secret ARN. Leave blank to import from CommonInfra if CommonInfraStackName is set."
+    ))
+    
+    DbHost = t.add_parameter(Parameter(
+        "DbHost", Type="String", Default="",
+        Description="Database hostname. Leave blank to import from CommonInfra if CommonInfraStackName is set."
+    ))
+    
+    DbPort = t.add_parameter(Parameter(
+        "DbPort", Type="String", Default="5432",
+        Description="Database port."
+    ))
+    
+    DbName = t.add_parameter(Parameter(
+        "DbName", Type="String", Default="metadata",
+        Description="Database name."
+    ))
+    
+    DbUser = t.add_parameter(Parameter(
+        "DbUser", Type="String", Default="lakerunner", 
+        Description="Database username."
+    ))
+    
+    DbSSLMode = t.add_parameter(Parameter(
+        "DbSSLMode", Type="String", Default="prefer",
+        Description="Database SSL mode."
+    ))
+    
+    AlbArn = t.add_parameter(Parameter(
+        "AlbArn", Type="String", Default="",
+        Description="ALB ARN for services with ingress. Leave blank to import from CommonInfra if CommonInfraStackName is set."
+    ))
+    
+    EfsFileSystemId = t.add_parameter(Parameter(
+        "EfsFileSystemId", Type="String", Default="",
+        Description="EFS File System ID. Leave blank to import from CommonInfra if CommonInfraStackName is set."
+    ))
+    
+    # Global service overrides
+    GlobalImageOverride = t.add_parameter(Parameter(
+        "GlobalImageOverride", Type="String", Default="",
+        Description="OPTIONAL: Override all service images with this value (useful for testing)"
+    ))
+    
+    GlobalReplicasOverride = t.add_parameter(Parameter(
+        "GlobalReplicasOverride", Type="String", Default="",
+        Description="OPTIONAL: Override replica count for all services (useful for scaling)"
+    ))
+    
+    # Parameter groups for console
+    t.set_metadata({
+        "AWS::CloudFormation::Interface": {
+            "ParameterGroups": [
+                {
+                    "Label": {"default": "Infrastructure References"},
+                    "Parameters": ["CommonInfraStackName", "ClusterArn", "VpcId", "PrivateSubnets", "TaskSecurityGroupId", "AlbArn", "EfsFileSystemId"]
+                },
+                {
+                    "Label": {"default": "Database Connection"},
+                    "Parameters": ["DbSecretArn", "DbHost", "DbPort", "DbName", "DbUser", "DbSSLMode"]
+                },
+                {
+                    "Label": {"default": "Global Overrides"},
+                    "Parameters": ["GlobalImageOverride", "GlobalReplicasOverride"]
+                }
+            ],
+            "ParameterLabels": {
+                "CommonInfraStackName": {"default": "Common Infra Stack Name"},
+                "ClusterArn": {"default": "ECS Cluster ARN"},
+                "VpcId": {"default": "VPC ID"},
+                "PrivateSubnets": {"default": "Private Subnets"},
+                "TaskSecurityGroupId": {"default": "Task Security Group"},
+                "AlbArn": {"default": "Load Balancer ARN"},
+                "EfsFileSystemId": {"default": "EFS File System ID"},
+                "DbSecretArn": {"default": "Database Secret ARN"},
+                "DbHost": {"default": "Database Host"},
+                "DbPort": {"default": "Database Port"},
+                "DbName": {"default": "Database Name"},
+                "DbUser": {"default": "Database User"},
+                "DbSSLMode": {"default": "Database SSL Mode"},
+                "GlobalImageOverride": {"default": "Global Image Override"},
+                "GlobalReplicasOverride": {"default": "Global Replicas Override"}
+            }
+        }
+    })
+    
+    # -----------------------
+    # Conditions for importing from CommonInfra
+    # -----------------------
+    t.add_condition("HasCI", Not(Equals(Ref(CommonInfraStackName), "")))
+    t.add_condition("NoClusterArn", Equals(Ref(ClusterArn), ""))
+    t.add_condition("NoDbSecretArn", Equals(Ref(DbSecretArn), ""))
+    t.add_condition("NoDbHost", Equals(Ref(DbHost), ""))
+    t.add_condition("NoAlbArn", Equals(Ref(AlbArn), ""))
+    t.add_condition("NoEfsId", Equals(Ref(EfsFileSystemId), ""))
+    t.add_condition("HasGlobalImageOverride", Not(Equals(Ref(GlobalImageOverride), "")))
+    t.add_condition("HasGlobalReplicasOverride", Not(Equals(Ref(GlobalReplicasOverride), "")))
+    
+    from troposphere import Condition
+    t.add_condition("UseClusterImport", And(Condition("HasCI"), Condition("NoClusterArn")))
+    t.add_condition("UseDbSecretImport", And(Condition("HasCI"), Condition("NoDbSecretArn")))
+    t.add_condition("UseDbHostImport", And(Condition("HasCI"), Condition("NoDbHost")))
+    t.add_condition("UseAlbImport", And(Condition("HasCI"), Condition("NoAlbArn")))
+    t.add_condition("UseEfsImport", And(Condition("HasCI"), Condition("NoEfsId")))
+    
+    # Helper function for imports
+    def ci_export(suffix):
+        return Sub("${CommonInfraStackName}-%s" % suffix, CommonInfraStackName=Ref(CommonInfraStackName))
+    
+    # Resolved values
+    ClusterArnValue = If("UseClusterImport", ImportValue(ci_export("ClusterArn")), Ref(ClusterArn))
+    DbSecretArnValue = If("UseDbSecretImport", ImportValue(ci_export("DbSecretArn")), Ref(DbSecretArn))
+    DbHostValue = If("UseDbHostImport", ImportValue(ci_export("DbEndpoint")), Ref(DbHost))
+    AlbArnValue = If("UseAlbImport", ImportValue(ci_export("AlbArn")), Ref(AlbArn))
+    EfsIdValue = If("UseEfsImport", ImportValue(ci_export("EfsId")), Ref(EfsFileSystemId))
+    
+    # -----------------------
+    # Task Execution Role (shared by all services)
+    # -----------------------
+    ExecutionRole = t.add_resource(Role(
+        "TaskExecutionRole",
+        RoleName=Sub("${AWS::StackName}-execution-role"),
+        AssumeRolePolicyDocument={
+            "Version": "2012-10-17",
+            "Statement": [{
+                "Effect": "Allow",
+                "Principal": {"Service": "ecs-tasks.amazonaws.com"},
+                "Action": "sts:AssumeRole"
+            }]
+        },
+        ManagedPolicyArns=[
+            "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+        ],
+        Policies=[
+            Policy(
+                PolicyName="SSMParameterAccess",
+                PolicyDocument={
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Action": [
+                                "ssm:GetParameter",
+                                "ssm:GetParameters"
+                            ],
+                            "Resource": [
+                                Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/*")
+                            ]
+                        },
+                        {
+                            "Effect": "Allow",
+                            "Action": [
+                                "ssmmessages:CreateControlChannel",
+                                "ssmmessages:CreateDataChannel", 
+                                "ssmmessages:OpenControlChannel",
+                                "ssmmessages:OpenDataChannel"
+                            ],
+                            "Resource": "*"
+                        }
+                    ]
+                }
+            )
+        ]
+    ))
+    
+    # -----------------------
+    # Task Role (shared by all services)
+    # -----------------------
+    TaskRole = t.add_resource(Role(
+        "TaskRole",
+        RoleName=Sub("${AWS::StackName}-task-role"),
+        AssumeRolePolicyDocument={
+            "Version": "2012-10-17",
+            "Statement": [{
+                "Effect": "Allow",
+                "Principal": {"Service": "ecs-tasks.amazonaws.com"},
+                "Action": "sts:AssumeRole"
+            }]
+        },
+        Policies=[
+            Policy(
+                PolicyName="S3AndSQSAccess",
+                PolicyDocument={
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Action": [
+                                "s3:GetObject",
+                                "s3:PutObject",
+                                "s3:DeleteObject",
+                                "s3:ListBucket"
+                            ],
+                            "Resource": [
+                                Sub("arn:aws:s3:::lakerunner-*"),
+                                Sub("arn:aws:s3:::lakerunner-*/*")
+                            ]
+                        },
+                        {
+                            "Effect": "Allow",
+                            "Action": [
+                                "sqs:ReceiveMessage",
+                                "sqs:DeleteMessage",
+                                "sqs:GetQueueAttributes"
+                            ],
+                            "Resource": [
+                                Sub("arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:lakerunner-*")
+                            ]
+                        },
+                        {
+                            "Effect": "Allow",
+                            "Action": [
+                                "secretsmanager:GetSecretValue"
+                            ],
+                            "Resource": [
+                                DbSecretArnValue
+                            ]
+                        },
+                        {
+                            "Effect": "Allow",
+                            "Action": [
+                                "ecs:ListServices",
+                                "ecs:DescribeServices", 
+                                "ecs:UpdateService",
+                                "ecs:ListTasks",
+                                "ecs:DescribeTasks"
+                            ],
+                            "Resource": "*"
+                        },
+                        {
+                            "Effect": "Allow",
+                            "Action": [
+                                "elasticfilesystem:ClientMount",
+                                "elasticfilesystem:ClientWrite",
+                                "elasticfilesystem:ClientRootAccess",
+                                "elasticfilesystem:DescribeFileSystems",
+                                "elasticfilesystem:DescribeMountTargets",
+                                "elasticfilesystem:DescribeAccessPoints"
+                            ],
+                            "Resource": "*"
+                        }
+                    ]
+                }
+            )
+        ]
+    ))
+    
+    # Collect services that need EFS access points
+    services_needing_efs = {}
+    for service_name, service_config in services.items():
+        efs_mounts = service_config.get('efs_mounts', [])
+        for mount in efs_mounts:
+            access_point_name = mount['access_point_name']
+            services_needing_efs[access_point_name] = mount
+    
+    # Create EFS access points
+    access_points = {}
+    for ap_name, mount_config in services_needing_efs.items():
+        access_points[ap_name] = t.add_resource(AccessPoint(
+            f"EfsAccessPoint{ap_name.title()}",
+            FileSystemId=EfsIdValue,
+            PosixUser=PosixUser(
+                Gid="0",
+                Uid="0"
+            ),
+            RootDirectory=RootDirectory(
+                Path=mount_config['efs_path'],
+                CreationInfo=CreationInfo(
+                    OwnerGid="0",
+                    OwnerUid="0",
+                    Permissions="750"
+                )
+            ),
+            AccessPointTags=Tags(Name=Sub("${AWS::StackName}-" + ap_name))
+        ))
+    
+    # Keep track of target groups for ALB integration
+    target_groups = {}
+    
+    # -----------------------
+    # Create services
+    # -----------------------
+    for service_name, service_config in services.items():
+        safe_name = service_name.replace('-', '').replace('_', '')
+        title_name = ''.join(word.capitalize() for word in service_name.replace('-', '_').split('_'))
+        
+        # Create log group
+        log_group = t.add_resource(LogGroup(
+            f"LogGroup{title_name}",
+            LogGroupName=Sub(f"/ecs/{service_name}"),
+            RetentionInDays=14
+        ))
+        
+        # Build volumes list
+        volumes = [Volume(Name="scratch")]
+        
+        # Add EFS volumes
+        efs_mounts = service_config.get('efs_mounts', [])
+        for mount in efs_mounts:
+            ap_name = mount['access_point_name']
+            if ap_name in access_points:
+                volumes.append(Volume(
+                    Name=f"efs-{ap_name}",
+                    EFSVolumeConfiguration=EFSVolumeConfiguration(
+                        FilesystemId=EfsIdValue,
+                        TransitEncryption="ENABLED",
+                        AuthorizationConfig=AuthorizationConfig(
+                            AccessPointId=Ref(access_points[ap_name]),
+                            IAM="ENABLED"
+                        )
+                    )
+                ))
+        
+        # Build environment variables
+        base_env = [
+            Environment(Name="BUMP_REVISION", Value="1"),
+            Environment(Name="OTEL_SERVICE_NAME", Value=service_name),
+            Environment(Name="TMPDIR", Value="/scratch"),
+            Environment(Name="HOME", Value="/scratch"),
+            Environment(Name="STORAGE_PROFILE_FILE", Value="env:STORAGE_PROFILES_ENV"),
+            Environment(Name="API_KEYS_FILE", Value="env:API_KEYS_ENV"),
+            Environment(Name="SQS_QUEUE_URL", Value=Sub("https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/lakerunner-ingest-queue")),
+            Environment(Name="SQS_REGION", Value=Ref("AWS::Region")),
+            Environment(Name="ECS_WORKER_CLUSTER_NAME", Value=Select(5, Split("/", ClusterArnValue))),
+            Environment(Name="ECS_WORKER_SERVICE_NAME", Value="lakerunner-query-worker"),
+            Environment(Name="LRDB_HOST", Value=DbHostValue),
+            Environment(Name="LRDB_PORT", Value=Ref(DbPort)),
+            Environment(Name="LRDB_NAME", Value=Ref(DbName)),
+            Environment(Name="LRDB_USER", Value=Ref(DbUser)),
+            Environment(Name="LRDB_SSLMODE", Value=Ref(DbSSLMode))
+        ]
+        
+        # Add service-specific environment variables
+        service_env = service_config.get('environment', {})
+        for key, value in service_env.items():
+            base_env.append(Environment(Name=key, Value=value))
+        
+        # Build secrets
+        secrets = [
+            EcsSecret(Name="STORAGE_PROFILES_ENV", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles")),
+            EcsSecret(Name="API_KEYS_ENV", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys")),
+            EcsSecret(Name="LRDB_PASSWORD", ValueFrom=Sub("${SecretArn}:password::", SecretArn=DbSecretArnValue))
+        ]
+        
+        # Build mount points
+        mount_points = [MountPoint(
+            ContainerPath="/scratch",
+            SourceVolume="scratch",
+            ReadOnly=False
+        )]
+        
+        # Add EFS mount points
+        for mount in efs_mounts:
+            ap_name = mount['access_point_name']
+            mount_points.append(MountPoint(
+                ContainerPath=mount['container_path'],
+                SourceVolume=f"efs-{ap_name}",
+                ReadOnly=False
+            ))
+        
+        # Add bind mounts
+        bind_mounts = service_config.get('bind_mounts', [])
+        for mount in bind_mounts:
+            mount_points.append(MountPoint(
+                ContainerPath=mount['container_path'],
+                SourceVolume=mount['source_volume'],
+                ReadOnly=mount.get('read_only', False)
+            ))
+        
+        # Build health check
+        health_check_config = service_config.get('health_check', {})
+        health_check = None
+        if health_check_config:
+            health_check = HealthCheck(
+                Command=health_check_config.get('command', []),
+                Interval=30,
+                Timeout=5,
+                Retries=3,
+                StartPeriod=60
+            )
+        
+        # Build port mappings
+        port_mappings = []
+        ingress = service_config.get('ingress')
+        if ingress:
+            port_mappings.append(PortMapping(
+                ContainerPort=ingress['port'],
+                Protocol="tcp"
+            ))
+        
+        # Create container definition
+        container_image = If(
+            "HasGlobalImageOverride",
+            Ref(GlobalImageOverride),
+            service_config['image']
+        )
+        
+        container = ContainerDefinition(
+            Name="AppContainer",
+            Image=container_image,
+            Command=service_config.get('command', []),
+            Environment=base_env,
+            Secrets=secrets,
+            MountPoints=mount_points,
+            PortMappings=port_mappings,
+            HealthCheck=health_check,
+            User="0",
+            LogConfiguration=LogConfiguration(
+                LogDriver="awslogs",
+                Options={
+                    "awslogs-group": Ref(log_group),
+                    "awslogs-region": Ref("AWS::Region"),
+                    "awslogs-stream-prefix": service_name
+                }
+            )
+        )
+        
+        # Create task definition
+        task_def = t.add_resource(TaskDefinition(
+            f"TaskDef{title_name}",
+            Family=service_name + "-task",
+            Cpu=str(service_config.get('cpu', 512)),
+            Memory=str(service_config.get('memory_mib', 1024)),
+            NetworkMode="awsvpc",
+            RequiresCompatibilities=["FARGATE"],
+            ExecutionRoleArn=GetAtt(ExecutionRole, "Arn"),
+            TaskRoleArn=GetAtt(TaskRole, "Arn"),
+            ContainerDefinitions=[container],
+            Volumes=volumes,
+            RuntimePlatform=RuntimePlatform(
+                CpuArchitecture="ARM64",
+                OperatingSystemFamily="LINUX"
+            )
+        ))
+        
+        # Create ECS service
+        desired_count = If(
+            "HasGlobalReplicasOverride",
+            Ref(GlobalReplicasOverride),
+            str(service_config.get('replicas', 1))
+        )
+        
+        ecs_service = t.add_resource(Service(
+            f"Service{title_name}",
+            ServiceName=service_name,
+            Cluster=ClusterArnValue,
+            TaskDefinition=Ref(task_def),
+            LaunchType="FARGATE",
+            DesiredCount=desired_count,
+            NetworkConfiguration=NetworkConfiguration(
+                AwsvpcConfiguration=AwsvpcConfiguration(
+                    Subnets=Ref(PrivateSubnets),
+                    SecurityGroups=[Ref(TaskSecurityGroupId)]
+                )
+            ),
+            EnableExecuteCommand=True
+        ))
+        
+        # Create ALB target group if service has ingress with attach_alb
+        if ingress and ingress.get('attach_alb'):
+            port = ingress['port']
+            health_check_path = ingress.get('health_check_path', '/')
+            
+            target_group = t.add_resource(TargetGroup(
+                f"TargetGroup{title_name}",
+                Name=Sub(f"${{AWS::StackName}}-{service_name}"[:32]),  # ALB TG names are limited to 32 chars
+                Port=port,
+                Protocol="HTTP",
+                VpcId=Ref(VpcId),
+                TargetType="ip",
+                HealthCheckPath=health_check_path,
+                HealthCheckProtocol="HTTP",
+                HealthCheckIntervalSeconds=30,
+                HealthCheckTimeoutSeconds=5,
+                HealthyThresholdCount=2,
+                UnhealthyThresholdCount=3,
+                Matcher=Matcher(HttpCode="200"),
+                TargetGroupAttributes=[
+                    TargetGroupAttribute(Key="stickiness.enabled", Value="false"),
+                    TargetGroupAttribute(Key="deregistration_delay.timeout_seconds", Value="30")
+                ]
+            ))
+            
+            target_groups[service_name] = {
+                'target_group': target_group,
+                'port': port,
+                'service': ecs_service
+            }
+            
+            # Add service to target group
+            ecs_service.LoadBalancers = [EcsLoadBalancer(
+                ContainerName="AppContainer",
+                ContainerPort=port,
+                TargetGroupArn=Ref(target_group)
+            )]
+    
+    # -----------------------
+    # ALB Listeners (if we have target groups)
+    # -----------------------
+    if target_groups:
+        t.add_condition("HasAlb", Not(Equals(AlbArnValue, "")))
+        
+        # Create listeners for each unique port
+        ports_created = set()
+        for service_name, tg_info in target_groups.items():
+            port = tg_info['port']
+            if port not in ports_created:
+                listener = t.add_resource(Listener(
+                    f"Listener{port}",
+                    Condition="HasAlb",
+                    LoadBalancerArn=AlbArnValue,
+                    Port=str(port),
+                    Protocol="HTTP",
+                    DefaultActions=[AlbAction(
+                        Type="forward",
+                        TargetGroupArn=Ref(tg_info['target_group'])
+                    )]
+                ))
+                ports_created.add(port)
+    
+    # -----------------------
+    # Outputs
+    # -----------------------
+    t.add_output(Output(
+        "TaskRoleArn",
+        Value=GetAtt(TaskRole, "Arn"),
+        Export=Export(name=Sub("${AWS::StackName}-TaskRoleArn"))
+    ))
+    
+    t.add_output(Output(
+        "ExecutionRoleArn", 
+        Value=GetAtt(ExecutionRole, "Arn"),
+        Export=Export(name=Sub("${AWS::StackName}-ExecutionRoleArn"))
+    ))
+    
+    # Output service ARNs
+    for service_name, _ in services.items():
+        title_name = ''.join(word.capitalize() for word in service_name.replace('-', '_').split('_'))
+        t.add_output(Output(
+            f"Service{title_name}Arn",
+            Value=Ref(f"Service{title_name}"),
+            Export=Export(name=Sub(f"${{AWS::StackName}}-{service_name}-ServiceArn"))
+        ))
+    
+    return t
+
+if __name__ == "__main__":
+    template = create_services_template()
+    print(template.to_yaml())
