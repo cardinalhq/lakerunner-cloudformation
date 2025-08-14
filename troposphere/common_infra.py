@@ -153,6 +153,17 @@ t.add_resource(SecurityGroupIngress(
     Description="task-to-task 7101",
 ))
 
+# Allow tasks to connect to PostgreSQL database
+t.add_resource(SecurityGroupIngress(
+    "TaskSGDbSelf",
+    GroupId=Ref(TaskSG),
+    IpProtocol="tcp",
+    FromPort=5432,
+    ToPort=5432,
+    SourceSecurityGroupId=Ref(TaskSG),
+    Description="task-to-database PostgreSQL",
+))
+
 # ALB SG (only if creating ALB)
 AlbSG = t.add_resource(SecurityGroup(
     "AlbSecurityGroup",

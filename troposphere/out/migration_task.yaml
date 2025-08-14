@@ -303,8 +303,10 @@ Resources:
                   - secretsmanager:GetSecretValue
                 Effect: Allow
                 Resource:
-                  - !ImportValue
-                    Fn::Sub: ${CommonInfraStackName}-DbSecretArn
+                  - !Sub
+                    - ${SecretArn}*
+                    - SecretArn: !ImportValue
+                        Fn::Sub: ${CommonInfraStackName}-DbSecretArn
             Version: '2012-10-17'
           PolicyName: TaskExecutionSecretsPolicy
     Type: AWS::IAM::Role

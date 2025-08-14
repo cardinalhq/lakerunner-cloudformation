@@ -371,6 +371,15 @@ Resources:
       SourceSecurityGroupId: !Ref 'TaskSG'
       ToPort: 7101
     Type: AWS::EC2::SecurityGroupIngress
+  TaskSGDbSelf:
+    Properties:
+      Description: task-to-database PostgreSQL
+      FromPort: 5432
+      GroupId: !Ref 'TaskSG'
+      IpProtocol: tcp
+      SourceSecurityGroupId: !Ref 'TaskSG'
+      ToPort: 5432
+    Type: AWS::EC2::SecurityGroupIngress
   Tg3000:
     Condition: CreateAlbCond
     Properties:

@@ -169,6 +169,16 @@ def create_services_template():
                                 "ssmmessages:OpenDataChannel"
                             ],
                             "Resource": "*"
+                        },
+                        {
+                            "Effect": "Allow",
+                            "Action": [
+                                "secretsmanager:GetSecretValue"
+                            ],
+                            "Resource": [
+                                Sub("${SecretArn}*", SecretArn=DbSecretArnValue),
+                                Sub("arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*")
+                            ]
                         }
                     ]
                 }
@@ -226,7 +236,7 @@ def create_services_template():
                                 "secretsmanager:GetSecretValue"
                             ],
                             "Resource": [
-                                DbSecretArnValue,
+                                Sub("${SecretArn}*", SecretArn=DbSecretArnValue),
                                 Sub("arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*")
                             ]
                         },

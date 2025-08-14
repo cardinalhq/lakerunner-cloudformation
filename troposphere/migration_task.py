@@ -166,7 +166,7 @@ ExecutionRole = t.add_resource(Role(
                     {
                         "Effect": "Allow",
                         "Action": ["secretsmanager:GetSecretValue"],
-                        "Resource": [DbSecretArnValue]
+                        "Resource": [Sub("${SecretArn}*", SecretArn=DbSecretArnValue)]
                     }
                 ]
             }
