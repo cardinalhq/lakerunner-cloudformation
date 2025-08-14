@@ -37,7 +37,7 @@ Metadata:
       PrivateSubnets:
         default: Private Subnets (for ECS/RDS/EFS)
       PublicSubnets:
-        default: Public Subnets (for ALB)
+        default: Public Subnets (required if ALB enabled)
       StorageProfilesOverride:
         default: Custom Storage Profiles (YAML)
       VpcId:
@@ -130,8 +130,9 @@ Parameters:
     Description: 'REQUIRED: Private subnet IDs (for RDS/ECS/EFS). Provide at least two in different AZs.'
     Type: List<AWS::EC2::Subnet::Id>
   PublicSubnets:
-    Description: 'REQUIRED: Public subnet IDs (for ALB). Provide at least two in different AZs.'
-    Type: List<AWS::EC2::Subnet::Id>
+    Default: ''
+    Description: Public subnet IDs (for ALB). Required when CreateAlb=Yes. Provide at least two in different AZs.
+    Type: CommaDelimitedList
   StorageProfilesOverride:
     Default: ''
     Description: 'OPTIONAL: Custom storage profiles configuration in YAML format. Leave blank to use defaults from defaults.yaml. Bucket name and region will be auto-filled.'

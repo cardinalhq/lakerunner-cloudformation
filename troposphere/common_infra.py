@@ -49,8 +49,9 @@ VpcId = t.add_parameter(Parameter(
 
 PublicSubnets = t.add_parameter(Parameter(
     "PublicSubnets",
-    Type="List<AWS::EC2::Subnet::Id>",
-    Description="REQUIRED: Public subnet IDs (for ALB). Provide at least two in different AZs."
+    Type="CommaDelimitedList",
+    Default="",
+    Description="Public subnet IDs (for ALB). Required when CreateAlb=Yes. Provide at least two in different AZs."
 ))
 
 PrivateSubnets = t.add_parameter(Parameter(
@@ -103,7 +104,7 @@ t.set_metadata({
         ],
         "ParameterLabels": {
             "VpcId": {"default": "VPC Id"},
-            "PublicSubnets": {"default": "Public Subnets (for ALB)"},
+            "PublicSubnets": {"default": "Public Subnets (required if ALB enabled)"},
             "PrivateSubnets": {"default": "Private Subnets (for ECS/RDS/EFS)"},
             "CreateAlb": {"default": "Create Application Load Balancer?"},
             "ApiKeysOverride": {"default": "Custom API Keys (YAML)"},
