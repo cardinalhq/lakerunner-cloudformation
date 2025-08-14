@@ -1,37 +1,11 @@
-Conditions:
-  HasCI: !Not
-    - !Equals
-      - !Ref 'CommonInfraStackName'
-      - ''
-  NoClusterArn: !Equals
-    - !Ref 'ClusterArn'
-    - ''
-  NoDbHost: !Equals
-    - !Ref 'DbHost'
-    - ''
-  NoDbSecretArn: !Equals
-    - !Ref 'DbSecretArn'
-    - ''
-  UseClusterImport: !And
-    - !Condition 'HasCI'
-    - !Condition 'NoClusterArn'
-  UseDbHostImport: !And
-    - !Condition 'HasCI'
-    - !Condition 'NoDbHost'
-  UseDbSecretImport: !And
-    - !Condition 'HasCI'
-    - !Condition 'NoDbSecretArn'
 Description: 'Lakerunner DB migration (single template): defines TaskDefinition and runs it via Custom Resource.'
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
       - Label:
-          default: Where to run
+          default: CommonInfra Stack
         Parameters:
-          - ClusterArn
-          - Subnets
-          - SecurityGroups
-          - AssignPublicIp
+          - CommonInfraStackName
       - Label:
           default: Task Sizing
         Parameters:
@@ -41,45 +15,15 @@ Metadata:
           default: Container Image
         Parameters:
           - ContainerImage
-      - Label:
-          default: Database Connection
-        Parameters:
-          - DbHost
-          - DbName
-          - DbUser
-          - DbPort
-          - DbSecretArn
-      - Label:
-          default: Permissions
-        Parameters:
-          - TaskRoleArn
     ParameterLabels:
-      AssignPublicIp:
-        default: Assign Public IP
-      ClusterArn:
-        default: ECS Cluster ARN
+      CommonInfraStackName:
+        default: CommonInfra Stack Name
       ContainerImage:
         default: Migration Image
       Cpu:
         default: Fargate CPU
-      DbHost:
-        default: DB Hostname
-      DbName:
-        default: DB Name
-      DbPort:
-        default: DB Port
-      DbSecretArn:
-        default: DB Secret ARN
-      DbUser:
-        default: DB User
       MemoryMiB:
         default: Fargate Memory (MiB)
-      SecurityGroups:
-        default: Task Security Groups
-      Subnets:
-        default: Private Subnets
-      TaskRoleArn:
-        default: Task Role ARN
 Outputs:
   LogGroupName:
     Export:
@@ -98,17 +42,6 @@ Outputs:
       Name: !Sub '${AWS::StackName}-TaskDefinitionArn'
     Value: !GetAtt 'MigrationTaskDef.TaskDefinitionArn'
 Parameters:
-  AssignPublicIp:
-    AllowedValues:
-      - ENABLED
-      - DISABLED
-    Default: DISABLED
-    Description: Whether to assign a public IP to the task ENI. Use DISABLED for private subnets.
-    Type: String
-  ClusterArn:
-    Default: ''
-    Description: ECS Cluster ARN. Leave blank to import from CommonInfra if CommonInfraStackName is set.
-    Type: String
   CommonInfraStackName:
     Default: ''
     Description: 'OPTIONAL: Name of the CommonInfra stack to import values from. If set, blank fields below will be auto-filled.'
@@ -121,38 +54,9 @@ Parameters:
     Default: '512'
     Description: Fargate CPU units (e.g., 256/512/1024).
     Type: String
-  DbHost:
-    Default: ''
-    Description: Postgres endpoint hostname. Leave blank to import from CommonInfra if CommonInfraStackName is set.
-    Type: String
-  DbName:
-    Default: lakerunner
-    Description: Postgres database name.
-    Type: String
-  DbPort:
-    Default: '5432'
-    Description: Postgres port (usually 5432).
-    Type: String
-  DbSecretArn:
-    Default: ''
-    Description: Secrets Manager ARN with {username,password}. Leave blank to import from CommonInfra if CommonInfraStackName is set.
-    Type: String
-  DbUser:
-    Default: lakerunner
-    Description: Postgres username (should match the secret's 'username').
-    Type: String
   MemoryMiB:
     Default: '1024'
     Description: Fargate Memory MiB (e.g., 512/1024/2048).
-    Type: String
-  SecurityGroups:
-    Description: 'REQUIRED: Security groups for the task (must reach RDS 5432).'
-    Type: List<AWS::EC2::SecurityGroup::Id>
-  Subnets:
-    Description: 'REQUIRED: Private subnet IDs (two or more AZs recommended).'
-    Type: List<AWS::EC2::Subnet::Id>
-  TaskRoleArn:
-    Description: 'REQUIRED: IAM Task Role ARN (should allow secretsmanager:GetSecretValue on the DB secret).'
     Type: String
 Resources:
   MigrationLogGroup:
@@ -168,17 +72,14 @@ Resources:
             - migrate
           Environment:
             - Name: LRDB_HOST
-              Value: !If
-                - UseDbHostImport
-                - !ImportValue
-                  Fn::Sub: ${CommonInfraStackName}-DbEndpoint
-                - !Ref 'DbHost'
+              Value: !ImportValue
+                Fn::Sub: ${CommonInfraStackName}-DbEndpoint
             - Name: LRDB_PORT
-              Value: !Ref 'DbPort'
+              Value: '5432'
             - Name: LRDB_NAME
-              Value: !Ref 'DbName'
+              Value: lakerunner
             - Name: LRDB_USER
-              Value: !Ref 'DbUser'
+              Value: lakerunner
             - Name: LRDB_SSLMODE
               Value: require
           Image: !Ref 'ContainerImage'
@@ -193,11 +94,8 @@ Resources:
             - Name: LRDB_PASSWORD
               ValueFrom: !Sub
                 - '${S}:password::'
-                - S: !If
-                    - UseDbSecretImport
-                    - !ImportValue
-                      Fn::Sub: ${CommonInfraStackName}-DbSecretArn
-                    - !Ref 'DbSecretArn'
+                - S: !ImportValue
+                    Fn::Sub: ${CommonInfraStackName}-DbSecretArn
       Cpu: !Ref 'Cpu'
       ExecutionRoleArn: !GetAtt 'TaskExecutionRole.Arn'
       Family: lakerunner-migration
@@ -205,8 +103,29 @@ Resources:
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE
-      TaskRoleArn: !Ref 'TaskRoleArn'
+      TaskRoleArn: !GetAtt 'MigrationTaskRole.Arn'
     Type: AWS::ECS::TaskDefinition
+  MigrationTaskRole:
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+        Version: '2012-10-17'
+      Policies:
+        - PolicyDocument:
+            Statement:
+              - Action:
+                  - secretsmanager:GetSecretValue
+                Effect: Allow
+                Resource:
+                  - !ImportValue
+                    Fn::Sub: ${CommonInfraStackName}-DbSecretArn
+            Version: '2012-10-17'
+          PolicyName: MigrationTaskPolicy
+    Type: AWS::IAM::Role
   RunEcsTaskFunction:
     Properties:
       Code:
@@ -322,15 +241,17 @@ Resources:
     Type: AWS::Lambda::Function
   RunMigration:
     Properties:
-      AssignPublicIp: !Ref 'AssignPublicIp'
-      ClusterArn: !If
-        - UseClusterImport
+      AssignPublicIp: DISABLED
+      ClusterArn: !ImportValue
+        Fn::Sub: ${CommonInfraStackName}-ClusterArn
+      SecurityGroups:
         - !ImportValue
-          Fn::Sub: ${CommonInfraStackName}-ClusterArn
-        - !Ref 'ClusterArn'
-      SecurityGroups: !Ref 'SecurityGroups'
+          Fn::Sub: ${CommonInfraStackName}-TaskSGId
       ServiceToken: !GetAtt 'RunEcsTaskFunction.Arn'
-      Subnets: !Ref 'Subnets'
+      Subnets: !Split
+        - ','
+        - !ImportValue
+          Fn::Sub: ${CommonInfraStackName}-PrivateSubnets
       TaskDefinitionArn: !GetAtt 'MigrationTaskDef.TaskDefinitionArn'
     Type: Custom::RunEcsTask
   RunnerLambdaRole:
@@ -360,7 +281,7 @@ Resources:
                   - iam:PassRole
                 Effect: Allow
                 Resource:
-                  - !Ref 'TaskRoleArn'
+                  - !GetAtt 'MigrationTaskRole.Arn'
                   - !GetAtt 'TaskExecutionRole.Arn'
             Version: '2012-10-17'
           PolicyName: RunnerInlinePolicy

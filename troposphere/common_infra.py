@@ -382,5 +382,10 @@ t.add_output(Output(
     Value=Ref(TaskSG),
     Export=Export(name=Sub("${AWS::StackName}-TaskSGId"))
 ))
+t.add_output(Output(
+    "PrivateSubnetsOut",
+    Value=Sub("${Subnet1},${Subnet2}", Subnet1=Select(0, Ref(PrivateSubnets)), Subnet2=Select(1, Ref(PrivateSubnets))),
+    Export=Export(name=Sub("${AWS::StackName}-PrivateSubnets"))
+))
 
 print(t.to_yaml())

@@ -51,6 +51,17 @@ Outputs:
     Export:
       Name: !Sub '${AWS::StackName}-EfsId'
     Value: !Ref 'Efs'
+  PrivateSubnetsOut:
+    Export:
+      Name: !Sub '${AWS::StackName}-PrivateSubnets'
+    Value: !Sub
+      - ${Subnet1},${Subnet2}
+      - Subnet1: !Select
+          - 0
+          - !Ref 'PrivateSubnets'
+        Subnet2: !Select
+          - 1
+          - !Ref 'PrivateSubnets'
   TaskSecurityGroupId:
     Export:
       Name: !Sub '${AWS::StackName}-TaskSGId'
