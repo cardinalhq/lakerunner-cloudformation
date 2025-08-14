@@ -155,6 +155,22 @@ ExecutionRole = t.add_resource(Role(
     },
     ManagedPolicyArns=[
         "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+    ],
+    Policies=[
+        Policy(
+            "TaskExecutionSecretsPolicy",
+            PolicyName="TaskExecutionSecretsPolicy",
+            PolicyDocument={
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Effect": "Allow",
+                        "Action": ["secretsmanager:GetSecretValue"],
+                        "Resource": [DbSecretArnValue]
+                    }
+                ]
+            }
+        )
     ]
 ))
 
