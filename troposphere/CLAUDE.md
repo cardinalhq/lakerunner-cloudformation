@@ -125,3 +125,15 @@ All services share:
 - All ECS tasks run with `AssignPublicIp: DISABLED`
 - Follow existing IAM policy patterns for new permissions
 - Database connections always use SSL (`LRDB_SSLMODE: require`)
+
+## Coding style
+
+- Follow existing coding style as much as practical.
+- Make sure there are no trailing whitespace or extra blank lines.
+- All code should be formatted properly.
+- All text-like files should have a final newline, not end on a character, unless that is how that file format usually works.
+- Useful comments welcome, verbosity should be minimal, and generally only document non-obvious code.
+- It is OK to add "section" style comments.
+- Markdown unordered lists should use a "-" not "*".
+- Markdown ordered lists should repeat "1." for each item.
+- Markdown should have blank lines between header lines, code blocks, etc. and other items.
