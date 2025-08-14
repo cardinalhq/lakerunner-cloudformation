@@ -1,5 +1,0 @@
-{
-  "yaml.schemas": {
-    "https://raw.githubusercontent.com/awslabs/goformation/master/schema/cloudformation.schema.json": "file:///Users/mgraff/git/github/cardinalhq/lakerunner-cloudformation/troposphere/out/services.yaml"
-  }
-}

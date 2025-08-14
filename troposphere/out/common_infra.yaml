@@ -57,6 +57,10 @@ Outputs:
     Export:
       Name: !Sub '${AWS::StackName}-ClusterArn'
     Value: !GetAtt 'Cluster.Arn'
+  CreateAlbValue:
+    Export:
+      Name: !Sub '${AWS::StackName}-CreateAlb'
+    Value: !Ref 'CreateAlb'
   DbEndpoint:
     Export:
       Name: !Sub '${AWS::StackName}-DbEndpoint'

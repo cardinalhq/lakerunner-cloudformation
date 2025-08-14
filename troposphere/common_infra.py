@@ -452,4 +452,11 @@ t.add_output(Output(
     Export=Export(name=Sub("${AWS::StackName}-VpcId"))
 ))
 
+# Export CreateAlb parameter value so Services template can auto-detect ALB presence
+t.add_output(Output(
+    "CreateAlbValue",
+    Value=Ref(CreateAlb),
+    Export=Export(name=Sub("${AWS::StackName}-CreateAlb"))
+))
+
 print(t.to_yaml())

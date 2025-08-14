@@ -17,7 +17,7 @@ import yaml
 import os
 from troposphere import (
     Template, Parameter, Ref, Sub, GetAtt, If, Equals, NoValue, Export, Output,
-    Select, Not, Tags, ImportValue, Join, And, Split
+    Select, Not, Tags, ImportValue, Join, And, Split, Condition
 )
 from troposphere.ecs import (
     Service, TaskDefinition, ContainerDefinition, Environment,
@@ -115,13 +115,17 @@ def create_services_template():
     DbSecretArnValue = ImportValue(ci_export("DbSecretArn"))
     DbHostValue = ImportValue(ci_export("DbEndpoint"))
     DbPortValue = ImportValue(ci_export("DbPort"))
-    AlbArnValue = ImportValue(ci_export("AlbArn"))
     EfsIdValue = ImportValue(ci_export("EfsId"))
     TaskSecurityGroupIdValue = ImportValue(ci_export("TaskSGId"))
-    VpcIdValue = ImportValue(ci_export("VpcId"))  # Need to add this to CommonInfra
+    VpcIdValue = ImportValue(ci_export("VpcId"))
     PrivateSubnetsValue = Split(",", ImportValue(ci_export("PrivateSubnets")))
-    Tg7101ArnValue = ImportValue(ci_export("Tg7101Arn"))
-    Tg3000ArnValue = ImportValue(ci_export("Tg3000Arn"))
+
+    # Import the CreateAlb parameter value from CommonInfra stack
+    # CommonInfra exports its CreateAlb parameter so we can detect ALB presence automatically
+    CreateAlbValue = ImportValue(ci_export("CreateAlb"))
+
+    # Condition for ALB resources - based on CommonInfra's CreateAlb parameter
+    t.add_condition("HasAlb", Equals(CreateAlbValue, "Yes"))
 
     # -----------------------
     # Task Execution Role (shared by all services)
@@ -518,13 +522,14 @@ def create_services_template():
             EnableExecuteCommand=True
         ))
 
-        # Create ALB target group if service has ingress with attach_alb
+        # Create ALB target group if service has ingress with attach_alb AND ALB exists
         if ingress and ingress.get('attach_alb'):
             port = ingress['port']
             health_check_path = ingress.get('health_check_path', '/')
 
             target_group = t.add_resource(TargetGroup(
                 f"TargetGroup{title_name}",
+                Condition="HasAlb",
                 Name=Sub(f"${{AWS::StackName}}-{service_name}"[:32]),  # ALB TG names are limited to 32 chars
                 Port=port,
                 Protocol="HTTP",
@@ -549,28 +554,28 @@ def create_services_template():
                 'service': ecs_service
             }
 
-            # Add service to target group
-            ecs_service.LoadBalancers = [EcsLoadBalancer(
+        # Add LoadBalancer configuration only if ALB exists and service has ALB ingress
+        if ingress and ingress.get('attach_alb'):
+            # LoadBalancers property is set conditionally
+            ecs_service.LoadBalancers = If("HasAlb", [EcsLoadBalancer(
                 ContainerName="AppContainer",
-                ContainerPort=port,
-                TargetGroupArn=Ref(target_group)
-            )]
+                ContainerPort=ingress['port'],
+                TargetGroupArn=Ref(target_groups[service_name]['target_group'])
+            )], NoValue)
 
     # -----------------------
-    # ALB Listeners (if we have target groups)
+    # ALB Listeners (if we have target groups AND ALB exists)
     # -----------------------
     if target_groups:
-        # We always import ALB ARN from CommonInfra, so ALB availability depends on CommonInfra having ALB
-        pass  # No condition needed - ALB listeners are always created when target groups exist
-
-        # Create listeners for each unique port
+        # Create listeners for each unique port (only if ALB exists)
         ports_created = set()
         for service_name, tg_info in target_groups.items():
             port = tg_info['port']
             if port not in ports_created:
                 listener = t.add_resource(Listener(
                     f"Listener{port}",
-                    LoadBalancerArn=AlbArnValue,
+                    Condition="HasAlb",
+                    LoadBalancerArn=ImportValue(ci_export("AlbArn")),
                     Port=str(port),
                     Protocol="HTTP",
                     DefaultActions=[AlbAction(

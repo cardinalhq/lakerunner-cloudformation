@@ -1,3 +1,10 @@
+Conditions:
+  HasAlb: !Equals
+    - !ImportValue
+      Fn::Sub:
+        - ${CommonInfraStackName}-CreateAlb
+        - CommonInfraStackName: !Ref 'CommonInfraStackName'
+    - 'Yes'
 Description: 'Lakerunner Services: ECS services, task definitions, IAM roles, and ALB integration'
 Metadata:
   AWS::CloudFormation::Interface:
@@ -129,6 +136,7 @@ Resources:
       Name: !Sub '${AWS::StackName}-grafana-admin'
     Type: AWS::SecretsManager::Secret
   Listener3000:
+    Condition: HasAlb
     Properties:
       DefaultActions:
         - TargetGroupArn: !Ref 'TargetGroupGrafana'
@@ -141,6 +149,7 @@ Resources:
       Protocol: HTTP
     Type: AWS::ElasticLoadBalancingV2::Listener
   Listener7101:
+    Condition: HasAlb
     Properties:
       DefaultActions:
         - TargetGroupArn: !Ref 'TargetGroupLakerunnerQueryApi'
@@ -211,10 +220,12 @@ Resources:
       DesiredCount: '1'
       EnableExecuteCommand: true
       LaunchType: FARGATE
-      LoadBalancers:
-        - ContainerName: AppContainer
-          ContainerPort: 3000
-          TargetGroupArn: !Ref 'TargetGroupGrafana'
+      LoadBalancers: !If
+        - HasAlb
+        - - ContainerName: AppContainer
+            ContainerPort: 3000
+            TargetGroupArn: !Ref 'TargetGroupGrafana'
+        - !Ref 'AWS::NoValue'
       NetworkConfiguration:
         AwsvpcConfiguration:
           SecurityGroups:
@@ -365,10 +376,12 @@ Resources:
       DesiredCount: '1'
       EnableExecuteCommand: true
       LaunchType: FARGATE
-      LoadBalancers:
-        - ContainerName: AppContainer
-          ContainerPort: 7101
-          TargetGroupArn: !Ref 'TargetGroupLakerunnerQueryApi'
+      LoadBalancers: !If
+        - HasAlb
+        - - ContainerName: AppContainer
+            ContainerPort: 7101
+            TargetGroupArn: !Ref 'TargetGroupLakerunnerQueryApi'
+        - !Ref 'AWS::NoValue'
       NetworkConfiguration:
         AwsvpcConfiguration:
           SecurityGroups:
@@ -461,6 +474,7 @@ Resources:
       TaskDefinition: !Ref 'TaskDefLakerunnerSweeper'
     Type: AWS::ECS::Service
   TargetGroupGrafana:
+    Condition: HasAlb
     Properties:
       HealthCheckIntervalSeconds: 30
       HealthCheckPath: /api/health
@@ -485,6 +499,7 @@ Resources:
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
   TargetGroupLakerunnerQueryApi:
+    Condition: HasAlb
     Properties:
       HealthCheckIntervalSeconds: 30
       HealthCheckPath: /ready
