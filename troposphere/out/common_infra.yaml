@@ -26,6 +26,11 @@ Metadata:
       VpcId:
         default: VPC Id
 Outputs:
+  AlbArn:
+    Condition: CreateAlbCond
+    Export:
+      Name: !Sub '${AWS::StackName}-AlbArn'
+    Value: !Ref 'Alb'
   AlbDNS:
     Condition: CreateAlbCond
     Export:
@@ -76,6 +81,10 @@ Outputs:
     Export:
       Name: !Sub '${AWS::StackName}-Tg7101Arn'
     Value: !Ref 'Tg7101'
+  VpcIdOut:
+    Export:
+      Name: !Sub '${AWS::StackName}-VpcId'
+    Value: !Ref 'VpcId'
 Parameters:
   CreateAlb:
     AllowedValues:

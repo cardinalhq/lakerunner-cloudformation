@@ -58,40 +58,29 @@ def create_services_template():
         Description="REQUIRED: Name of the CommonInfra stack to import infrastructure values from."
     ))
 
-    VpcId = t.add_parameter(Parameter(
-        "VpcId", Type="AWS::EC2::VPC::Id",
-        Description="REQUIRED: VPC ID where services will run."
+    # Container image overrides for air-gapped deployments
+    GoServicesImage = t.add_parameter(Parameter(
+        "GoServicesImage", Type="String", 
+        Default="public.ecr.aws/cardinalhq.io/lakerunner:latest",
+        Description="Container image for Go services (pubsub, ingest, compact, etc.)"
     ))
 
-    PrivateSubnets = t.add_parameter(Parameter(
-        "PrivateSubnets", Type="List<AWS::EC2::Subnet::Id>",
-        Description="REQUIRED: Private subnet IDs for ECS services."
+    QueryApiImage = t.add_parameter(Parameter(
+        "QueryApiImage", Type="String",
+        Default="public.ecr.aws/cardinalhq.io/lakerunner/query-api:latest-dev", 
+        Description="Container image for query-api service"
     ))
 
-    DbPort = t.add_parameter(Parameter(
-        "DbPort", Type="String", Default="5432",
-        Description="Database port."
+    QueryWorkerImage = t.add_parameter(Parameter(
+        "QueryWorkerImage", Type="String",
+        Default="public.ecr.aws/cardinalhq.io/lakerunner/query-worker:latest-dev",
+        Description="Container image for query-worker service"
     ))
 
-    DbName = t.add_parameter(Parameter(
-        "DbName", Type="String", Default="lakerunner",
-        Description="Database name."
-    ))
-
-    DbUser = t.add_parameter(Parameter(
-        "DbUser", Type="String", Default="lakerunner",
-        Description="Database username."
-    ))
-
-    # Global service overrides
-    GlobalImageOverride = t.add_parameter(Parameter(
-        "GlobalImageOverride", Type="String", Default="",
-        Description="OPTIONAL: Override all service images with this value (useful for testing)"
-    ))
-
-    GlobalReplicasOverride = t.add_parameter(Parameter(
-        "GlobalReplicasOverride", Type="String", Default="",
-        Description="OPTIONAL: Override replica count for all services (useful for scaling)"
+    GrafanaImage = t.add_parameter(Parameter(
+        "GrafanaImage", Type="String",
+        Default="grafana/grafana:latest",
+        Description="Container image for Grafana service"
     ))
 
     # Parameter groups for console
@@ -99,36 +88,23 @@ def create_services_template():
         "AWS::CloudFormation::Interface": {
             "ParameterGroups": [
                 {
-                    "Label": {"default": "Infrastructure References"},
-                    "Parameters": ["CommonInfraStackName", "VpcId", "PrivateSubnets"]
+                    "Label": {"default": "Infrastructure"},
+                    "Parameters": ["CommonInfraStackName"]
                 },
                 {
-                    "Label": {"default": "Database Connection"},
-                    "Parameters": ["DbPort", "DbName", "DbUser"]
-                },
-                {
-                    "Label": {"default": "Global Overrides"},
-                    "Parameters": ["GlobalImageOverride", "GlobalReplicasOverride"]
+                    "Label": {"default": "Container Images"},
+                    "Parameters": ["GoServicesImage", "QueryApiImage", "QueryWorkerImage", "GrafanaImage"]
                 }
             ],
             "ParameterLabels": {
                 "CommonInfraStackName": {"default": "Common Infra Stack Name"},
-                "VpcId": {"default": "VPC ID"},
-                "PrivateSubnets": {"default": "Private Subnets"},
-                "DbPort": {"default": "Database Port"},
-                "DbName": {"default": "Database Name"},
-                "DbUser": {"default": "Database User"},
-                "GlobalImageOverride": {"default": "Global Image Override"},
-                "GlobalReplicasOverride": {"default": "Global Replicas Override"}
+                "GoServicesImage": {"default": "Go Services Image"},
+                "QueryApiImage": {"default": "Query API Image"}, 
+                "QueryWorkerImage": {"default": "Query Worker Image"},
+                "GrafanaImage": {"default": "Grafana Image"}
             }
         }
     })
-
-    # -----------------------
-    # Conditions
-    # -----------------------
-    t.add_condition("HasGlobalImageOverride", Not(Equals(Ref(GlobalImageOverride), "")))
-    t.add_condition("HasGlobalReplicasOverride", Not(Equals(Ref(GlobalReplicasOverride), "")))
 
     # Helper function for imports
     def ci_export(suffix):
@@ -138,9 +114,14 @@ def create_services_template():
     ClusterArnValue = ImportValue(ci_export("ClusterArn"))
     DbSecretArnValue = ImportValue(ci_export("DbSecretArn"))
     DbHostValue = ImportValue(ci_export("DbEndpoint"))
+    DbPortValue = ImportValue(ci_export("DbPort"))
     AlbArnValue = ImportValue(ci_export("AlbArn"))
     EfsIdValue = ImportValue(ci_export("EfsId"))
     TaskSecurityGroupIdValue = ImportValue(ci_export("TaskSGId"))
+    VpcIdValue = ImportValue(ci_export("VpcId"))  # Need to add this to CommonInfra
+    PrivateSubnetsValue = Split(",", ImportValue(ci_export("PrivateSubnets")))
+    Tg7101ArnValue = ImportValue(ci_export("Tg7101Arn"))
+    Tg3000ArnValue = ImportValue(ci_export("Tg3000Arn"))
 
     # -----------------------
     # Task Execution Role (shared by all services)
@@ -390,9 +371,9 @@ def create_services_template():
             Environment(Name="ECS_WORKER_CLUSTER_NAME", Value=Select(5, Split("/", ClusterArnValue))),
             Environment(Name="ECS_WORKER_SERVICE_NAME", Value="lakerunner-query-worker"),
             Environment(Name="LRDB_HOST", Value=DbHostValue),
-            Environment(Name="LRDB_PORT", Value=Ref(DbPort)),
-            Environment(Name="LRDB_NAME", Value=Ref(DbName)),
-            Environment(Name="LRDB_USER", Value=Ref(DbUser)),
+            Environment(Name="LRDB_PORT", Value=DbPortValue),
+            Environment(Name="LRDB_NAME", Value="lakerunner"),
+            Environment(Name="LRDB_USER", Value="lakerunner"),
             Environment(Name="LRDB_SSLMODE", Value="require")
         ]
 
@@ -469,12 +450,16 @@ def create_services_template():
                 Protocol="tcp"
             ))
 
-        # Create container definition
-        container_image = If(
-            "HasGlobalImageOverride",
-            Ref(GlobalImageOverride),
-            service_config['image']
-        )
+        # Select container image based on service type
+        if service_name == 'lakerunner-query-api':
+            container_image = Ref(QueryApiImage)
+        elif service_name == 'lakerunner-query-worker':
+            container_image = Ref(QueryWorkerImage)
+        elif service_name == 'grafana':
+            container_image = Ref(GrafanaImage)
+        else:
+            # All other services use Go services image (pubsub, ingest, compact, etc.)
+            container_image = Ref(GoServicesImage)
 
         container = ContainerDefinition(
             Name="AppContainer",
@@ -515,11 +500,7 @@ def create_services_template():
         ))
 
         # Create ECS service
-        desired_count = If(
-            "HasGlobalReplicasOverride",
-            Ref(GlobalReplicasOverride),
-            str(service_config.get('replicas', 1))
-        )
+        desired_count = str(service_config.get('replicas', 1))
 
         ecs_service = t.add_resource(Service(
             f"Service{title_name}",
@@ -530,7 +511,7 @@ def create_services_template():
             DesiredCount=desired_count,
             NetworkConfiguration=NetworkConfiguration(
                 AwsvpcConfiguration=AwsvpcConfiguration(
-                    Subnets=Ref(PrivateSubnets),
+                    Subnets=PrivateSubnetsValue,
                     SecurityGroups=[TaskSecurityGroupIdValue]
                 )
             ),
@@ -547,7 +528,7 @@ def create_services_template():
                 Name=Sub(f"${{AWS::StackName}}-{service_name}"[:32]),  # ALB TG names are limited to 32 chars
                 Port=port,
                 Protocol="HTTP",
-                VpcId=Ref(VpcId),
+                VpcId=VpcIdValue,
                 TargetType="ip",
                 HealthCheckPath=health_check_path,
                 HealthCheckProtocol="HTTP",

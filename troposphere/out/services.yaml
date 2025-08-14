@@ -1,50 +1,29 @@
-Conditions:
-  HasGlobalImageOverride: !Not
-    - !Equals
-      - !Ref 'GlobalImageOverride'
-      - ''
-  HasGlobalReplicasOverride: !Not
-    - !Equals
-      - !Ref 'GlobalReplicasOverride'
-      - ''
 Description: 'Lakerunner Services: ECS services, task definitions, IAM roles, and ALB integration'
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
       - Label:
-          default: Infrastructure References
+          default: Infrastructure
         Parameters:
           - CommonInfraStackName
-          - VpcId
-          - PrivateSubnets
       - Label:
-          default: Database Connection
+          default: Container Images
         Parameters:
-          - DbPort
-          - DbName
-          - DbUser
-      - Label:
-          default: Global Overrides
-        Parameters:
-          - GlobalImageOverride
-          - GlobalReplicasOverride
+          - GoServicesImage
+          - QueryApiImage
+          - QueryWorkerImage
+          - GrafanaImage
     ParameterLabels:
       CommonInfraStackName:
         default: Common Infra Stack Name
-      DbName:
-        default: Database Name
-      DbPort:
-        default: Database Port
-      DbUser:
-        default: Database User
-      GlobalImageOverride:
-        default: Global Image Override
-      GlobalReplicasOverride:
-        default: Global Replicas Override
-      PrivateSubnets:
-        default: Private Subnets
-      VpcId:
-        default: VPC ID
+      GoServicesImage:
+        default: Go Services Image
+      GrafanaImage:
+        default: Grafana Image
+      QueryApiImage:
+        default: Query API Image
+      QueryWorkerImage:
+        default: Query Worker Image
 Outputs:
   ExecutionRoleArn:
     Export:
@@ -103,32 +82,22 @@ Parameters:
   CommonInfraStackName:
     Description: 'REQUIRED: Name of the CommonInfra stack to import infrastructure values from.'
     Type: String
-  DbName:
-    Default: lakerunner
-    Description: Database name.
+  GoServicesImage:
+    Default: public.ecr.aws/cardinalhq.io/lakerunner:latest
+    Description: Container image for Go services (pubsub, ingest, compact, etc.)
     Type: String
-  DbPort:
-    Default: '5432'
-    Description: Database port.
+  GrafanaImage:
+    Default: grafana/grafana:latest
+    Description: Container image for Grafana service
     Type: String
-  DbUser:
-    Default: lakerunner
-    Description: Database username.
+  QueryApiImage:
+    Default: public.ecr.aws/cardinalhq.io/lakerunner/query-api:latest-dev
+    Description: Container image for query-api service
     Type: String
-  GlobalImageOverride:
-    Default: ''
-    Description: 'OPTIONAL: Override all service images with this value (useful for testing)'
+  QueryWorkerImage:
+    Default: public.ecr.aws/cardinalhq.io/lakerunner/query-worker:latest-dev
+    Description: Container image for query-worker service
     Type: String
-  GlobalReplicasOverride:
-    Default: ''
-    Description: 'OPTIONAL: Override replica count for all services (useful for scaling)'
-    Type: String
-  PrivateSubnets:
-    Description: 'REQUIRED: Private subnet IDs for ECS services.'
-    Type: List<AWS::EC2::Subnet::Id>
-  VpcId:
-    Description: 'REQUIRED: VPC ID where services will run.'
-    Type: AWS::EC2::VPC::Id
 Resources:
   EfsAccessPointGrafana:
     Properties:
@@ -239,10 +208,7 @@ Resources:
         Fn::Sub:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
-      DesiredCount: !If
-        - HasGlobalReplicasOverride
-        - !Ref 'GlobalReplicasOverride'
-        - '1'
+      DesiredCount: '1'
       EnableExecuteCommand: true
       LaunchType: FARGATE
       LoadBalancers:
@@ -256,7 +222,12 @@ Resources:
               Fn::Sub:
                 - ${CommonInfraStackName}-TaskSGId
                 - CommonInfraStackName: !Ref 'CommonInfraStackName'
-          Subnets: !Ref 'PrivateSubnets'
+          Subnets: !Split
+            - ','
+            - !ImportValue
+              Fn::Sub:
+                - ${CommonInfraStackName}-PrivateSubnets
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
       ServiceName: grafana
       TaskDefinition: !Ref 'TaskDefGrafana'
     Type: AWS::ECS::Service
@@ -266,10 +237,7 @@ Resources:
         Fn::Sub:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
-      DesiredCount: !If
-        - HasGlobalReplicasOverride
-        - !Ref 'GlobalReplicasOverride'
-        - '1'
+      DesiredCount: '1'
       EnableExecuteCommand: true
       LaunchType: FARGATE
       NetworkConfiguration:
@@ -279,7 +247,12 @@ Resources:
               Fn::Sub:
                 - ${CommonInfraStackName}-TaskSGId
                 - CommonInfraStackName: !Ref 'CommonInfraStackName'
-          Subnets: !Ref 'PrivateSubnets'
+          Subnets: !Split
+            - ','
+            - !ImportValue
+              Fn::Sub:
+                - ${CommonInfraStackName}-PrivateSubnets
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
       ServiceName: lakerunner-compact-logs
       TaskDefinition: !Ref 'TaskDefLakerunnerCompactLogs'
     Type: AWS::ECS::Service
@@ -289,10 +262,7 @@ Resources:
         Fn::Sub:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
-      DesiredCount: !If
-        - HasGlobalReplicasOverride
-        - !Ref 'GlobalReplicasOverride'
-        - '1'
+      DesiredCount: '1'
       EnableExecuteCommand: true
       LaunchType: FARGATE
       NetworkConfiguration:
@@ -302,7 +272,12 @@ Resources:
               Fn::Sub:
                 - ${CommonInfraStackName}-TaskSGId
                 - CommonInfraStackName: !Ref 'CommonInfraStackName'
-          Subnets: !Ref 'PrivateSubnets'
+          Subnets: !Split
+            - ','
+            - !ImportValue
+              Fn::Sub:
+                - ${CommonInfraStackName}-PrivateSubnets
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
       ServiceName: lakerunner-compact-metrics
       TaskDefinition: !Ref 'TaskDefLakerunnerCompactMetrics'
     Type: AWS::ECS::Service
@@ -312,10 +287,7 @@ Resources:
         Fn::Sub:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
-      DesiredCount: !If
-        - HasGlobalReplicasOverride
-        - !Ref 'GlobalReplicasOverride'
-        - '1'
+      DesiredCount: '1'
       EnableExecuteCommand: true
       LaunchType: FARGATE
       NetworkConfiguration:
@@ -325,7 +297,12 @@ Resources:
               Fn::Sub:
                 - ${CommonInfraStackName}-TaskSGId
                 - CommonInfraStackName: !Ref 'CommonInfraStackName'
-          Subnets: !Ref 'PrivateSubnets'
+          Subnets: !Split
+            - ','
+            - !ImportValue
+              Fn::Sub:
+                - ${CommonInfraStackName}-PrivateSubnets
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
       ServiceName: lakerunner-ingest-logs
       TaskDefinition: !Ref 'TaskDefLakerunnerIngestLogs'
     Type: AWS::ECS::Service
@@ -335,10 +312,7 @@ Resources:
         Fn::Sub:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
-      DesiredCount: !If
-        - HasGlobalReplicasOverride
-        - !Ref 'GlobalReplicasOverride'
-        - '1'
+      DesiredCount: '1'
       EnableExecuteCommand: true
       LaunchType: FARGATE
       NetworkConfiguration:
@@ -348,7 +322,12 @@ Resources:
               Fn::Sub:
                 - ${CommonInfraStackName}-TaskSGId
                 - CommonInfraStackName: !Ref 'CommonInfraStackName'
-          Subnets: !Ref 'PrivateSubnets'
+          Subnets: !Split
+            - ','
+            - !ImportValue
+              Fn::Sub:
+                - ${CommonInfraStackName}-PrivateSubnets
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
       ServiceName: lakerunner-ingest-metrics
       TaskDefinition: !Ref 'TaskDefLakerunnerIngestMetrics'
     Type: AWS::ECS::Service
@@ -358,10 +337,7 @@ Resources:
         Fn::Sub:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
-      DesiredCount: !If
-        - HasGlobalReplicasOverride
-        - !Ref 'GlobalReplicasOverride'
-        - '1'
+      DesiredCount: '1'
       EnableExecuteCommand: true
       LaunchType: FARGATE
       NetworkConfiguration:
@@ -371,7 +347,12 @@ Resources:
               Fn::Sub:
                 - ${CommonInfraStackName}-TaskSGId
                 - CommonInfraStackName: !Ref 'CommonInfraStackName'
-          Subnets: !Ref 'PrivateSubnets'
+          Subnets: !Split
+            - ','
+            - !ImportValue
+              Fn::Sub:
+                - ${CommonInfraStackName}-PrivateSubnets
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
       ServiceName: lakerunner-pubsub-sqs
       TaskDefinition: !Ref 'TaskDefLakerunnerPubsubSqs'
     Type: AWS::ECS::Service
@@ -381,10 +362,7 @@ Resources:
         Fn::Sub:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
-      DesiredCount: !If
-        - HasGlobalReplicasOverride
-        - !Ref 'GlobalReplicasOverride'
-        - '1'
+      DesiredCount: '1'
       EnableExecuteCommand: true
       LaunchType: FARGATE
       LoadBalancers:
@@ -398,7 +376,12 @@ Resources:
               Fn::Sub:
                 - ${CommonInfraStackName}-TaskSGId
                 - CommonInfraStackName: !Ref 'CommonInfraStackName'
-          Subnets: !Ref 'PrivateSubnets'
+          Subnets: !Split
+            - ','
+            - !ImportValue
+              Fn::Sub:
+                - ${CommonInfraStackName}-PrivateSubnets
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
       ServiceName: lakerunner-query-api
       TaskDefinition: !Ref 'TaskDefLakerunnerQueryApi'
     Type: AWS::ECS::Service
@@ -408,10 +391,7 @@ Resources:
         Fn::Sub:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
-      DesiredCount: !If
-        - HasGlobalReplicasOverride
-        - !Ref 'GlobalReplicasOverride'
-        - '1'
+      DesiredCount: '1'
       EnableExecuteCommand: true
       LaunchType: FARGATE
       NetworkConfiguration:
@@ -421,7 +401,12 @@ Resources:
               Fn::Sub:
                 - ${CommonInfraStackName}-TaskSGId
                 - CommonInfraStackName: !Ref 'CommonInfraStackName'
-          Subnets: !Ref 'PrivateSubnets'
+          Subnets: !Split
+            - ','
+            - !ImportValue
+              Fn::Sub:
+                - ${CommonInfraStackName}-PrivateSubnets
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
       ServiceName: lakerunner-query-worker
       TaskDefinition: !Ref 'TaskDefLakerunnerQueryWorker'
     Type: AWS::ECS::Service
@@ -431,10 +416,7 @@ Resources:
         Fn::Sub:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
-      DesiredCount: !If
-        - HasGlobalReplicasOverride
-        - !Ref 'GlobalReplicasOverride'
-        - '1'
+      DesiredCount: '1'
       EnableExecuteCommand: true
       LaunchType: FARGATE
       NetworkConfiguration:
@@ -444,7 +426,12 @@ Resources:
               Fn::Sub:
                 - ${CommonInfraStackName}-TaskSGId
                 - CommonInfraStackName: !Ref 'CommonInfraStackName'
-          Subnets: !Ref 'PrivateSubnets'
+          Subnets: !Split
+            - ','
+            - !ImportValue
+              Fn::Sub:
+                - ${CommonInfraStackName}-PrivateSubnets
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
       ServiceName: lakerunner-rollup-metrics
       TaskDefinition: !Ref 'TaskDefLakerunnerRollupMetrics'
     Type: AWS::ECS::Service
@@ -454,10 +441,7 @@ Resources:
         Fn::Sub:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
-      DesiredCount: !If
-        - HasGlobalReplicasOverride
-        - !Ref 'GlobalReplicasOverride'
-        - '1'
+      DesiredCount: '1'
       EnableExecuteCommand: true
       LaunchType: FARGATE
       NetworkConfiguration:
@@ -467,7 +451,12 @@ Resources:
               Fn::Sub:
                 - ${CommonInfraStackName}-TaskSGId
                 - CommonInfraStackName: !Ref 'CommonInfraStackName'
-          Subnets: !Ref 'PrivateSubnets'
+          Subnets: !Split
+            - ','
+            - !ImportValue
+              Fn::Sub:
+                - ${CommonInfraStackName}-PrivateSubnets
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
       ServiceName: lakerunner-sweeper
       TaskDefinition: !Ref 'TaskDefLakerunnerSweeper'
     Type: AWS::ECS::Service
@@ -490,7 +479,10 @@ Resources:
           Value: '30'
       TargetType: ip
       UnhealthyThresholdCount: 3
-      VpcId: !Ref 'VpcId'
+      VpcId: !ImportValue
+        Fn::Sub:
+          - ${CommonInfraStackName}-VpcId
+          - CommonInfraStackName: !Ref 'CommonInfraStackName'
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
   TargetGroupLakerunnerQueryApi:
     Properties:
@@ -511,7 +503,10 @@ Resources:
           Value: '30'
       TargetType: ip
       UnhealthyThresholdCount: 3
-      VpcId: !Ref 'VpcId'
+      VpcId: !ImportValue
+        Fn::Sub:
+          - ${CommonInfraStackName}-VpcId
+          - CommonInfraStackName: !Ref 'CommonInfraStackName'
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
   TaskDefGrafana:
     Properties:
@@ -551,11 +546,14 @@ Resources:
                   - ${CommonInfraStackName}-DbEndpoint
                   - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_PORT
-              Value: !Ref 'DbPort'
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbPort
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_NAME
-              Value: !Ref 'DbName'
+              Value: lakerunner
             - Name: LRDB_USER
-              Value: !Ref 'DbUser'
+              Value: lakerunner
             - Name: LRDB_SSLMODE
               Value: require
             - Name: GF_SECURITY_ADMIN_USER
@@ -575,10 +573,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: !If
-            - HasGlobalImageOverride
-            - !Ref 'GlobalImageOverride'
-            - grafana/grafana:latest
+          Image: !Ref 'GrafanaImage'
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -677,11 +672,14 @@ Resources:
                   - ${CommonInfraStackName}-DbEndpoint
                   - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_PORT
-              Value: !Ref 'DbPort'
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbPort
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_NAME
-              Value: !Ref 'DbName'
+              Value: lakerunner
             - Name: LRDB_USER
-              Value: !Ref 'DbUser'
+              Value: lakerunner
             - Name: LRDB_SSLMODE
               Value: require
           HealthCheck:
@@ -692,10 +690,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: !If
-            - HasGlobalImageOverride
-            - !Ref 'GlobalImageOverride'
-            - public.ecr.aws/cardinalhq.io/lakerunner:latest
+          Image: !Ref 'GoServicesImage'
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -775,11 +770,14 @@ Resources:
                   - ${CommonInfraStackName}-DbEndpoint
                   - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_PORT
-              Value: !Ref 'DbPort'
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbPort
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_NAME
-              Value: !Ref 'DbName'
+              Value: lakerunner
             - Name: LRDB_USER
-              Value: !Ref 'DbUser'
+              Value: lakerunner
             - Name: LRDB_SSLMODE
               Value: require
           HealthCheck:
@@ -790,10 +788,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: !If
-            - HasGlobalImageOverride
-            - !Ref 'GlobalImageOverride'
-            - public.ecr.aws/cardinalhq.io/lakerunner:latest
+          Image: !Ref 'GoServicesImage'
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -873,11 +868,14 @@ Resources:
                   - ${CommonInfraStackName}-DbEndpoint
                   - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_PORT
-              Value: !Ref 'DbPort'
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbPort
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_NAME
-              Value: !Ref 'DbName'
+              Value: lakerunner
             - Name: LRDB_USER
-              Value: !Ref 'DbUser'
+              Value: lakerunner
             - Name: LRDB_SSLMODE
               Value: require
           HealthCheck:
@@ -888,10 +886,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: !If
-            - HasGlobalImageOverride
-            - !Ref 'GlobalImageOverride'
-            - public.ecr.aws/cardinalhq.io/lakerunner:latest
+          Image: !Ref 'GoServicesImage'
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -971,11 +966,14 @@ Resources:
                   - ${CommonInfraStackName}-DbEndpoint
                   - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_PORT
-              Value: !Ref 'DbPort'
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbPort
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_NAME
-              Value: !Ref 'DbName'
+              Value: lakerunner
             - Name: LRDB_USER
-              Value: !Ref 'DbUser'
+              Value: lakerunner
             - Name: LRDB_SSLMODE
               Value: require
           HealthCheck:
@@ -986,10 +984,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: !If
-            - HasGlobalImageOverride
-            - !Ref 'GlobalImageOverride'
-            - public.ecr.aws/cardinalhq.io/lakerunner:latest
+          Image: !Ref 'GoServicesImage'
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -1070,11 +1065,14 @@ Resources:
                   - ${CommonInfraStackName}-DbEndpoint
                   - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_PORT
-              Value: !Ref 'DbPort'
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbPort
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_NAME
-              Value: !Ref 'DbName'
+              Value: lakerunner
             - Name: LRDB_USER
-              Value: !Ref 'DbUser'
+              Value: lakerunner
             - Name: LRDB_SSLMODE
               Value: require
           HealthCheck:
@@ -1085,10 +1083,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: !If
-            - HasGlobalImageOverride
-            - !Ref 'GlobalImageOverride'
-            - public.ecr.aws/cardinalhq.io/lakerunner:latest
+          Image: !Ref 'GoServicesImage'
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -1166,11 +1161,14 @@ Resources:
                   - ${CommonInfraStackName}-DbEndpoint
                   - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_PORT
-              Value: !Ref 'DbPort'
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbPort
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_NAME
-              Value: !Ref 'DbName'
+              Value: lakerunner
             - Name: LRDB_USER
-              Value: !Ref 'DbUser'
+              Value: lakerunner
             - Name: LRDB_SSLMODE
               Value: require
             - Name: EXECUTION_ENVIRONMENT
@@ -1198,10 +1196,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: !If
-            - HasGlobalImageOverride
-            - !Ref 'GlobalImageOverride'
-            - public.ecr.aws/cardinalhq.io/lakerunner/query-api:latest-dev
+          Image: !Ref 'QueryApiImage'
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -1288,11 +1283,14 @@ Resources:
                   - ${CommonInfraStackName}-DbEndpoint
                   - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_PORT
-              Value: !Ref 'DbPort'
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbPort
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_NAME
-              Value: !Ref 'DbName'
+              Value: lakerunner
             - Name: LRDB_USER
-              Value: !Ref 'DbUser'
+              Value: lakerunner
             - Name: LRDB_SSLMODE
               Value: require
             - Name: METRIC_PREFIX
@@ -1308,10 +1306,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: !If
-            - HasGlobalImageOverride
-            - !Ref 'GlobalImageOverride'
-            - public.ecr.aws/cardinalhq.io/lakerunner/query-worker:latest-dev
+          Image: !Ref 'QueryWorkerImage'
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -1400,11 +1395,14 @@ Resources:
                   - ${CommonInfraStackName}-DbEndpoint
                   - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_PORT
-              Value: !Ref 'DbPort'
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbPort
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_NAME
-              Value: !Ref 'DbName'
+              Value: lakerunner
             - Name: LRDB_USER
-              Value: !Ref 'DbUser'
+              Value: lakerunner
             - Name: LRDB_SSLMODE
               Value: require
           HealthCheck:
@@ -1415,10 +1413,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: !If
-            - HasGlobalImageOverride
-            - !Ref 'GlobalImageOverride'
-            - public.ecr.aws/cardinalhq.io/lakerunner:latest
+          Image: !Ref 'GoServicesImage'
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -1498,11 +1493,14 @@ Resources:
                   - ${CommonInfraStackName}-DbEndpoint
                   - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_PORT
-              Value: !Ref 'DbPort'
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbPort
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_NAME
-              Value: !Ref 'DbName'
+              Value: lakerunner
             - Name: LRDB_USER
-              Value: !Ref 'DbUser'
+              Value: lakerunner
             - Name: LRDB_SSLMODE
               Value: require
           HealthCheck:
@@ -1513,10 +1511,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: !If
-            - HasGlobalImageOverride
-            - !Ref 'GlobalImageOverride'
-            - public.ecr.aws/cardinalhq.io/lakerunner:latest
+          Image: !Ref 'GoServicesImage'
           LogConfiguration:
             LogDriver: awslogs
             Options:

@@ -369,6 +369,12 @@ t.add_output(Output(
     Export=Export(name=Sub("${AWS::StackName}-AlbDNS"))
 ))
 t.add_output(Output(
+    "AlbArn",
+    Condition="CreateAlbCond",
+    Value=Ref(Alb),
+    Export=Export(name=Sub("${AWS::StackName}-AlbArn"))
+))
+t.add_output(Output(
     "Tg7101Arn",
     Condition="CreateAlbCond",
     Value=Ref(Tg7101),
@@ -389,6 +395,11 @@ t.add_output(Output(
     "PrivateSubnetsOut",
     Value=Sub("${Subnet1},${Subnet2}", Subnet1=Select(0, Ref(PrivateSubnets)), Subnet2=Select(1, Ref(PrivateSubnets))),
     Export=Export(name=Sub("${AWS::StackName}-PrivateSubnets"))
+))
+t.add_output(Output(
+    "VpcIdOut",
+    Value=Ref(VpcId),
+    Export=Export(name=Sub("${AWS::StackName}-VpcId"))
 ))
 
 print(t.to_yaml())
