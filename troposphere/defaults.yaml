@@ -1,5 +1,5 @@
 # Default configuration for Lakerunner deployment
-# This file contains initial state for API keys, storage profiles, and service configurations
+# This file contains initial state for API keys, storage profiles, service configurations, and container images
 
 # API Keys configuration
 api_keys:
@@ -17,6 +17,14 @@ storage_profiles:
     organization_id: 12340000-0000-4000-8000-000000000000
     region: "${AWS_REGION}"  # Will be replaced with actual region
     use_path_style: true
+
+# Container Images configuration
+images:
+  migration: "public.ecr.aws/cardinalhq.io/lakerunner:latest"
+  go_services: "public.ecr.aws/cardinalhq.io/lakerunner:latest"
+  query_api: "public.ecr.aws/cardinalhq.io/lakerunner/query-api:latest"
+  query_worker: "public.ecr.aws/cardinalhq.io/lakerunner/query-worker:latest"
+  grafana: "grafana/grafana:latest"
 
 # Service configurations (moved from services.yaml for centralization)
 services:

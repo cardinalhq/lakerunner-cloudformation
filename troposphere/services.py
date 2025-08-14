@@ -46,9 +46,10 @@ def create_services_template():
     t = Template()
     t.set_description("Lakerunner Services: ECS services, task definitions, IAM roles, and ALB integration")
 
-    # Load service configurations
+    # Load service configurations and image defaults
     config = load_service_config()
     services = config.get('services', {})
+    images = config.get('images', {})
 
     # -----------------------
     # Parameters (imports from CommonInfra)
@@ -61,25 +62,25 @@ def create_services_template():
     # Container image overrides for air-gapped deployments
     GoServicesImage = t.add_parameter(Parameter(
         "GoServicesImage", Type="String",
-        Default="public.ecr.aws/cardinalhq.io/lakerunner:latest",
+        Default=images.get('go_services', 'public.ecr.aws/cardinalhq.io/lakerunner:latest'),
         Description="Container image for Go services (pubsub, ingest, compact, etc.)"
     ))
 
     QueryApiImage = t.add_parameter(Parameter(
         "QueryApiImage", Type="String",
-        Default="public.ecr.aws/cardinalhq.io/lakerunner/query-api:latest-dev",
+        Default=images.get('query_api', 'public.ecr.aws/cardinalhq.io/lakerunner/query-api:latest'),
         Description="Container image for query-api service"
     ))
 
     QueryWorkerImage = t.add_parameter(Parameter(
         "QueryWorkerImage", Type="String",
-        Default="public.ecr.aws/cardinalhq.io/lakerunner/query-worker:latest-dev",
+        Default=images.get('query_worker', 'public.ecr.aws/cardinalhq.io/lakerunner/query-worker:latest'),
         Description="Container image for query-worker service"
     ))
 
     GrafanaImage = t.add_parameter(Parameter(
         "GrafanaImage", Type="String",
-        Default="grafana/grafana:latest",
+        Default=images.get('grafana', 'grafana/grafana:latest'),
         Description="Container image for Grafana service"
     ))
 

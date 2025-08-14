@@ -35,6 +35,16 @@ from troposphere.ecs import (
   TaskDefinition,
 )
 from troposphere.awslambda import Function, Code
+import yaml
+import os
+
+def load_defaults(config_file="defaults.yaml"):
+    """Load default configuration from YAML file"""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    config_path = os.path.join(script_dir, config_file)
+
+    with open(config_path, 'r') as f:
+        return yaml.safe_load(f)
 
 class RunEcsTask(AWSObject):
     resource_type = "Custom::RunEcsTask"
@@ -50,6 +60,10 @@ class RunEcsTask(AWSObject):
 t = Template()
 t.set_description("Lakerunner DB migration (single template): defines TaskDefinition and runs it via Custom Resource.")
 
+# Load defaults for image configuration
+defaults = load_defaults()
+images = defaults.get('images', {})
+
 # -----------------------
 # Parameters (with console hints)
 # -----------------------
@@ -60,7 +74,7 @@ CommonInfraStackName = t.add_parameter(Parameter(
 
 ContainerImage = t.add_parameter(Parameter(
     "ContainerImage", Type="String",
-    Default="public.ecr.aws/cardinalhq.io/lakerunner:latest",
+    Default=images.get('migration', 'public.ecr.aws/cardinalhq.io/lakerunner:latest'),
     Description="Migration container image."
 ))
 Cpu = t.add_parameter(Parameter(

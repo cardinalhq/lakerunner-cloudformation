@@ -105,11 +105,11 @@ Parameters:
     Description: Container image for Grafana service
     Type: String
   QueryApiImage:
-    Default: public.ecr.aws/cardinalhq.io/lakerunner/query-api:latest-dev
+    Default: public.ecr.aws/cardinalhq.io/lakerunner/query-api:latest
     Description: Container image for query-api service
     Type: String
   QueryWorkerImage:
-    Default: public.ecr.aws/cardinalhq.io/lakerunner/query-worker:latest-dev
+    Default: public.ecr.aws/cardinalhq.io/lakerunner/query-worker:latest
     Description: Container image for query-worker service
     Type: String
 Resources:
