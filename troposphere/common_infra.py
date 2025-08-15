@@ -51,7 +51,7 @@ PublicSubnets = t.add_parameter(Parameter(
     "PublicSubnets",
     Type="CommaDelimitedList",
     Default="",
-    Description="Public subnet IDs (for ALB). Required when CreateAlb=Yes. Provide at least two in different AZs."
+    Description="Public subnet IDs (for internet-facing ALB). Required when AlbScheme=internet-facing. Provide at least two in different AZs."
 ))
 
 PrivateSubnets = t.add_parameter(Parameter(
@@ -60,12 +60,12 @@ PrivateSubnets = t.add_parameter(Parameter(
     Description="REQUIRED: Private subnet IDs (for RDS/ECS/EFS). Provide at least two in different AZs."
 ))
 
-CreateAlb = t.add_parameter(Parameter(
-    "CreateAlb",
+AlbScheme = t.add_parameter(Parameter(
+    "AlbScheme",
     Type="String",
-    AllowedValues=["Yes", "No"],
-    Default="Yes",
-    Description="Create an internet-facing Application Load Balancer with listeners on 7101 and 3000. Set to 'No' to skip."
+    AllowedValues=["internet-facing", "internal"],
+    Default="internal",
+    Description="Load balancer scheme: 'internet-facing' for external access or 'internal' for internal access only."
 ))
 
 # Configuration overrides (optional multi-line parameters)
@@ -95,7 +95,7 @@ t.set_metadata({
             },
             {
                 "Label": {"default": "Load Balancer"},
-                "Parameters": ["CreateAlb"]
+                "Parameters": ["AlbScheme"]
             },
             {
                 "Label": {"default": "Configuration Overrides (Advanced)"},
@@ -104,9 +104,9 @@ t.set_metadata({
         ],
         "ParameterLabels": {
             "VpcId": {"default": "VPC Id"},
-            "PublicSubnets": {"default": "Public Subnets (required if ALB enabled)"},
+            "PublicSubnets": {"default": "Public Subnets (required for internet-facing ALB)"},
             "PrivateSubnets": {"default": "Private Subnets (for ECS/RDS/EFS)"},
-            "CreateAlb": {"default": "Create Application Load Balancer?"},
+            "AlbScheme": {"default": "Load Balancer Scheme"},
             "ApiKeysOverride": {"default": "Custom API Keys (YAML)"},
             "StorageProfilesOverride": {"default": "Custom Storage Profiles (YAML)"}
         }
@@ -116,7 +116,7 @@ t.set_metadata({
 # -----------------------
 # Conditions
 # -----------------------
-t.add_condition("CreateAlbCond", Equals(Ref(CreateAlb), "Yes"))
+t.add_condition("IsInternetFacing", Equals(Ref(AlbScheme), "internet-facing"))
 t.add_condition("HasApiKeysOverride", Not(Equals(Ref(ApiKeysOverride), "")))
 t.add_condition("HasStorageProfilesOverride", Not(Equals(Ref(StorageProfilesOverride), "")))
 
@@ -176,10 +176,9 @@ t.add_resource(SecurityGroupIngress(
     Description="task-to-EFS NFS",
 ))
 
-# ALB SG (only if creating ALB)
+# ALB SG
 AlbSG = t.add_resource(SecurityGroup(
     "AlbSecurityGroup",
-    Condition="CreateAlbCond",
     GroupDescription="Security group for ALB",
     VpcId=Ref(VpcId),
     SecurityGroupEgress=[{
@@ -191,7 +190,6 @@ AlbSG = t.add_resource(SecurityGroup(
 
 t.add_resource(SecurityGroupIngress(
     "Alb3000Open",
-    Condition="CreateAlbCond",
     GroupId=Ref(AlbSG),
     IpProtocol="tcp",
     FromPort=3000, ToPort=3000,
@@ -200,7 +198,6 @@ t.add_resource(SecurityGroupIngress(
 ))
 t.add_resource(SecurityGroupIngress(
     "Alb7101Open",
-    Condition="CreateAlbCond",
     GroupId=Ref(AlbSG),
     IpProtocol="tcp",
     FromPort=7101, ToPort=7101,
@@ -211,7 +208,6 @@ t.add_resource(SecurityGroupIngress(
 for port in (3000, 7101):
     t.add_resource(SecurityGroupIngress(
         f"TaskFromAlb{port}",
-        Condition="CreateAlbCond",
         GroupId=Ref(TaskSG),
         IpProtocol="tcp",
         FromPort=port, ToPort=port,
@@ -220,21 +216,23 @@ for port in (3000, 7101):
     ))
 
 # -----------------------
-# Optional ALB + listeners + target groups
+# ALB + listeners + target groups
 # -----------------------
 Alb = t.add_resource(LoadBalancer(
     "Alb",
-    Condition="CreateAlbCond",
     Name=Sub("${AWS::StackName}-alb"),
-    Scheme="internet-facing",
+    Scheme=Ref(AlbScheme),
     SecurityGroups=[Ref(AlbSG)],
-    Subnets=Ref(PublicSubnets),
+    Subnets=If(
+        "IsInternetFacing",
+        Ref(PublicSubnets),
+        Ref(PrivateSubnets)
+    ),
     Type="application",
 ))
 
 Tg7101 = t.add_resource(TargetGroup(
     "Tg7101",
-    Condition="CreateAlbCond",
     Port=7101, Protocol="HTTP",
     VpcId=Ref(VpcId),
     TargetType="ip",
@@ -252,7 +250,6 @@ Tg7101 = t.add_resource(TargetGroup(
 ))
 Tg3000 = t.add_resource(TargetGroup(
     "Tg3000",
-    Condition="CreateAlbCond",
     Port=3000, Protocol="HTTP",
     VpcId=Ref(VpcId),
     TargetType="ip",
@@ -271,7 +268,6 @@ Tg3000 = t.add_resource(TargetGroup(
 
 t.add_resource(Listener(
     "Listener7101",
-    Condition="CreateAlbCond",
     LoadBalancerArn=Ref(Alb),
     Port="7101",
     Protocol="HTTP",
@@ -279,7 +275,6 @@ t.add_resource(Listener(
 ))
 t.add_resource(Listener(
     "Listener3000",
-    Condition="CreateAlbCond",
     LoadBalancerArn=Ref(Alb),
     Port="3000",
     Protocol="HTTP",
@@ -462,25 +457,21 @@ t.add_resource(SsmParameter(
 # -----------------------
 t.add_output(Output(
     "AlbDNS",
-    Condition="CreateAlbCond",
     Value=GetAtt(Alb, "DNSName"),
     Export=Export(name=Sub("${AWS::StackName}-AlbDNS"))
 ))
 t.add_output(Output(
     "AlbArn",
-    Condition="CreateAlbCond",
     Value=Ref(Alb),
     Export=Export(name=Sub("${AWS::StackName}-AlbArn"))
 ))
 t.add_output(Output(
     "Tg7101Arn",
-    Condition="CreateAlbCond",
     Value=Ref(Tg7101),
     Export=Export(name=Sub("${AWS::StackName}-Tg7101Arn"))
 ))
 t.add_output(Output(
     "Tg3000Arn",
-    Condition="CreateAlbCond",
     Value=Ref(Tg3000),
     Export=Export(name=Sub("${AWS::StackName}-Tg3000Arn"))
 ))
@@ -500,11 +491,11 @@ t.add_output(Output(
     Export=Export(name=Sub("${AWS::StackName}-VpcId"))
 ))
 
-# Export CreateAlb parameter value so Services template can auto-detect ALB presence
+# Export ALB scheme so Services template can use appropriate subnets
 t.add_output(Output(
-    "CreateAlbValue",
-    Value=Ref(CreateAlb),
-    Export=Export(name=Sub("${AWS::StackName}-CreateAlb"))
+    "AlbSchemeValue",
+    Value=Ref(AlbScheme),
+    Export=Export(name=Sub("${AWS::StackName}-AlbScheme"))
 ))
 
 print(t.to_yaml())

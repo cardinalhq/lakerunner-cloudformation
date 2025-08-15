@@ -16,7 +16,7 @@
 import yaml
 import os
 from troposphere import (
-    Template, Parameter, Ref, Sub, GetAtt, If, Equals, NoValue, Export, Output,
+    Template, Parameter, Ref, Sub, GetAtt, If, Equals, Export, Output,
     Select, Not, Tags, ImportValue, Join, And, Split, Condition
 )
 from troposphere.ecs import (
@@ -90,7 +90,7 @@ def create_services_template():
             "ParameterGroups": [
                 {
                     "Label": {"default": "Infrastructure"},
-                    "Parameters": ["CommonInfraStackName", "CreateAlb"]
+                    "Parameters": ["CommonInfraStackName"]
                 },
                 {
                     "Label": {"default": "Container Images"},
@@ -99,7 +99,6 @@ def create_services_template():
             ],
             "ParameterLabels": {
                 "CommonInfraStackName": {"default": "Common Infra Stack Name"},
-                "CreateAlb": {"default": "ALB Created in CommonInfra?"},
                 "GoServicesImage": {"default": "Go Services Image"},
                 "QueryApiImage": {"default": "Query API Image"},
                 "QueryWorkerImage": {"default": "Query Worker Image"},
@@ -136,16 +135,6 @@ def create_services_template():
     PrivateSubnetsValue = Split(",", ImportValue(ci_export("PrivateSubnets")))
     BucketArnValue = ImportValue(ci_export("BucketArn"))
 
-    # Add parameter for ALB presence (must match CommonInfra setting)
-    CreateAlb = t.add_parameter(Parameter(
-        "CreateAlb", Type="String",
-        Default="Yes",
-        AllowedValues=["Yes", "No"],
-        Description="Must match the CreateAlb parameter from CommonInfra. Set to 'No' if ALB was not created."
-    ))
-
-    # Condition for ALB resources
-    t.add_condition("HasAlb", Equals(Ref(CreateAlb), "Yes"))
 
     # -----------------------
     # Task Execution Role (shared by all services)
@@ -572,14 +561,14 @@ def create_services_template():
                     'service': ecs_service
                 }
 
-        # Add LoadBalancer configuration only if ALB exists and service has ALB ingress
+        # Add LoadBalancer configuration for services with ALB ingress
         if ingress and ingress.get('attach_alb') and service_name in target_groups:
-            # LoadBalancers property is set conditionally
-            ecs_service.LoadBalancers = If("HasAlb", [EcsLoadBalancer(
+            # LoadBalancers property - ALB is always created
+            ecs_service.LoadBalancers = [EcsLoadBalancer(
                 ContainerName="AppContainer",
                 ContainerPort=ingress['port'],
                 TargetGroupArn=target_groups[service_name]['target_group_arn']
-            )], NoValue)
+            )]
 
     # -----------------------
     # ALB integration - use target groups created in common stack

@@ -1,7 +1,3 @@
-Conditions:
-  HasAlb: !Equals
-    - !Ref 'CreateAlb'
-    - 'Yes'
 Description: 'Lakerunner Services: ECS services, task definitions, IAM roles, and ALB integration'
 Metadata:
   AWS::CloudFormation::Interface:
@@ -10,7 +6,6 @@ Metadata:
           default: Infrastructure
         Parameters:
           - CommonInfraStackName
-          - CreateAlb
       - Label:
           default: Container Images
         Parameters:
@@ -21,8 +16,6 @@ Metadata:
     ParameterLabels:
       CommonInfraStackName:
         default: Common Infra Stack Name
-      CreateAlb:
-        default: ALB Created in CommonInfra?
       GoServicesImage:
         default: Go Services Image
       GrafanaImage:
@@ -88,13 +81,6 @@ Outputs:
 Parameters:
   CommonInfraStackName:
     Description: 'REQUIRED: Name of the CommonInfra stack to import infrastructure values from.'
-    Type: String
-  CreateAlb:
-    AllowedValues:
-      - 'Yes'
-      - 'No'
-    Default: 'Yes'
-    Description: Must match the CreateAlb parameter from CommonInfra. Set to 'No' if ALB was not created.
     Type: String
   GoServicesImage:
     Default: public.ecr.aws/cardinalhq.io/lakerunner:latest
@@ -243,15 +229,13 @@ Resources:
       DesiredCount: '1'
       EnableExecuteCommand: true
       LaunchType: FARGATE
-      LoadBalancers: !If
-        - HasAlb
-        - - ContainerName: AppContainer
-            ContainerPort: 3000
-            TargetGroupArn: !ImportValue
-              Fn::Sub:
-                - ${CommonInfraStackName}-Tg3000Arn
-                - CommonInfraStackName: !Ref 'CommonInfraStackName'
-        - !Ref 'AWS::NoValue'
+      LoadBalancers:
+        - ContainerName: AppContainer
+          ContainerPort: 3000
+          TargetGroupArn: !ImportValue
+            Fn::Sub:
+              - ${CommonInfraStackName}-Tg3000Arn
+              - CommonInfraStackName: !Ref 'CommonInfraStackName'
       NetworkConfiguration:
         AwsvpcConfiguration:
           SecurityGroups:
@@ -402,15 +386,13 @@ Resources:
       DesiredCount: '1'
       EnableExecuteCommand: true
       LaunchType: FARGATE
-      LoadBalancers: !If
-        - HasAlb
-        - - ContainerName: AppContainer
-            ContainerPort: 7101
-            TargetGroupArn: !ImportValue
-              Fn::Sub:
-                - ${CommonInfraStackName}-Tg7101Arn
-                - CommonInfraStackName: !Ref 'CommonInfraStackName'
-        - !Ref 'AWS::NoValue'
+      LoadBalancers:
+        - ContainerName: AppContainer
+          ContainerPort: 7101
+          TargetGroupArn: !ImportValue
+            Fn::Sub:
+              - ${CommonInfraStackName}-Tg7101Arn
+              - CommonInfraStackName: !Ref 'CommonInfraStackName'
       NetworkConfiguration:
         AwsvpcConfiguration:
           SecurityGroups:

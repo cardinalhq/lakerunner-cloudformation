@@ -1,7 +1,4 @@
 Conditions:
-  CreateAlbCond: !Equals
-    - !Ref 'CreateAlb'
-    - 'Yes'
   HasApiKeysOverride: !Not
     - !Equals
       - !Ref 'ApiKeysOverride'
@@ -10,6 +7,9 @@ Conditions:
     - !Equals
       - !Ref 'StorageProfilesOverride'
       - ''
+  IsInternetFacing: !Equals
+    - !Ref 'AlbScheme'
+    - internet-facing
 Description: CommonInfra stack for Lakerunner.
 Metadata:
   AWS::CloudFormation::Interface:
@@ -23,36 +23,38 @@ Metadata:
       - Label:
           default: Load Balancer
         Parameters:
-          - CreateAlb
+          - AlbScheme
       - Label:
           default: Configuration Overrides (Advanced)
         Parameters:
           - ApiKeysOverride
           - StorageProfilesOverride
     ParameterLabels:
+      AlbScheme:
+        default: Load Balancer Scheme
       ApiKeysOverride:
         default: Custom API Keys (YAML)
-      CreateAlb:
-        default: Create Application Load Balancer?
       PrivateSubnets:
         default: Private Subnets (for ECS/RDS/EFS)
       PublicSubnets:
-        default: Public Subnets (required if ALB enabled)
+        default: Public Subnets (required for internet-facing ALB)
       StorageProfilesOverride:
         default: Custom Storage Profiles (YAML)
       VpcId:
         default: VPC Id
 Outputs:
   AlbArn:
-    Condition: CreateAlbCond
     Export:
       Name: !Sub '${AWS::StackName}-AlbArn'
     Value: !Ref 'Alb'
   AlbDNS:
-    Condition: CreateAlbCond
     Export:
       Name: !Sub '${AWS::StackName}-AlbDNS'
     Value: !GetAtt 'Alb.DNSName'
+  AlbSchemeValue:
+    Export:
+      Name: !Sub '${AWS::StackName}-AlbScheme'
+    Value: !Ref 'AlbScheme'
   BucketArn:
     Export:
       Name: !Sub '${AWS::StackName}-BucketArn'
@@ -65,10 +67,6 @@ Outputs:
     Export:
       Name: !Sub '${AWS::StackName}-ClusterArn'
     Value: !GetAtt 'Cluster.Arn'
-  CreateAlbValue:
-    Export:
-      Name: !Sub '${AWS::StackName}-CreateAlb'
-    Value: !Ref 'CreateAlb'
   DbEndpoint:
     Export:
       Name: !Sub '${AWS::StackName}-DbEndpoint'
@@ -101,12 +99,10 @@ Outputs:
       Name: !Sub '${AWS::StackName}-TaskSGId'
     Value: !Ref 'TaskSG'
   Tg3000Arn:
-    Condition: CreateAlbCond
     Export:
       Name: !Sub '${AWS::StackName}-Tg3000Arn'
     Value: !Ref 'Tg3000'
   Tg7101Arn:
-    Condition: CreateAlbCond
     Export:
       Name: !Sub '${AWS::StackName}-Tg7101Arn'
     Value: !Ref 'Tg7101'
@@ -115,23 +111,23 @@ Outputs:
       Name: !Sub '${AWS::StackName}-VpcId'
     Value: !Ref 'VpcId'
 Parameters:
+  AlbScheme:
+    AllowedValues:
+      - internet-facing
+      - internal
+    Default: internal
+    Description: 'Load balancer scheme: ''internet-facing'' for external access or ''internal'' for internal access only.'
+    Type: String
   ApiKeysOverride:
     Default: ''
     Description: 'OPTIONAL: Custom API keys configuration in YAML format. Leave blank to use defaults from defaults.yaml. Example: - organization_id: xxx\n  keys:\n    - keyvalue'
-    Type: String
-  CreateAlb:
-    AllowedValues:
-      - 'Yes'
-      - 'No'
-    Default: 'Yes'
-    Description: Create an internet-facing Application Load Balancer with listeners on 7101 and 3000. Set to 'No' to skip.
     Type: String
   PrivateSubnets:
     Description: 'REQUIRED: Private subnet IDs (for RDS/ECS/EFS). Provide at least two in different AZs.'
     Type: List<AWS::EC2::Subnet::Id>
   PublicSubnets:
     Default: ''
-    Description: Public subnet IDs (for ALB). Required when CreateAlb=Yes. Provide at least two in different AZs.
+    Description: Public subnet IDs (for internet-facing ALB). Required when AlbScheme=internet-facing. Provide at least two in different AZs.
     Type: CommaDelimitedList
   StorageProfilesOverride:
     Default: ''
@@ -142,17 +138,18 @@ Parameters:
     Type: AWS::EC2::VPC::Id
 Resources:
   Alb:
-    Condition: CreateAlbCond
     Properties:
       Name: !Sub '${AWS::StackName}-alb'
-      Scheme: internet-facing
+      Scheme: !Ref 'AlbScheme'
       SecurityGroups:
         - !Ref 'AlbSecurityGroup'
-      Subnets: !Ref 'PublicSubnets'
+      Subnets: !If
+        - IsInternetFacing
+        - !Ref 'PublicSubnets'
+        - !Ref 'PrivateSubnets'
       Type: application
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
   Alb3000Open:
-    Condition: CreateAlbCond
     Properties:
       CidrIp: '0.0.0.0/0'
       Description: HTTP 3000
@@ -162,7 +159,6 @@ Resources:
       ToPort: 3000
     Type: AWS::EC2::SecurityGroupIngress
   Alb7101Open:
-    Condition: CreateAlbCond
     Properties:
       CidrIp: '0.0.0.0/0'
       Description: HTTP 7101
@@ -172,7 +168,6 @@ Resources:
       ToPort: 7101
     Type: AWS::EC2::SecurityGroupIngress
   AlbSecurityGroup:
-    Condition: CreateAlbCond
     Properties:
       GroupDescription: Security group for ALB
       SecurityGroupEgress:
@@ -311,7 +306,6 @@ Resources:
         - !Ref 'TaskSG'
     Type: AWS::RDS::DBInstance
   Listener3000:
-    Condition: CreateAlbCond
     Properties:
       DefaultActions:
         - TargetGroupArn: !Ref 'Tg3000'
@@ -321,7 +315,6 @@ Resources:
       Protocol: HTTP
     Type: AWS::ElasticLoadBalancingV2::Listener
   Listener7101:
-    Condition: CreateAlbCond
     Properties:
       DefaultActions:
         - TargetGroupArn: !Ref 'Tg7101'
@@ -344,7 +337,6 @@ Resources:
           - Bucket: !Ref 'IngestBucket'
     Type: AWS::SSM::Parameter
   TaskFromAlb3000:
-    Condition: CreateAlbCond
     Properties:
       Description: ALB to tasks 3000
       FromPort: 3000
@@ -354,7 +346,6 @@ Resources:
       ToPort: 3000
     Type: AWS::EC2::SecurityGroupIngress
   TaskFromAlb7101:
-    Condition: CreateAlbCond
     Properties:
       Description: ALB to tasks 7101
       FromPort: 7101
@@ -400,7 +391,6 @@ Resources:
       ToPort: 2049
     Type: AWS::EC2::SecurityGroupIngress
   Tg3000:
-    Condition: CreateAlbCond
     Properties:
       HealthCheckIntervalSeconds: 30
       HealthCheckPath: /api/health
@@ -421,7 +411,6 @@ Resources:
       VpcId: !Ref 'VpcId'
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
   Tg7101:
-    Condition: CreateAlbCond
     Properties:
       HealthCheckIntervalSeconds: 30
       HealthCheckPath: /ready
