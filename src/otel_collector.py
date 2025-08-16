@@ -34,7 +34,7 @@ from troposphere.logs import LogGroup
 from troposphere.ec2 import SecurityGroup, SecurityGroupRule
 # EFS no longer needed for simplified config approach
 
-def load_otel_config(config_file="defaults.yaml"):
+def load_otel_config(config_file="otel-stack-defaults.yaml"):
     """Load OTEL collector configuration from YAML file"""
     script_dir = os.path.dirname(os.path.abspath(__file__))
     config_path = os.path.join(script_dir, "..", config_file)
@@ -45,7 +45,7 @@ def load_otel_config(config_file="defaults.yaml"):
 def load_default_otel_yaml():
     """Load the default OTEL configuration YAML as a string"""
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    config_path = os.path.join(script_dir, "..", "otel-config.yaml")
+    config_path = os.path.join(script_dir, "..", "otel-collector-config.yaml")
 
     with open(config_path, 'r') as f:
         return f.read().strip()

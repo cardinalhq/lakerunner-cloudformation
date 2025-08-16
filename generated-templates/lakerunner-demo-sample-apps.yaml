@@ -82,7 +82,7 @@ Resources:
             - Name: OTEL_SERVICE_NAME
               Value: sample-app
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
-              Value: !Sub 'http://<troposphere.ImportValue object at 0x10282b0b0>:4317'
+              Value: !Sub 'http://<troposphere.ImportValue object at 0x1009c2330>:4317'
             - Name: OTEL_EXPORTER_OTLP_PROTOCOL
               Value: grpc
             - Name: OTEL_RESOURCE_ATTRIBUTES

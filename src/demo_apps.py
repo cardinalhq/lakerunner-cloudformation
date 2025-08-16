@@ -32,7 +32,7 @@ from troposphere.efs import AccessPoint, PosixUser, RootDirectory, CreationInfo
 from troposphere.logs import LogGroup
 from troposphere.secretsmanager import Secret, GenerateSecretString
 
-def load_demo_config(config_file="defaults.yaml"):
+def load_demo_config(config_file="demo-apps-stack-defaults.yaml"):
     """Load demo app configuration from YAML file"""
     script_dir = os.path.dirname(os.path.abspath(__file__))
     config_path = os.path.join(script_dir, "..", config_file)

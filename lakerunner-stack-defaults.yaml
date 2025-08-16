@@ -1,5 +1,5 @@
-# Default configuration for Lakerunner deployment
-# This file contains initial state for API keys, storage profiles, service configurations, and container images
+# Default configuration for core Lakerunner deployment
+# This file contains configuration for the main three stacks: common, migration, and services
 
 # API Keys configuration
 api_keys:
@@ -25,9 +25,8 @@ images:
   query_api: "public.ecr.aws/cardinalhq.io/lakerunner/query-api:latest"
   query_worker: "public.ecr.aws/cardinalhq.io/lakerunner/query-worker:latest"
   grafana: "grafana/grafana:latest"
-  otel_collector: "public.ecr.aws/cardinalhq.io/cardinalhq-otel-collector:latest"
 
-# Service configurations (moved from services.yaml for centralization)
+# Service configurations for core Lakerunner services
 services:
   lakerunner-pubsub-sqs:
     image: "public.ecr.aws/cardinalhq.io/lakerunner:latest"
@@ -172,38 +171,3 @@ services:
     health_check:
       type: "curl"
       command: ["curl", "-f", "http://localhost:3000/api/health"]
-
-# OTEL Collector services configuration
-otel_services:
-  otel-gateway:
-    image: "public.ecr.aws/cardinalhq.io/cardinalhq-otel-collector:latest"
-    command: ["/app/bin/cardinalhq-otel-collector", "--config=/etc/otel/config.yaml"]
-    cpu: 1024
-    memory_mib: 2048
-    replicas: 1
-    environment:
-      OTEL_RESOURCE_ATTRIBUTES: "service.name=otel-gateway"
-
-# Demo applications with OTEL instrumentation
-demo_apps:
-  sample-app:
-    image: "public.ecr.aws/cardinalhq.io/lakerunner-demo/sample-app:latest"
-    command: ["./sample-app"]
-    cpu: 512
-    memory_mib: 1024
-    replicas: 1
-    environment:
-      APP_NAME: "sample-app"
-      LOG_LEVEL: "info"
-      HTTP_PORT: "8080"
-    ingress:
-      port: 8080
-      attach_alb: false
-    health_check:
-      type: "http"
-      port: 8080
-      path: "/health"
-    bind_mounts:
-      - container_path: "/app/data"
-        source_volume: "scratch"
-        read_only: false
