@@ -313,6 +313,7 @@ Resources:
                   processors:
                     memory_limiter:
                       limit_mib: 1024
+                      check_interval: 1s
 
                     batch:
                       send_batch_max_size: 100
