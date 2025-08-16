@@ -461,6 +461,11 @@ Resources:
           IpProtocol: tcp
           SourceSecurityGroupId: !Ref 'AlbSecurityGroup'
           ToPort: 4318
+        - Description: OTEL health check from ALB
+          FromPort: 13133
+          IpProtocol: tcp
+          SourceSecurityGroupId: !Ref 'AlbSecurityGroup'
+          ToPort: 13133
       Tags:
         - Key: Name
           Value: !Sub '${AWS::StackName}-task-sg'

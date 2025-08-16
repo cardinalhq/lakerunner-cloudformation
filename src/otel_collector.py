@@ -194,6 +194,13 @@ def create_otel_collector_template():
                 ToPort=4318,
                 SourceSecurityGroupId=Ref(AlbSecurityGroup),
                 Description="OTEL HTTP from ALB"
+            ),
+            SecurityGroupRule(
+                IpProtocol="tcp",
+                FromPort=13133,
+                ToPort=13133,
+                SourceSecurityGroupId=Ref(AlbSecurityGroup),
+                Description="OTEL health check from ALB"
             )
         ],
         Tags=Tags(Name=Sub("${AWS::StackName}-task-sg"))
