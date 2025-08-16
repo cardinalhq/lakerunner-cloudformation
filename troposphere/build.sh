@@ -42,5 +42,9 @@ echo "3. Generating Services..."
 python3 services.py > out/services.yaml
 cfn-lint out/services.yaml
 
+echo "4. Generating OTEL Collector..."
+python3 otel_collector.py > out/otel_collector.yaml
+cfn-lint out/otel_collector.yaml
+
 echo -e "\n✅ Generated CloudFormation templates:"
 ls -la out/

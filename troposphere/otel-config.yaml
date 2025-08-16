@@ -1,0 +1,69 @@
+# OTEL Collector Configuration
+# This is a placeholder configuration for the CardinalHQ OTEL Collector
+# Modify this file according to your specific telemetry requirements
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  memory_limiter:
+    limit_mib: 1024
+
+  batch:
+    send_batch_max_size: 100
+    send_batch_size: 10
+    timeout: 1s
+
+exporters:
+  chqs3:
+    buffering:
+      directory: /scratch
+      type: disk
+    s3uploader:
+      customer_key: ${env:ORGANIZATION_ID}/${env:COLLECTOR_NAME}
+      region: ${env:AWS_REGION}
+      s3_bucket: ${env:AWS_S3_BUCKET}
+      s3_force_path_style: true
+      s3_partition: minute
+      s3_prefix: otel-raw
+
+  nop:
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions:
+    - health_check
+  pipelines:
+    traces:
+      receivers:
+        - otlp
+      processors:
+        - memory_limiter
+      exporters:
+        - nop
+
+    metrics:
+      receivers:
+        - otlp
+      processors:
+        - memory_limiter
+        - batch
+      exporters:
+        - chqs3
+
+    logs:
+      receivers:
+        - otlp
+      processors:
+        - memory_limiter
+        - batch
+      exporters:
+        - chqs3

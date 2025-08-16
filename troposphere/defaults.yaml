@@ -25,6 +25,7 @@ images:
   query_api: "public.ecr.aws/cardinalhq.io/lakerunner/query-api:latest"
   query_worker: "public.ecr.aws/cardinalhq.io/lakerunner/query-worker:latest"
   grafana: "grafana/grafana:latest"
+  otel_collector: "public.ecr.aws/cardinalhq.io/cardinalhq-otel-collector:latest"
 
 # Service configurations (moved from services.yaml for centralization)
 services:
@@ -171,3 +172,14 @@ services:
     health_check:
       type: "curl"
       command: ["curl", "-f", "http://localhost:3000/api/health"]
+
+# OTEL Collector services configuration
+otel_services:
+  otel-gateway:
+    image: "public.ecr.aws/cardinalhq.io/cardinalhq-otel-collector:latest"
+    command: ["/otelcol", "--config=/etc/otel/config.yaml"]
+    cpu: 1024
+    memory_mib: 2048
+    replicas: 1
+    environment:
+      OTEL_RESOURCE_ATTRIBUTES: "service.name=otel-gateway"
