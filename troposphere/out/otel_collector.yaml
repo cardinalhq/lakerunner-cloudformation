@@ -20,14 +20,11 @@ Metadata:
         Parameters:
           - OrganizationId
           - CollectorName
-          - ForceReplaceConfig
     ParameterLabels:
       CollectorName:
         default: Collector Name
       CommonInfraStackName:
         default: Common Infra Stack Name
-      ForceReplaceConfig:
-        default: Force Replace Config
       LoadBalancerType:
         default: Load Balancer Type
       OrganizationId:
@@ -55,7 +52,7 @@ Outputs:
       Name: !Sub '${AWS::StackName}-LoadBalancerDNS'
     Value: !GetAtt 'ApplicationLoadBalancer.DNSName'
   OtelConfigAccessPointId:
-    Description: EFS Access Point ID for OTEL configuration. Upload config.yaml to this location.
+    Description: EFS Access Point ID for OTEL configuration. Mount this and upload config.yaml manually. Collector will restart once config exists.
     Export:
       Name: !Sub '${AWS::StackName}-OtelConfigAccessPointId'
     Value: !Ref 'OtelConfigAccessPoint'
@@ -71,13 +68,6 @@ Parameters:
     Type: String
   CommonInfraStackName:
     Description: 'REQUIRED: Name of the CommonInfra stack to import infrastructure values from.'
-    Type: String
-  ForceReplaceConfig:
-    AllowedValues:
-      - 'true'
-      - 'false'
-    Default: 'false'
-    Description: 'Whether to force replace the OTEL config file during stack creation (default: false)'
     Type: String
   LoadBalancerType:
     AllowedValues:
@@ -146,54 +136,6 @@ Resources:
           Value: !Sub '${AWS::StackName}-alb'
       Type: application
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
-  ConfigUploader:
-    Properties:
-      AccessPointId: !Ref 'OtelConfigAccessPoint'
-      EfsId: !ImportValue
-        Fn::Sub:
-          - ${CommonInfraStackName}-EfsId
-          - CommonInfraStackName: !Ref 'CommonInfraStackName'
-      ForceReplace: !Ref 'ForceReplaceConfig'
-      ServiceToken: !GetAtt 'ConfigUploaderFunction.Arn'
-    Type: AWS::CloudFormation::CustomResource
-  ConfigUploaderFunction:
-    Properties:
-      Code:
-        ZipFile: "\nimport json\nimport boto3\nimport os\nimport urllib3\nimport base64\n\ndef send_response(event, context, response_status, response_data=None, physical_resource_id=None):\n    if response_data\
-          \ is None:\n        response_data = {}\n    \n    response_url = event['ResponseURL']\n    response_body = {\n        'Status': response_status,\n        'Reason': f'See CloudWatch Log Stream:\
-          \ {context.log_stream_name}',\n        'PhysicalResourceId': physical_resource_id or context.log_stream_name,\n        'StackId': event['StackId'],\n        'RequestId': event['RequestId'],\n\
-          \        'LogicalResourceId': event['LogicalResourceId'],\n        'Data': response_data\n    }\n    \n    json_response = json.dumps(response_body)\n    headers = {'Content-Type': 'application/json'}\n\
-          \    \n    http = urllib3.PoolManager()\n    response = http.request('PUT', response_url, body=json_response, headers=headers)\n    print(f\"Response status: {response.status}\")\n\ndef lambda_handler(event,\
-          \ context):\n    print(f\"Event: {json.dumps(event)}\")\n    \n    try:\n        request_type = event.get('RequestType')\n        if request_type == 'Delete':\n            send_response(event,\
-          \ context, 'SUCCESS')\n            return\n        \n        force_replace = event['ResourceProperties'].get('ForceReplace', 'false').lower() == 'true'\n        \n        # Decode the base64 config\
-          \ content\n        config_content = base64.b64decode('IyBPVEVMIENvbGxlY3RvciBDb25maWd1cmF0aW9uCiMgVGhpcyBpcyBhIHBsYWNlaG9sZGVyIGNvbmZpZ3VyYXRpb24gZm9yIHRoZSBDYXJkaW5hbEhRIE9URUwgQ29sbGVjdG9yCiMgTW9kaWZ5IHRoaXMgZmlsZSBhY2NvcmRpbmcgdG8geW91ciBzcGVjaWZpYyB0ZWxlbWV0cnkgcmVxdWlyZW1lbnRzCgpyZWNlaXZlcnM6CiAgb3RscDoKICAgIHByb3RvY29sczoKICAgICAgZ3JwYzoKICAgICAgICBlbmRwb2ludDogMC4wLjAuMDo0MzE3CiAgICAgIGh0dHA6CiAgICAgICAgZW5kcG9pbnQ6IDAuMC4wLjA6NDMxOAoKcHJvY2Vzc29yczoKICBtZW1vcnlfbGltaXRlcjoKICAgIGxpbWl0X21pYjogMTAyNAoKICBiYXRjaDoKICAgIHNlbmRfYmF0Y2hfbWF4X3NpemU6IDEwMAogICAgc2VuZF9iYXRjaF9zaXplOiAxMAogICAgdGltZW91dDogMXMKCmV4cG9ydGVyczoKICBjaHFzMzoKICAgIGJ1ZmZlcmluZzoKICAgICAgZGlyZWN0b3J5OiAvc2NyYXRjaAogICAgICB0eXBlOiBkaXNrCiAgICBzM3VwbG9hZGVyOgogICAgICBjdXN0b21lcl9rZXk6ICR7ZW52Ok9SR0FOSVpBVElPTl9JRH0vJHtlbnY6Q09MTEVDVE9SX05BTUV9CiAgICAgIHJlZ2lvbjogJHtlbnY6QVdTX1JFR0lPTn0KICAgICAgczNfYnVja2V0OiAke2VudjpBV1NfUzNfQlVDS0VUfQogICAgICBzM19mb3JjZV9wYXRoX3N0eWxlOiB0cnVlCiAgICAgIHMzX3BhcnRpdGlvbjogbWludXRlCiAgICAgIHMzX3ByZWZpeDogb3RlbC1yYXcKCiAgbm9wOgoKZXh0ZW5zaW9uczoKICBoZWFsdGhfY2hlY2s6CiAgICBlbmRwb2ludDogMC4wLjAuMDoxMzEzMwoKc2VydmljZToKICBleHRlbnNpb25zOgogICAgLSBoZWFsdGhfY2hlY2sKICBwaXBlbGluZXM6CiAgICB0cmFjZXM6CiAgICAgIHJlY2VpdmVyczoKICAgICAgICAtIG90bHAKICAgICAgcHJvY2Vzc29yczoKICAgICAgICAtIG1lbW9yeV9saW1pdGVyCiAgICAgIGV4cG9ydGVyczoKICAgICAgICAtIG5vcAoKICAgIG1ldHJpY3M6CiAgICAgIHJlY2VpdmVyczoKICAgICAgICAtIG90bHAKICAgICAgcHJvY2Vzc29yczoKICAgICAgICAtIG1lbW9yeV9saW1pdGVyCiAgICAgICAgLSBiYXRjaAogICAgICBleHBvcnRlcnM6CiAgICAgICAgLSBjaHFzMwoKICAgIGxvZ3M6CiAgICAgIHJlY2VpdmVyczoKICAgICAgICAtIG90bHAKICAgICAgcHJvY2Vzc29yczoKICAgICAgICAtIG1lbW9yeV9saW1pdGVyCiAgICAgICAgLSBiYXRjaAogICAgICBleHBvcnRlcnM6CiAgICAgICAgLSBjaHFzMwo=').decode()\n\
-          \        \n        # For Lambda in VPC with EFS, the file system is mounted at /mnt/efs\n        # This requires the Lambda to have EFS file system configured\n        config_file_path = '/mnt/efs/config.yaml'\n\
-          \        \n        # Check if file exists and force_replace setting\n        file_exists = os.path.exists(config_file_path)\n        should_write = force_replace or not file_exists\n        \n\
-          \        if should_write:\n            # Ensure directory exists\n            os.makedirs(os.path.dirname(config_file_path), exist_ok=True)\n            \n            # Write the config file\n\
-          \            with open(config_file_path, 'w') as f:\n                f.write(config_content)\n            \n            print(f\"Config file written to {config_file_path} (force_replace={force_replace},\
-          \ existed={file_exists})\")\n            \n            response_data = {\n                'ConfigPath': config_file_path,\n                'Action': 'replaced' if file_exists else 'created',\n\
-          \                'ForceReplace': force_replace\n            }\n        else:\n            print(f\"Config file already exists at {config_file_path} and force_replace is false\")\n            response_data\
-          \ = {\n                'ConfigPath': config_file_path,\n                'Action': 'skipped',\n                'ForceReplace': force_replace\n            }\n        \n        send_response(event,\
-          \ context, 'SUCCESS', response_data)\n        \n    except Exception as e:\n        print(f\"Error: {str(e)}\")\n        import traceback\n        traceback.print_exc()\n        send_response(event,\
-          \ context, 'FAILED')\n        raise\n"
-      FileSystemConfigs:
-        - Arn: !GetAtt 'OtelConfigAccessPoint.Arn'
-          LocalMountPath: /mnt/efs
-      FunctionName: !Sub '${AWS::StackName}-config-uploader'
-      Handler: index.lambda_handler
-      Role: !GetAtt 'LambdaExecutionRole.Arn'
-      Runtime: python3.9
-      Timeout: 300
-      VpcConfig:
-        SecurityGroupIds:
-          - !Ref 'TaskSecurityGroup'
-        SubnetIds: !Split
-          - ','
-          - !ImportValue
-            Fn::Sub:
-              - ${CommonInfraStackName}-PrivateSubnets
-              - CommonInfraStackName: !Ref 'CommonInfraStackName'
-    Type: AWS::Lambda::Function
   ExecRole:
     Properties:
       AssumeRolePolicyDocument:
@@ -236,32 +178,6 @@ Resources:
       Port: 4318
       Protocol: HTTP
     Type: AWS::ElasticLoadBalancingV2::Listener
-  LambdaExecutionRole:
-    Properties:
-      AssumeRolePolicyDocument:
-        Statement:
-          - Action: sts:AssumeRole
-            Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-        Version: '2012-10-17'
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
-      Policies:
-        - PolicyDocument:
-            Statement:
-              - Action:
-                  - elasticfilesystem:ClientMount
-                  - elasticfilesystem:ClientWrite
-                  - elasticfilesystem:DescribeFileSystems
-                  - elasticfilesystem:DescribeMountTargets
-                  - elasticfilesystem:DescribeAccessPoints
-                Effect: Allow
-                Resource: '*'
-            Version: '2012-10-17'
-          PolicyName: EFSAccess
-      RoleName: !Sub '${AWS::StackName}-lambda-role'
-    Type: AWS::IAM::Role
   LogGroupOtelGateway:
     Properties:
       LogGroupName: !Sub '/ecs/otel-gateway'
@@ -339,6 +255,9 @@ Resources:
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
   ServiceOtelGateway:
+    DependsOn:
+      - GrpcListener
+      - HttpListener
     Properties:
       Cluster: !ImportValue
         Fn::Sub:
@@ -503,6 +422,11 @@ Resources:
           IpProtocol: tcp
           SourceSecurityGroupId: !Ref 'AlbSecurityGroup'
           ToPort: 4318
+        - CidrIp: 10.0.0.0/8
+          Description: NFS for EFS access
+          FromPort: 2049
+          IpProtocol: tcp
+          ToPort: 2049
       Tags:
         - Key: Name
           Value: !Sub '${AWS::StackName}-task-sg'

@@ -33,8 +33,6 @@ from troposphere.elasticloadbalancingv2 import (
 from troposphere.logs import LogGroup
 from troposphere.ec2 import SecurityGroup, SecurityGroupRule
 from troposphere.efs import AccessPoint, PosixUser, RootDirectory, CreationInfo
-from troposphere.awslambda import Function, Code, VPCConfig, FileSystemConfig
-from troposphere.cloudformation import CustomResource
 
 def load_otel_config(config_file="defaults.yaml"):
     """Load OTEL collector configuration from YAML file"""
@@ -90,12 +88,6 @@ def create_otel_collector_template():
         Description="Collector name for OTEL data routing"
     ))
 
-    ForceReplaceConfig = t.add_parameter(Parameter(
-        "ForceReplaceConfig", Type="String",
-        Default="false",
-        AllowedValues=["true", "false"],
-        Description="Whether to force replace the OTEL config file during stack creation (default: false)"
-    ))
 
     # Parameter groups for console
     t.set_metadata({
@@ -111,7 +103,7 @@ def create_otel_collector_template():
                 },
                 {
                     "Label": {"default": "Customer Configuration"},
-                    "Parameters": ["OrganizationId", "CollectorName", "ForceReplaceConfig"]
+                    "Parameters": ["OrganizationId", "CollectorName"]
                 }
             ],
             "ParameterLabels": {
@@ -119,8 +111,7 @@ def create_otel_collector_template():
                 "LoadBalancerType": {"default": "Load Balancer Type"},
                 "OtelCollectorImage": {"default": "OTEL Collector Image"},
                 "OrganizationId": {"default": "Organization ID"},
-                "CollectorName": {"default": "Collector Name"},
-                "ForceReplaceConfig": {"default": "Force Replace Config"}
+                "CollectorName": {"default": "Collector Name"}
             }
         }
     })
@@ -186,6 +177,13 @@ def create_otel_collector_template():
                 ToPort=4318,
                 SourceSecurityGroupId=Ref(AlbSecurityGroup),
                 Description="OTEL HTTP from ALB"
+            ),
+            SecurityGroupRule(
+                IpProtocol="tcp",
+                FromPort=2049,
+                ToPort=2049,
+                CidrIp="10.0.0.0/8",
+                Description="NFS for EFS access"
             )
         ],
         Tags=Tags(Name=Sub("${AWS::StackName}-task-sg"))
@@ -381,169 +379,6 @@ def create_otel_collector_template():
         ]
     ))
 
-    # -----------------------
-    # Lambda Function for Config Upload
-    # -----------------------
-    # Lambda execution role
-    LambdaExecutionRole = t.add_resource(Role(
-        "LambdaExecutionRole",
-        RoleName=Sub("${AWS::StackName}-lambda-role"),
-        AssumeRolePolicyDocument={
-            "Version": "2012-10-17",
-            "Statement": [{
-                "Effect": "Allow",
-                "Principal": {"Service": "lambda.amazonaws.com"},
-                "Action": "sts:AssumeRole"
-            }]
-        },
-        ManagedPolicyArns=[
-            "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
-        ],
-        Policies=[
-            Policy(
-                PolicyName="EFSAccess",
-                PolicyDocument={
-                    "Version": "2012-10-17",
-                    "Statement": [
-                        {
-                            "Effect": "Allow",
-                            "Action": [
-                                "elasticfilesystem:ClientMount",
-                                "elasticfilesystem:ClientWrite",
-                                "elasticfilesystem:DescribeFileSystems",
-                                "elasticfilesystem:DescribeMountTargets",
-                                "elasticfilesystem:DescribeAccessPoints"
-                            ],
-                            "Resource": "*"
-                        }
-                    ]
-                }
-            )
-        ]
-    ))
-
-    # Read the OTEL config file content
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    config_file_path = os.path.join(script_dir, "otel-config.yaml")
-    with open(config_file_path, 'r') as f:
-        otel_config_content = f.read()
-
-    # Create a base64-encoded version of the config to avoid string escaping issues
-    import base64
-    config_b64 = base64.b64encode(otel_config_content.encode()).decode()
-    
-    lambda_code = f'''
-import json
-import boto3
-import os
-import urllib3
-import base64
-
-def send_response(event, context, response_status, response_data=None, physical_resource_id=None):
-    if response_data is None:
-        response_data = {{}}
-    
-    response_url = event['ResponseURL']
-    response_body = {{
-        'Status': response_status,
-        'Reason': f'See CloudWatch Log Stream: {{context.log_stream_name}}',
-        'PhysicalResourceId': physical_resource_id or context.log_stream_name,
-        'StackId': event['StackId'],
-        'RequestId': event['RequestId'],
-        'LogicalResourceId': event['LogicalResourceId'],
-        'Data': response_data
-    }}
-    
-    json_response = json.dumps(response_body)
-    headers = {{'Content-Type': 'application/json'}}
-    
-    http = urllib3.PoolManager()
-    response = http.request('PUT', response_url, body=json_response, headers=headers)
-    print(f"Response status: {{response.status}}")
-
-def lambda_handler(event, context):
-    print(f"Event: {{json.dumps(event)}}")
-    
-    try:
-        request_type = event.get('RequestType')
-        if request_type == 'Delete':
-            send_response(event, context, 'SUCCESS')
-            return
-        
-        force_replace = event['ResourceProperties'].get('ForceReplace', 'false').lower() == 'true'
-        
-        # Decode the base64 config content
-        config_content = base64.b64decode('{config_b64}').decode()
-        
-        # For Lambda in VPC with EFS, the file system is mounted at /mnt/efs
-        # This requires the Lambda to have EFS file system configured
-        config_file_path = '/mnt/efs/config.yaml'
-        
-        # Check if file exists and force_replace setting
-        file_exists = os.path.exists(config_file_path)
-        should_write = force_replace or not file_exists
-        
-        if should_write:
-            # Ensure directory exists
-            os.makedirs(os.path.dirname(config_file_path), exist_ok=True)
-            
-            # Write the config file
-            with open(config_file_path, 'w') as f:
-                f.write(config_content)
-            
-            print(f"Config file written to {{config_file_path}} (force_replace={{force_replace}}, existed={{file_exists}})")
-            
-            response_data = {{
-                'ConfigPath': config_file_path,
-                'Action': 'replaced' if file_exists else 'created',
-                'ForceReplace': force_replace
-            }}
-        else:
-            print(f"Config file already exists at {{config_file_path}} and force_replace is false")
-            response_data = {{
-                'ConfigPath': config_file_path,
-                'Action': 'skipped',
-                'ForceReplace': force_replace
-            }}
-        
-        send_response(event, context, 'SUCCESS', response_data)
-        
-    except Exception as e:
-        print(f"Error: {{str(e)}}")
-        import traceback
-        traceback.print_exc()
-        send_response(event, context, 'FAILED')
-        raise
-'''
-
-    ConfigUploaderFunction = t.add_resource(Function(
-        "ConfigUploaderFunction",
-        FunctionName=Sub("${AWS::StackName}-config-uploader"),
-        Runtime="python3.9",
-        Handler="index.lambda_handler",
-        Role=GetAtt(LambdaExecutionRole, "Arn"),
-        Code=Code(ZipFile=lambda_code),
-        Timeout=300,
-        VpcConfig=VPCConfig(
-            SecurityGroupIds=[Ref(TaskSecurityGroup)],
-            SubnetIds=PrivateSubnetsValue
-        ),
-        FileSystemConfigs=[
-            FileSystemConfig(
-                Arn=GetAtt(OtelConfigAccessPoint, "Arn"),
-                LocalMountPath="/mnt/efs"
-            )
-        ]
-    ))
-
-    # Custom resource to trigger the Lambda
-    ConfigUploader = t.add_resource(CustomResource(
-        "ConfigUploader",
-        ServiceToken=GetAtt(ConfigUploaderFunction, "Arn"),
-        EfsId=EfsIdValue,
-        AccessPointId=Ref(OtelConfigAccessPoint),
-        ForceReplace=Ref(ForceReplaceConfig)
-    ))
 
     # -----------------------
     # ECS Service and Task Definition
@@ -682,7 +517,8 @@ def lambda_handler(event, context):
                 TargetGroupArn=Ref(OtelHttpTargetGroup)
             )
         ],
-        EnableExecuteCommand=True
+        EnableExecuteCommand=True,
+        DependsOn=[GrpcListener, HttpListener]
     ))
 
     # -----------------------
@@ -718,7 +554,7 @@ def lambda_handler(event, context):
 
     t.add_output(Output(
         "OtelConfigAccessPointId",
-        Description="EFS Access Point ID for OTEL configuration. Upload config.yaml to this location.",
+        Description="EFS Access Point ID for OTEL configuration. Mount this and upload config.yaml manually. Collector will restart once config exists.",
         Value=Ref(OtelConfigAccessPoint),
         Export=Export(Sub("${AWS::StackName}-OtelConfigAccessPointId"))
     ))
