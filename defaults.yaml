@@ -177,7 +177,7 @@ services:
 otel_services:
   otel-gateway:
     image: "public.ecr.aws/cardinalhq.io/cardinalhq-otel-collector:latest"
-    command: ["/otelcol", "--config=/etc/otel/config.yaml"]
+    command: ["/app/bin/cardinalhq-otel-collector", "--config=/etc/otel/config.yaml"]
     cpu: 1024
     memory_mib: 2048
     replicas: 1

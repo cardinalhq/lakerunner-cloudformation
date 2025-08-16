@@ -1,4 +1,8 @@
 Conditions:
+  HasCustomConfig: !Not
+    - !Equals
+      - !Ref 'OtelConfigYaml'
+      - ''
   IsInternal: !Equals
     - !Ref 'LoadBalancerType'
     - internal
@@ -20,6 +24,7 @@ Metadata:
         Parameters:
           - OrganizationId
           - CollectorName
+          - OtelConfigYaml
     ParameterLabels:
       CollectorName:
         default: Collector Name
@@ -31,6 +36,8 @@ Metadata:
         default: Organization ID
       OtelCollectorImage:
         default: OTEL Collector Image
+      OtelConfigYaml:
+        default: Custom OTEL Configuration (YAML)
 Outputs:
   GrpcEndpoint:
     Description: OTEL gRPC endpoint URL
@@ -51,11 +58,6 @@ Outputs:
     Export:
       Name: !Sub '${AWS::StackName}-LoadBalancerDNS'
     Value: !GetAtt 'ApplicationLoadBalancer.DNSName'
-  OtelConfigAccessPointId:
-    Description: EFS Access Point ID for OTEL configuration. Mount this and upload config.yaml manually. Collector will restart once config exists.
-    Export:
-      Name: !Sub '${AWS::StackName}-OtelConfigAccessPointId'
-    Value: !Ref 'OtelConfigAccessPoint'
   ServiceArn:
     Description: ARN of the OTEL gateway service
     Export:
@@ -83,6 +85,10 @@ Parameters:
   OtelCollectorImage:
     Default: public.ecr.aws/cardinalhq.io/cardinalhq-otel-collector:latest
     Description: Container image for OTEL collector service
+    Type: String
+  OtelConfigYaml:
+    Default: ''
+    Description: 'OPTIONAL: Custom OTEL collector configuration in YAML format. Leave blank to use default configuration.'
     Type: String
 Resources:
   AlbSecurityGroup:
@@ -183,25 +189,6 @@ Resources:
       LogGroupName: !Sub '/ecs/otel-gateway'
       RetentionInDays: 14
     Type: AWS::Logs::LogGroup
-  OtelConfigAccessPoint:
-    Properties:
-      AccessPointTags:
-        - Key: Name
-          Value: !Sub '${AWS::StackName}-otel-config'
-      FileSystemId: !ImportValue
-        Fn::Sub:
-          - ${CommonInfraStackName}-EfsId
-          - CommonInfraStackName: !Ref 'CommonInfraStackName'
-      PosixUser:
-        Gid: '0'
-        Uid: '0'
-      RootDirectory:
-        CreationInfo:
-          OwnerGid: '0'
-          OwnerUid: '0'
-          Permissions: '755'
-        Path: /otel-config
-    Type: AWS::EFS::AccessPoint
   OtelGrpcTargetGroup:
     Properties:
       HealthCheckIntervalSeconds: 30
@@ -291,8 +278,7 @@ Resources:
     Properties:
       ContainerDefinitions:
         - Command:
-            - /otelcol
-            - --config=/etc/otel/config.yaml
+            - /app/bin/run-with-env-config
           Environment:
             - Name: OTEL_SERVICE_NAME
               Value: otel-gateway
@@ -307,6 +293,80 @@ Resources:
               Value: !Ref 'OrganizationId'
             - Name: COLLECTOR_NAME
               Value: !Ref 'CollectorName'
+            - Name: CHQ_COLLECTOR_CONFIG_YAML
+              Value: !If
+                - HasCustomConfig
+                - !Ref 'OtelConfigYaml'
+                - |-
+                  # OTEL Collector Configuration
+                  # This is a placeholder configuration for the CardinalHQ OTEL Collector
+                  # Modify this file according to your specific telemetry requirements
+
+                  receivers:
+                    otlp:
+                      protocols:
+                        grpc:
+                          endpoint: 0.0.0.0:4317
+                        http:
+                          endpoint: 0.0.0.0:4318
+
+                  processors:
+                    memory_limiter:
+                      limit_mib: 1024
+
+                    batch:
+                      send_batch_max_size: 100
+                      send_batch_size: 10
+                      timeout: 1s
+
+                  exporters:
+                    chqs3:
+                      buffering:
+                        directory: /scratch
+                        type: disk
+                      s3uploader:
+                        customer_key: ${env:ORGANIZATION_ID}/${env:COLLECTOR_NAME}
+                        region: ${env:AWS_REGION}
+                        s3_bucket: ${env:AWS_S3_BUCKET}
+                        s3_force_path_style: true
+                        s3_partition: minute
+                        s3_prefix: otel-raw
+
+                    nop:
+
+                  extensions:
+                    health_check:
+                      endpoint: 0.0.0.0:13133
+
+                  service:
+                    extensions:
+                      - health_check
+                    pipelines:
+                      traces:
+                        receivers:
+                          - otlp
+                        processors:
+                          - memory_limiter
+                        exporters:
+                          - nop
+
+                      metrics:
+                        receivers:
+                          - otlp
+                        processors:
+                          - memory_limiter
+                          - batch
+                        exporters:
+                          - chqs3
+
+                      logs:
+                        receivers:
+                          - otlp
+                        processors:
+                          - memory_limiter
+                          - batch
+                        exporters:
+                          - chqs3
             - Name: OTEL_RESOURCE_ATTRIBUTES
               Value: service.name=otel-gateway
           HealthCheck:
@@ -328,9 +388,6 @@ Resources:
             - ContainerPath: /scratch
               ReadOnly: false
               SourceVolume: scratch
-            - ContainerPath: /etc/otel
-              ReadOnly: true
-              SourceVolume: otel-config
           Name: OtelCollector
           PortMappings:
             - ContainerPort: 4317
@@ -353,16 +410,6 @@ Resources:
       TaskRoleArn: !GetAtt 'TaskRole.Arn'
       Volumes:
         - Name: scratch
-        - EFSVolumeConfiguration:
-            AuthorizationConfig:
-              AccessPointId: !Ref 'OtelConfigAccessPoint'
-              IAM: ENABLED
-            FilesystemId: !ImportValue
-              Fn::Sub:
-                - ${CommonInfraStackName}-EfsId
-                - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            TransitEncryption: ENABLED
-          Name: otel-config
     Type: AWS::ECS::TaskDefinition
   TaskRole:
     Properties:
@@ -395,15 +442,6 @@ Resources:
                         Fn::Sub:
                           - ${CommonInfraStackName}-BucketName
                           - CommonInfraStackName: !Ref 'CommonInfraStackName'
-              - Action:
-                  - elasticfilesystem:ClientMount
-                  - elasticfilesystem:ClientWrite
-                  - elasticfilesystem:ClientRootAccess
-                  - elasticfilesystem:DescribeFileSystems
-                  - elasticfilesystem:DescribeMountTargets
-                  - elasticfilesystem:DescribeAccessPoints
-                Effect: Allow
-                Resource: '*'
             Version: '2012-10-17'
           PolicyName: S3Access
       RoleName: !Sub '${AWS::StackName}-task-role'
@@ -422,11 +460,6 @@ Resources:
           IpProtocol: tcp
           SourceSecurityGroupId: !Ref 'AlbSecurityGroup'
           ToPort: 4318
-        - CidrIp: 10.0.0.0/8
-          Description: NFS for EFS access
-          FromPort: 2049
-          IpProtocol: tcp
-          ToPort: 2049
       Tags:
         - Key: Name
           Value: !Sub '${AWS::StackName}-task-sg'

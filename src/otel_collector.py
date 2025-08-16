@@ -32,7 +32,7 @@ from troposphere.elasticloadbalancingv2 import (
 )
 from troposphere.logs import LogGroup
 from troposphere.ec2 import SecurityGroup, SecurityGroupRule
-from troposphere.efs import AccessPoint, PosixUser, RootDirectory, CreationInfo
+# EFS no longer needed for simplified config approach
 
 def load_otel_config(config_file="defaults.yaml"):
     """Load OTEL collector configuration from YAML file"""
@@ -41,6 +41,14 @@ def load_otel_config(config_file="defaults.yaml"):
 
     with open(config_path, 'r') as f:
         return yaml.safe_load(f)
+
+def load_default_otel_yaml():
+    """Load the default OTEL configuration YAML as a string"""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    config_path = os.path.join(script_dir, "..", "otel-config.yaml")
+
+    with open(config_path, 'r') as f:
+        return f.read().strip()
 
 def create_otel_collector_template():
     """Create CloudFormation template for OTEL collector stack"""
@@ -88,6 +96,13 @@ def create_otel_collector_template():
         Description="Collector name for OTEL data routing"
     ))
 
+    # OTEL Configuration (optional override)
+    OtelConfigYaml = t.add_parameter(Parameter(
+        "OtelConfigYaml", Type="String",
+        Default="",
+        Description="OPTIONAL: Custom OTEL collector configuration in YAML format. Leave blank to use default configuration."
+    ))
+
 
     # Parameter groups for console
     t.set_metadata({
@@ -103,7 +118,7 @@ def create_otel_collector_template():
                 },
                 {
                     "Label": {"default": "Customer Configuration"},
-                    "Parameters": ["OrganizationId", "CollectorName"]
+                    "Parameters": ["OrganizationId", "CollectorName", "OtelConfigYaml"]
                 }
             ],
             "ParameterLabels": {
@@ -111,7 +126,8 @@ def create_otel_collector_template():
                 "LoadBalancerType": {"default": "Load Balancer Type"},
                 "OtelCollectorImage": {"default": "OTEL Collector Image"},
                 "OrganizationId": {"default": "Organization ID"},
-                "CollectorName": {"default": "Collector Name"}
+                "CollectorName": {"default": "Collector Name"},
+                "OtelConfigYaml": {"default": "Custom OTEL Configuration (YAML)"}
             }
         }
     })
@@ -130,6 +146,7 @@ def create_otel_collector_template():
 
     # Conditions
     t.add_condition("IsInternal", Equals(Ref(LoadBalancerType), "internal"))
+    t.add_condition("HasCustomConfig", Not(Equals(Ref(OtelConfigYaml), "")))
 
     # -----------------------
     # Security Groups
@@ -177,13 +194,6 @@ def create_otel_collector_template():
                 ToPort=4318,
                 SourceSecurityGroupId=Ref(AlbSecurityGroup),
                 Description="OTEL HTTP from ALB"
-            ),
-            SecurityGroupRule(
-                IpProtocol="tcp",
-                FromPort=2049,
-                ToPort=2049,
-                CidrIp="10.0.0.0/8",
-                Description="NFS for EFS access"
             )
         ],
         Tags=Tags(Name=Sub("${AWS::StackName}-task-sg"))
@@ -270,25 +280,7 @@ def create_otel_collector_template():
     ))
 
     # -----------------------
-    # EFS Access Point for OTEL Config
-    # -----------------------
-    OtelConfigAccessPoint = t.add_resource(AccessPoint(
-        "OtelConfigAccessPoint",
-        FileSystemId=EfsIdValue,
-        PosixUser=PosixUser(
-            Gid="0",
-            Uid="0"
-        ),
-        RootDirectory=RootDirectory(
-            Path="/otel-config",
-            CreationInfo=CreationInfo(
-                OwnerGid="0",
-                OwnerUid="0",
-                Permissions="755"
-            )
-        ),
-        AccessPointTags=Tags(Name=Sub("${AWS::StackName}-otel-config"))
-    ))
+    # EFS Access Point no longer needed - using environment variable config
 
     # -----------------------
     # IAM Roles
@@ -360,18 +352,6 @@ def create_otel_collector_template():
                                 Sub("arn:aws:s3:::${BucketName}", BucketName=BucketNameValue),
                                 Sub("arn:aws:s3:::${BucketName}/*", BucketName=BucketNameValue)
                             ]
-                        },
-                        {
-                            "Effect": "Allow",
-                            "Action": [
-                                "elasticfilesystem:ClientMount",
-                                "elasticfilesystem:ClientWrite",
-                                "elasticfilesystem:ClientRootAccess",
-                                "elasticfilesystem:DescribeFileSystems",
-                                "elasticfilesystem:DescribeMountTargets",
-                                "elasticfilesystem:DescribeAccessPoints"
-                            ],
-                            "Resource": "*"
                         }
                     ]
                 }
@@ -398,10 +378,18 @@ def create_otel_collector_template():
         Environment(Name="AWS_S3_BUCKET", Value=BucketNameValue),
         Environment(Name="AWS_REGION", Value=Ref("AWS::Region")),
         Environment(Name="ORGANIZATION_ID", Value=Ref(OrganizationId)),
-        Environment(Name="COLLECTOR_NAME", Value=Ref(CollectorName))
+        Environment(Name="COLLECTOR_NAME", Value=Ref(CollectorName)),
+        Environment(
+            Name="CHQ_COLLECTOR_CONFIG_YAML",
+            Value=If(
+                "HasCustomConfig",
+                Ref(OtelConfigYaml),
+                load_default_otel_yaml()
+            )
+        )
     ]
 
-    # Add service-specific environment variables
+    # Add service-specific environment variables  
     service_env = service_config.get('environment', {})
     for key, value in service_env.items():
         environment.append(Environment(Name=key, Value=value))
@@ -422,17 +410,12 @@ def create_otel_collector_template():
         PortMapping(ContainerPort=13133, Protocol="tcp")
     ]
 
-    # Mount points
+    # Mount points (only scratch directory needed)
     mount_points = [
         MountPoint(
             ContainerPath="/scratch",
             SourceVolume="scratch",
             ReadOnly=False
-        ),
-        MountPoint(
-            ContainerPath="/etc/otel",
-            SourceVolume="otel-config",
-            ReadOnly=True
         )
     ]
 
@@ -440,7 +423,7 @@ def create_otel_collector_template():
     container = ContainerDefinition(
         Name="OtelCollector",
         Image=Ref(OtelCollectorImage),
-        Command=service_config.get('command', []),
+        Command=["/app/bin/run-with-env-config"],
         Environment=environment,
         MountPoints=mount_points,
         PortMappings=port_mappings,
@@ -456,20 +439,9 @@ def create_otel_collector_template():
         )
     )
 
-    # Volumes
+    # Volumes (only scratch directory needed)
     volumes = [
-        Volume(Name="scratch"),
-        Volume(
-            Name="otel-config",
-            EFSVolumeConfiguration=EFSVolumeConfiguration(
-                FilesystemId=EfsIdValue,
-                TransitEncryption="ENABLED",
-                AuthorizationConfig=AuthorizationConfig(
-                    AccessPointId=Ref(OtelConfigAccessPoint),
-                    IAM="ENABLED"
-                )
-            )
-        )
+        Volume(Name="scratch")
     ]
 
     # Task definition
@@ -552,12 +524,7 @@ def create_otel_collector_template():
         Export=Export(Sub("${AWS::StackName}-ServiceArn"))
     ))
 
-    t.add_output(Output(
-        "OtelConfigAccessPointId",
-        Description="EFS Access Point ID for OTEL configuration. Mount this and upload config.yaml manually. Collector will restart once config exists.",
-        Value=Ref(OtelConfigAccessPoint),
-        Export=Export(Sub("${AWS::StackName}-OtelConfigAccessPointId"))
-    ))
+    # EFS access point output no longer needed - using environment variable config
 
     return t
 
