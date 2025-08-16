@@ -46,6 +46,10 @@ echo "4. Generating OTEL Collector..."
 python3 src/otel_collector.py > generated-templates/otel_collector.yaml
 cfn-lint generated-templates/otel_collector.yaml
 
+echo "5. Generating Demo Apps..."
+python3 src/demo_apps.py > generated-templates/demo_apps.yaml
+cfn-lint generated-templates/demo_apps.yaml
+
 echo -e "\n✅ Generated CloudFormation templates:"
 ls -la generated-templates/
 

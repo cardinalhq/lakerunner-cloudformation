@@ -322,6 +322,16 @@ def create_otel_collector_template():
                             "Resource": [
                                 Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/otel/*")
                             ]
+                        },
+                        {
+                            "Effect": "Allow",
+                            "Action": [
+                                "ssmmessages:CreateControlChannel",
+                                "ssmmessages:CreateDataChannel",
+                                "ssmmessages:OpenControlChannel",
+                                "ssmmessages:OpenDataChannel"
+                            ],
+                            "Resource": "*"
                         }
                     ]
                 }
@@ -401,14 +411,15 @@ def create_otel_collector_template():
     for key, value in service_env.items():
         environment.append(Environment(Name=key, Value=value))
 
-    # Health check - use the correct OTEL health check endpoint
-    health_check = HealthCheck(
-        Command=["CMD-SHELL", "curl -f http://localhost:13133/healthz || exit 1"],
-        Interval=30,
-        Timeout=5,
-        Retries=3,
-        StartPeriod=60
-    )
+    # Health check - temporarily disabled for debugging
+    # health_check = HealthCheck(
+    #     Command=["CMD-SHELL", "curl -f http://localhost:13133/healthz || exit 1"],
+    #     Interval=30,
+    #     Timeout=5,
+    #     Retries=3,
+    #     StartPeriod=60
+    # )
+    health_check = None
 
     # Port mappings
     port_mappings = [
@@ -427,16 +438,15 @@ def create_otel_collector_template():
     ]
 
     # Container definition
-    container = ContainerDefinition(
-        Name="OtelCollector",
-        Image=Ref(OtelCollectorImage),
-        Command=["/app/bin/run-with-env-config"],
-        Environment=environment,
-        MountPoints=mount_points,
-        PortMappings=port_mappings,
-        HealthCheck=health_check,
-        User="0",
-        LogConfiguration=LogConfiguration(
+    container_args = {
+        "Name": "OtelCollector",
+        "Image": Ref(OtelCollectorImage),
+        "Command": ["/app/bin/run-with-env-config"],
+        "Environment": environment,
+        "MountPoints": mount_points,
+        "PortMappings": port_mappings,
+        "User": "0",
+        "LogConfiguration": LogConfiguration(
             LogDriver="awslogs",
             Options={
                 "awslogs-group": Ref(OtelLogGroup),
@@ -444,7 +454,13 @@ def create_otel_collector_template():
                 "awslogs-stream-prefix": "otel-gateway"
             }
         )
-    )
+    }
+    
+    # Only add HealthCheck if it's defined
+    if health_check is not None:
+        container_args["HealthCheck"] = health_check
+    
+    container = ContainerDefinition(**container_args)
 
     # Volumes (only scratch directory needed)
     volumes = [

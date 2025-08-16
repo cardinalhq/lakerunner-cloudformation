@@ -1,0 +1,147 @@
+Description: 'Lakerunner Demo Apps: OTEL-instrumented applications for testing telemetry collection'
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Infrastructure
+        Parameters:
+          - CommonInfraStackName
+          - ServicesStackName
+          - OtelCollectorStackName
+      - Label:
+          default: Container Images
+        Parameters:
+          - SampleAppImage
+    ParameterLabels:
+      CommonInfraStackName:
+        default: Common Infra Stack Name
+      OtelCollectorStackName:
+        default: OTEL Collector Stack Name
+      SampleAppImage:
+        default: Sample App Image
+      ServicesStackName:
+        default: Services Stack Name
+Outputs:
+  ServiceSampleAppArn:
+    Export:
+      Name: !Sub '${AWS::StackName}-sample-app-ServiceArn'
+    Value: !Ref 'ServiceSampleApp'
+Parameters:
+  CommonInfraStackName:
+    Description: 'REQUIRED: Name of the CommonInfra stack to import infrastructure values from.'
+    Type: String
+  OtelCollectorStackName:
+    Description: 'REQUIRED: Name of the OTEL Collector stack to get collector endpoint from.'
+    Type: String
+  SampleAppImage:
+    Default: public.ecr.aws/cardinalhq.io/lakerunner-demo/sample-app:latest
+    Description: Container image for sample-app service
+    Type: String
+  ServicesStackName:
+    Description: 'REQUIRED: Name of the Services stack to import ALB target groups from.'
+    Type: String
+Resources:
+  LogGroupSampleApp:
+    Properties:
+      LogGroupName: !Sub '/ecs/sample-app'
+      RetentionInDays: 14
+    Type: AWS::Logs::LogGroup
+  ServiceSampleApp:
+    Properties:
+      Cluster: !ImportValue
+        Fn::Sub:
+          - ${CommonInfraStackName}-ClusterArn
+          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      DesiredCount: 1
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      LoadBalancers: []
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - !ImportValue
+              Fn::Sub:
+                - ${ServicesStackName}-TaskSecurityGroupId
+                - ServicesStackName: !Ref 'ServicesStackName'
+          Subnets: !Split
+            - ','
+            - !ImportValue
+              Fn::Sub:
+                - ${CommonInfraStackName}-PrivateSubnets
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      ServiceName: sample-app
+      TaskDefinition: !Ref 'TaskDefSampleApp'
+    Type: AWS::ECS::Service
+  TaskDefSampleApp:
+    Properties:
+      ContainerDefinitions:
+        - Command:
+            - ./sample-app
+          Environment:
+            - Name: OTEL_SERVICE_NAME
+              Value: sample-app
+            - Name: OTEL_EXPORTER_OTLP_ENDPOINT
+              Value: !Sub 'http://<troposphere.ImportValue object at 0x10282b0b0>:4317'
+            - Name: OTEL_EXPORTER_OTLP_PROTOCOL
+              Value: grpc
+            - Name: OTEL_RESOURCE_ATTRIBUTES
+              Value: service.name=sample-app
+            - Name: TMPDIR
+              Value: /scratch
+            - Name: HOME
+              Value: /scratch
+            - Name: APP_NAME
+              Value: sample-app
+            - Name: LOG_LEVEL
+              Value: info
+            - Name: HTTP_PORT
+              Value: '8080'
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - curl -f http://localhost:8080/health || exit 1
+            Interval: 30
+            Retries: 3
+            StartPeriod: 60
+            Timeout: 5
+          Image: !Ref 'SampleAppImage'
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref 'LogGroupSampleApp'
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: sample-app
+          MountPoints:
+            - ContainerPath: /scratch
+              ReadOnly: false
+              SourceVolume: scratch
+            - ContainerPath: /app/data
+              ReadOnly: false
+              SourceVolume: scratch
+          Name: AppContainer
+          PortMappings:
+            - ContainerPort: 8080
+              Protocol: tcp
+          User: '0'
+      Cpu: '512'
+      ExecutionRoleArn: !ImportValue
+        Fn::Sub:
+          - ${ServicesStackName}-ExecutionRoleArn
+          - ServicesStackName: !Ref 'ServicesStackName'
+      Family: sample-app-task
+      Memory: '1024'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      RuntimePlatform:
+        CpuArchitecture: ARM64
+        OperatingSystemFamily: LINUX
+      TaskRoleArn: !ImportValue
+        Fn::Sub:
+          - ${ServicesStackName}-TaskRoleArn
+          - ServicesStackName: !Ref 'ServicesStackName'
+      Volumes:
+        - Name: scratch
+    Type: AWS::ECS::TaskDefinition
+

@@ -162,6 +162,13 @@ Resources:
                 Effect: Allow
                 Resource:
                   - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/otel/*'
+              - Action:
+                  - ssmmessages:CreateControlChannel
+                  - ssmmessages:CreateDataChannel
+                  - ssmmessages:OpenControlChannel
+                  - ssmmessages:OpenDataChannel
+                Effect: Allow
+                Resource: '*'
             Version: '2012-10-17'
           PolicyName: SSMParameterAccess
       RoleName: !Sub '${AWS::StackName}-exec-role'
@@ -370,14 +377,6 @@ Resources:
                           - chqs3
             - Name: OTEL_RESOURCE_ATTRIBUTES
               Value: service.name=otel-gateway
-          HealthCheck:
-            Command:
-              - CMD-SHELL
-              - curl -f http://localhost:13133/healthz || exit 1
-            Interval: 30
-            Retries: 3
-            StartPeriod: 60
-            Timeout: 5
           Image: !Ref 'OtelCollectorImage'
           LogConfiguration:
             LogDriver: awslogs
