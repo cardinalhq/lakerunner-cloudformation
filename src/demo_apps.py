@@ -141,7 +141,7 @@ def create_demo_apps_template():
         # Environment variables
         environment = [
             Environment(Name="OTEL_SERVICE_NAME", Value=app_name),
-            Environment(Name="OTEL_EXPORTER_OTLP_ENDPOINT", Value=Sub(f"http://{OtelAlbDnsValue}:4317")),
+            Environment(Name="OTEL_EXPORTER_OTLP_ENDPOINT", Value=Sub("http://${OtelAlbDns}:4317", OtelAlbDns=OtelAlbDnsValue)),
             Environment(Name="OTEL_EXPORTER_OTLP_PROTOCOL", Value="grpc"),
             Environment(Name="OTEL_RESOURCE_ATTRIBUTES", Value=f"service.name={app_name}"),
             Environment(Name="TMPDIR", Value="/scratch"),
