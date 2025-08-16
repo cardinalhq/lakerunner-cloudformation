@@ -221,7 +221,7 @@ def create_otel_collector_template():
         Protocol="HTTP",
         VpcId=VpcIdValue,
         TargetType="ip",
-        HealthCheckPath="/",
+        HealthCheckPath="/healthz",
         HealthCheckProtocol="HTTP",
         HealthCheckPort="13133",
         HealthCheckIntervalSeconds=30,
@@ -242,7 +242,7 @@ def create_otel_collector_template():
         Protocol="HTTP",
         VpcId=VpcIdValue,
         TargetType="ip",
-        HealthCheckPath="/",
+        HealthCheckPath="/healthz",
         HealthCheckProtocol="HTTP",
         HealthCheckPort="13133",
         HealthCheckIntervalSeconds=30,
@@ -394,9 +394,9 @@ def create_otel_collector_template():
     for key, value in service_env.items():
         environment.append(Environment(Name=key, Value=value))
 
-    # Health check
+    # Health check - use the correct OTEL health check endpoint
     health_check = HealthCheck(
-        Command=["CMD-SHELL", "curl -f http://localhost:13133/ || exit 1"],
+        Command=["CMD-SHELL", "curl -f http://localhost:13133/healthz || exit 1"],
         Interval=30,
         Timeout=5,
         Retries=3,

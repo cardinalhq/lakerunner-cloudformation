@@ -192,7 +192,7 @@ Resources:
   OtelGrpcTargetGroup:
     Properties:
       HealthCheckIntervalSeconds: 30
-      HealthCheckPath: /
+      HealthCheckPath: /healthz
       HealthCheckPort: '13133'
       HealthCheckProtocol: HTTP
       HealthCheckTimeoutSeconds: 5
@@ -218,7 +218,7 @@ Resources:
   OtelHttpTargetGroup:
     Properties:
       HealthCheckIntervalSeconds: 30
-      HealthCheckPath: /
+      HealthCheckPath: /healthz
       HealthCheckPort: '13133'
       HealthCheckProtocol: HTTP
       HealthCheckTimeoutSeconds: 5
@@ -373,7 +373,7 @@ Resources:
           HealthCheck:
             Command:
               - CMD-SHELL
-              - curl -f http://localhost:13133/ || exit 1
+              - curl -f http://localhost:13133/healthz || exit 1
             Interval: 30
             Retries: 3
             StartPeriod: 60
