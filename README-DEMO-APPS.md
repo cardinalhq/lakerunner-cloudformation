@@ -265,3 +265,9 @@ To integrate your own applications with the demo setup:
 - **Node.js**: Use `@opentelemetry/api` and `@opentelemetry/sdk-node`
 
 All language SDKs support the same OTEL environment variables for configuration.
+
+## See Also
+
+- **[README.md](README.md)** - Main Lakerunner deployment guide
+- **[README-OTEL-COLLECTOR.md](README-OTEL-COLLECTOR.md)** - OTEL collector setup and configuration
+- **[README-BUILDING.md](README-BUILDING.md)** - Building and development guide

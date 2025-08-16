@@ -121,47 +121,13 @@ All services share:
 - EFS mount for shared scratch space (/scratch)
 - Health checks appropriate to service type (Go, Scala, cURL)
 
-## Build System
+## Additional Documentation
 
-If you need to modify the templates, use the included build system:
+This repository includes several specialized guides:
 
-### Requirements
-
-- Python 3.7+
-- Virtual environment support
-
-### Commands
-
-1. Navigate to the repository root directory:
-   ```bash
-   cd lakerunner-cloudformation/
-   ```
-
-2. Generate all templates:
-   ```bash
-   ./build.sh
-   ```
-
-   This will:
-   - Create a Python virtual environment
-   - Install dependencies from `requirements.txt`
-   - Generate templates in `generated-templates/` directory:
-     - `generated-templates/lakerunner-common.yaml`
-     - `generated-templates/lakerunner-migration.yaml` 
-     - `generated-templates/lakerunner-services.yaml`
-   - Validate templates with `cfn-lint`
-
-### Template Structure
-
-- **`src/common_infra.py`** - Core infrastructure template
-- **`src/migration_task.py`** - Database migration template
-- **`src/services.py`** - ECS services template
-- **`lakerunner-stack-defaults.yaml`** - Configuration defaults for services and API keys
-- **`build.sh`** - Build script that generates and validates all templates
-
-## Demo Applications
-
-For testing telemetry collection, see [README-DEMO-APPS.md](README-DEMO-APPS.md) for OTEL-instrumented demo applications and OTEL collector setup.
+- **[Demo Applications](README-DEMO-APPS.md)** - OTEL-instrumented sample applications for testing telemetry collection
+- **[OTEL Collector](README-OTEL-COLLECTOR.md)** - Dedicated telemetry ingestion service setup and configuration  
+- **[Building from Source](README-BUILDING.md)** - Development guide for modifying and building CloudFormation templates
 
 ## Configuration
 
@@ -186,3 +152,10 @@ Default configurations are stored in `lakerunner-stack-defaults.yaml` and includ
 - Health checks can be monitored via ECS console
 - Database connectivity issues often indicate security group or subnet configuration problems
 - ALB target health can be checked via EC2 console under Load Balancers
+
+## Documentation Index
+
+- **[README.md](README.md)** - Main deployment guide (this document)
+- **[README-DEMO-APPS.md](README-DEMO-APPS.md)** - Demo applications and testing
+- **[README-OTEL-COLLECTOR.md](README-OTEL-COLLECTOR.md)** - OTEL collector setup  
+- **[README-BUILDING.md](README-BUILDING.md)** - Building and development guide

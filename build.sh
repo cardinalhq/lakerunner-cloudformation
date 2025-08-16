@@ -31,23 +31,23 @@ fi
 mkdir generated-templates
 
 echo "1. Generating Lakerunner Common Infrastructure..."
-python3 src/common_infra.py > generated-templates/lakerunner-common.yaml
+python3 src/lakerunner_common.py > generated-templates/lakerunner-common.yaml
 cfn-lint generated-templates/lakerunner-common.yaml
 
 echo "2. Generating Lakerunner Migration Task..."
-python3 src/migration_task.py > generated-templates/lakerunner-migration.yaml
+python3 src/lakerunner_migration.py > generated-templates/lakerunner-migration.yaml
 cfn-lint generated-templates/lakerunner-migration.yaml
 
 echo "3. Generating Lakerunner Services..."
-python3 src/services.py > generated-templates/lakerunner-services.yaml
+python3 src/lakerunner_services.py > generated-templates/lakerunner-services.yaml
 cfn-lint generated-templates/lakerunner-services.yaml
 
 echo "4. Generating Demo OTEL Collector..."
-python3 src/otel_collector.py > generated-templates/lakerunner-demo-otel-collector.yaml
+python3 src/demo_otel_collector.py > generated-templates/lakerunner-demo-otel-collector.yaml
 cfn-lint generated-templates/lakerunner-demo-otel-collector.yaml
 
 echo "5. Generating Demo Sample Apps..."
-python3 src/demo_apps.py > generated-templates/lakerunner-demo-sample-apps.yaml
+python3 src/demo_sample_apps.py > generated-templates/lakerunner-demo-sample-apps.yaml
 cfn-lint generated-templates/lakerunner-demo-sample-apps.yaml
 
 echo -e "\n✅ Generated CloudFormation templates:"

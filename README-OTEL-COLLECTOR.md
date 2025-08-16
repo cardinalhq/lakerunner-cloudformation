@@ -219,3 +219,9 @@ Configure your OTEL SDK to send data to the collector endpoints. The collector a
 - **Standard OTEL signal types**: traces, metrics, logs
 
 For examples of instrumented applications, see [README-DEMO-APPS.md](README-DEMO-APPS.md).
+
+## See Also
+
+- **[README.md](README.md)** - Main Lakerunner deployment guide  
+- **[README-DEMO-APPS.md](README-DEMO-APPS.md)** - Demo applications and testing
+- **[README-BUILDING.md](README-BUILDING.md)** - Building and development guide
