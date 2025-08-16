@@ -4,11 +4,15 @@ This repository contains CloudFormation templates for deploying Lakerunner on AW
 
 ## Architecture
 
-The deployment consists of three CloudFormation stacks that must be deployed in order:
+The deployment consists of three required CloudFormation stacks that must be deployed in order:
 
 1. **CommonInfra** - Core infrastructure (VPC resources, RDS, EFS, S3, SQS, ALB)
 2. **Migration** - Database migration task (runs once during initial setup)  
 3. **Services** - ECS Fargate services for all Lakerunner microservices
+
+An optional fourth stack provides OTEL telemetry collection:
+
+4. **OTEL Collector** *(Optional)* - Dedicated OTEL collector for telemetry ingestion
 
 ## Requirements
 
@@ -26,6 +30,7 @@ Pre-generated CloudFormation templates are available in the `troposphere/out/` d
 1. `common_infra.yaml` (suggested stack name: "lakerunner-common")
 2. `migration_task.yaml` (suggested stack name: "lakerunner-migration") 
 3. `services.yaml` (suggested stack name: "lakerunner-services")
+4. `otel_collector.yaml` *(Optional)* (suggested stack name: "lakerunner-otel")
 
 ## Deployment Steps
 
@@ -104,6 +109,54 @@ aws cloudformation create-stack \
   --parameters ParameterKey=CommonInfraStackName,ParameterValue=lakerunner-common \
   --capabilities CAPABILITY_IAM
 ```
+
+### Step 4: Deploy OTEL Collector Stack (Optional)
+
+The OTEL collector provides a dedicated telemetry ingestion endpoint that can receive OTEL data via gRPC or HTTP and export it to Lakerunner's S3 storage for processing.
+
+**Why use the OTEL collector?**
+
+- **Standardized telemetry ingestion** - Accept OTEL traces, metrics, and logs from any OTEL-compatible source
+- **Separate scaling** - Scale telemetry collection independently from core Lakerunner services
+- **Configurable endpoints** - Internal or external ALB for different network access patterns
+- **Data transformation** - Process and filter telemetry data before storage
+- **High availability** - Dedicated ALB and ECS service for telemetry collection
+
+Deploy `out/otel_collector.yaml` for the OTEL collector service. Required parameters:
+
+- **CommonInfraStackName** – Name of the CommonInfra stack (e.g., "lakerunner-common")
+
+Optional parameters:
+
+- **LoadBalancerType** – ALB scheme: "internal" (default) or "internet-facing"
+- **OrganizationId** – Customer organization ID for data routing (default: 12340000-0000-4000-8000-000000000000)
+- **CollectorName** – Collector name for data routing (default: lakerunner)
+- **OtelCollectorImage** – Container image for OTEL collector (for air-gapped deployments)
+
+**Example AWS CLI deployment:**
+
+```bash
+aws cloudformation create-stack \
+  --stack-name lakerunner-otel \
+  --template-body file://out/otel_collector.yaml \
+  --parameters ParameterKey=CommonInfraStackName,ParameterValue=lakerunner-common \
+               ParameterKey=LoadBalancerType,ParameterValue=internal \
+  --capabilities CAPABILITY_IAM
+```
+
+**Post-deployment configuration:**
+
+The OTEL collector requires manual configuration upload:
+
+1. **Mount the EFS access point** (use the `OtelConfigAccessPointId` output)
+2. **Upload configuration** as `config.yaml` to the mounted EFS location
+3. **Collector will restart** automatically once the config file is detected
+
+The collector will initially fail to start until the configuration is uploaded. This is expected behavior.
+
+**OTEL endpoints after deployment:**
+- **gRPC**: `http://<alb-dns>:4317` 
+- **HTTP**: `http://<alb-dns>:4318`
 
 ## Access Points
 
@@ -189,6 +242,7 @@ If you need to modify the CloudFormation templates, you can regenerate them usin
      - `out/common_infra.yaml`
      - `out/migration_task.yaml` 
      - `out/services.yaml`
+     - `out/otel_collector.yaml`
    - Validate templates with `cfn-lint`
 
 ### Template Structure
@@ -196,7 +250,9 @@ If you need to modify the CloudFormation templates, you can regenerate them usin
 - **`common_infra.py`** - Core infrastructure template
 - **`migration_task.py`** - Database migration template
 - **`services.py`** - ECS services template
+- **`otel_collector.py`** - OTEL collector template (optional)
 - **`defaults.yaml`** - Configuration defaults for services and API keys
+- **`otel-config.yaml`** - Placeholder OTEL collector configuration
 - **`build.sh`** - Build script that generates and validates all templates
 
 ### Modifying Templates
