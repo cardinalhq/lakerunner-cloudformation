@@ -1,6 +1,6 @@
 # CardinalHQ's Lakerunner CloudFormation Templates
 
-This repository contains CloudFormation templates for deploying Lakerunner on AWS ECS using Fargate. Pre-generated templates are available in the `troposphere/out/` directory for immediate use.
+This repository contains CloudFormation templates for deploying Lakerunner on AWS ECS using Fargate. Pre-generated templates are available in the `generated-templates/` directory for immediate use.
 
 ## Architecture
 
@@ -23,7 +23,7 @@ An optional fourth stack provides OTEL telemetry collection:
 
 ## Installation
 
-Pre-generated CloudFormation templates are available in the `troposphere/out/` directory. These are region and account agnostic, and should deploy to any AWS account where you have sufficient permissions.
+Pre-generated CloudFormation templates are available in the `generated-templates/` directory. These are region and account agnostic, and should deploy to any AWS account where you have sufficient permissions.
 
 ### Deploy the stacks in this order:
 
@@ -36,7 +36,7 @@ Pre-generated CloudFormation templates are available in the `troposphere/out/` d
 
 ### Step 1: Deploy CommonInfra Stack
 
-Deploy `out/common_infra.yaml` using the AWS Console or CLI. Required parameters:
+Deploy `generated-templates/common_infra.yaml` using the AWS Console or CLI. Required parameters:
 
 - **VpcId** – The existing VPC ID to deploy into  
 - **PrivateSubnets** – List of private subnet IDs (minimum 2, different AZs)
@@ -53,7 +53,7 @@ Optional parameters:
 ```bash
 aws cloudformation create-stack \
   --stack-name lakerunner-common \
-  --template-body file://out/common_infra.yaml \
+  --template-body file://generated-templates/common_infra.yaml \
   --parameters ParameterKey=VpcId,ParameterValue=vpc-12345678 \
                ParameterKey=PrivateSubnets,ParameterValue="subnet-private1,subnet-private2" \
                ParameterKey=PublicSubnets,ParameterValue="subnet-public1,subnet-public2" \
@@ -65,7 +65,7 @@ Wait for stack creation to complete before proceeding.
 
 ### Step 2: Deploy Migration Stack
 
-Deploy `out/migration_task.yaml` to run database migrations. Required parameters:
+Deploy `generated-templates/migration_task.yaml` to run database migrations. Required parameters:
 
 - **CommonInfraStackName** – Name of the CommonInfra stack (e.g., "lakerunner-common")
 
@@ -80,7 +80,7 @@ Optional parameters:
 ```bash
 aws cloudformation create-stack \
   --stack-name lakerunner-migration \
-  --template-body file://out/migration_task.yaml \
+  --template-body file://generated-templates/migration_task.yaml \
   --parameters ParameterKey=CommonInfraStackName,ParameterValue=lakerunner-common \
   --capabilities CAPABILITY_IAM
 ```
@@ -89,7 +89,7 @@ The migration task will run automatically and the stack will complete when migra
 
 ### Step 3: Deploy Services Stack
 
-Deploy `out/services.yaml` for all Lakerunner microservices. Required parameters:
+Deploy `generated-templates/services.yaml` for all Lakerunner microservices. Required parameters:
 
 - **CommonInfraStackName** – Name of the CommonInfra stack (e.g., "lakerunner-common")
 
@@ -105,7 +105,7 @@ Optional parameters (for air-gapped deployments):
 ```bash
 aws cloudformation create-stack \
   --stack-name lakerunner-services \
-  --template-body file://out/services.yaml \
+  --template-body file://generated-templates/services.yaml \
   --parameters ParameterKey=CommonInfraStackName,ParameterValue=lakerunner-common \
   --capabilities CAPABILITY_IAM
 ```
@@ -122,7 +122,7 @@ The OTEL collector provides a dedicated telemetry ingestion endpoint that can re
 - **Data transformation** - Process and filter telemetry data before storage
 - **High availability** - Dedicated ALB and ECS service for telemetry collection
 
-Deploy `out/otel_collector.yaml` for the OTEL collector service. Required parameters:
+Deploy `generated-templates/otel_collector.yaml` for the OTEL collector service. Required parameters:
 
 - **CommonInfraStackName** – Name of the CommonInfra stack (e.g., "lakerunner-common")
 
@@ -138,7 +138,7 @@ Optional parameters:
 ```bash
 aws cloudformation create-stack \
   --stack-name lakerunner-otel \
-  --template-body file://out/otel_collector.yaml \
+  --template-body file://generated-templates/otel_collector.yaml \
   --parameters ParameterKey=CommonInfraStackName,ParameterValue=lakerunner-common \
                ParameterKey=LoadBalancerType,ParameterValue=internal \
   --capabilities CAPABILITY_IAM
@@ -225,9 +225,9 @@ If you need to modify the CloudFormation templates, you can regenerate them usin
 
 ### Generating Templates
 
-1. Navigate to the troposphere directory:
+1. Navigate to the repository root directory:
    ```bash
-   cd troposphere/
+   cd lakerunner-cloudformation/
    ```
 
 2. Generate all CloudFormation templates:
@@ -238,19 +238,19 @@ If you need to modify the CloudFormation templates, you can regenerate them usin
    This will:
    - Create a Python virtual environment
    - Install dependencies from `requirements.txt`
-   - Generate templates in `out/` directory:
-     - `out/common_infra.yaml`
-     - `out/migration_task.yaml` 
-     - `out/services.yaml`
-     - `out/otel_collector.yaml`
+   - Generate templates in `generated-templates/` directory:
+     - `generated-templates/common_infra.yaml`
+     - `generated-templates/migration_task.yaml` 
+     - `generated-templates/services.yaml`
+     - `generated-templates/otel_collector.yaml`
    - Validate templates with `cfn-lint`
 
 ### Template Structure
 
-- **`common_infra.py`** - Core infrastructure template
-- **`migration_task.py`** - Database migration template
-- **`services.py`** - ECS services template
-- **`otel_collector.py`** - OTEL collector template (optional)
+- **`src/common_infra.py`** - Core infrastructure template
+- **`src/migration_task.py`** - Database migration template
+- **`src/services.py`** - ECS services template
+- **`src/otel_collector.py`** - OTEL collector template (optional)
 - **`defaults.yaml`** - Configuration defaults for services and API keys
 - **`otel-config.yaml`** - Placeholder OTEL collector configuration
 - **`build.sh`** - Build script that generates and validates all templates

@@ -25,26 +25,26 @@ else
   pip install -r requirements.txt
 fi
 
-if [ -d "out" ]; then
-  rm -rf out
+if [ -d "generated-templates" ]; then
+  rm -rf generated-templates
 fi
-mkdir out
+mkdir generated-templates
 
 echo "1. Generating Common Infrastructure..."
-python3 common_infra.py > out/common_infra.yaml
-cfn-lint out/common_infra.yaml
+python3 src/common_infra.py > generated-templates/common_infra.yaml
+cfn-lint generated-templates/common_infra.yaml
 
 echo "2. Generating Migration Task..."
-python3 migration_task.py > out/migration_task.yaml
-cfn-lint out/migration_task.yaml
+python3 src/migration_task.py > generated-templates/migration_task.yaml
+cfn-lint generated-templates/migration_task.yaml
 
 echo "3. Generating Services..."
-python3 services.py > out/services.yaml
-cfn-lint out/services.yaml
+python3 src/services.py > generated-templates/services.yaml
+cfn-lint generated-templates/services.yaml
 
 echo "4. Generating OTEL Collector..."
-python3 otel_collector.py > out/otel_collector.yaml
-cfn-lint out/otel_collector.yaml
+python3 src/otel_collector.py > generated-templates/otel_collector.yaml
+cfn-lint generated-templates/otel_collector.yaml
 
 echo -e "\n✅ Generated CloudFormation templates:"
-ls -la out/
+ls -la generated-templates/

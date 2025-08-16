@@ -37,7 +37,7 @@ from troposphere.efs import AccessPoint, PosixUser, RootDirectory, CreationInfo
 def load_otel_config(config_file="defaults.yaml"):
     """Load OTEL collector configuration from YAML file"""
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    config_path = os.path.join(script_dir, config_file)
+    config_path = os.path.join(script_dir, "..", config_file)
 
     with open(config_path, 'r') as f:
         return yaml.safe_load(f)

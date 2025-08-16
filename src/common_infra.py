@@ -124,7 +124,7 @@ t.add_condition("HasStorageProfilesOverride", Not(Equals(Ref(StorageProfilesOver
 def load_defaults():
     """Load default configuration from defaults.yaml"""
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    config_path = os.path.join(script_dir, "defaults.yaml")
+    config_path = os.path.join(script_dir, "..", "defaults.yaml")
 
     with open(config_path, 'r') as f:
         return yaml.safe_load(f)
