@@ -29,7 +29,7 @@ class TestParameterValidation:
         assert private_subnets["Type"] == "List<AWS::EC2::Subnet::Id>"
         
         public_subnets = parameters["PublicSubnets"]
-        assert public_subnets["Type"] == "CommaDelimitedList"
+        assert public_subnets["Type"] == "List<AWS::EC2::Subnet::Id>"
 
     def test_common_infra_conditions_validity(self):
         """Test that all conditions in CommonInfra are valid CloudFormation"""

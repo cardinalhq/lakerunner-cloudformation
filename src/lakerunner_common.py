@@ -49,7 +49,7 @@ VpcId = t.add_parameter(Parameter(
 
 PublicSubnets = t.add_parameter(Parameter(
     "PublicSubnets",
-    Type="CommaDelimitedList",
+    Type="List<AWS::EC2::Subnet::Id>",
     Default="",
     Description="Public subnet IDs (for internet-facing ALB). Required when AlbScheme=internet-facing. Provide at least two in different AZs."
 ))
@@ -119,6 +119,7 @@ t.set_metadata({
 t.add_condition("IsInternetFacing", Equals(Ref(AlbScheme), "internet-facing"))
 t.add_condition("HasApiKeysOverride", Not(Equals(Ref(ApiKeysOverride), "")))
 t.add_condition("HasStorageProfilesOverride", Not(Equals(Ref(StorageProfilesOverride), "")))
+t.add_condition("HasPublicSubnets", Not(Equals(Select(0, Ref(PublicSubnets)), "")))
 
 # Helper function to load defaults
 def load_defaults():
@@ -220,7 +221,6 @@ for port in (3000, 7101):
 # -----------------------
 Alb = t.add_resource(LoadBalancer(
     "Alb",
-    Name=Sub("${AWS::StackName}-alb"),
     Scheme=Ref(AlbScheme),
     SecurityGroups=[Ref(AlbSG)],
     Subnets=If(
@@ -484,6 +484,12 @@ t.add_output(Output(
     "PrivateSubnetsOut",
     Value=Sub("${Subnet1},${Subnet2}", Subnet1=Select(0, Ref(PrivateSubnets)), Subnet2=Select(1, Ref(PrivateSubnets))),
     Export=Export(name=Sub("${AWS::StackName}-PrivateSubnets"))
+))
+t.add_output(Output(
+    "PublicSubnetsOut",
+    Value=Sub("${Subnet1},${Subnet2}", Subnet1=Select(0, Ref(PublicSubnets)), Subnet2=Select(1, Ref(PublicSubnets))),
+    Export=Export(name=Sub("${AWS::StackName}-PublicSubnets")),
+    Condition="HasPublicSubnets"
 ))
 t.add_output(Output(
     "VpcIdOut",
