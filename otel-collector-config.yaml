@@ -32,7 +32,20 @@ exporters:
       s3_force_path_style: true
       s3_partition: minute
       s3_prefix: otel-raw
-
+    timeboxes:
+      logs:
+        grace_period: 1s
+        interval: 10s
+        open_interval_count: 1
+      metrics:
+        grace_period: 1s
+        interval: 10s
+        open_interval_count: 1
+      traces:
+        grace_period: 1s
+        interval: 10s
+        open_interval_count: 1
+    use_now_for_metrics: true
   nop:
 
 extensions:
