@@ -63,6 +63,14 @@ def load_defaults(config_file="defaults.yaml"):
 - `./build.sh` - Generate all CloudFormation templates with validation
 - `python3 <template>.py` - Generate individual template
 - `cfn-lint out/<template>.yaml` - Validate specific template
+- `make test` - Run all unit tests
+- `make test-common` - Run CommonInfra template tests only
+- `make test-services` - Run Services template tests only
+- `make test-migration` - Run Migration template tests only
+- `make test-params` - Run parameter and condition validation tests only
+- `make build` - Generate templates using Makefile
+- `make lint` - Run cfn-lint validation on all templates
+- `make all` - Run build, test, and lint together
 
 ### Environment
 
@@ -77,6 +85,33 @@ When making changes to templates, always use the virtual environment to test:
 1. `cfn-lint out/*.yaml` - Run additional validation if needed
 
 All templates must pass cfn-lint validation (errors must be fixed, warnings are acceptable if safe).
+
+### Unit Testing
+
+The repository includes comprehensive unit tests using pytest and cloud-radar for offline CloudFormation template testing:
+
+- **Test Structure**: Tests are organized in the `tests/` directory with separate test files for each template
+- **Cloud-Radar**: Enables offline validation of CloudFormation templates without AWS credentials
+- **Mock Configuration**: Tests use mocked service configurations to avoid dependencies on external files
+- **Coverage**: Tests validate template structure, parameters, resources, exports, and CloudFormation syntax
+
+When adding new templates or modifying existing ones:
+1. Run `make test` to ensure all tests pass
+2. Add new test cases for new functionality
+3. Update test mocks when changing service configurations
+4. Ensure tests cover both positive and negative scenarios
+5. Run `make test-params` specifically for parameter and condition changes
+
+### Parameter Validation Testing
+
+The repository includes comprehensive parameter validation tests that catch issues cfn-lint may miss:
+
+- **Parameter Constraints**: Validates AllowedValues, Types, and constraint consistency
+- **Condition Syntax**: Ensures all CloudFormation conditions use valid syntax
+- **Parameter References**: Verifies conditions reference existing parameters
+- **Condition Usage**: Validates conditions are used properly in resources and outputs
+- **Logic Validation**: Tests condition logic for common mistakes and antipatterns
+- **Cross-Template Consistency**: Ensures parameter types are consistent across templates
 
 ## Development Guidelines
 
@@ -117,3 +152,4 @@ All templates must pass cfn-lint validation (errors must be fixed, warnings are 
 - Markdown ordered lists should repeat "1." for each item.
 - Markdown should have blank lines between header lines, code blocks, etc. and other items.
 - Never add advertisements for Claude or Anthropic to any docs or commit messages.
+- Don't use emoji
