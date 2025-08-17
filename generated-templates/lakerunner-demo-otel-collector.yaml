@@ -205,7 +205,6 @@ Resources:
       HealthyThresholdCount: 2
       Matcher:
         HttpCode: '200'
-      Name: !Sub '${AWS::StackName}-otel-grpc'
       Port: 4317
       Protocol: HTTP
       Tags:
@@ -231,7 +230,6 @@ Resources:
       HealthyThresholdCount: 2
       Matcher:
         HttpCode: '200'
-      Name: !Sub '${AWS::StackName}-otel-http'
       Port: 4318
       Protocol: HTTP
       Tags:

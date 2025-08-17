@@ -222,7 +222,6 @@ def create_otel_collector_template():
     # Target Groups
     OtelGrpcTargetGroup = t.add_resource(TargetGroup(
         "OtelGrpcTargetGroup",
-        Name=Sub("${AWS::StackName}-otel-grpc"),
         Port=4317,
         Protocol="HTTP",
         VpcId=VpcIdValue,
@@ -243,7 +242,6 @@ def create_otel_collector_template():
 
     OtelHttpTargetGroup = t.add_resource(TargetGroup(
         "OtelHttpTargetGroup",
-        Name=Sub("${AWS::StackName}-otel-http"),
         Port=4318,
         Protocol="HTTP",
         VpcId=VpcIdValue,
