@@ -1,3 +1,8 @@
+Conditions:
+  EnableOtlp: !Not
+    - !Equals
+      - !Ref 'OtelEndpoint'
+      - ''
 Description: 'Lakerunner Services: ECS services, task definitions, IAM roles, and ALB integration'
 Metadata:
   AWS::CloudFormation::Interface:
@@ -13,6 +18,10 @@ Metadata:
           - QueryApiImage
           - QueryWorkerImage
           - GrafanaImage
+      - Label:
+          default: Telemetry
+        Parameters:
+          - OtelEndpoint
     ParameterLabels:
       CommonInfraStackName:
         default: Common Infra Stack Name
@@ -20,6 +29,8 @@ Metadata:
         default: Go Services Image
       GrafanaImage:
         default: Grafana Image
+      OtelEndpoint:
+        default: OTEL Collector Endpoint
       QueryApiImage:
         default: Query API Image
       QueryWorkerImage:
@@ -89,6 +100,10 @@ Parameters:
   GrafanaImage:
     Default: grafana/grafana:latest
     Description: Container image for Grafana service
+    Type: String
+  OtelEndpoint:
+    Default: ''
+    Description: 'OPTIONAL: OTEL collector HTTP endpoint URL (e.g., http://collector-dns:4318). Leave blank to disable OTLP telemetry export.'
     Type: String
   QueryApiImage:
     Default: public.ecr.aws/cardinalhq.io/lakerunner/query-api:latest
@@ -532,6 +547,16 @@ Resources:
               Value: lakerunner
             - Name: LRDB_SSLMODE
               Value: require
+            - Name: OTEL_EXPORTER_OTLP_ENDPOINT
+              Value: !If
+                - EnableOtlp
+                - !Ref 'OtelEndpoint'
+                - !Ref 'AWS::NoValue'
+            - Name: ENABLE_OTLP_TELEMETRY
+              Value: !If
+                - EnableOtlp
+                - 'true'
+                - !Ref 'AWS::NoValue'
             - Name: GF_SECURITY_ADMIN_USER
               Value: admin
             - Name: GF_SERVER_HTTP_PORT
@@ -654,6 +679,16 @@ Resources:
               Value: lakerunner
             - Name: LRDB_SSLMODE
               Value: require
+            - Name: OTEL_EXPORTER_OTLP_ENDPOINT
+              Value: !If
+                - EnableOtlp
+                - !Ref 'OtelEndpoint'
+                - !Ref 'AWS::NoValue'
+            - Name: ENABLE_OTLP_TELEMETRY
+              Value: !If
+                - EnableOtlp
+                - 'true'
+                - !Ref 'AWS::NoValue'
           HealthCheck:
             Command:
               - /app/bin/lakerunner
@@ -752,6 +787,16 @@ Resources:
               Value: lakerunner
             - Name: LRDB_SSLMODE
               Value: require
+            - Name: OTEL_EXPORTER_OTLP_ENDPOINT
+              Value: !If
+                - EnableOtlp
+                - !Ref 'OtelEndpoint'
+                - !Ref 'AWS::NoValue'
+            - Name: ENABLE_OTLP_TELEMETRY
+              Value: !If
+                - EnableOtlp
+                - 'true'
+                - !Ref 'AWS::NoValue'
           HealthCheck:
             Command:
               - /app/bin/lakerunner
@@ -850,6 +895,16 @@ Resources:
               Value: lakerunner
             - Name: LRDB_SSLMODE
               Value: require
+            - Name: OTEL_EXPORTER_OTLP_ENDPOINT
+              Value: !If
+                - EnableOtlp
+                - !Ref 'OtelEndpoint'
+                - !Ref 'AWS::NoValue'
+            - Name: ENABLE_OTLP_TELEMETRY
+              Value: !If
+                - EnableOtlp
+                - 'true'
+                - !Ref 'AWS::NoValue'
           HealthCheck:
             Command:
               - /app/bin/lakerunner
@@ -948,6 +1003,16 @@ Resources:
               Value: lakerunner
             - Name: LRDB_SSLMODE
               Value: require
+            - Name: OTEL_EXPORTER_OTLP_ENDPOINT
+              Value: !If
+                - EnableOtlp
+                - !Ref 'OtelEndpoint'
+                - !Ref 'AWS::NoValue'
+            - Name: ENABLE_OTLP_TELEMETRY
+              Value: !If
+                - EnableOtlp
+                - 'true'
+                - !Ref 'AWS::NoValue'
           HealthCheck:
             Command:
               - /app/bin/lakerunner
@@ -1047,6 +1112,16 @@ Resources:
               Value: lakerunner
             - Name: LRDB_SSLMODE
               Value: require
+            - Name: OTEL_EXPORTER_OTLP_ENDPOINT
+              Value: !If
+                - EnableOtlp
+                - !Ref 'OtelEndpoint'
+                - !Ref 'AWS::NoValue'
+            - Name: ENABLE_OTLP_TELEMETRY
+              Value: !If
+                - EnableOtlp
+                - 'true'
+                - !Ref 'AWS::NoValue'
           HealthCheck:
             Command:
               - /app/bin/lakerunner
@@ -1143,6 +1218,16 @@ Resources:
               Value: lakerunner
             - Name: LRDB_SSLMODE
               Value: require
+            - Name: OTEL_EXPORTER_OTLP_ENDPOINT
+              Value: !If
+                - EnableOtlp
+                - !Ref 'OtelEndpoint'
+                - !Ref 'AWS::NoValue'
+            - Name: ENABLE_OTLP_TELEMETRY
+              Value: !If
+                - EnableOtlp
+                - 'true'
+                - !Ref 'AWS::NoValue'
             - Name: EXECUTION_ENVIRONMENT
               Value: ecs
             - Name: QUERY_WORKER_DEPLOYMENT_NAME
@@ -1261,6 +1346,16 @@ Resources:
               Value: lakerunner
             - Name: LRDB_SSLMODE
               Value: require
+            - Name: OTEL_EXPORTER_OTLP_ENDPOINT
+              Value: !If
+                - EnableOtlp
+                - !Ref 'OtelEndpoint'
+                - !Ref 'AWS::NoValue'
+            - Name: ENABLE_OTLP_TELEMETRY
+              Value: !If
+                - EnableOtlp
+                - 'true'
+                - !Ref 'AWS::NoValue'
             - Name: METRIC_PREFIX
               Value: lakerunner-query-worker
             - Name: SPRING_PROFILES_ACTIVE
@@ -1369,6 +1464,16 @@ Resources:
               Value: lakerunner
             - Name: LRDB_SSLMODE
               Value: require
+            - Name: OTEL_EXPORTER_OTLP_ENDPOINT
+              Value: !If
+                - EnableOtlp
+                - !Ref 'OtelEndpoint'
+                - !Ref 'AWS::NoValue'
+            - Name: ENABLE_OTLP_TELEMETRY
+              Value: !If
+                - EnableOtlp
+                - 'true'
+                - !Ref 'AWS::NoValue'
           HealthCheck:
             Command:
               - /app/bin/lakerunner
@@ -1467,6 +1572,16 @@ Resources:
               Value: lakerunner
             - Name: LRDB_SSLMODE
               Value: require
+            - Name: OTEL_EXPORTER_OTLP_ENDPOINT
+              Value: !If
+                - EnableOtlp
+                - !Ref 'OtelEndpoint'
+                - !Ref 'AWS::NoValue'
+            - Name: ENABLE_OTLP_TELEMETRY
+              Value: !If
+                - EnableOtlp
+                - 'true'
+                - !Ref 'AWS::NoValue'
           HealthCheck:
             Command:
               - /app/bin/lakerunner

@@ -116,3 +116,4 @@ All templates must pass cfn-lint validation (errors must be fixed, warnings are 
 - Markdown unordered lists should use a "-" not "*".
 - Markdown ordered lists should repeat "1." for each item.
 - Markdown should have blank lines between header lines, code blocks, etc. and other items.
+- Never add advertisements for Claude or Anthropic to any docs or commit messages.
