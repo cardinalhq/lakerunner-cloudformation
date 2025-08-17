@@ -64,6 +64,7 @@ Deploy `generated-templates/lakerunner-services.yaml` for all Lakerunner microse
 - **CommonInfraStackName** – Name of the CommonInfra stack (e.g., "lakerunner-common")
 
 Optional parameters:
+- **OtelEndpoint** – OTEL collector HTTP endpoint URL (e.g., http://collector-dns:4318). Leave blank to disable OTLP telemetry export.
 - Container image overrides for air-gapped deployments:
   - **GoServicesImage** – Image for Go services (default: public.ecr.aws/cardinalhq.io/lakerunner:latest)
   - **QueryApiImage** – Image for query-api (default: public.ecr.aws/cardinalhq.io/lakerunner/query-api:latest)
@@ -79,6 +80,67 @@ aws cloudformation create-stack \\
   --parameters ParameterKey=CommonInfraStackName,ParameterValue=lakerunner-common \\
   --capabilities CAPABILITY_IAM
 ```
+
+## OTLP Telemetry Support
+
+The services stack supports optional OTLP (OpenTelemetry Protocol) telemetry export. When enabled, all Go services will export logs and metrics to the specified collector endpoint.
+
+### Configuration
+
+Add the `OtelEndpoint` parameter when deploying the services stack:
+
+```bash
+# Deploy services with OTLP telemetry enabled
+aws cloudformation create-stack \
+  --stack-name lakerunner-services \
+  --template-body file://generated-templates/lakerunner-services.yaml \
+  --parameters ParameterKey=CommonInfraStackName,ParameterValue=lakerunner-common \
+               ParameterKey=OtelEndpoint,ParameterValue=http://collector-dns:4318 \
+  --capabilities CAPABILITY_IAM
+```
+
+### Getting the Collector Endpoint
+
+**Option 1: Using CardinalHQ OTEL Collector Stack**
+
+1. Deploy the OTEL collector stack first:
+   ```bash
+   aws cloudformation create-stack \
+     --stack-name lakerunner-otel-collector \
+     --template-body file://generated-templates/lakerunner-demo-otel-collector.yaml \
+     --parameters ParameterKey=CommonInfraStackName,ParameterValue=lakerunner-common \
+     --capabilities CAPABILITY_IAM
+   ```
+
+1. Get the HTTP endpoint from stack outputs:
+   ```bash
+   aws cloudformation describe-stacks \
+     --stack-name lakerunner-otel-collector \
+     --query 'Stacks[0].Outputs[?OutputKey==`HttpEndpoint`].OutputValue' \
+     --output text
+   ```
+
+**Option 2: External Collector**
+
+For collectors outside the ECS cluster, provide the full endpoint URL:
+- `http://my-collector.example.com:4318` - External HTTP collector
+- `http://internal-lb-dns:4318` - Internal load balancer  
+- `http://10.0.1.100:4318` - Direct IP address
+
+### Environment Variables
+
+When `OtelEndpoint` is provided, these environment variables are automatically added to all Go services:
+
+- `OTEL_EXPORTER_OTLP_ENDPOINT` - The collector endpoint URL
+- `ENABLE_OTLP_TELEMETRY=true` - Enables telemetry export in the application
+
+### Deployment Order with Telemetry
+
+For full telemetry setup, deploy in this order:
+
+1. `lakerunner-common` - Core infrastructure
+1. `lakerunner-demo-otel-collector` - OTEL collector (optional)
+1. `lakerunner-services` - Services with OTLP enabled
 
 ## Access Points
 
@@ -120,6 +182,7 @@ All services share:
 - Standardized logging to CloudWatch
 - EFS mount for shared scratch space (/scratch)
 - Health checks appropriate to service type (Go, Scala, cURL)
+- Optional OTLP telemetry export to OpenTelemetry collectors
 
 ## Additional Documentation
 

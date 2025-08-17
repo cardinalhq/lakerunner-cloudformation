@@ -84,6 +84,13 @@ def create_services_template():
         Description="Container image for Grafana service"
     ))
 
+    # OTLP Telemetry configuration
+    OtelEndpoint = t.add_parameter(Parameter(
+        "OtelEndpoint", Type="String",
+        Default="",
+        Description="OPTIONAL: OTEL collector HTTP endpoint URL (e.g., http://collector-dns:4318). Leave blank to disable OTLP telemetry export."
+    ))
+
     # Parameter groups for console
     t.set_metadata({
         "AWS::CloudFormation::Interface": {
@@ -95,6 +102,10 @@ def create_services_template():
                 {
                     "Label": {"default": "Container Images"},
                     "Parameters": ["GoServicesImage", "QueryApiImage", "QueryWorkerImage", "GrafanaImage"]
+                },
+                {
+                    "Label": {"default": "Telemetry"},
+                    "Parameters": ["OtelEndpoint"]
                 }
             ],
             "ParameterLabels": {
@@ -102,7 +113,8 @@ def create_services_template():
                 "GoServicesImage": {"default": "Go Services Image"},
                 "QueryApiImage": {"default": "Query API Image"},
                 "QueryWorkerImage": {"default": "Query Worker Image"},
-                "GrafanaImage": {"default": "Grafana Image"}
+                "GrafanaImage": {"default": "Grafana Image"},
+                "OtelEndpoint": {"default": "OTEL Collector Endpoint"}
             }
         }
     })
@@ -135,6 +147,8 @@ def create_services_template():
     PrivateSubnetsValue = Split(",", ImportValue(ci_export("PrivateSubnets")))
     BucketArnValue = ImportValue(ci_export("BucketArn"))
 
+    # Conditions
+    t.add_condition("EnableOtlp", Not(Equals(Ref(OtelEndpoint), "")))
 
     # -----------------------
     # Task Execution Role (shared by all services)
@@ -399,6 +413,20 @@ def create_services_template():
             Environment(Name="LRDB_USER", Value="lakerunner"),
             Environment(Name="LRDB_SSLMODE", Value="require")
         ]
+
+        # Add OTLP telemetry environment variables (conditionally)
+        # Note: We add these individually with If() conditions since CloudFormation
+        # doesn't support conditional lists in environment arrays
+        base_env.extend([
+            Environment(
+                Name="OTEL_EXPORTER_OTLP_ENDPOINT", 
+                Value=If("EnableOtlp", Ref(OtelEndpoint), Ref("AWS::NoValue"))
+            ),
+            Environment(
+                Name="ENABLE_OTLP_TELEMETRY", 
+                Value=If("EnableOtlp", "true", Ref("AWS::NoValue"))
+            )
+        ])
 
         # Add service-specific environment variables (excluding sensitive ones)
         service_env = service_config.get('environment', {})
