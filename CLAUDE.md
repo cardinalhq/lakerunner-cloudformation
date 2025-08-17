@@ -152,5 +152,4 @@ The repository includes comprehensive parameter validation tests that catch issu
 - Markdown ordered lists should repeat "1." for each item.
 - Markdown should have blank lines between header lines, code blocks, etc. and other items.
 - Never add advertisements for Claude or Anthropic to any docs or commit messages.
-
 - Don't use emoji
