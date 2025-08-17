@@ -116,7 +116,6 @@ Resources:
   ApplicationLoadBalancer:
     Properties:
       IpAddressType: ipv4
-      Name: !Sub '${AWS::StackName}-alb'
       Scheme: !If
         - IsInternal
         - internal

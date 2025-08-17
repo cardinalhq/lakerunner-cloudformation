@@ -211,7 +211,6 @@ def create_otel_collector_template():
     # -----------------------
     ApplicationLoadBalancer = t.add_resource(LoadBalancer(
         "ApplicationLoadBalancer",
-        Name=Sub("${AWS::StackName}-alb"),
         Scheme=If("IsInternal", "internal", "internet-facing"),
         Type="application",
         IpAddressType="ipv4",

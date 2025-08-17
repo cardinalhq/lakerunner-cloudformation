@@ -3,6 +3,12 @@ Conditions:
     - !Equals
       - !Ref 'ApiKeysOverride'
       - ''
+  HasPublicSubnets: !Not
+    - !Equals
+      - !Select
+        - 0
+        - !Ref 'PublicSubnets'
+      - ''
   HasStorageProfilesOverride: !Not
     - !Equals
       - !Ref 'StorageProfilesOverride'
@@ -94,6 +100,18 @@ Outputs:
         Subnet2: !Select
           - 1
           - !Ref 'PrivateSubnets'
+  PublicSubnetsOut:
+    Condition: HasPublicSubnets
+    Export:
+      Name: !Sub '${AWS::StackName}-PublicSubnets'
+    Value: !Sub
+      - ${Subnet1},${Subnet2}
+      - Subnet1: !Select
+          - 0
+          - !Ref 'PublicSubnets'
+        Subnet2: !Select
+          - 1
+          - !Ref 'PublicSubnets'
   TaskSecurityGroupId:
     Export:
       Name: !Sub '${AWS::StackName}-TaskSGId'
@@ -128,7 +146,7 @@ Parameters:
   PublicSubnets:
     Default: ''
     Description: Public subnet IDs (for internet-facing ALB). Required when AlbScheme=internet-facing. Provide at least two in different AZs.
-    Type: CommaDelimitedList
+    Type: List<AWS::EC2::Subnet::Id>
   StorageProfilesOverride:
     Default: ''
     Description: 'OPTIONAL: Custom storage profiles configuration in YAML format. Leave blank to use defaults from defaults.yaml. Bucket name and region will be auto-filled.'
@@ -139,7 +157,6 @@ Parameters:
 Resources:
   Alb:
     Properties:
-      Name: !Sub '${AWS::StackName}-alb'
       Scheme: !Ref 'AlbScheme'
       SecurityGroups:
         - !Ref 'AlbSecurityGroup'
