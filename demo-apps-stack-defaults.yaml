@@ -1,0 +1,30 @@
+# Default configuration for Demo Apps stack
+# This file contains configuration for OTEL-instrumented demo applications
+
+# Container Images configuration
+images:
+  demo_sample_app: "public.ecr.aws/cardinalhq.io/lakerunner-demo/sample-app:latest"
+
+# Demo applications with OTEL instrumentation
+demo_apps:
+  sample-app:
+    image: "public.ecr.aws/cardinalhq.io/lakerunner-demo/sample-app:latest"
+    command: ["./sample-app"]
+    cpu: 512
+    memory_mib: 1024
+    replicas: 1
+    environment:
+      APP_NAME: "sample-app"
+      LOG_LEVEL: "info"
+      HTTP_PORT: "8080"
+    ingress:
+      port: 8080
+      attach_alb: false
+    health_check:
+      type: "http"
+      port: 8080
+      path: "/health"
+    bind_mounts:
+      - container_path: "/app/data"
+        source_volume: "scratch"
+        read_only: false

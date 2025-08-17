@@ -1,5 +1,5 @@
-# Default configuration for Lakerunner deployment
-# This file contains initial state for API keys, storage profiles, service configurations, and container images
+# Default configuration for core Lakerunner deployment
+# This file contains configuration for the main three stacks: common, migration, and services
 
 # API Keys configuration
 api_keys:
@@ -20,16 +20,16 @@ storage_profiles:
 
 # Container Images configuration
 images:
-  migration: "public.ecr.aws/cardinalhq.io/lakerunner:latest"
-  go_services: "public.ecr.aws/cardinalhq.io/lakerunner:latest"
+  migration: "public.ecr.aws/cardinalhq.io/lakerunner:v1.1.0"
+  go_services: "public.ecr.aws/cardinalhq.io/lakerunner:v1.1.0"
   query_api: "public.ecr.aws/cardinalhq.io/lakerunner/query-api:latest"
   query_worker: "public.ecr.aws/cardinalhq.io/lakerunner/query-worker:latest"
   grafana: "grafana/grafana:latest"
 
-# Service configurations (moved from services.yaml for centralization)
+# Service configurations for core Lakerunner services
 services:
   lakerunner-pubsub-sqs:
-    image: "public.ecr.aws/cardinalhq.io/lakerunner:latest"
+    image: "public.ecr.aws/cardinalhq.io/lakerunner:v1.1.0"
     command: ["/app/bin/lakerunner", "pubsub", "sqs"]
     cpu: 1024
     memory_mib: 2048
@@ -40,7 +40,7 @@ services:
     environment: {}
 
   lakerunner-ingest-logs:
-    image: "public.ecr.aws/cardinalhq.io/lakerunner:latest"
+    image: "public.ecr.aws/cardinalhq.io/lakerunner:v1.1.0"
     command: ["/app/bin/lakerunner", "ingest-logs"]
     cpu: 1024
     memory_mib: 2048
@@ -51,7 +51,7 @@ services:
     environment: {}
 
   lakerunner-ingest-metrics:
-    image: "public.ecr.aws/cardinalhq.io/lakerunner:latest"
+    image: "public.ecr.aws/cardinalhq.io/lakerunner:v1.1.0"
     command: ["/app/bin/lakerunner", "ingest-metrics"]
     cpu: 1024
     memory_mib: 2048
@@ -62,7 +62,7 @@ services:
     environment: {}
 
   lakerunner-compact-logs:
-    image: "public.ecr.aws/cardinalhq.io/lakerunner:latest"
+    image: "public.ecr.aws/cardinalhq.io/lakerunner:v1.1.0"
     command: ["/app/bin/lakerunner", "compact-logs"]
     cpu: 1024
     memory_mib: 2048
@@ -73,7 +73,7 @@ services:
     environment: {}
 
   lakerunner-compact-metrics:
-    image: "public.ecr.aws/cardinalhq.io/lakerunner:latest"
+    image: "public.ecr.aws/cardinalhq.io/lakerunner:v1.1.0"
     command: ["/app/bin/lakerunner", "compact-metrics"]
     cpu: 1024
     memory_mib: 2048
@@ -84,7 +84,7 @@ services:
     environment: {}
 
   lakerunner-rollup-metrics:
-    image: "public.ecr.aws/cardinalhq.io/lakerunner:latest"
+    image: "public.ecr.aws/cardinalhq.io/lakerunner:v1.1.0"
     command: ["/app/bin/lakerunner", "rollup-metrics"]
     cpu: 1024
     memory_mib: 2048
@@ -95,7 +95,7 @@ services:
     environment: {}
 
   lakerunner-sweeper:
-    image: "public.ecr.aws/cardinalhq.io/lakerunner:latest"
+    image: "public.ecr.aws/cardinalhq.io/lakerunner:v1.1.0"
     command: ["/app/bin/lakerunner", "sweeper"]
     cpu: 256
     memory_mib: 512
