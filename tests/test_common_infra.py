@@ -35,8 +35,8 @@ class TestCommonInfraTemplate:
         parameters = template_dict["Parameters"]
         
         required_params = [
-            "VpcId", "PublicSubnets", "PrivateSubnets", 
-            "AlbScheme", "ApiKeysOverride", "StorageProfilesOverride"
+            "VpcId", "PrivateSubnets", 
+            "ApiKeysOverride", "StorageProfilesOverride"
         ]
         
         for param in required_params:
@@ -54,7 +54,6 @@ class TestCommonInfraTemplate:
         test_params = sample_parameters.copy()
         test_params.update({
             "VpcId": "vpc-12345678",
-            "PublicSubnets": "subnet-12345678,subnet-87654321", 
             "PrivateSubnets": "subnet-abcdef12,subnet-fedcba21"
         })
         
@@ -63,7 +62,6 @@ class TestCommonInfraTemplate:
             template=json.loads(template.to_json()),
             imports={
                 "VpcId": "vpc-12345678",
-                "PublicSubnets": "subnet-12345678,subnet-87654321", 
                 "PrivateSubnets": "subnet-abcdef12,subnet-fedcba21"
             }
         )

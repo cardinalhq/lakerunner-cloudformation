@@ -26,11 +26,13 @@ from troposphere.ecs import (
     LoadBalancer as EcsLoadBalancer, EFSVolumeConfiguration, AuthorizationConfig
 )
 from troposphere.iam import Role, Policy
-from troposphere.elasticloadbalancingv2 import TargetGroup, TargetGroupAttribute, Listener, Matcher
+from troposphere.elasticloadbalancingv2 import LoadBalancer, TargetGroup, TargetGroupAttribute, Listener, Matcher
 from troposphere.elasticloadbalancingv2 import Action as AlbAction
+from troposphere.ec2 import SecurityGroup, SecurityGroupIngress
 from troposphere.efs import AccessPoint, PosixUser, RootDirectory, CreationInfo
 from troposphere.logs import LogGroup
 from troposphere.secretsmanager import Secret, GenerateSecretString
+from troposphere.ssm import Parameter as SSMParameter
 
 def load_service_config(config_file="lakerunner-stack-defaults.yaml"):
     """Load service configuration from YAML file"""
@@ -91,13 +93,29 @@ def create_services_template():
         Description="OPTIONAL: OTEL collector HTTP endpoint URL (e.g., http://collector-dns:4318). Leave blank to disable OTLP telemetry export."
     ))
 
+    # ALB Configuration parameters
+    PublicSubnets = t.add_parameter(Parameter(
+        "PublicSubnets",
+        Type="List<AWS::EC2::Subnet::Id>",
+        Default="",
+        Description="Public subnet IDs (for internet-facing ALB). Required when AlbScheme=internet-facing. Provide at least two in different AZs."
+    ))
+
+    AlbScheme = t.add_parameter(Parameter(
+        "AlbScheme",
+        Type="String",
+        AllowedValues=["internet-facing", "internal"],
+        Default="internal",
+        Description="Load balancer scheme: 'internet-facing' for external access or 'internal' for internal access only."
+    ))
+
     # Parameter groups for console
     t.set_metadata({
         "AWS::CloudFormation::Interface": {
             "ParameterGroups": [
                 {
                     "Label": {"default": "Infrastructure"},
-                    "Parameters": ["CommonInfraStackName"]
+                    "Parameters": ["CommonInfraStackName", "PublicSubnets", "AlbScheme"]
                 },
                 {
                     "Label": {"default": "Container Images"},
@@ -110,6 +128,8 @@ def create_services_template():
             ],
             "ParameterLabels": {
                 "CommonInfraStackName": {"default": "Common Infra Stack Name"},
+                "PublicSubnets": {"default": "Public Subnets"},
+                "AlbScheme": {"default": "ALB Scheme"},
                 "GoServicesImage": {"default": "Go Services Image"},
                 "QueryApiImage": {"default": "Query API Image"},
                 "QueryWorkerImage": {"default": "Query Worker Image"},
@@ -149,6 +169,114 @@ def create_services_template():
 
     # Conditions
     t.add_condition("EnableOtlp", Not(Equals(Ref(OtelEndpoint), "")))
+    t.add_condition("IsInternetFacing", Equals(Ref(AlbScheme), "internet-facing"))
+
+    # -----------------------
+    # ALB Security Group
+    # -----------------------
+    AlbSG = t.add_resource(SecurityGroup(
+        "AlbSecurityGroup",
+        GroupDescription="Security group for ALB",
+        VpcId=VpcIdValue,
+        SecurityGroupEgress=[{
+            "IpProtocol": "-1",
+            "CidrIp": "0.0.0.0/0",
+            "Description": "Allow all outbound"
+        }]
+    ))
+
+    t.add_resource(SecurityGroupIngress(
+        "Alb3000Open",
+        GroupId=Ref(AlbSG),
+        IpProtocol="tcp",
+        FromPort=3000, ToPort=3000,
+        CidrIp="0.0.0.0/0",
+        Description="HTTP 3000",
+    ))
+    t.add_resource(SecurityGroupIngress(
+        "Alb7101Open",
+        GroupId=Ref(AlbSG),
+        IpProtocol="tcp",
+        FromPort=7101, ToPort=7101,
+        CidrIp="0.0.0.0/0",
+        Description="HTTP 7101",
+    ))
+
+    # Add ingress rules to task security group to allow ALB traffic
+    for port in (3000, 7101):
+        t.add_resource(SecurityGroupIngress(
+            f"TaskFromAlb{port}",
+            GroupId=TaskSecurityGroupIdValue,
+            IpProtocol="tcp",
+            FromPort=port, ToPort=port,
+            SourceSecurityGroupId=Ref(AlbSG),
+            Description=f"ALB to tasks {port}",
+        ))
+
+    # -----------------------
+    # ALB + listeners + target groups
+    # -----------------------
+    Alb = t.add_resource(LoadBalancer(
+        "Alb",
+        Scheme=Ref(AlbScheme),
+        SecurityGroups=[Ref(AlbSG)],
+        Subnets=If(
+            "IsInternetFacing",
+            Ref(PublicSubnets),
+            PrivateSubnetsValue
+        ),
+        Type="application",
+    ))
+
+    Tg7101 = t.add_resource(TargetGroup(
+        "Tg7101",
+        Port=7101, Protocol="HTTP",
+        VpcId=VpcIdValue,
+        TargetType="ip",
+        HealthCheckPath="/ready",
+        HealthCheckProtocol="HTTP",
+        HealthCheckIntervalSeconds=30,
+        HealthCheckTimeoutSeconds=5,
+        HealthyThresholdCount=2,
+        UnhealthyThresholdCount=3,
+        Matcher=Matcher(HttpCode="200"),
+        TargetGroupAttributes=[
+            TargetGroupAttribute(Key="stickiness.enabled", Value="false"),
+            TargetGroupAttribute(Key="deregistration_delay.timeout_seconds", Value="30")
+        ]
+    ))
+    Tg3000 = t.add_resource(TargetGroup(
+        "Tg3000",
+        Port=3000, Protocol="HTTP",
+        VpcId=VpcIdValue,
+        TargetType="ip",
+        HealthCheckPath="/api/health",
+        HealthCheckProtocol="HTTP",
+        HealthCheckIntervalSeconds=30,
+        HealthCheckTimeoutSeconds=5,
+        HealthyThresholdCount=2,
+        UnhealthyThresholdCount=3,
+        Matcher=Matcher(HttpCode="200"),
+        TargetGroupAttributes=[
+            TargetGroupAttribute(Key="stickiness.enabled", Value="false"),
+            TargetGroupAttribute(Key="deregistration_delay.timeout_seconds", Value="30")
+        ]
+    ))
+
+    t.add_resource(Listener(
+        "Listener7101",
+        LoadBalancerArn=Ref(Alb),
+        Port="7101",
+        Protocol="HTTP",
+        DefaultActions=[AlbAction(Type="forward", TargetGroupArn=Ref(Tg7101))]
+    ))
+    t.add_resource(Listener(
+        "Listener3000",
+        LoadBalancerArn=Ref(Alb),
+        Port="3000",
+        Protocol="HTTP",
+        DefaultActions=[AlbAction(Type="forward", TargetGroupArn=Ref(Tg3000))]
+    ))
 
     # -----------------------
     # Task Execution Role (shared by all services)
@@ -180,7 +308,8 @@ def create_services_template():
                                 "ssm:GetParameters"
                             ],
                             "Resource": [
-                                Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/*")
+                                Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/*"),
+                                Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}-*")
                             ]
                         },
                         {
@@ -329,6 +458,42 @@ def create_services_template():
         Export=Export(Sub("${AWS::StackName}-GrafanaAdminSecretArn"))
     ))
 
+    # Create Grafana datasource configuration
+    # Get the first API key from the config for the datasource
+    config = load_service_config()
+    api_keys = config.get('api_keys', [])
+    default_api_key = ""
+    if api_keys and api_keys[0].get('keys'):
+        default_api_key = api_keys[0]['keys'][0]
+
+    grafana_datasource_config = {
+        "apiVersion": 1,
+        "datasources": [
+            {
+                "name": "Cardinal",
+                "type": "cardinalhq-lakerunner-datasource",
+                "access": "proxy",
+                "isDefault": True,
+                "editable": True,
+                "jsonData": {
+                    "customPath": "http://lakerunner-query-api:7101"
+                },
+                "secureJsonData": {
+                    "apiKey": default_api_key
+                }
+            }
+        ]
+    }
+
+    # Store the datasource configuration in SSM Parameter for provisioning
+    grafana_datasource_param = t.add_resource(SSMParameter(
+        "GrafanaDatasourceConfig",
+        Name=Sub("${AWS::StackName}-grafana-datasource-config"),
+        Type="String",
+        Value=yaml.dump(grafana_datasource_config),
+        Description="Grafana datasource configuration for Cardinal plugin"
+    ))
+
     # Collect services that need EFS access points
     services_needing_efs = {}
     for service_name, service_config in services.items():
@@ -455,6 +620,13 @@ def create_services_template():
                 ValueFrom=Sub("${SecretArn}:password::", SecretArn=Ref(grafana_secret))
             ))
 
+        # Add Grafana datasource configuration for Grafana service
+        if service_name == 'grafana':
+            secrets.append(EcsSecret(
+                Name="GRAFANA_DATASOURCE_CONFIG",
+                ValueFrom=Ref(grafana_datasource_param)
+            ))
+
         # Build mount points
         mount_points = [MountPoint(
             ContainerPath="/scratch",
@@ -512,10 +684,28 @@ def create_services_template():
             # All other services use Go services image (pubsub, ingest, compact, etc.)
             container_image = Ref(GoServicesImage)
 
+        # Special handling for Grafana container command
+        container_command = service_config.get('command', [])
+        if service_name == 'grafana':
+            # For Grafana, we need to set up the datasource provisioning before starting
+            container_command = [
+                "/bin/sh", "-c",
+                '''
+                # Create provisioning directories
+                mkdir -p /etc/grafana/provisioning/datasources
+                
+                # Write datasource configuration from environment variable
+                echo "$GRAFANA_DATASOURCE_CONFIG" > /etc/grafana/provisioning/datasources/cardinal.yaml
+                
+                # Start Grafana
+                exec /run.sh
+                '''
+            ]
+
         container = ContainerDefinition(
             Name="AppContainer",
             Image=container_image,
-            Command=service_config.get('command', []),
+            Command=container_command,
             Environment=base_env,
             Secrets=secrets,
             MountPoints=mount_points,
@@ -569,17 +759,17 @@ def create_services_template():
             EnableExecuteCommand=True
         ))
 
-        # Store target group mapping for ALB services (use common stack target groups)
+        # Store target group mapping for ALB services (use local target groups)
         if ingress and ingress.get('attach_alb'):
             port = ingress['port']
 
-            # Map to the appropriate target group created in CommonInfra stack
+            # Map to the appropriate target group created in this stack
             if port == 7101:
-                target_group_arn = ImportValue(ci_export("Tg7101Arn"))
+                target_group_arn = Ref(Tg7101)
             elif port == 3000:
-                target_group_arn = ImportValue(ci_export("Tg3000Arn"))
+                target_group_arn = Ref(Tg3000)
             else:
-                # For other ports, we'd need to add them to the common stack
+                # For other ports, we'd need to add them to this stack
                 target_group_arn = None
 
             if target_group_arn:
@@ -599,14 +789,31 @@ def create_services_template():
             )]
 
     # -----------------------
-    # ALB integration - use target groups created in common stack
-    # -----------------------
-    # Note: Listeners and target groups are created in the CommonInfra stack
-    # We just need to attach our services to the existing target groups
-
-    # -----------------------
     # Outputs
     # -----------------------
+    # ALB Outputs
+    t.add_output(Output(
+        "AlbDNS",
+        Value=GetAtt(Alb, "DNSName"),
+        Export=Export(name=Sub("${AWS::StackName}-AlbDNS"))
+    ))
+    t.add_output(Output(
+        "AlbArn",
+        Value=Ref(Alb),
+        Export=Export(name=Sub("${AWS::StackName}-AlbArn"))
+    ))
+    t.add_output(Output(
+        "Tg7101Arn",
+        Value=Ref(Tg7101),
+        Export=Export(name=Sub("${AWS::StackName}-Tg7101Arn"))
+    ))
+    t.add_output(Output(
+        "Tg3000Arn",
+        Value=Ref(Tg3000),
+        Export=Export(name=Sub("${AWS::StackName}-Tg3000Arn"))
+    ))
+
+    # Service Outputs
     t.add_output(Output(
         "TaskRoleArn",
         Value=GetAtt(TaskRole, "Arn"),

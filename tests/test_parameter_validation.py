@@ -13,13 +13,6 @@ class TestParameterValidation:
         template_dict = json.loads(template.to_json())
         parameters = template_dict["Parameters"]
         
-        # Test AlbScheme parameter constraints
-        alb_scheme = parameters["AlbScheme"]
-        assert "AllowedValues" in alb_scheme
-        assert set(alb_scheme["AllowedValues"]) == {"internet-facing", "internal"}
-        assert alb_scheme["Default"] == "internal"
-        assert alb_scheme["Type"] == "String"
-        
         # Test VpcId parameter type constraint
         vpc_id = parameters["VpcId"]
         assert vpc_id["Type"] == "AWS::EC2::VPC::Id"
@@ -28,8 +21,14 @@ class TestParameterValidation:
         private_subnets = parameters["PrivateSubnets"]
         assert private_subnets["Type"] == "List<AWS::EC2::Subnet::Id>"
         
-        public_subnets = parameters["PublicSubnets"]
-        assert public_subnets["Type"] == "List<AWS::EC2::Subnet::Id>"
+        # Test configuration override parameters
+        api_keys_override = parameters["ApiKeysOverride"]
+        assert api_keys_override["Type"] == "String"
+        assert api_keys_override["Default"] == ""
+        
+        storage_profiles_override = parameters["StorageProfilesOverride"]
+        assert storage_profiles_override["Type"] == "String"
+        assert storage_profiles_override["Default"] == ""
 
     def test_common_infra_conditions_validity(self):
         """Test that all conditions in CommonInfra are valid CloudFormation"""
@@ -38,23 +37,14 @@ class TestParameterValidation:
         template_dict = json.loads(template.to_json())
         conditions = template_dict.get("Conditions", {})
         
-        # Verify expected conditions exist
+        # Verify expected conditions exist (ALB conditions moved to Services stack)
         expected_conditions = [
-            "IsInternetFacing",
             "HasApiKeysOverride", 
             "HasStorageProfilesOverride"
         ]
         
         for condition_name in expected_conditions:
             assert condition_name in conditions, f"Condition {condition_name} not found"
-            
-        # Test IsInternetFacing condition structure
-        is_internet_facing = conditions["IsInternetFacing"]
-        assert "Fn::Equals" in is_internet_facing
-        equals_args = is_internet_facing["Fn::Equals"]
-        assert len(equals_args) == 2
-        assert equals_args[0] == {"Ref": "AlbScheme"}
-        assert equals_args[1] == "internet-facing"
         
         # Test HasApiKeysOverride condition structure
         has_api_keys = conditions["HasApiKeysOverride"]
@@ -98,32 +88,29 @@ class TestParameterValidation:
                 assert param["Default"].startswith("test:")  # From mock config
 
     def test_parameter_validation_with_cloud_radar(self):
-        """Test parameter validation using Cloud-Radar with invalid values"""
+        """Test parameter validation using Cloud-Radar"""
         from lakerunner_common import t as template
         
-        # Test with invalid AlbScheme value
-        invalid_params = {
+        # Test parameters
+        params = {
             "VpcId": "vpc-12345678",
-            "PublicSubnets": "subnet-12345678,subnet-87654321", 
             "PrivateSubnets": "subnet-abcdef12,subnet-fedcba21",
-            "AlbScheme": "invalid-scheme",  # Invalid value
             "ApiKeysOverride": "",
             "StorageProfilesOverride": ""
         }
         
-        # Cloud-Radar should handle this - it validates the template structure
-        # but parameter value validation happens at CloudFormation deployment time
+        # Cloud-Radar validates template structure and parameter types
         cf_template = CloudRadarTemplate(
             template=json.loads(template.to_json())
         )
         
-        # Template structure should still be valid
+        # Template structure should be valid
         assert cf_template.template is not None
         assert "Parameters" in cf_template.template
         
-        # The parameter constraint should be in the template
-        alb_scheme_param = cf_template.template["Parameters"]["AlbScheme"]
-        assert "AllowedValues" in alb_scheme_param
+        # Test that VPC parameter constraint is in the template
+        vpc_param = cf_template.template["Parameters"]["VpcId"]
+        assert vpc_param["Type"] == "AWS::EC2::VPC::Id"
 
     def test_condition_usage_in_resources(self):
         """Test that conditions are properly used in resource definitions"""
@@ -132,23 +119,20 @@ class TestParameterValidation:
         template_dict = json.loads(template.to_json())
         resources = template_dict["Resources"]
         
-        # Find ALB resource and check if it uses conditions properly
-        alb_resource = None
+        # Test that conditions are used in SSM parameter resources
+        api_keys_param = None
         for name, resource in resources.items():
-            if resource["Type"] == "AWS::ElasticLoadBalancingV2::LoadBalancer":
-                alb_resource = resource
+            if (resource["Type"] == "AWS::SSM::Parameter" and 
+                "api_keys" in resource["Properties"].get("Name", "")):
+                api_keys_param = resource
                 break
         
-        assert alb_resource is not None, "ALB resource not found"
+        assert api_keys_param is not None, "API keys parameter not found"
         
-        # Check that ALB Subnets property uses conditional logic
-        subnets_property = alb_resource["Properties"]["Subnets"]
-        assert "Fn::If" in subnets_property
-        
-        # Verify the If condition structure
-        if_args = subnets_property["Fn::If"]
-        assert len(if_args) == 3  # condition, true_value, false_value
-        assert if_args[0] == "IsInternetFacing"
+        # Check that parameter value uses conditional logic
+        assert "Value" in api_keys_param["Properties"]
+        value_prop = api_keys_param["Properties"]["Value"]
+        assert "Fn::If" in value_prop, "API keys parameter should use conditional logic"
 
     def test_parameter_interdependencies(self):
         """Test parameter interdependencies and validation logic"""
@@ -189,10 +173,6 @@ class TestParameterValidation:
         
         template_dict = json.loads(template.to_json())
         parameters = template_dict["Parameters"]
-        
-        # AlbScheme should default to internal (more secure)
-        alb_scheme = parameters["AlbScheme"]
-        assert alb_scheme["Default"] == "internal"
         
         # Override parameters should default to empty (use built-in defaults)
         override_params = ["ApiKeysOverride", "StorageProfilesOverride"]

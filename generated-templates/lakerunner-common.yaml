@@ -3,19 +3,10 @@ Conditions:
     - !Equals
       - !Ref 'ApiKeysOverride'
       - ''
-  HasPublicSubnets: !Not
-    - !Equals
-      - !Select
-        - 0
-        - !Ref 'PublicSubnets'
-      - ''
   HasStorageProfilesOverride: !Not
     - !Equals
       - !Ref 'StorageProfilesOverride'
       - ''
-  IsInternetFacing: !Equals
-    - !Ref 'AlbScheme'
-    - internet-facing
 Description: CommonInfra stack for Lakerunner.
 Metadata:
   AWS::CloudFormation::Interface:
@@ -24,43 +15,22 @@ Metadata:
           default: Networking
         Parameters:
           - VpcId
-          - PublicSubnets
           - PrivateSubnets
-      - Label:
-          default: Load Balancer
-        Parameters:
-          - AlbScheme
       - Label:
           default: Configuration Overrides (Advanced)
         Parameters:
           - ApiKeysOverride
           - StorageProfilesOverride
     ParameterLabels:
-      AlbScheme:
-        default: Load Balancer Scheme
       ApiKeysOverride:
         default: Custom API Keys (YAML)
       PrivateSubnets:
         default: Private Subnets (for ECS/RDS/EFS)
-      PublicSubnets:
-        default: Public Subnets (required for internet-facing ALB)
       StorageProfilesOverride:
         default: Custom Storage Profiles (YAML)
       VpcId:
         default: VPC Id
 Outputs:
-  AlbArn:
-    Export:
-      Name: !Sub '${AWS::StackName}-AlbArn'
-    Value: !Ref 'Alb'
-  AlbDNS:
-    Export:
-      Name: !Sub '${AWS::StackName}-AlbDNS'
-    Value: !GetAtt 'Alb.DNSName'
-  AlbSchemeValue:
-    Export:
-      Name: !Sub '${AWS::StackName}-AlbScheme'
-    Value: !Ref 'AlbScheme'
   BucketArn:
     Export:
       Name: !Sub '${AWS::StackName}-BucketArn'
@@ -100,52 +70,21 @@ Outputs:
         Subnet2: !Select
           - 1
           - !Ref 'PrivateSubnets'
-  PublicSubnetsOut:
-    Condition: HasPublicSubnets
-    Export:
-      Name: !Sub '${AWS::StackName}-PublicSubnets'
-    Value: !Sub
-      - ${Subnet1},${Subnet2}
-      - Subnet1: !Select
-          - 0
-          - !Ref 'PublicSubnets'
-        Subnet2: !Select
-          - 1
-          - !Ref 'PublicSubnets'
   TaskSecurityGroupId:
     Export:
       Name: !Sub '${AWS::StackName}-TaskSGId'
     Value: !Ref 'TaskSG'
-  Tg3000Arn:
-    Export:
-      Name: !Sub '${AWS::StackName}-Tg3000Arn'
-    Value: !Ref 'Tg3000'
-  Tg7101Arn:
-    Export:
-      Name: !Sub '${AWS::StackName}-Tg7101Arn'
-    Value: !Ref 'Tg7101'
   VpcIdOut:
     Export:
       Name: !Sub '${AWS::StackName}-VpcId'
     Value: !Ref 'VpcId'
 Parameters:
-  AlbScheme:
-    AllowedValues:
-      - internet-facing
-      - internal
-    Default: internal
-    Description: 'Load balancer scheme: ''internet-facing'' for external access or ''internal'' for internal access only.'
-    Type: String
   ApiKeysOverride:
     Default: ''
     Description: 'OPTIONAL: Custom API keys configuration in YAML format. Leave blank to use defaults from defaults.yaml. Example: - organization_id: xxx\n  keys:\n    - keyvalue'
     Type: String
   PrivateSubnets:
     Description: 'REQUIRED: Private subnet IDs (for RDS/ECS/EFS). Provide at least two in different AZs.'
-    Type: List<AWS::EC2::Subnet::Id>
-  PublicSubnets:
-    Default: ''
-    Description: Public subnet IDs (for internet-facing ALB). Required when AlbScheme=internet-facing. Provide at least two in different AZs.
     Type: List<AWS::EC2::Subnet::Id>
   StorageProfilesOverride:
     Default: ''
@@ -155,44 +94,6 @@ Parameters:
     Description: 'REQUIRED: VPC where resources will be created.'
     Type: AWS::EC2::VPC::Id
 Resources:
-  Alb:
-    Properties:
-      Scheme: !Ref 'AlbScheme'
-      SecurityGroups:
-        - !Ref 'AlbSecurityGroup'
-      Subnets: !If
-        - IsInternetFacing
-        - !Ref 'PublicSubnets'
-        - !Ref 'PrivateSubnets'
-      Type: application
-    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
-  Alb3000Open:
-    Properties:
-      CidrIp: '0.0.0.0/0'
-      Description: HTTP 3000
-      FromPort: 3000
-      GroupId: !Ref 'AlbSecurityGroup'
-      IpProtocol: tcp
-      ToPort: 3000
-    Type: AWS::EC2::SecurityGroupIngress
-  Alb7101Open:
-    Properties:
-      CidrIp: '0.0.0.0/0'
-      Description: HTTP 7101
-      FromPort: 7101
-      GroupId: !Ref 'AlbSecurityGroup'
-      IpProtocol: tcp
-      ToPort: 7101
-    Type: AWS::EC2::SecurityGroupIngress
-  AlbSecurityGroup:
-    Properties:
-      GroupDescription: Security group for ALB
-      SecurityGroupEgress:
-        - CidrIp: '0.0.0.0/0'
-          Description: Allow all outbound
-          IpProtocol: '-1'
-      VpcId: !Ref 'VpcId'
-    Type: AWS::EC2::SecurityGroup
   ApiKeysParam:
     Properties:
       Description: API keys configuration
@@ -322,24 +223,6 @@ Resources:
       VPCSecurityGroups:
         - !Ref 'TaskSG'
     Type: AWS::RDS::DBInstance
-  Listener3000:
-    Properties:
-      DefaultActions:
-        - TargetGroupArn: !Ref 'Tg3000'
-          Type: forward
-      LoadBalancerArn: !Ref 'Alb'
-      Port: '3000'
-      Protocol: HTTP
-    Type: AWS::ElasticLoadBalancingV2::Listener
-  Listener7101:
-    Properties:
-      DefaultActions:
-        - TargetGroupArn: !Ref 'Tg7101'
-          Type: forward
-      LoadBalancerArn: !Ref 'Alb'
-      Port: '7101'
-      Protocol: HTTP
-    Type: AWS::ElasticLoadBalancingV2::Listener
   StorageProfilesParam:
     Properties:
       Description: Storage profiles configuration
@@ -353,24 +236,6 @@ Resources:
             \  use_path_style: true\n"
           - Bucket: !Ref 'IngestBucket'
     Type: AWS::SSM::Parameter
-  TaskFromAlb3000:
-    Properties:
-      Description: ALB to tasks 3000
-      FromPort: 3000
-      GroupId: !Ref 'TaskSG'
-      IpProtocol: tcp
-      SourceSecurityGroupId: !Ref 'AlbSecurityGroup'
-      ToPort: 3000
-    Type: AWS::EC2::SecurityGroupIngress
-  TaskFromAlb7101:
-    Properties:
-      Description: ALB to tasks 7101
-      FromPort: 7101
-      GroupId: !Ref 'TaskSG'
-      IpProtocol: tcp
-      SourceSecurityGroupId: !Ref 'AlbSecurityGroup'
-      ToPort: 7101
-    Type: AWS::EC2::SecurityGroupIngress
   TaskSG:
     Properties:
       GroupDescription: Security group for ECS tasks
@@ -407,44 +272,4 @@ Resources:
       SourceSecurityGroupId: !Ref 'TaskSG'
       ToPort: 2049
     Type: AWS::EC2::SecurityGroupIngress
-  Tg3000:
-    Properties:
-      HealthCheckIntervalSeconds: 30
-      HealthCheckPath: /api/health
-      HealthCheckProtocol: HTTP
-      HealthCheckTimeoutSeconds: 5
-      HealthyThresholdCount: 2
-      Matcher:
-        HttpCode: '200'
-      Port: 3000
-      Protocol: HTTP
-      TargetGroupAttributes:
-        - Key: stickiness.enabled
-          Value: 'false'
-        - Key: deregistration_delay.timeout_seconds
-          Value: '30'
-      TargetType: ip
-      UnhealthyThresholdCount: 3
-      VpcId: !Ref 'VpcId'
-    Type: AWS::ElasticLoadBalancingV2::TargetGroup
-  Tg7101:
-    Properties:
-      HealthCheckIntervalSeconds: 30
-      HealthCheckPath: /ready
-      HealthCheckProtocol: HTTP
-      HealthCheckTimeoutSeconds: 5
-      HealthyThresholdCount: 2
-      Matcher:
-        HttpCode: '200'
-      Port: 7101
-      Protocol: HTTP
-      TargetGroupAttributes:
-        - Key: stickiness.enabled
-          Value: 'false'
-        - Key: deregistration_delay.timeout_seconds
-          Value: '30'
-      TargetType: ip
-      UnhealthyThresholdCount: 3
-      VpcId: !Ref 'VpcId'
-    Type: AWS::ElasticLoadBalancingV2::TargetGroup
 
