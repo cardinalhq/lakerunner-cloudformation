@@ -766,10 +766,7 @@ echo "Reset token file: $RESET_TOKEN_FILE"
 # Create provisioning directories
 mkdir -p "$DATASOURCES_DIR"
 
-# Ensure Grafana user (472) can access the data directory
-# The init container runs as root, so it can set proper ownership
-chown -R 472:472 /var/lib/grafana || true
-chmod -R 755 /var/lib/grafana || true
+# All containers run as root, so no ownership changes needed
 
 # Handle reset token logic
 if [ -n "$RESET_TOKEN" ] && [ "$RESET_TOKEN" != "" ]; then
@@ -809,16 +806,8 @@ echo "Grafana initialization complete"
             init_container.Command = ["/bin/sh", "-c", init_script]
             container_definitions.append(init_container)
 
-        # Determine user based on service type
-        if service_name == 'grafana':
-            # Use Grafana container default user (don't set User field)
-            user_setting = None
-        elif service_name in ['lakerunner-query-api', 'lakerunner-query-worker']:
-            # Use user 2000 for query services
-            user_setting = "2000"
-        else:
-            # Use distroless nonroot userid for Go services
-            user_setting = "65532"
+        # Run all containers as root for now
+        user_setting = "0"
 
         # Main application container
         container_kwargs = {
@@ -840,9 +829,8 @@ echo "Grafana initialization complete"
             )
         }
 
-        # Only add User field if we have a specific user setting
-        if user_setting is not None:
-            container_kwargs["User"] = user_setting
+        # Always set User field to root
+        container_kwargs["User"] = user_setting
 
         # For Grafana, add dependency on init container to ensure proper startup order
         if service_name == 'grafana':
