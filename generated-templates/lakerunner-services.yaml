@@ -726,6 +726,10 @@ Resources:
                     Fn::Sub:
                       - ${CommonInfraStackName}-DbSecretArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: GF_SECURITY_ADMIN_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !Ref 'GrafanaSecret'
             - Name: GRAFANA_DATASOURCE_CONFIG
               ValueFrom: !Ref 'GrafanaDatasourceConfig'
           User: '0'

@@ -161,6 +161,7 @@ services:
       health_check_path: "/api/health"
     environment:
       GF_SECURITY_ADMIN_USER: "admin"
+      GF_SECURITY_ADMIN_PASSWORD: "from_secret"  # This will be replaced with secret from AWS Secrets Manager
       GF_SERVER_HTTP_PORT: "3000"
       GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s:%(http_port)s"
       GF_INSTALL_PLUGINS: "https://github.com/cardinalhq/cardinalhq-lakerunner-datasource/raw/refs/heads/main/cardinalhq-lakerunner-datasource.zip;cardinalhq-lakerunner-datasource"
