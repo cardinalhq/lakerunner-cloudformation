@@ -3,7 +3,7 @@
 
 set -e
 
-IMAGE_NAME="public.ecr.aws/cardinalhq.io/lakerunner-grafana-initcontainer:latest"
+IMAGE_NAME="public.ecr.aws/cardinalhq.io/lakerunner/initcontainer-grafana:latest"
 
 echo "Building Grafana Init Container for multiple architectures..."
 
@@ -20,6 +20,7 @@ docker buildx use multiarch
 echo "Building for linux/amd64 and linux/arm64..."
 docker buildx build \
     --platform linux/amd64,linux/arm64 \
+    --pull \
     -t "$IMAGE_NAME" \
     --push \
     .
@@ -29,4 +30,4 @@ echo "Multi-architecture image available at: $IMAGE_NAME"
 
 echo ""
 echo "To use locally for testing (single architecture):"
-echo "  docker buildx build --platform linux/amd64 -t $IMAGE_NAME --load ."
+echo "  docker buildx build --platform linux/amd64 --pull -t $IMAGE_NAME --load ."

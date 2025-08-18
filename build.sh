@@ -54,9 +54,9 @@ echo "6. Generating Demo Sample Apps..."
 python3 src/demo_sample_apps.py > generated-templates/lakerunner-demo-sample-apps.yaml
 cfn-lint generated-templates/lakerunner-demo-sample-apps.yaml
 
-echo -e "\n✅ Generated CloudFormation templates:"
+echo -e "\nGenerated CloudFormation templates:"
 ls -la generated-templates/
 
-echo -e "\n📝 Note: cfn-lint warnings above are safe to ignore:"
+echo -e "\nNote: cfn-lint warnings above are safe to ignore:"
 echo "  - W1030: Empty PublicSubnets parameter is expected when using internal ALB"
 echo "  - W1020: Unnecessary Fn::Sub warnings are cosmetic and don't affect functionality"

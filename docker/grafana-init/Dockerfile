@@ -1,13 +1,15 @@
 # Grafana Init Container
 # This container handles Grafana datasource provisioning and data reset functionality
-FROM gcr.io/distroless/base-debian12:debug
+FROM alpine:3.20
 
-# Copy the init script
-COPY init-grafana.sh /usr/local/bin/init-grafana.sh
+# Install bash for script execution
+RUN apk add --no-cache bash
+
+# Copy the init script (COPY automatically creates parent directories)
+COPY init-grafana.sh /app/scripts/init-grafana.sh
 
 # Make the script executable
-USER root
-RUN chmod +x /usr/local/bin/init-grafana.sh
+RUN chmod +x /app/scripts/init-grafana.sh
 
 # Set the entrypoint
-ENTRYPOINT ["/usr/local/bin/init-grafana.sh"]
+ENTRYPOINT ["/app/scripts/init-grafana.sh"]

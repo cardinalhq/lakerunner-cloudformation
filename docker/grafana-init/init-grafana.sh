@@ -56,11 +56,11 @@ echo "Grafana initialization complete"
 
 # Verify the configuration was written correctly
 if [ -f "$DATASOURCES_DIR/cardinal.yaml" ]; then
-    echo "✓ Datasource configuration file created successfully"
+    echo "Datasource configuration file created successfully"
     echo "Configuration preview:"
     head -10 "$DATASOURCES_DIR/cardinal.yaml" || true
 else
-    echo "✗ Failed to create datasource configuration file"
+    echo "Failed to create datasource configuration file"
     exit 1
 fi
 

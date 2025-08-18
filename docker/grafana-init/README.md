@@ -26,7 +26,7 @@ For local development and testing:
 
 ```bash
 # Build for current architecture only (for local testing)
-docker buildx build --platform linux/amd64 -t public.ecr.aws/cardinalhq.io/lakerunner-grafana-initcontainer:latest --load .
+docker buildx build --platform linux/amd64 --pull -t public.ecr.aws/cardinalhq.io/lakerunner/initcontainer-grafana:latest --load .
 ```
 
 ## Usage
@@ -41,6 +41,11 @@ The container expects these environment variables:
 - `RESET_TOKEN`: Optional token to trigger Grafana data reset
 - `GRAFANA_DATASOURCE_CONFIG`: YAML configuration for the Cardinal datasource
 
+## Container Structure
+
+The container follows CardinalHQ conventions:
+- `/app/scripts/init-grafana.sh`: Initialization script (entrypoint)
+
 ## Volumes
 
 The container needs access to these mounted volumes:
@@ -53,6 +58,6 @@ The container needs access to these mounted volumes:
 This approach solves air-gapped deployment issues by:
 
 1. Pre-building the init logic into a container image
-2. Using a distroless base image with shell support for minimal attack surface
+2. Using Alpine Linux as base image for minimal size with shell support
 3. Eliminating the need to download Alpine packages at runtime
 4. Providing a self-contained initialization solution
