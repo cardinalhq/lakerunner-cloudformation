@@ -518,20 +518,32 @@ def create_services_template():
     # Create EFS access points
     access_points = {}
     for ap_name, mount_config in services_needing_efs.items():
+        # Configure access point based on service type
+        if ap_name == 'grafana':
+            # Grafana access point: don't enforce POSIX user, let containers use their own users
+            # Root-owned directory with group write permissions allows both root (init) and grafana user access
+            posix_user = PosixUser(Gid="0", Uid="0")  # Use root for access point
+            creation_info = CreationInfo(
+                OwnerGid="0",     # root group owns the directory
+                OwnerUid="0",     # root user owns the directory  
+                Permissions="755"  # owner rwx, group rx, others rx - allows access to multiple users
+            )
+        else:
+            # Default for other services (currently none use EFS except Grafana)
+            posix_user = PosixUser(Gid="0", Uid="0")
+            creation_info = CreationInfo(
+                OwnerGid="0",
+                OwnerUid="0", 
+                Permissions="750"
+            )
+            
         access_points[ap_name] = t.add_resource(AccessPoint(
             f"EfsAccessPoint{ap_name.title()}",
             FileSystemId=EfsIdValue,
-            PosixUser=PosixUser(
-                Gid="0",
-                Uid="0"
-            ),
+            PosixUser=posix_user,
             RootDirectory=RootDirectory(
                 Path=mount_config['efs_path'],
-                CreationInfo=CreationInfo(
-                    OwnerGid="0",
-                    OwnerUid="0",
-                    Permissions="750"
-                )
+                CreationInfo=creation_info
             ),
             AccessPointTags=Tags(Name=Sub("${AWS::StackName}-" + ap_name))
         ))
@@ -754,6 +766,11 @@ echo "Reset token file: $RESET_TOKEN_FILE"
 # Create provisioning directories
 mkdir -p "$DATASOURCES_DIR"
 
+# Ensure Grafana user (472) can access the data directory
+# The init container runs as root, so it can set proper ownership
+chown -R 472:472 /var/lib/grafana || true
+chmod -R 755 /var/lib/grafana || true
+
 # Handle reset token logic
 if [ -n "$RESET_TOKEN" ] && [ "$RESET_TOKEN" != "" ]; then
     echo "Reset token provided: $RESET_TOKEN"
@@ -763,9 +780,9 @@ if [ -n "$RESET_TOKEN" ] && [ "$RESET_TOKEN" != "" ]; then
         STORED_TOKEN=$(cat "$RESET_TOKEN_FILE")
         if [ "$STORED_TOKEN" != "$RESET_TOKEN" ]; then
             echo "Reset token changed from '$STORED_TOKEN' to '$RESET_TOKEN' - wiping Grafana data"
-            # Remove all Grafana data except the reset token file
-            find /var/lib/grafana -mindepth 1 -not -name ".grafana_reset_token" -delete || true
-            # Update stored token
+            # Remove all Grafana data
+            find /var/lib/grafana -mindepth 1 -delete || true
+            # Create new token file
             echo "$RESET_TOKEN" > "$RESET_TOKEN_FILE"
         else
             echo "Reset token unchanged - no reset needed"
@@ -792,6 +809,17 @@ echo "Grafana initialization complete"
             init_container.Command = ["/bin/sh", "-c", init_script]
             container_definitions.append(init_container)
 
+        # Determine user based on service type
+        if service_name == 'grafana':
+            # Use Grafana container default user (don't set User field)
+            user_setting = None
+        elif service_name in ['lakerunner-query-api', 'lakerunner-query-worker']:
+            # Use user 2000 for query services
+            user_setting = "2000"
+        else:
+            # Use distroless nonroot userid for Go services
+            user_setting = "65532"
+
         # Main application container
         container_kwargs = {
             "Name": "AppContainer",
@@ -802,7 +830,6 @@ echo "Grafana initialization complete"
             "MountPoints": mount_points,
             "PortMappings": port_mappings,
             "HealthCheck": health_check,
-            "User": "0",
             "LogConfiguration": LogConfiguration(
                 LogDriver="awslogs",
                 Options={
@@ -812,6 +839,10 @@ echo "Grafana initialization complete"
                 }
             )
         }
+
+        # Only add User field if we have a specific user setting
+        if user_setting is not None:
+            container_kwargs["User"] = user_setting
 
         # For Grafana, add dependency on init container to ensure proper startup order
         if service_name == 'grafana':

@@ -220,7 +220,7 @@ Resources:
         CreationInfo:
           OwnerGid: '0'
           OwnerUid: '0'
-          Permissions: '750'
+          Permissions: '755'
         Path: /grafana
     Type: AWS::EFS::AccessPoint
   ExecRole:
@@ -649,6 +649,11 @@ Resources:
               # Create provisioning directories
               mkdir -p "$DATASOURCES_DIR"
 
+              # Ensure Grafana user (472) can access the data directory
+              # The init container runs as root, so it can set proper ownership
+              chown -R 472:472 /var/lib/grafana || true
+              chmod -R 755 /var/lib/grafana || true
+
               # Handle reset token logic
               if [ -n "$RESET_TOKEN" ] && [ "$RESET_TOKEN" != "" ]; then
                   echo "Reset token provided: $RESET_TOKEN"
@@ -658,9 +663,9 @@ Resources:
                       STORED_TOKEN=$(cat "$RESET_TOKEN_FILE")
                       if [ "$STORED_TOKEN" != "$RESET_TOKEN" ]; then
                           echo "Reset token changed from '$STORED_TOKEN' to '$RESET_TOKEN' - wiping Grafana data"
-                          # Remove all Grafana data except the reset token file
-                          find /var/lib/grafana -mindepth 1 -not -name ".grafana_reset_token" -delete || true
-                          # Update stored token
+                          # Remove all Grafana data
+                          find /var/lib/grafana -mindepth 1 -delete || true
+                          # Create new token file
                           echo "$RESET_TOKEN" > "$RESET_TOKEN_FILE"
                       else
                           echo "Reset token unchanged - no reset needed"
@@ -774,7 +779,7 @@ Resources:
               Value: '3000'
             - Name: GF_SERVER_ROOT_URL
               Value: '%(protocol)s://%(domain)s:%(http_port)s'
-            - Name: GF_PLUGINS_PREINSTALL
+            - Name: GF_INSTALL_PLUGINS
               Value: https://github.com/cardinalhq/cardinalhq-lakerunner-datasource/raw/refs/heads/main/cardinalhq-lakerunner-datasource.zip;cardinalhq-lakerunner-datasource
             - Name: GF_PATHS_PROVISIONING
               Value: /etc/grafana/provisioning
@@ -825,7 +830,6 @@ Resources:
                 - SecretArn: !Ref 'GrafanaSecret'
             - Name: GRAFANA_DATASOURCE_CONFIG
               ValueFrom: !Ref 'GrafanaDatasourceConfig'
-          User: '0'
       Cpu: '512'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
       Family: grafana-task
@@ -943,7 +947,7 @@ Resources:
                     Fn::Sub:
                       - ${CommonInfraStackName}-DbSecretArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
-          User: '0'
+          User: '65532'
       Cpu: '1024'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
       Family: lakerunner-compact-logs-task
@@ -1051,7 +1055,7 @@ Resources:
                     Fn::Sub:
                       - ${CommonInfraStackName}-DbSecretArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
-          User: '0'
+          User: '65532'
       Cpu: '1024'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
       Family: lakerunner-compact-metrics-task
@@ -1159,7 +1163,7 @@ Resources:
                     Fn::Sub:
                       - ${CommonInfraStackName}-DbSecretArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
-          User: '0'
+          User: '65532'
       Cpu: '1024'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
       Family: lakerunner-ingest-logs-task
@@ -1267,7 +1271,7 @@ Resources:
                     Fn::Sub:
                       - ${CommonInfraStackName}-DbSecretArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
-          User: '0'
+          User: '65532'
       Cpu: '1024'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
       Family: lakerunner-ingest-metrics-task
@@ -1376,7 +1380,7 @@ Resources:
                     Fn::Sub:
                       - ${CommonInfraStackName}-DbSecretArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
-          User: '0'
+          User: '65532'
       Cpu: '1024'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
       Family: lakerunner-pubsub-sqs-task
@@ -1504,7 +1508,7 @@ Resources:
                     Fn::Sub:
                       - ${CommonInfraStackName}-DbSecretArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
-          User: '0'
+          User: '2000'
       Cpu: '2048'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
       Family: lakerunner-query-api-task
@@ -1620,7 +1624,7 @@ Resources:
                     Fn::Sub:
                       - ${CommonInfraStackName}-DbSecretArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
-          User: '0'
+          User: '2000'
       Cpu: '2048'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
       Family: lakerunner-query-worker-task
@@ -1728,7 +1732,7 @@ Resources:
                     Fn::Sub:
                       - ${CommonInfraStackName}-DbSecretArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
-          User: '0'
+          User: '65532'
       Cpu: '1024'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
       Family: lakerunner-rollup-metrics-task
@@ -1836,7 +1840,7 @@ Resources:
                     Fn::Sub:
                       - ${CommonInfraStackName}-DbSecretArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
-          User: '0'
+          User: '65532'
       Cpu: '256'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
       Family: lakerunner-sweeper-task
