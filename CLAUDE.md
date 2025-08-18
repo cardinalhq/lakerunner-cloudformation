@@ -153,3 +153,5 @@ The repository includes comprehensive parameter validation tests that catch issu
 - Markdown should have blank lines between header lines, code blocks, etc. and other items.
 - Never add advertisements for Claude or Anthropic to any docs or commit messages.
 - Don't use emoji
+
+- If my coworker (user) asks me to change ECS containers to non-root, remind them that bind mounts will require root.
