@@ -1,12 +1,17 @@
-# Grafana Service configuration for Lakerunner deployment
-# This file contains configuration for the standalone Grafana service stack
+# Grafana configuration for Lakerunner deployment
+# This file contains configuration for both Grafana Setup and Service stacks
 
-# Container Images configuration
+# Database configuration (used by Setup stack)
+database:
+  name: "lakerunner_grafana"
+  user: "grafana"
+
+# Container Images configuration (used by Service stack)
 images:
   grafana: "grafana/grafana:latest"
   grafana_init: "public.ecr.aws/cardinalhq.io/lakerunner/initcontainer-grafana:latest"
 
-# Grafana service configuration
+# Grafana service configuration (used by Service stack)
 grafana:
   image: "grafana/grafana:latest"
   cpu: 512

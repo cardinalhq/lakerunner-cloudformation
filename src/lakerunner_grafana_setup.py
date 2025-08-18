@@ -7,6 +7,8 @@ Creates a separate database for Grafana on the existing RDS instance.
 This stack creates the "lakerunner_grafana" database and associated user/secret.
 """
 
+import yaml
+import os
 from troposphere import (
     Template, Parameter, Output, Ref, Sub, GetAtt, ImportValue,
     Export, Split
@@ -18,11 +20,16 @@ from troposphere.iam import Role, Policy
 from troposphere.logs import LogGroup
 from troposphere.cloudformation import CustomResource
 
-def load_defaults(config_file="lakerunner-grafana-setup-defaults.yaml"):
+def load_defaults(config_file="lakerunner-grafana-defaults.yaml"):
     """Load default configuration from YAML file"""
-    # For this template, we don't need complex YAML parsing since it's mostly just parameters
-    # The configuration is minimal and handled via CloudFormation parameters
-    return {}
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    config_path = os.path.join(script_dir, "..", config_file)
+    try:
+        with open(config_path, 'r') as f:
+            return yaml.safe_load(f)
+    except FileNotFoundError:
+        print(f"Warning: {config_file} not found, using empty defaults")
+        return {}
 
 def create_grafana_setup_template():
     """Create CloudFormation template for Grafana database setup"""
@@ -32,6 +39,7 @@ def create_grafana_setup_template():
 
     # Load defaults
     defaults = load_defaults()
+    db_config = defaults.get('database', {})
 
     # Parameters
     common_infra_stack_name = t.add_parameter(Parameter(
@@ -43,14 +51,14 @@ def create_grafana_setup_template():
     grafana_db_name = t.add_parameter(Parameter(
         "GrafanaDbName",
         Type="String",
-        Default="lakerunner_grafana",
+        Default=db_config.get('name', 'lakerunner_grafana'),
         Description="Name of the database to create for Grafana",
     ))
 
     grafana_db_user = t.add_parameter(Parameter(
         "GrafanaDbUser", 
         Type="String",
-        Default="grafana",
+        Default=db_config.get('user', 'grafana'),
         Description="Database user for Grafana",
     ))
 
