@@ -88,7 +88,7 @@ def create_grafana_setup_template():
             ]
         },
         ManagedPolicyArns=[
-            "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCExecutionRole"
+            "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCExecutionRolePolicy"
         ],
         Policies=[
             Policy(

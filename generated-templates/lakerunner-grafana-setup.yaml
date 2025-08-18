@@ -101,7 +101,7 @@ Resources:
               Service: lambda.amazonaws.com
         Version: '2012-10-17'
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCExecutionRole
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCExecutionRolePolicy
       Policies:
         - PolicyDocument:
             Statement:
