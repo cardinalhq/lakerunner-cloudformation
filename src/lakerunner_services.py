@@ -28,6 +28,7 @@ from troposphere.ecs import (
 from troposphere.iam import Role, Policy
 from troposphere.elasticloadbalancingv2 import LoadBalancer, TargetGroup, TargetGroupAttribute, Listener, Matcher
 from troposphere.elasticloadbalancingv2 import Action as AlbAction
+from troposphere.ssm import Parameter as SSMParameter
 from troposphere.ec2 import SecurityGroup, SecurityGroupIngress
 from troposphere.efs import AccessPoint, PosixUser, RootDirectory, CreationInfo
 from troposphere.logs import LogGroup
@@ -179,6 +180,7 @@ def create_services_template():
     # Conditions
     t.add_condition("EnableOtlp", Not(Equals(Ref(OtelEndpoint), "")))
     t.add_condition("IsInternetFacing", Equals(Ref(AlbScheme), "internet-facing"))
+
 
     # -----------------------
     # ALB Security Group
@@ -699,61 +701,109 @@ def create_services_template():
             # All other services use Go services image (pubsub, ingest, compact, etc.)
             container_image = Ref(GoServicesImage)
 
-        # Special handling for Grafana container command
+        # Get base container command from service config
         container_command = service_config.get('command', [])
+
+        # Build container definitions - for Grafana we need init container + main container
+        container_definitions = []
+
         if service_name == 'grafana':
-            # For Grafana, we need to handle reset logic and set up datasource provisioning before starting
-            container_command = [
-                "/bin/sh", "-c",
-                '''
-                # Handle Grafana reset logic
-                RESET_TOKEN_FILE="/var/lib/grafana/.reset_token"
+            # Create init container for Grafana setup (datasource provisioning + reset logic)
+            init_container = ContainerDefinition(
+                Name="GrafanaInit",
+                Image="public.ecr.aws/docker/library/alpine:latest",
+                Essential=False,
+                Command=["/bin/sh", "-c"],
+                Environment=[
+                    Environment(Name="PROVISIONING_DIR", Value="${GF_PATHS_PROVISIONING:-/etc/grafana/provisioning}"),
+                    Environment(Name="RESET_TOKEN", Value=Ref("GrafanaResetToken")),
+                    Environment(Name="ALB_DNS_URL", Value=Sub("http://${AlbDns}", AlbDns=GetAtt("Alb", "DNSName")))
+                ],
+                Secrets=[
+                    EcsSecret(
+                        Name="GRAFANA_DATASOURCE_CONFIG",
+                        ValueFrom=Sub("${AWS::StackName}-grafana-datasource-config")
+                    )
+                ],
+                MountPoints=mount_points,  # Same EFS mounts as main container
+                User="0",
+                LogConfiguration=LogConfiguration(
+                    LogDriver="awslogs",
+                    Options={
+                        "awslogs-group": Ref(log_group),
+                        "awslogs-region": Ref("AWS::Region"),
+                        "awslogs-stream-prefix": service_name + "-init"
+                    }
+                )
+            )
 
-                if [ -n "$GF_RESET_TOKEN" ]; then
-                    # Check if reset token has changed
-                    if [ ! -f "$RESET_TOKEN_FILE" ] || [ "$(cat $RESET_TOKEN_FILE 2>/dev/null)" != "$GF_RESET_TOKEN" ]; then
-                        echo "Reset token changed or not found. Wiping Grafana data..."
-                        # Remove all Grafana data except our tracking file
-                        find /var/lib/grafana -mindepth 1 -not -name ".reset_token" -delete 2>/dev/null || true
-                        # Store new reset token
-                        echo "$GF_RESET_TOKEN" > "$RESET_TOKEN_FILE"
-                        echo "Grafana data wiped. Starting with fresh configuration."
-                    else
-                        echo "Reset token unchanged. Preserving existing Grafana data."
-                    fi
-                else
-                    # No reset token set, just ensure we have the tracking file if data exists
-                    if [ -d "/var/lib/grafana" ] && [ ! -f "$RESET_TOKEN_FILE" ]; then
-                        # Create empty token file to track that we've been here
-                        touch "$RESET_TOKEN_FILE"
-                    fi
-                fi
+            # Multi-line shell script for init container
+            init_script = '''
+# Install curl for health checks and other tools
+apk add --no-cache curl
 
-                # Get provisioning base directory from environment variable
-                PROVISIONING_DIR="${GF_PATHS_PROVISIONING:-/etc/grafana/provisioning}"
+# Set up provisioning directory
+PROVISIONING_DIR="${GF_PATHS_PROVISIONING:-/etc/grafana/provisioning}"
+DATASOURCES_DIR="$PROVISIONING_DIR/datasources"
+RESET_TOKEN_FILE="/var/lib/grafana/.grafana_reset_token"
 
-                # Create provisioning directories
-                mkdir -p "$PROVISIONING_DIR/datasources"
+echo "Provisioning directory: $PROVISIONING_DIR"
+echo "Datasources directory: $DATASOURCES_DIR"
+echo "Reset token file: $RESET_TOKEN_FILE"
 
-                # Write datasource configuration from environment variable
-                echo "$GRAFANA_DATASOURCE_CONFIG" > "$PROVISIONING_DIR/datasources/cardinal.yaml"
+# Create provisioning directories
+mkdir -p "$DATASOURCES_DIR"
 
-                # Start Grafana
-                exec /run.sh
-                '''
-            ]
+# Handle reset token logic
+if [ -n "$RESET_TOKEN" ] && [ "$RESET_TOKEN" != "" ]; then
+    echo "Reset token provided: $RESET_TOKEN"
 
-        container = ContainerDefinition(
-            Name="AppContainer",
-            Image=container_image,
-            Command=container_command,
-            Environment=base_env,
-            Secrets=secrets,
-            MountPoints=mount_points,
-            PortMappings=port_mappings,
-            HealthCheck=health_check,
-            User="0",
-            LogConfiguration=LogConfiguration(
+    # Check if token file exists and compare
+    if [ -f "$RESET_TOKEN_FILE" ]; then
+        STORED_TOKEN=$(cat "$RESET_TOKEN_FILE")
+        if [ "$STORED_TOKEN" != "$RESET_TOKEN" ]; then
+            echo "Reset token changed from '$STORED_TOKEN' to '$RESET_TOKEN' - wiping Grafana data"
+            # Remove all Grafana data except the reset token file
+            find /var/lib/grafana -mindepth 1 -not -name ".grafana_reset_token" -delete || true
+            # Update stored token
+            echo "$RESET_TOKEN" > "$RESET_TOKEN_FILE"
+        else
+            echo "Reset token unchanged - no reset needed"
+        fi
+    else
+        echo "First time with reset token - storing: $RESET_TOKEN"
+        echo "$RESET_TOKEN" > "$RESET_TOKEN_FILE"
+    fi
+else
+    echo "No reset token provided - skipping reset logic"
+fi
+
+# Write datasource configuration
+echo "Writing Grafana datasource configuration..."
+# The datasource config comes from SSM parameter as YAML, just write it directly
+cat > "$DATASOURCES_DIR/cardinal.yaml" << DATASOURCE_EOF
+$GRAFANA_DATASOURCE_CONFIG
+DATASOURCE_EOF
+
+echo "Grafana initialization complete"
+'''
+
+            # Set the command arguments with the script
+            init_container.Command = ["/bin/sh", "-c", init_script]
+            container_definitions.append(init_container)
+
+        # Main application container
+        container_kwargs = {
+            "Name": "AppContainer",
+            "Image": container_image,
+            "Command": container_command,
+            "Environment": base_env,
+            "Secrets": secrets,
+            "MountPoints": mount_points,
+            "PortMappings": port_mappings,
+            "HealthCheck": health_check,
+            "User": "0",
+            "LogConfiguration": LogConfiguration(
                 LogDriver="awslogs",
                 Options={
                     "awslogs-group": Ref(log_group),
@@ -761,7 +811,14 @@ def create_services_template():
                     "awslogs-stream-prefix": service_name
                 }
             )
-        )
+        }
+
+        # For Grafana, add dependency on init container to ensure proper startup order
+        if service_name == 'grafana':
+            container_kwargs["DependsOn"] = [{"ContainerName": "GrafanaInit", "Condition": "SUCCESS"}]
+
+        container = ContainerDefinition(**container_kwargs)
+        container_definitions.append(container)
 
         # Create task definition
         task_def = t.add_resource(TaskDefinition(
@@ -773,7 +830,7 @@ def create_services_template():
             RequiresCompatibilities=["FARGATE"],
             ExecutionRoleArn=GetAtt(ExecutionRole, "Arn"),
             TaskRoleArn=GetAtt(TaskRole, "Arn"),
-            ContainerDefinitions=[container],
+            ContainerDefinitions=container_definitions,
             Volumes=volumes,
             RuntimePlatform=RuntimePlatform(
                 CpuArchitecture="ARM64",
