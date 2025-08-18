@@ -632,17 +632,16 @@ Resources:
         - Command:
             - /bin/sh
             - -c
-            - "\n                # Handle Grafana reset logic\n                RESET_TOKEN_FILE=\"/var/lib/grafana/.reset_token\"\n                \n                if [ -n \"$GF_RESET_TOKEN\" ]; then\n\
-              \                    # Check if reset token has changed\n                    if [ ! -f \"$RESET_TOKEN_FILE\" ] || [ \"$(cat $RESET_TOKEN_FILE 2>/dev/null)\" != \"$GF_RESET_TOKEN\" ]; then\n\
-              \                        echo \"Reset token changed or not found. Wiping Grafana data...\"\n                        # Remove all Grafana data except our tracking file\n                   \
-              \     find /var/lib/grafana -mindepth 1 -not -name \".reset_token\" -delete 2>/dev/null || true\n                        # Store new reset token\n                        echo \"$GF_RESET_TOKEN\"\
-              \ > \"$RESET_TOKEN_FILE\"\n                        echo \"Grafana data wiped. Starting with fresh configuration.\"\n                    else\n                        echo \"Reset token unchanged.\
-              \ Preserving existing Grafana data.\"\n                    fi\n                else\n                    # No reset token set, just ensure we have the tracking file if data exists\n      \
-              \              if [ -d \"/var/lib/grafana\" ] && [ ! -f \"$RESET_TOKEN_FILE\" ]; then\n                        # Create empty token file to track that we've been here\n                   \
-              \     touch \"$RESET_TOKEN_FILE\"\n                    fi\n                fi\n\n                # Get provisioning base directory from environment variable\n                PROVISIONING_DIR=\"\
-              ${GF_PATHS_PROVISIONING:-/etc/grafana/provisioning}\"\n\n                # Create provisioning directories\n                mkdir -p \"$PROVISIONING_DIR/datasources\"\n\n                #\
-              \ Write datasource configuration from environment variable\n                echo \"$GRAFANA_DATASOURCE_CONFIG\" > \"$PROVISIONING_DIR/datasources/cardinal.yaml\"\n\n                # Start\
-              \ Grafana\n                exec /run.sh\n                "
+            - "\n                # Handle Grafana reset logic\n                RESET_TOKEN_FILE=\"/var/lib/grafana/.reset_token\"\n\n                if [ -n \"$GF_RESET_TOKEN\" ]; then\n               \
+              \     # Check if reset token has changed\n                    if [ ! -f \"$RESET_TOKEN_FILE\" ] || [ \"$(cat $RESET_TOKEN_FILE 2>/dev/null)\" != \"$GF_RESET_TOKEN\" ]; then\n             \
+              \           echo \"Reset token changed or not found. Wiping Grafana data...\"\n                        # Remove all Grafana data except our tracking file\n                        find /var/lib/grafana\
+              \ -mindepth 1 -not -name \".reset_token\" -delete 2>/dev/null || true\n                        # Store new reset token\n                        echo \"$GF_RESET_TOKEN\" > \"$RESET_TOKEN_FILE\"\
+              \n                        echo \"Grafana data wiped. Starting with fresh configuration.\"\n                    else\n                        echo \"Reset token unchanged. Preserving existing\
+              \ Grafana data.\"\n                    fi\n                else\n                    # No reset token set, just ensure we have the tracking file if data exists\n                    if [ -d\
+              \ \"/var/lib/grafana\" ] && [ ! -f \"$RESET_TOKEN_FILE\" ]; then\n                        # Create empty token file to track that we've been here\n                        touch \"$RESET_TOKEN_FILE\"\
+              \n                    fi\n                fi\n\n                # Get provisioning base directory from environment variable\n                PROVISIONING_DIR=\"${GF_PATHS_PROVISIONING:-/etc/grafana/provisioning}\"\
+              \n\n                # Create provisioning directories\n                mkdir -p \"$PROVISIONING_DIR/datasources\"\n\n                # Write datasource configuration from environment variable\n\
+              \                echo \"$GRAFANA_DATASOURCE_CONFIG\" > \"$PROVISIONING_DIR/datasources/cardinal.yaml\"\n\n                # Start Grafana\n                exec /run.sh\n                "
           Environment:
             - Name: BUMP_REVISION
               Value: '1'
