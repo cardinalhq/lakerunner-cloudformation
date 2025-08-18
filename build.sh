@@ -42,11 +42,15 @@ echo "3. Generating Lakerunner Services..."
 python3 src/lakerunner_services.py > generated-templates/lakerunner-services.yaml
 cfn-lint generated-templates/lakerunner-services.yaml
 
-echo "4. Generating Demo OTEL Collector..."
+echo "4. Generating Lakerunner Grafana..."
+python3 src/lakerunner_grafana.py > generated-templates/lakerunner-grafana.yaml
+cfn-lint generated-templates/lakerunner-grafana.yaml
+
+echo "5. Generating Demo OTEL Collector..."
 python3 src/demo_otel_collector.py > generated-templates/lakerunner-demo-otel-collector.yaml
 cfn-lint generated-templates/lakerunner-demo-otel-collector.yaml
 
-echo "5. Generating Demo Sample Apps..."
+echo "6. Generating Demo Sample Apps..."
 python3 src/demo_sample_apps.py > generated-templates/lakerunner-demo-sample-apps.yaml
 cfn-lint generated-templates/lakerunner-demo-sample-apps.yaml
 

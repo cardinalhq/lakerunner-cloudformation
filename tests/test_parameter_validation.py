@@ -78,8 +78,8 @@ class TestParameterValidation:
             assert common_infra_param["Type"] == "String"
             assert "Description" in common_infra_param
             
-            # Test image parameters have correct types and defaults
-            image_params = ["GoServicesImage", "QueryApiImage", "QueryWorkerImage", "GrafanaImage"]
+            # Test image parameters have correct types and defaults (Grafana moved to separate stack)
+            image_params = ["GoServicesImage", "QueryApiImage", "QueryWorkerImage"]
             for param_name in image_params:
                 assert param_name in parameters
                 param = parameters[param_name]

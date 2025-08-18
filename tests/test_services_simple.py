@@ -121,7 +121,7 @@ class TestServicesTemplateSimple:
         
         parameters = template_dict["Parameters"]
         
-        # Should have image override parameters
-        expected_image_params = ["GoServicesImage", "QueryApiImage", "QueryWorkerImage", "GrafanaImage"]
+        # Should have image override parameters (Grafana moved to separate stack)
+        expected_image_params = ["GoServicesImage", "QueryApiImage", "QueryWorkerImage"]
         for param in expected_image_params:
             assert param in parameters, f"Image parameter {param} not found"

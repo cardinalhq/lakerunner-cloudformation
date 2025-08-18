@@ -1,0 +1,486 @@
+Conditions:
+  IsInternetFacing: !Equals
+    - !Ref 'AlbScheme'
+    - internet-facing
+Description: 'Lakerunner Grafana: Grafana service with ALB, EFS storage, and datasource configuration'
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Infrastructure
+        Parameters:
+          - CommonInfraStackName
+          - ServicesStackName
+          - AlbScheme
+      - Label:
+          default: Container Images
+        Parameters:
+          - GrafanaImage
+      - Label:
+          default: Grafana Configuration
+        Parameters:
+          - GrafanaResetToken
+    ParameterLabels:
+      AlbScheme:
+        default: ALB Scheme
+      CommonInfraStackName:
+        default: Common Infra Stack Name
+      GrafanaImage:
+        default: Grafana Image
+      GrafanaResetToken:
+        default: Grafana Reset Token
+      ServicesStackName:
+        default: Services Stack Name
+Outputs:
+  GrafanaAdminSecretArn:
+    Description: 'ARN of the Grafana admin password secret. Use AWS CLI to retrieve: aws secretsmanager get-secret-value --secret-id <ARN>'
+    Export:
+      Name: !Sub '${AWS::StackName}-GrafanaAdminSecretArn'
+    Value: !Ref 'GrafanaSecret'
+  GrafanaAlbArn:
+    Export:
+      Name: !Sub '${AWS::StackName}-AlbArn'
+    Value: !Ref 'GrafanaAlb'
+  GrafanaAlbDNS:
+    Export:
+      Name: !Sub '${AWS::StackName}-AlbDNS'
+    Value: !GetAtt 'GrafanaAlb.DNSName'
+  GrafanaServiceArn:
+    Export:
+      Name: !Sub '${AWS::StackName}-ServiceArn'
+    Value: !Ref 'GrafanaService'
+  GrafanaUrl:
+    Description: URL to access Grafana dashboard
+    Value: !Sub
+      - http://${GrafanaAlbDns}:3000
+      - GrafanaAlbDns: !GetAtt 'GrafanaAlb.DNSName'
+Parameters:
+  AlbScheme:
+    AllowedValues:
+      - internet-facing
+      - internal
+    Default: internal
+    Description: 'Load balancer scheme: ''internet-facing'' for external access or ''internal'' for internal access only.'
+    Type: String
+  CommonInfraStackName:
+    Description: 'REQUIRED: Name of the CommonInfra stack to import infrastructure values from.'
+    Type: String
+  GrafanaImage:
+    Default: grafana/grafana:latest
+    Description: Container image for Grafana service
+    Type: String
+  GrafanaResetToken:
+    Default: ''
+    Description: 'OPTIONAL: Change this value to reset Grafana data (wipe EFS volume). Leave blank for normal operation. Use any string (e.g., timestamp) to trigger reset.'
+    Type: String
+  ServicesStackName:
+    Description: 'REQUIRED: Name of the Services stack to import Query API ALB DNS and port from.'
+    Type: String
+Resources:
+  GrafanaAlb:
+    Properties:
+      Scheme: !Ref 'AlbScheme'
+      SecurityGroups:
+        - !Ref 'GrafanaAlbSecurityGroup'
+      Subnets: !If
+        - IsInternetFacing
+        - !Split
+          - ','
+          - !ImportValue
+            Fn::Sub:
+              - ${CommonInfraStackName}-PublicSubnets
+              - CommonInfraStackName: !Ref 'CommonInfraStackName'
+        - !Split
+          - ','
+          - !ImportValue
+            Fn::Sub:
+              - ${CommonInfraStackName}-PrivateSubnets
+              - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      Type: application
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+  GrafanaAlb3000Open:
+    Properties:
+      CidrIp: '0.0.0.0/0'
+      Description: HTTP 3000 for Grafana
+      FromPort: 3000
+      GroupId: !Ref 'GrafanaAlbSecurityGroup'
+      IpProtocol: tcp
+      ToPort: 3000
+    Type: AWS::EC2::SecurityGroupIngress
+  GrafanaAlbSecurityGroup:
+    Properties:
+      GroupDescription: Security group for Grafana ALB
+      SecurityGroupEgress:
+        - CidrIp: '0.0.0.0/0'
+          Description: Allow all outbound
+          IpProtocol: '-1'
+      VpcId: !ImportValue
+        Fn::Sub:
+          - ${CommonInfraStackName}-VpcId
+          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+    Type: AWS::EC2::SecurityGroup
+  GrafanaDatasourceConfig:
+    Properties:
+      Description: Grafana datasource configuration for Cardinal plugin
+      Name: !Sub '${AWS::StackName}-grafana-datasource-config'
+      Type: String
+      Value: !Sub
+        - |
+          apiVersion: 1
+          datasources:
+          - access: proxy
+            editable: true
+            isDefault: true
+            jsonData:
+              customPath: http://${QUERY_API_ALB_DNS}:7101
+            name: Cardinal
+            secureJsonData:
+              apiKey: f70603aa00e6f67999cc66e336134887
+            type: cardinalhq-lakerunner-datasource
+        - QUERY_API_ALB_DNS: !ImportValue
+            Fn::Sub:
+              - ${ServicesStackName}-AlbDNS
+              - ServicesStackName: !Ref 'ServicesStackName'
+    Type: AWS::SSM::Parameter
+  GrafanaEfsAccessPoint:
+    Properties:
+      AccessPointTags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-grafana'
+      FileSystemId: !ImportValue
+        Fn::Sub:
+          - ${CommonInfraStackName}-EfsId
+          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      PosixUser:
+        Gid: '0'
+        Uid: '0'
+      RootDirectory:
+        CreationInfo:
+          OwnerGid: '0'
+          OwnerUid: '0'
+          Permissions: '755'
+        Path: /grafana
+    Type: AWS::EFS::AccessPoint
+  GrafanaExecRole:
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+        Version: '2012-10-17'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyDocument:
+            Statement:
+              - Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                Effect: Allow
+                Resource:
+                  - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}-*'
+              - Action:
+                  - ssmmessages:CreateControlChannel
+                  - ssmmessages:CreateDataChannel
+                  - ssmmessages:OpenControlChannel
+                  - ssmmessages:OpenDataChannel
+                Effect: Allow
+                Resource: '*'
+              - Action:
+                  - secretsmanager:GetSecretValue
+                Effect: Allow
+                Resource:
+                  - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*'
+            Version: '2012-10-17'
+          PolicyName: SSMParameterAccess
+      RoleName: !Sub '${AWS::StackName}-exec-role'
+    Type: AWS::IAM::Role
+  GrafanaListener:
+    Properties:
+      DefaultActions:
+        - TargetGroupArn: !Ref 'GrafanaTg'
+          Type: forward
+      LoadBalancerArn: !Ref 'GrafanaAlb'
+      Port: '3000'
+      Protocol: HTTP
+    Type: AWS::ElasticLoadBalancingV2::Listener
+  GrafanaLogGroup:
+    Properties:
+      LogGroupName: !Sub '/ecs/grafana'
+      RetentionInDays: 14
+    Type: AWS::Logs::LogGroup
+  GrafanaSecret:
+    Properties:
+      Description: Grafana admin password
+      GenerateSecretString:
+        ExcludeCharacters: ' !"#$%&''()*+,./:;<=>?@[\]^`{|}~'
+        GenerateStringKey: password
+        PasswordLength: 32
+        SecretStringTemplate: '{"username": "lakerunner"}'
+      Name: !Sub '${AWS::StackName}-grafana'
+    Type: AWS::SecretsManager::Secret
+  GrafanaService:
+    DependsOn:
+      - GrafanaListener
+    Properties:
+      Cluster: !ImportValue
+        Fn::Sub:
+          - ${CommonInfraStackName}-ClusterArn
+          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      DesiredCount: '1'
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      LoadBalancers:
+        - ContainerName: GrafanaContainer
+          ContainerPort: 3000
+          TargetGroupArn: !Ref 'GrafanaTg'
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          SecurityGroups:
+            - !ImportValue
+              Fn::Sub:
+                - ${CommonInfraStackName}-TaskSGId
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
+          Subnets: !Split
+            - ','
+            - !ImportValue
+              Fn::Sub:
+                - ${CommonInfraStackName}-PrivateSubnets
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      ServiceName: grafana
+      TaskDefinition: !Ref 'GrafanaTaskDef'
+    Type: AWS::ECS::Service
+  GrafanaTaskDef:
+    Properties:
+      ContainerDefinitions:
+        - Command:
+            - /bin/sh
+            - -c
+            - |2
+
+              # Install curl for health checks and other tools
+              apk add --no-cache curl
+
+              # Set up provisioning directory
+              PROVISIONING_DIR="${GF_PATHS_PROVISIONING:-/etc/grafana/provisioning}"
+              DATASOURCES_DIR="$PROVISIONING_DIR/datasources"
+              RESET_TOKEN_FILE="/var/lib/grafana/.grafana_reset_token"
+
+              echo "Provisioning directory: $PROVISIONING_DIR"
+              echo "Datasources directory: $DATASOURCES_DIR"
+              echo "Reset token file: $RESET_TOKEN_FILE"
+
+              # Create provisioning directories
+              mkdir -p "$DATASOURCES_DIR"
+
+              # All containers run as root, so no ownership changes needed
+
+              # Handle reset token logic
+              if [ -n "$RESET_TOKEN" ] && [ "$RESET_TOKEN" != "" ]; then
+                  echo "Reset token provided: $RESET_TOKEN"
+
+                  # Check if token file exists and compare
+                  if [ -f "$RESET_TOKEN_FILE" ]; then
+                      STORED_TOKEN=$(cat "$RESET_TOKEN_FILE")
+                      if [ "$STORED_TOKEN" != "$RESET_TOKEN" ]; then
+                          echo "Reset token changed from '$STORED_TOKEN' to '$RESET_TOKEN' - wiping Grafana data"
+                          # Remove all Grafana data
+                          find /var/lib/grafana -mindepth 1 -delete || true
+                          # Create new token file
+                          echo "$RESET_TOKEN" > "$RESET_TOKEN_FILE"
+                      else
+                          echo "Reset token unchanged - no reset needed"
+                      fi
+                  else
+                      echo "First time with reset token - storing: $RESET_TOKEN"
+                      echo "$RESET_TOKEN" > "$RESET_TOKEN_FILE"
+                  fi
+              else
+                  echo "No reset token provided - skipping reset logic"
+              fi
+
+              # Write datasource configuration
+              echo "Writing Grafana datasource configuration..."
+              # The datasource config comes from SSM parameter as YAML, just write it directly
+              cat > "$DATASOURCES_DIR/cardinal.yaml" << DATASOURCE_EOF
+              $GRAFANA_DATASOURCE_CONFIG
+              DATASOURCE_EOF
+
+              echo "Grafana initialization complete"
+          Environment:
+            - Name: PROVISIONING_DIR
+              Value: ${GF_PATHS_PROVISIONING:-/etc/grafana/provisioning}
+            - Name: RESET_TOKEN
+              Value: !Ref 'GrafanaResetToken'
+            - Name: QUERY_API_URL
+              Value: !Sub
+                - http://${QueryApiAlbDns}
+                - QueryApiAlbDns: !ImportValue
+                    Fn::Sub:
+                      - ${ServicesStackName}-AlbDNS
+                      - ServicesStackName: !Ref 'ServicesStackName'
+          Essential: false
+          Image: public.ecr.aws/docker/library/alpine:latest
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref 'GrafanaLogGroup'
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: grafana-init
+          MountPoints:
+            - ContainerPath: /scratch
+              ReadOnly: false
+              SourceVolume: scratch
+            - ContainerPath: /var/lib/grafana
+              ReadOnly: false
+              SourceVolume: efs-grafana
+          Name: GrafanaInit
+          Secrets:
+            - Name: GRAFANA_DATASOURCE_CONFIG
+              ValueFrom: !Sub '${AWS::StackName}-grafana-datasource-config'
+          User: '0'
+        - DependsOn:
+            - Condition: SUCCESS
+              ContainerName: GrafanaInit
+          Environment:
+            - Name: BUMP_REVISION
+              Value: '1'
+            - Name: OTEL_SERVICE_NAME
+              Value: grafana
+            - Name: TMPDIR
+              Value: /scratch
+            - Name: HOME
+              Value: /scratch
+            - Name: GF_SECURITY_ADMIN_USER
+              Value: lakerunner
+            - Name: GF_SERVER_HTTP_PORT
+              Value: '3000'
+            - Name: GF_SERVER_ROOT_URL
+              Value: '%(protocol)s://%(domain)s:%(http_port)s'
+            - Name: GF_INSTALL_PLUGINS
+              Value: https://github.com/cardinalhq/cardinalhq-lakerunner-datasource/raw/refs/heads/main/cardinalhq-lakerunner-datasource.zip;cardinalhq-lakerunner-datasource
+            - Name: GF_PATHS_PROVISIONING
+              Value: /etc/grafana/provisioning
+            - Name: GF_RESET_TOKEN
+              Value: !Ref 'GrafanaResetToken'
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - curl -f http://localhost:3000/api/health
+            Interval: 30
+            Retries: 3
+            StartPeriod: 60
+            Timeout: 5
+          Image: !Ref 'GrafanaImage'
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref 'GrafanaLogGroup'
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: grafana
+          MountPoints:
+            - ContainerPath: /scratch
+              ReadOnly: false
+              SourceVolume: scratch
+            - ContainerPath: /var/lib/grafana
+              ReadOnly: false
+              SourceVolume: efs-grafana
+          Name: GrafanaContainer
+          PortMappings:
+            - ContainerPort: 3000
+              Protocol: tcp
+          Secrets:
+            - Name: GF_SECURITY_ADMIN_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !Ref 'GrafanaSecret'
+            - Name: GRAFANA_DATASOURCE_CONFIG
+              ValueFrom: !Ref 'GrafanaDatasourceConfig'
+          User: '0'
+      Cpu: '512'
+      ExecutionRoleArn: !GetAtt 'GrafanaExecRole.Arn'
+      Family: grafana-task
+      Memory: '1024'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      RuntimePlatform:
+        CpuArchitecture: ARM64
+        OperatingSystemFamily: LINUX
+      TaskRoleArn: !GetAtt 'GrafanaTaskRole.Arn'
+      Volumes:
+        - Name: scratch
+        - EFSVolumeConfiguration:
+            AuthorizationConfig:
+              AccessPointId: !Ref 'GrafanaEfsAccessPoint'
+              IAM: ENABLED
+            FilesystemId: !ImportValue
+              Fn::Sub:
+                - ${CommonInfraStackName}-EfsId
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            TransitEncryption: ENABLED
+          Name: efs-grafana
+    Type: AWS::ECS::TaskDefinition
+  GrafanaTaskRole:
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+        Version: '2012-10-17'
+      Policies:
+        - PolicyDocument:
+            Statement:
+              - Action:
+                  - elasticfilesystem:ClientMount
+                  - elasticfilesystem:ClientWrite
+                  - elasticfilesystem:ClientRootAccess
+                  - elasticfilesystem:DescribeFileSystems
+                  - elasticfilesystem:DescribeMountTargets
+                  - elasticfilesystem:DescribeAccessPoints
+                Effect: Allow
+                Resource: '*'
+            Version: '2012-10-17'
+          PolicyName: EFSAccess
+      RoleName: !Sub '${AWS::StackName}-task-role'
+    Type: AWS::IAM::Role
+  GrafanaTg:
+    Properties:
+      HealthCheckIntervalSeconds: 30
+      HealthCheckPath: /api/health
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      Matcher:
+        HttpCode: '200'
+      Port: 3000
+      Protocol: HTTP
+      TargetGroupAttributes:
+        - Key: stickiness.enabled
+          Value: 'false'
+        - Key: deregistration_delay.timeout_seconds
+          Value: '30'
+      TargetType: ip
+      UnhealthyThresholdCount: 3
+      VpcId: !ImportValue
+        Fn::Sub:
+          - ${CommonInfraStackName}-VpcId
+          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+  TaskFromGrafanaAlb3000:
+    Properties:
+      Description: Grafana ALB to tasks 3000
+      FromPort: 3000
+      GroupId: !ImportValue
+        Fn::Sub:
+          - ${CommonInfraStackName}-TaskSGId
+          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      IpProtocol: tcp
+      SourceSecurityGroupId: !Ref 'GrafanaAlbSecurityGroup'
+      ToPort: 3000
+    Type: AWS::EC2::SecurityGroupIngress
+
