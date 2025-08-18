@@ -94,12 +94,6 @@ def create_services_template():
     ))
 
     # ALB Configuration parameters
-    PublicSubnets = t.add_parameter(Parameter(
-        "PublicSubnets",
-        Type="List<AWS::EC2::Subnet::Id>",
-        Default="",
-        Description="Public subnet IDs (for internet-facing ALB). Required when AlbScheme=internet-facing. Provide at least two in different AZs."
-    ))
 
     AlbScheme = t.add_parameter(Parameter(
         "AlbScheme",
@@ -115,7 +109,7 @@ def create_services_template():
             "ParameterGroups": [
                 {
                     "Label": {"default": "Infrastructure"},
-                    "Parameters": ["CommonInfraStackName", "PublicSubnets", "AlbScheme"]
+                    "Parameters": ["CommonInfraStackName", "AlbScheme"]
                 },
                 {
                     "Label": {"default": "Container Images"},
@@ -128,7 +122,6 @@ def create_services_template():
             ],
             "ParameterLabels": {
                 "CommonInfraStackName": {"default": "Common Infra Stack Name"},
-                "PublicSubnets": {"default": "Public Subnets"},
                 "AlbScheme": {"default": "ALB Scheme"},
                 "GoServicesImage": {"default": "Go Services Image"},
                 "QueryApiImage": {"default": "Query API Image"},
@@ -166,6 +159,10 @@ def create_services_template():
     VpcIdValue = ImportValue(ci_export("VpcId"))
     PrivateSubnetsValue = Split(",", ImportValue(ci_export("PrivateSubnets")))
     BucketArnValue = ImportValue(ci_export("BucketArn"))
+
+    # Import PublicSubnets - CommonInfra always exports this, but may be empty string if not provided
+    PublicSubnetsImport = ImportValue(ci_export("PublicSubnets"))
+    PublicSubnetsValue = Split(",", PublicSubnetsImport)
 
     # Conditions
     t.add_condition("EnableOtlp", Not(Equals(Ref(OtelEndpoint), "")))
@@ -222,7 +219,7 @@ def create_services_template():
         SecurityGroups=[Ref(AlbSG)],
         Subnets=If(
             "IsInternetFacing",
-            Ref(PublicSubnets),
+            PublicSubnetsValue,
             PrivateSubnetsValue
         ),
         Type="application",
@@ -584,11 +581,11 @@ def create_services_template():
         # doesn't support conditional lists in environment arrays
         base_env.extend([
             Environment(
-                Name="OTEL_EXPORTER_OTLP_ENDPOINT", 
+                Name="OTEL_EXPORTER_OTLP_ENDPOINT",
                 Value=If("EnableOtlp", Ref(OtelEndpoint), Ref("AWS::NoValue"))
             ),
             Environment(
-                Name="ENABLE_OTLP_TELEMETRY", 
+                Name="ENABLE_OTLP_TELEMETRY",
                 Value=If("EnableOtlp", "true", Ref("AWS::NoValue"))
             )
         ])
@@ -693,10 +690,10 @@ def create_services_template():
                 '''
                 # Create provisioning directories
                 mkdir -p /etc/grafana/provisioning/datasources
-                
+
                 # Write datasource configuration from environment variable
                 echo "$GRAFANA_DATASOURCE_CONFIG" > /etc/grafana/provisioning/datasources/cardinal.yaml
-                
+
                 # Start Grafana
                 exec /run.sh
                 '''

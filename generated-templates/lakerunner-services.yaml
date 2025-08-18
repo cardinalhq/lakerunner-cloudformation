@@ -14,7 +14,6 @@ Metadata:
           default: Infrastructure
         Parameters:
           - CommonInfraStackName
-          - PublicSubnets
           - AlbScheme
       - Label:
           default: Container Images
@@ -38,8 +37,6 @@ Metadata:
         default: Grafana Image
       OtelEndpoint:
         default: OTEL Collector Endpoint
-      PublicSubnets:
-        default: Public Subnets
       QueryApiImage:
         default: Query API Image
       QueryWorkerImage:
@@ -137,10 +134,6 @@ Parameters:
     Default: ''
     Description: 'OPTIONAL: OTEL collector HTTP endpoint URL (e.g., http://collector-dns:4318). Leave blank to disable OTLP telemetry export.'
     Type: String
-  PublicSubnets:
-    Default: ''
-    Description: Public subnet IDs (for internet-facing ALB). Required when AlbScheme=internet-facing. Provide at least two in different AZs.
-    Type: List<AWS::EC2::Subnet::Id>
   QueryApiImage:
     Default: public.ecr.aws/cardinalhq.io/lakerunner/query-api:latest
     Description: Container image for query-api service
@@ -157,7 +150,12 @@ Resources:
         - !Ref 'AlbSecurityGroup'
       Subnets: !If
         - IsInternetFacing
-        - !Ref 'PublicSubnets'
+        - !Split
+          - ','
+          - !ImportValue
+            Fn::Sub:
+              - ${CommonInfraStackName}-PublicSubnets
+              - CommonInfraStackName: !Ref 'CommonInfraStackName'
         - !Split
           - ','
           - !ImportValue
@@ -1900,4 +1898,3 @@ Resources:
         SecretStringTemplate: '{}'
       Name: !Sub '${AWS::StackName}-token-key'
     Type: AWS::SecretsManager::Secret
-

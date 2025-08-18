@@ -44,6 +44,13 @@ VpcId = t.add_parameter(Parameter(
     Description="REQUIRED: VPC where resources will be created."
 ))
 
+PublicSubnets = t.add_parameter(Parameter(
+    "PublicSubnets",
+    Type="List<AWS::EC2::Subnet::Id>",
+    Default="",
+    Description="Public subnet IDs (for internet-facing ALB). Required when ALB uses internet-facing scheme. Provide at least two in different AZs."
+))
+
 PrivateSubnets = t.add_parameter(Parameter(
     "PrivateSubnets",
     Type="List<AWS::EC2::Subnet::Id>",
@@ -73,7 +80,7 @@ t.set_metadata({
         "ParameterGroups": [
             {
                 "Label": {"default": "Networking"},
-                "Parameters": ["VpcId", "PrivateSubnets"]
+                "Parameters": ["VpcId", "PublicSubnets", "PrivateSubnets"]
             },
             {
                 "Label": {"default": "Configuration Overrides (Advanced)"},
@@ -82,6 +89,7 @@ t.set_metadata({
         ],
         "ParameterLabels": {
             "VpcId": {"default": "VPC Id"},
+            "PublicSubnets": {"default": "Public Subnets (for ALB internet-facing)"},
             "PrivateSubnets": {"default": "Private Subnets (for ECS/RDS/EFS)"},
             "ApiKeysOverride": {"default": "Custom API Keys (YAML)"},
             "StorageProfilesOverride": {"default": "Custom Storage Profiles (YAML)"}
@@ -94,6 +102,7 @@ t.set_metadata({
 # -----------------------
 t.add_condition("HasApiKeysOverride", Not(Equals(Ref(ApiKeysOverride), "")))
 t.add_condition("HasStorageProfilesOverride", Not(Equals(Ref(StorageProfilesOverride), "")))
+t.add_condition("HasPublicSubnets", Not(Equals(Select(0, Ref(PublicSubnets)), "")))
 
 # Helper function to load defaults
 def load_defaults():
@@ -337,9 +346,26 @@ t.add_output(Output(
     Export=Export(name=Sub("${AWS::StackName}-PrivateSubnets"))
 ))
 t.add_output(Output(
+    "PublicSubnetsOut",
+    Value=If(
+        "HasPublicSubnets",
+        Sub("${Subnet1},${Subnet2}", Subnet1=Select(0, Ref(PublicSubnets)), Subnet2=Select(1, Ref(PublicSubnets))),
+        ""
+    ),
+    Export=Export(name=Sub("${AWS::StackName}-PublicSubnets"))
+))
+t.add_output(Output(
     "VpcIdOut",
     Value=Ref(VpcId),
     Export=Export(name=Sub("${AWS::StackName}-VpcId"))
+))
+
+# Export whether internet-facing ALB is supported
+t.add_output(Output(
+    "SupportsInternetFacingAlb",
+    Value=If("HasPublicSubnets", "Yes", "No"),
+    Export=Export(name=Sub("${AWS::StackName}-SupportsInternetFacingAlb")),
+    Description="Whether this CommonInfra stack supports internet-facing ALBs (requires PublicSubnets)"
 ))
 
 print(t.to_yaml())

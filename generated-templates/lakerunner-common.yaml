@@ -3,6 +3,12 @@ Conditions:
     - !Equals
       - !Ref 'ApiKeysOverride'
       - ''
+  HasPublicSubnets: !Not
+    - !Equals
+      - !Select
+        - 0
+        - !Ref 'PublicSubnets'
+      - ''
   HasStorageProfilesOverride: !Not
     - !Equals
       - !Ref 'StorageProfilesOverride'
@@ -15,6 +21,7 @@ Metadata:
           default: Networking
         Parameters:
           - VpcId
+          - PublicSubnets
           - PrivateSubnets
       - Label:
           default: Configuration Overrides (Advanced)
@@ -26,6 +33,8 @@ Metadata:
         default: Custom API Keys (YAML)
       PrivateSubnets:
         default: Private Subnets (for ECS/RDS/EFS)
+      PublicSubnets:
+        default: Public Subnets (for ALB internet-facing)
       StorageProfilesOverride:
         default: Custom Storage Profiles (YAML)
       VpcId:
@@ -70,6 +79,28 @@ Outputs:
         Subnet2: !Select
           - 1
           - !Ref 'PrivateSubnets'
+  PublicSubnetsOut:
+    Export:
+      Name: !Sub '${AWS::StackName}-PublicSubnets'
+    Value: !If
+      - HasPublicSubnets
+      - !Sub
+        - ${Subnet1},${Subnet2}
+        - Subnet1: !Select
+            - 0
+            - !Ref 'PublicSubnets'
+          Subnet2: !Select
+            - 1
+            - !Ref 'PublicSubnets'
+      - ''
+  SupportsInternetFacingAlb:
+    Description: Whether this CommonInfra stack supports internet-facing ALBs (requires PublicSubnets)
+    Export:
+      Name: !Sub '${AWS::StackName}-SupportsInternetFacingAlb'
+    Value: !If
+      - HasPublicSubnets
+      - 'Yes'
+      - 'No'
   TaskSecurityGroupId:
     Export:
       Name: !Sub '${AWS::StackName}-TaskSGId'
@@ -85,6 +116,10 @@ Parameters:
     Type: String
   PrivateSubnets:
     Description: 'REQUIRED: Private subnet IDs (for RDS/ECS/EFS). Provide at least two in different AZs.'
+    Type: List<AWS::EC2::Subnet::Id>
+  PublicSubnets:
+    Default: ''
+    Description: Public subnet IDs (for internet-facing ALB). Required when ALB uses internet-facing scheme. Provide at least two in different AZs.
     Type: List<AWS::EC2::Subnet::Id>
   StorageProfilesOverride:
     Default: ''
