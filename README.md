@@ -7,7 +7,7 @@ This repository contains CloudFormation templates for deploying the core Lakerun
 The core Lakerunner deployment consists of three CloudFormation stacks that must be deployed in order:
 
 1. **Common Infrastructure** (`lakerunner-common.yaml`) - VPC resources, RDS database, EFS, S3 bucket, SQS queue, and ALB
-2. **Migration** (`lakerunner-migration.yaml`) - Database migration task that runs once during initial setup  
+2. **Migration** (`lakerunner-migration.yaml`) - Database migration task that runs once during initial setup
 3. **Services** (`lakerunner-services.yaml`) - ECS Fargate services for all Lakerunner microservices
 
 ## Quick Start
@@ -22,6 +22,7 @@ Deploy `generated-templates/lakerunner-common.yaml` using the AWS Console or CLI
 - **PrivateSubnets** – Private subnet IDs (for ECS/RDS/EFS). Provide at least two in different AZs.
 
 Optional parameters:
+
 - **PublicSubnets** – Public subnet IDs (required only for internet-facing ALB)
 - **AlbScheme** – Load balancer scheme: "internal" (default) or "internet-facing"
 - **ApiKeysOverride** – Custom API keys configuration in YAML format
@@ -45,6 +46,7 @@ Deploy `generated-templates/lakerunner-migration.yaml` to run database migration
 - **CommonInfraStackName** – Name of the CommonInfra stack (e.g., "lakerunner-common")
 
 Optional parameters:
+
 - **MigrationImage** – Container image for migration task (default: public.ecr.aws/cardinalhq.io/lakerunner:latest)
 
 **Example AWS CLI deployment:**
@@ -64,6 +66,7 @@ Deploy `generated-templates/lakerunner-services.yaml` for all Lakerunner microse
 - **CommonInfraStackName** – Name of the CommonInfra stack (e.g., "lakerunner-common")
 
 Optional parameters:
+
 - **OtelEndpoint** – OTEL collector HTTP endpoint URL (e.g., http://collector-dns:4318). Leave blank to disable OTLP telemetry export.
 - Container image overrides for air-gapped deployments:
   - **GoServicesImage** – Image for Go services (default: public.ecr.aws/cardinalhq.io/lakerunner:latest)
@@ -104,27 +107,30 @@ aws cloudformation create-stack \
 **Option 1: Using CardinalHQ OTEL Collector Stack**
 
 1. Deploy the OTEL collector stack first:
-   ```bash
-   aws cloudformation create-stack \
-     --stack-name lakerunner-otel-collector \
-     --template-body file://generated-templates/lakerunner-demo-otel-collector.yaml \
-     --parameters ParameterKey=CommonInfraStackName,ParameterValue=lakerunner-common \
-     --capabilities CAPABILITY_IAM
-   ```
 
-1. Get the HTTP endpoint from stack outputs:
-   ```bash
-   aws cloudformation describe-stacks \
-     --stack-name lakerunner-otel-collector \
-     --query 'Stacks[0].Outputs[?OutputKey==`HttpEndpoint`].OutputValue' \
-     --output text
-   ```
+```bash
+aws cloudformation create-stack \
+  --stack-name lakerunner-otel-collector \
+  --template-body file://generated-templates/lakerunner-demo-otel-collector.yaml \
+  --parameters ParameterKey=CommonInfraStackName,ParameterValue=lakerunner-common \
+  --capabilities CAPABILITY_IAM
+```
+
+2. Get the HTTP endpoint from stack outputs:
+
+```bash
+aws cloudformation describe-stacks \
+  --stack-name lakerunner-otel-collector \
+  --query 'Stacks[0].Outputs[?OutputKey==`HttpEndpoint`].OutputValue' \
+  --output text
+```
 
 **Option 2: External Collector**
 
 For collectors outside the ECS cluster, provide the full endpoint URL:
+
 - `http://my-collector.example.com:4318` - External HTTP collector
-- `http://internal-lb-dns:4318` - Internal load balancer  
+- `http://internal-lb-dns:4318` - Internal load balancer
 - `http://10.0.1.100:4318` - Direct IP address
 
 ### Environment Variables
@@ -139,18 +145,88 @@ When `OtelEndpoint` is provided, these environment variables are automatically a
 For full telemetry setup, deploy in this order:
 
 1. `lakerunner-common` - Core infrastructure
-1. `lakerunner-demo-otel-collector` - OTEL collector (optional)
-1. `lakerunner-services` - Services with OTLP enabled
+2. `lakerunner-demo-otel-collector` - OTEL collector (optional)
+3. `lakerunner-services` - Services with OTLP enabled
 
 ## Access Points
 
 After successful deployment:
 
 - **Grafana Dashboard**: Access via ALB DNS name on port 3000
-  - Username: `admin`
+  - Username: `lakerunner`
   - Password: Retrieve from AWS Secrets Manager using the GrafanaAdminSecretArn output
 - **Query API**: Access via ALB DNS name on port 7101
 - **S3 Bucket**: Upload data to the created bucket with appropriate prefixes
+
+### Retrieving Grafana Password
+
+```bash
+# Get the secret ARN from stack outputs
+SECRET_ARN=$(aws cloudformation describe-stacks \
+  --stack-name lakerunner-services \
+  --query 'Stacks[0].Outputs[?OutputKey==`GrafanaAdminSecretArn`].OutputValue' \
+  --output text)
+
+# Retrieve the password
+aws secretsmanager get-secret-value \
+  --secret-id $SECRET_ARN \
+  --query 'SecretString' \
+  --output text | jq -r '.password'
+```
+
+### Grafana Password Recovery
+
+If you lose access to Grafana (forgot password, account locked, etc.), you can reset the entire Grafana configuration using the **Grafana Reset Token** feature.
+
+#### How It Works
+
+The `GrafanaResetToken` parameter allows you to wipe all Grafana data and start fresh with the original admin credentials. When you change this parameter value, Grafana will:
+
+1. Delete all existing Grafana data (dashboards, users, settings, database)
+2. Start with a clean database
+3. Use the original admin credentials (`lakerunner` username with password from AWS Secrets Manager)
+
+#### Reset Procedure
+
+**To reset Grafana:**
+
+```bash
+# Update the stack with a reset token (use any unique value)
+aws cloudformation update-stack \
+  --stack-name lakerunner-services \
+  --use-previous-template \
+  --parameters \
+    ParameterKey=CommonInfraStackName,UsePreviousValue=true \
+    ParameterKey=GrafanaResetToken,ParameterValue="reset-$(date +%s)" \
+  --capabilities CAPABILITY_IAM
+```
+
+**To return to normal operation (prevent accidental resets):**
+
+```bash
+# Clear the reset token after successful reset
+aws cloudformation update-stack \
+  --stack-name lakerunner-services \
+  --use-previous-template \
+  --parameters \
+    ParameterKey=CommonInfraStackName,UsePreviousValue=true \
+    ParameterKey=GrafanaResetToken,ParameterValue="" \
+  --capabilities CAPABILITY_IAM
+```
+
+#### Reset Token Behavior
+
+- **Empty token** (default): Normal operation, preserves all Grafana data
+- **New token value**: Wipes Grafana data and resets to fresh state with original admin credentials
+- **Same token value**: No action taken, data preserved
+- **Token tracking**: The system remembers the last reset token to prevent accidental resets
+
+#### Example Use Cases
+
+1. **Password Recovery**: Set reset token, deploy, access with original credentials, clear token
+2. **Clean Demo Environment**: Use reset token to quickly restore demo state
+3. **Development Reset**: Reset during development to test fresh configurations
+4. **User Management Reset**: Remove all custom users and return to single admin account
 
 ## Load Balancer Configuration
 
@@ -160,6 +236,7 @@ An Application Load Balancer is always created and points to:
 - `grafana` service on port 3000
 
 The ALB can be configured as:
+
 - **Internal** (default) - Only accessible from within the VPC
 - **Internet-facing** - Accessible from the internet (requires public subnets)
 
@@ -169,7 +246,7 @@ Lakerunner consists of these microservices that process telemetry data:
 
 - **pubsub-sqs** - Receives SQS notifications from S3 bucket
 - **ingest-logs/metrics** - Process raw log and metric files
-- **compact-logs/metrics** - Optimize storage format  
+- **compact-logs/metrics** - Optimize storage format
 - **rollup-metrics** - Pre-aggregate metrics for faster queries
 - **sweeper** - Clean up temporary files
 - **query-api** - REST API for data queries (ALB-attached)
@@ -177,6 +254,7 @@ Lakerunner consists of these microservices that process telemetry data:
 - **grafana** - Visualization dashboard (ALB-attached)
 
 All services share:
+
 - Common ECS task execution and task roles
 - Unified secret injection from Secrets Manager and SSM
 - Standardized logging to CloudWatch
@@ -189,8 +267,154 @@ All services share:
 This repository includes several specialized guides:
 
 - **[Demo Applications](README-DEMO-APPS.md)** - OTEL-instrumented sample applications for testing telemetry collection
-- **[OTEL Collector](README-OTEL-COLLECTOR.md)** - Dedicated telemetry ingestion service setup and configuration  
+- **[OTEL Collector](README-OTEL-COLLECTOR.md)** - Dedicated telemetry ingestion service setup and configuration
 - **[Building from Source](README-BUILDING.md)** - Development guide for modifying and building CloudFormation templates
+
+## Stack Dependencies and Deployment Order
+
+### All Available Stacks
+
+This repository provides **5 CloudFormation stacks** with specific dependencies:
+
+1. **Common Infrastructure** (`lakerunner-common.yaml`) - Core infrastructure
+2. **Migration** (`lakerunner-migration.yaml`) - Database migration task
+3. **Services** (`lakerunner-services.yaml`) - Core Lakerunner services
+4. **OTEL Collector** (`lakerunner-demo-otel-collector.yaml`) - Optional telemetry collector
+5. **Demo Sample Apps** (`lakerunner-demo-sample-apps.yaml`) - Optional test applications
+
+### Dependency Diagram
+
+```
+lakerunner-common (required)
+├── lakerunner-migration (required after common)
+├── lakerunner-services (required after common)
+├── lakerunner-demo-otel-collector (optional, after common)
+└── lakerunner-demo-sample-apps (optional, after services + otel-collector)
+```
+
+### Deployment Scenarios
+
+#### Minimal Deployment (Core Platform)
+
+```bash
+# 1. Core infrastructure
+aws cloudformation create-stack --stack-name lakerunner-common ...
+
+# 2. Database migration
+aws cloudformation create-stack --stack-name lakerunner-migration ...
+
+# 3. Services
+aws cloudformation create-stack --stack-name lakerunner-services ...
+```
+
+#### Full Deployment (With Telemetry Collection)
+
+```bash
+# 1. Core infrastructure
+aws cloudformation create-stack --stack-name lakerunner-common ...
+
+# 2. Database migration
+aws cloudformation create-stack --stack-name lakerunner-migration ...
+
+# 3. OTEL collector (optional, for telemetry ingestion)
+aws cloudformation create-stack --stack-name lakerunner-otel-collector ...
+
+# 4. Services (with OTLP enabled to point to collector)
+aws cloudformation create-stack --stack-name lakerunner-services \
+  --parameters ParameterKey=OtelEndpoint,ParameterValue="http://collector-dns:4318" ...
+
+# 5. Demo applications (optional, for testing)
+aws cloudformation create-stack --stack-name lakerunner-demo-apps \
+  --parameters ParameterKey=OtelCollectorStackName,ParameterValue="lakerunner-otel-collector" ...
+```
+
+### Cross-Stack Resource Sharing
+
+**Common Infrastructure exports:**
+
+- VPC ID, Private/Public Subnets
+- ECS Cluster ARN
+- Database endpoint, port, credentials ARN
+- EFS filesystem ID
+- S3 bucket name/ARN
+- Security groups
+
+**Services imports from Common:**
+
+- All infrastructure resources
+- Database credentials for app configuration
+- EFS for Grafana persistence
+
+**Migration imports from Common:**
+
+- Database connection details
+- ECS cluster for task execution
+- Network configuration
+
+**OTEL Collector imports from Common:**
+
+- VPC and networking for ALB
+- ECS cluster for service deployment
+
+**Demo Apps imports from:**
+
+- Common: ECS cluster, networking, security groups
+- Services: Task execution role, security groups
+- OTEL Collector: Telemetry endpoint URL
+
+## Complete Parameter Reference
+
+### Common Infrastructure Stack Parameters
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `VpcId` | AWS::EC2::VPC::Id | Yes | - | VPC where resources will be created |
+| `PrivateSubnets` | List<AWS::EC2::Subnet::Id> | Yes | - | Private subnet IDs for ECS/RDS/EFS (≥2 in different AZs) |
+| `PublicSubnets` | List<AWS::EC2::Subnet::Id> | No | - | Public subnet IDs for internet-facing ALB (≥2 in different AZs) |
+| `ApiKeysOverride` | String | No | "" | Custom API keys configuration in YAML format |
+| `StorageProfilesOverride` | String | No | "" | Custom storage profiles configuration in YAML format |
+
+### Migration Stack Parameters
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `CommonInfraStackName` | String | Yes | - | Name of the CommonInfra stack to import values from |
+| `ContainerImage` | String | No | public.ecr.aws/cardinalhq.io/lakerunner:v1.1.0 | Migration container image |
+| `Cpu` | String | No | "512" | Fargate CPU units (256/512/1024/2048/4096) |
+| `MemoryMiB` | String | No | "1024" | Fargate Memory in MiB (512/1024/2048/3072/4096/5120/6144/7168/8192) |
+
+### Services Stack Parameters
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `CommonInfraStackName` | String | Yes | - | Name of the CommonInfra stack to import values from |
+| `AlbScheme` | String | No | "internal" | ALB scheme: "internal" or "internet-facing" |
+| `OtelEndpoint` | String | No | "" | OTEL collector HTTP endpoint (e.g., http://collector-dns:4318) |
+| `GrafanaResetToken` | String | No | "" | Change this value to reset Grafana data (wipe EFS volume) |
+| `GoServicesImage` | String | No | public.ecr.aws/cardinalhq.io/lakerunner:v1.1.0 | Container image for Go services |
+| `QueryApiImage` | String | No | public.ecr.aws/cardinalhq.io/lakerunner/query-api:latest | Container image for query-api service |
+| `QueryWorkerImage` | String | No | public.ecr.aws/cardinalhq.io/lakerunner/query-worker:latest | Container image for query-worker service |
+| `GrafanaImage` | String | No | grafana/grafana:latest | Container image for Grafana service |
+
+### OTEL Collector Stack Parameters
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `CommonInfraStackName` | String | Yes | - | Name of the CommonInfra stack to import values from |
+| `LoadBalancerType` | String | No | "internal" | ALB type: "internal" or "internet-facing" |
+| `OrganizationId` | String | No | 12340000-0000-4000-8000-000000000000 | Organization ID for OTEL data routing |
+| `CollectorName` | String | No | "lakerunner" | Collector name for OTEL data routing |
+| `OtelCollectorImage` | String | No | public.ecr.aws/cardinalhq.io/cardinalhq-otel-collector:latest | OTEL collector container image |
+| `OtelConfigYaml` | String | No | "" | Custom OTEL collector configuration in YAML format |
+
+### Demo Sample Apps Stack Parameters
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `CommonInfraStackName` | String | Yes | - | Name of the CommonInfra stack to import values from |
+| `ServicesStackName` | String | Yes | - | Name of the Services stack to import ALB target groups from |
+| `OtelCollectorStackName` | String | Yes | - | Name of the OTEL Collector stack to get collector endpoint from |
+| `SampleAppImage` | String | No | public.ecr.aws/cardinalhq.io/lakerunner-demo/sample-app:latest | Container image for sample-app service |
 
 ## Configuration
 
@@ -220,5 +444,5 @@ Default configurations are stored in `lakerunner-stack-defaults.yaml` and includ
 
 - **[README.md](README.md)** - Main deployment guide (this document)
 - **[README-DEMO-APPS.md](README-DEMO-APPS.md)** - Demo applications and testing
-- **[README-OTEL-COLLECTOR.md](README-OTEL-COLLECTOR.md)** - OTEL collector setup  
+- **[README-OTEL-COLLECTOR.md](README-OTEL-COLLECTOR.md)** - OTEL collector setup
 - **[README-BUILDING.md](README-BUILDING.md)** - Building and development guide

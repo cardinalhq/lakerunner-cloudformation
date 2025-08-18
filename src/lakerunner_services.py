@@ -93,6 +93,13 @@ def create_services_template():
         Description="OPTIONAL: OTEL collector HTTP endpoint URL (e.g., http://collector-dns:4318). Leave blank to disable OTLP telemetry export."
     ))
 
+    # Grafana Reset Token
+    GrafanaResetToken = t.add_parameter(Parameter(
+        "GrafanaResetToken", Type="String",
+        Default="",
+        Description="OPTIONAL: Change this value to reset Grafana data (wipe EFS volume). Leave blank for normal operation. Use any string (e.g., timestamp) to trigger reset."
+    ))
+
     # ALB Configuration parameters
 
     AlbScheme = t.add_parameter(Parameter(
@@ -118,6 +125,10 @@ def create_services_template():
                 {
                     "Label": {"default": "Telemetry"},
                     "Parameters": ["OtelEndpoint"]
+                },
+                {
+                    "Label": {"default": "Grafana Configuration"},
+                    "Parameters": ["GrafanaResetToken"]
                 }
             ],
             "ParameterLabels": {
@@ -127,7 +138,8 @@ def create_services_template():
                 "QueryApiImage": {"default": "Query API Image"},
                 "QueryWorkerImage": {"default": "Query Worker Image"},
                 "GrafanaImage": {"default": "Grafana Image"},
-                "OtelEndpoint": {"default": "OTEL Collector Endpoint"}
+                "OtelEndpoint": {"default": "OTEL Collector Endpoint"},
+                "GrafanaResetToken": {"default": "Grafana Reset Token"}
             }
         }
     })
@@ -476,7 +488,7 @@ def create_services_template():
         Name=Sub("${AWS::StackName}-grafana"),
         Description="Grafana admin password",
         GenerateSecretString=GenerateSecretString(
-            SecretStringTemplate='{"username": "admin"}',
+            SecretStringTemplate='{"username": "lakerunner"}',
             GenerateStringKey='password',
             ExcludeCharacters=' !"#$%&\'()*+,./:;<=>?@[\\]^`{|}~',
             PasswordLength=32
@@ -597,7 +609,11 @@ def create_services_template():
         sensitive_keys = {'TOKEN_HMAC256_KEY', 'GF_SECURITY_ADMIN_PASSWORD'}
         for key, value in service_env.items():
             if key not in sensitive_keys:
-                base_env.append(Environment(Name=key, Value=value))
+                # Special handling for GF_RESET_TOKEN to use parameter instead of defaults
+                if key == 'GF_RESET_TOKEN':
+                    base_env.append(Environment(Name=key, Value=Ref(GrafanaResetToken)))
+                else:
+                    base_env.append(Environment(Name=key, Value=value))
 
         # Build secrets
         secrets = [
@@ -686,10 +702,33 @@ def create_services_template():
         # Special handling for Grafana container command
         container_command = service_config.get('command', [])
         if service_name == 'grafana':
-            # For Grafana, we need to set up the datasource provisioning before starting
+            # For Grafana, we need to handle reset logic and set up datasource provisioning before starting
             container_command = [
                 "/bin/sh", "-c",
                 '''
+                # Handle Grafana reset logic
+                RESET_TOKEN_FILE="/var/lib/grafana/.reset_token"
+
+                if [ -n "$GF_RESET_TOKEN" ]; then
+                    # Check if reset token has changed
+                    if [ ! -f "$RESET_TOKEN_FILE" ] || [ "$(cat $RESET_TOKEN_FILE 2>/dev/null)" != "$GF_RESET_TOKEN" ]; then
+                        echo "Reset token changed or not found. Wiping Grafana data..."
+                        # Remove all Grafana data except our tracking file
+                        find /var/lib/grafana -mindepth 1 -not -name ".reset_token" -delete 2>/dev/null || true
+                        # Store new reset token
+                        echo "$GF_RESET_TOKEN" > "$RESET_TOKEN_FILE"
+                        echo "Grafana data wiped. Starting with fresh configuration."
+                    else
+                        echo "Reset token unchanged. Preserving existing Grafana data."
+                    fi
+                else
+                    # No reset token set, just ensure we have the tracking file if data exists
+                    if [ -d "/var/lib/grafana" ] && [ ! -f "$RESET_TOKEN_FILE" ]; then
+                        # Create empty token file to track that we've been here
+                        touch "$RESET_TOKEN_FILE"
+                    fi
+                fi
+
                 # Get provisioning base directory from environment variable
                 PROVISIONING_DIR="${GF_PATHS_PROVISIONING:-/etc/grafana/provisioning}"
 

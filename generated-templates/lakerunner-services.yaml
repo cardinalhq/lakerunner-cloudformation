@@ -26,6 +26,10 @@ Metadata:
           default: Telemetry
         Parameters:
           - OtelEndpoint
+      - Label:
+          default: Grafana Configuration
+        Parameters:
+          - GrafanaResetToken
     ParameterLabels:
       AlbScheme:
         default: ALB Scheme
@@ -35,6 +39,8 @@ Metadata:
         default: Go Services Image
       GrafanaImage:
         default: Grafana Image
+      GrafanaResetToken:
+        default: Grafana Reset Token
       OtelEndpoint:
         default: OTEL Collector Endpoint
       QueryApiImage:
@@ -129,6 +135,10 @@ Parameters:
   GrafanaImage:
     Default: grafana/grafana:latest
     Description: Container image for Grafana service
+    Type: String
+  GrafanaResetToken:
+    Default: ''
+    Description: 'OPTIONAL: Change this value to reset Grafana data (wipe EFS volume). Leave blank for normal operation. Use any string (e.g., timestamp) to trigger reset.'
     Type: String
   OtelEndpoint:
     Default: ''
@@ -283,7 +293,7 @@ Resources:
         ExcludeCharacters: ' !"#$%&''()*+,./:;<=>?@[\]^`{|}~'
         GenerateStringKey: password
         PasswordLength: 32
-        SecretStringTemplate: '{"username": "admin"}'
+        SecretStringTemplate: '{"username": "lakerunner"}'
       Name: !Sub '${AWS::StackName}-grafana'
     Type: AWS::SecretsManager::Secret
   Listener3000:
@@ -622,9 +632,17 @@ Resources:
         - Command:
             - /bin/sh
             - -c
-            - "\n                # Get provisioning base directory from environment variable\n                PROVISIONING_DIR=\"${GF_PATHS_PROVISIONING:-/etc/grafana/provisioning}\"\n\n               \
-              \ # Create provisioning directories\n                mkdir -p \"$PROVISIONING_DIR/datasources\"\n\n                # Write datasource configuration from environment variable\n            \
-              \    echo \"$GRAFANA_DATASOURCE_CONFIG\" > \"$PROVISIONING_DIR/datasources/cardinal.yaml\"\n\n                # Start Grafana\n                exec /run.sh\n                "
+            - "\n                # Handle Grafana reset logic\n                RESET_TOKEN_FILE=\"/var/lib/grafana/.reset_token\"\n                \n                if [ -n \"$GF_RESET_TOKEN\" ]; then\n\
+              \                    # Check if reset token has changed\n                    if [ ! -f \"$RESET_TOKEN_FILE\" ] || [ \"$(cat $RESET_TOKEN_FILE 2>/dev/null)\" != \"$GF_RESET_TOKEN\" ]; then\n\
+              \                        echo \"Reset token changed or not found. Wiping Grafana data...\"\n                        # Remove all Grafana data except our tracking file\n                   \
+              \     find /var/lib/grafana -mindepth 1 -not -name \".reset_token\" -delete 2>/dev/null || true\n                        # Store new reset token\n                        echo \"$GF_RESET_TOKEN\"\
+              \ > \"$RESET_TOKEN_FILE\"\n                        echo \"Grafana data wiped. Starting with fresh configuration.\"\n                    else\n                        echo \"Reset token unchanged.\
+              \ Preserving existing Grafana data.\"\n                    fi\n                else\n                    # No reset token set, just ensure we have the tracking file if data exists\n      \
+              \              if [ -d \"/var/lib/grafana\" ] && [ ! -f \"$RESET_TOKEN_FILE\" ]; then\n                        # Create empty token file to track that we've been here\n                   \
+              \     touch \"$RESET_TOKEN_FILE\"\n                    fi\n                fi\n\n                # Get provisioning base directory from environment variable\n                PROVISIONING_DIR=\"\
+              ${GF_PATHS_PROVISIONING:-/etc/grafana/provisioning}\"\n\n                # Create provisioning directories\n                mkdir -p \"$PROVISIONING_DIR/datasources\"\n\n                #\
+              \ Write datasource configuration from environment variable\n                echo \"$GRAFANA_DATASOURCE_CONFIG\" > \"$PROVISIONING_DIR/datasources/cardinal.yaml\"\n\n                # Start\
+              \ Grafana\n                exec /run.sh\n                "
           Environment:
             - Name: BUMP_REVISION
               Value: '1'
@@ -680,7 +698,7 @@ Resources:
                 - 'true'
                 - !Ref 'AWS::NoValue'
             - Name: GF_SECURITY_ADMIN_USER
-              Value: admin
+              Value: lakerunner
             - Name: GF_SERVER_HTTP_PORT
               Value: '3000'
             - Name: GF_SERVER_ROOT_URL
@@ -689,6 +707,8 @@ Resources:
               Value: https://github.com/cardinalhq/cardinalhq-lakerunner-datasource/raw/refs/heads/main/cardinalhq-lakerunner-datasource.zip;cardinalhq-lakerunner-datasource
             - Name: GF_PATHS_PROVISIONING
               Value: /etc/grafana/provisioning
+            - Name: GF_RESET_TOKEN
+              Value: !Ref 'GrafanaResetToken'
           HealthCheck:
             Command:
               - curl
