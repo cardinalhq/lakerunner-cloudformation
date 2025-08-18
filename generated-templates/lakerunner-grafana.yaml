@@ -16,6 +16,7 @@ Metadata:
           default: Container Images
         Parameters:
           - GrafanaImage
+          - GrafanaInitImage
       - Label:
           default: Grafana Configuration
         Parameters:
@@ -27,6 +28,8 @@ Metadata:
         default: Common Infra Stack Name
       GrafanaImage:
         default: Grafana Image
+      GrafanaInitImage:
+        default: Grafana Init Image
       GrafanaResetToken:
         default: Grafana Reset Token
       ServicesStackName:
@@ -68,6 +71,10 @@ Parameters:
   GrafanaImage:
     Default: grafana/grafana:latest
     Description: Container image for Grafana service
+    Type: String
+  GrafanaInitImage:
+    Default: public.ecr.aws/cardinalhq.io/lakerunner-grafana-initcontainer:latest
+    Description: Container image for Grafana init container
     Type: String
   GrafanaResetToken:
     Default: ''
@@ -255,61 +262,7 @@ Resources:
   GrafanaTaskDef:
     Properties:
       ContainerDefinitions:
-        - Command:
-            - /bin/sh
-            - -c
-            - |2
-
-              # Install curl for health checks and other tools
-              apk add --no-cache curl
-
-              # Set up provisioning directory
-              PROVISIONING_DIR="${GF_PATHS_PROVISIONING:-/etc/grafana/provisioning}"
-              DATASOURCES_DIR="$PROVISIONING_DIR/datasources"
-              RESET_TOKEN_FILE="/var/lib/grafana/.grafana_reset_token"
-
-              echo "Provisioning directory: $PROVISIONING_DIR"
-              echo "Datasources directory: $DATASOURCES_DIR"
-              echo "Reset token file: $RESET_TOKEN_FILE"
-
-              # Create provisioning directories
-              mkdir -p "$DATASOURCES_DIR"
-
-              # All containers run as root, so no ownership changes needed
-
-              # Handle reset token logic
-              if [ -n "$RESET_TOKEN" ] && [ "$RESET_TOKEN" != "" ]; then
-                  echo "Reset token provided: $RESET_TOKEN"
-
-                  # Check if token file exists and compare
-                  if [ -f "$RESET_TOKEN_FILE" ]; then
-                      STORED_TOKEN=$(cat "$RESET_TOKEN_FILE")
-                      if [ "$STORED_TOKEN" != "$RESET_TOKEN" ]; then
-                          echo "Reset token changed from '$STORED_TOKEN' to '$RESET_TOKEN' - wiping Grafana data"
-                          # Remove all Grafana data
-                          find /var/lib/grafana -mindepth 1 -delete || true
-                          # Create new token file
-                          echo "$RESET_TOKEN" > "$RESET_TOKEN_FILE"
-                      else
-                          echo "Reset token unchanged - no reset needed"
-                      fi
-                  else
-                      echo "First time with reset token - storing: $RESET_TOKEN"
-                      echo "$RESET_TOKEN" > "$RESET_TOKEN_FILE"
-                  fi
-              else
-                  echo "No reset token provided - skipping reset logic"
-              fi
-
-              # Write datasource configuration
-              echo "Writing Grafana datasource configuration..."
-              # The datasource config comes from SSM parameter as YAML, just write it directly
-              cat > "$DATASOURCES_DIR/cardinal.yaml" << DATASOURCE_EOF
-              $GRAFANA_DATASOURCE_CONFIG
-              DATASOURCE_EOF
-
-              echo "Grafana initialization complete"
-          Environment:
+        - Environment:
             - Name: PROVISIONING_DIR
               Value: ${GF_PATHS_PROVISIONING:-/etc/grafana/provisioning}
             - Name: RESET_TOKEN
@@ -322,7 +275,7 @@ Resources:
                       - ${ServicesStackName}-AlbDNS
                       - ServicesStackName: !Ref 'ServicesStackName'
           Essential: false
-          Image: public.ecr.aws/docker/library/alpine:latest
+          Image: !Ref 'GrafanaInitImage'
           LogConfiguration:
             LogDriver: awslogs
             Options:

@@ -4,6 +4,7 @@
 # Container Images configuration
 images:
   grafana: "grafana/grafana:latest"
+  grafana_init: "public.ecr.aws/cardinalhq.io/lakerunner-grafana-initcontainer:latest"
 
 # Grafana service configuration
 grafana:

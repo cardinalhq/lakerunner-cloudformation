@@ -166,6 +166,7 @@ class TestGrafanaTemplateSimple(unittest.TestCase):
         
         # Should have Grafana-specific parameters
         assert "GrafanaImage" in parameters
+        assert "GrafanaInitImage" in parameters
         assert "GrafanaResetToken" in parameters
         assert "AlbScheme" in parameters
     
