@@ -136,11 +136,12 @@ def create_grafana_setup_template():
             SubnetIds=Split(",", ImportValue(Sub("${CommonInfraStackName}-PrivateSubnets",
                                                 CommonInfraStackName=Ref(common_infra_stack_name))))
         ),
+        Layers=["arn:aws:lambda:us-east-1:898466741470:layer:psycopg2-py39:1"],
         Code=Code(ZipFile="""
 import json
 import boto3
-import psycopg2
 import urllib.request
+import psycopg2
 
 def send_response(event, context, status, data=None, reason=""):
     resp = {

@@ -47,7 +47,7 @@ Resources:
   CreateDbFunction:
     Properties:
       Code:
-        ZipFile: "\nimport json\nimport boto3\nimport psycopg2\nimport urllib.request\n\ndef send_response(event, context, status, data=None, reason=\"\"):\n    resp = {\n        \"Status\": status,\n \
+        ZipFile: "\nimport json\nimport boto3\nimport urllib.request\nimport psycopg2\n\ndef send_response(event, context, status, data=None, reason=\"\"):\n    resp = {\n        \"Status\": status,\n \
           \       \"Reason\": f\"{reason} See CloudWatch Logs for details: {context.log_stream_name}\",\n        \"PhysicalResourceId\": event.get(\"PhysicalResourceId\") or \"GrafanaDbSetup\",\n      \
           \  \"StackId\": event[\"StackId\"],\n        \"RequestId\": event[\"RequestId\"],\n        \"LogicalResourceId\": event[\"LogicalResourceId\"],\n        \"NoEcho\": False,\n        \"Data\": data\
           \ or {}\n    }\n    body = json.dumps(resp).encode(\"utf-8\")\n    req = urllib.request.Request(event[\"ResponseURL\"], data=body, method=\"PUT\")\n    req.add_header(\"content-type\", \"\")\n\
@@ -75,6 +75,8 @@ Resources:
           \ as e:\n        print(\"Exception:\", str(e))\n        send_response(event, context, \"FAILED\", {\"Error\": str(e)}, reason=str(e))\n"
       FunctionName: !Sub '${AWS::StackName}-grafana-db-setup'
       Handler: index.handler
+      Layers:
+        - arn:aws:lambda:us-east-1:898466741470:layer:psycopg2-py39:1
       Role: !GetAtt 'CreateDbFunctionRole.Arn'
       Runtime: python3.13
       Timeout: 300
