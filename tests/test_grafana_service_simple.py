@@ -163,7 +163,6 @@ class TestGrafanaTemplateSimple(unittest.TestCase):
         # Should have required stack name parameters
         assert "CommonInfraStackName" in parameters
         assert "ServicesStackName" in parameters
-        assert "GrafanaSetupStackName" in parameters
         
         # Should have Grafana-specific parameters
         assert "GrafanaImage" in parameters

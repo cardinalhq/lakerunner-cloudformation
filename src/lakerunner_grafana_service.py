@@ -66,10 +66,6 @@ def create_grafana_template():
         Description="REQUIRED: Name of the Services stack to import Query API ALB DNS and port from."
     ))
 
-    GrafanaSetupStackName = t.add_parameter(Parameter(
-        "GrafanaSetupStackName", Type="String",
-        Description="REQUIRED: Name of the Grafana Setup stack to import database credentials from."
-    ))
 
     # Container image overrides for air-gapped deployments
     GrafanaImage = t.add_parameter(Parameter(
@@ -106,7 +102,7 @@ def create_grafana_template():
             "ParameterGroups": [
                 {
                     "Label": {"default": "Infrastructure"},
-                    "Parameters": ["CommonInfraStackName", "ServicesStackName", "GrafanaSetupStackName", "AlbScheme"]
+                    "Parameters": ["CommonInfraStackName", "ServicesStackName", "AlbScheme"]
                 },
                 {
                     "Label": {"default": "Container Images"},
@@ -120,7 +116,6 @@ def create_grafana_template():
             "ParameterLabels": {
                 "CommonInfraStackName": {"default": "Common Infra Stack Name"},
                 "ServicesStackName": {"default": "Services Stack Name"},
-                "GrafanaSetupStackName": {"default": "Grafana Setup Stack Name"},
                 "AlbScheme": {"default": "ALB Scheme"},
                 "GrafanaImage": {"default": "Grafana Image"},
                 "GrafanaInitImage": {"default": "Grafana Init Image"},
@@ -407,9 +402,9 @@ def create_grafana_template():
 
     # Add database connection environment variables
     base_env.extend([
-        Environment(Name="GF_DATABASE_HOST", Value=ImportValue(Sub("${GrafanaSetupStackName}-DbHost", GrafanaSetupStackName=Ref(GrafanaSetupStackName)))),
-        Environment(Name="GF_DATABASE_PORT", Value=ImportValue(Sub("${GrafanaSetupStackName}-DbPort", GrafanaSetupStackName=Ref(GrafanaSetupStackName)))),
-        Environment(Name="GF_DATABASE_NAME", Value=ImportValue(Sub("${GrafanaSetupStackName}-DbName", GrafanaSetupStackName=Ref(GrafanaSetupStackName)))),
+        Environment(Name="GF_DATABASE_HOST", Value=ImportValue(Sub("${CommonInfraStackName}-DbEndpoint", CommonInfraStackName=Ref(CommonInfraStackName)))),
+        Environment(Name="GF_DATABASE_PORT", Value=ImportValue(Sub("${CommonInfraStackName}-DbPort", CommonInfraStackName=Ref(CommonInfraStackName)))),
+        Environment(Name="GF_DATABASE_NAME", Value="lakerunner"),
     ])
 
     # Add Grafana-specific environment variables (excluding sensitive ones)
@@ -431,11 +426,11 @@ def create_grafana_template():
         ),
         EcsSecret(
             Name="GF_DATABASE_USER",
-            ValueFrom=Sub("${DbSecretArn}:username::", DbSecretArn=ImportValue(Sub("${GrafanaSetupStackName}-DbSecretArn", GrafanaSetupStackName=Ref(GrafanaSetupStackName))))
+            ValueFrom=Sub("${DbSecretArn}:username::", DbSecretArn=ImportValue(Sub("${CommonInfraStackName}-DbSecretArn", CommonInfraStackName=Ref(CommonInfraStackName))))
         ),
         EcsSecret(
             Name="GF_DATABASE_PASSWORD", 
-            ValueFrom=Sub("${DbSecretArn}:password::", DbSecretArn=ImportValue(Sub("${GrafanaSetupStackName}-DbSecretArn", GrafanaSetupStackName=Ref(GrafanaSetupStackName))))
+            ValueFrom=Sub("${DbSecretArn}:password::", DbSecretArn=ImportValue(Sub("${CommonInfraStackName}-DbSecretArn", CommonInfraStackName=Ref(CommonInfraStackName))))
         ),
         EcsSecret(
             Name="GRAFANA_DATASOURCE_CONFIG",
