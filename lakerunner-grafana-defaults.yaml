@@ -1,0 +1,37 @@
+# Grafana configuration for Lakerunner deployment
+# This file contains configuration for the standalone Grafana stack
+
+# Container Images configuration
+images:
+  grafana: "grafana/grafana:latest"
+
+# Grafana service configuration
+grafana:
+  image: "grafana/grafana:latest"
+  cpu: 512
+  memory_mib: 1024
+  replicas: 1
+  ingress:
+    port: 3000
+    health_check_path: "/api/health"
+  environment:
+    GF_SECURITY_ADMIN_USER: "lakerunner"
+    GF_SECURITY_ADMIN_PASSWORD: "from_secret"  # This will be replaced with secret from AWS Secrets Manager
+    GF_SERVER_HTTP_PORT: "3000"
+    GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s:%(http_port)s"
+    GF_INSTALL_PLUGINS: "https://github.com/cardinalhq/cardinalhq-lakerunner-datasource/raw/refs/heads/main/cardinalhq-lakerunner-datasource.zip;cardinalhq-lakerunner-datasource"
+    GF_PATHS_PROVISIONING: "/etc/grafana/provisioning"
+    GF_RESET_TOKEN: ""
+  efs_mounts:
+    - container_path: "/var/lib/grafana"
+      efs_path: "/grafana"
+      access_point_name: "grafana"
+  health_check:
+    type: "curl"
+    command: ["curl", "-f", "http://localhost:3000/api/health"]
+
+# API Keys configuration (for datasource setup)
+api_keys:
+  - organization_id: 12340000-0000-4000-8000-000000000000
+    keys:
+      - f70603aa00e6f67999cc66e336134887
