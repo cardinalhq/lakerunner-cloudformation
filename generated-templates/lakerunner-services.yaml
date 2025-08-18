@@ -353,6 +353,8 @@ Resources:
       RetentionInDays: 14
     Type: AWS::Logs::LogGroup
   ServiceGrafana:
+    DependsOn:
+      - Listener3000
     Properties:
       Cluster: !ImportValue
         Fn::Sub:
@@ -507,6 +509,8 @@ Resources:
       TaskDefinition: !Ref 'TaskDefLakerunnerPubsubSqs'
     Type: AWS::ECS::Service
   ServiceLakerunnerQueryApi:
+    DependsOn:
+      - Listener7101
     Properties:
       Cluster: !ImportValue
         Fn::Sub:
@@ -616,9 +620,9 @@ Resources:
         - Command:
             - /bin/sh
             - -c
-            - "\n                # Create provisioning directories\n                mkdir -p /etc/grafana/provisioning/datasources\n                \n                # Write datasource configuration from\
-              \ environment variable\n                echo \"$GRAFANA_DATASOURCE_CONFIG\" > /etc/grafana/provisioning/datasources/cardinal.yaml\n                \n                # Start Grafana\n     \
-              \           exec /run.sh\n                "
+            - "\n                # Create provisioning directories\n                mkdir -p /etc/grafana/provisioning/datasources\n\n                # Write datasource configuration from environment variable\n\
+              \                echo \"$GRAFANA_DATASOURCE_CONFIG\" > /etc/grafana/provisioning/datasources/cardinal.yaml\n\n                # Start Grafana\n                exec /run.sh\n              \
+              \  "
           Environment:
             - Name: BUMP_REVISION
               Value: '1'
@@ -1898,3 +1902,4 @@ Resources:
         SecretStringTemplate: '{}'
       Name: !Sub '${AWS::StackName}-token-key'
     Type: AWS::SecretsManager::Secret
+

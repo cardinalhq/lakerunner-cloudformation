@@ -784,6 +784,10 @@ def create_services_template():
                 ContainerPort=ingress['port'],
                 TargetGroupArn=target_groups[service_name]['target_group_arn']
             )]
+            # Add dependency on the corresponding listener to ensure target group is attached to ALB
+            port = ingress['port']
+            listener_name = f"Listener{port}"
+            ecs_service.DependsOn = [listener_name]
 
     # -----------------------
     # Outputs
