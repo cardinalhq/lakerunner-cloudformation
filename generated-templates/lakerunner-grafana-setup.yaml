@@ -75,10 +75,8 @@ Resources:
           \ as e:\n        print(\"Exception:\", str(e))\n        send_response(event, context, \"FAILED\", {\"Error\": str(e)}, reason=str(e))\n"
       FunctionName: !Sub '${AWS::StackName}-grafana-db-setup'
       Handler: index.handler
-      Layers:
-        - arn:aws:lambda:us-east-1:898466741470:layer:psycopg2-py39:1
       Role: !GetAtt 'CreateDbFunctionRole.Arn'
-      Runtime: python3.13
+      Runtime: python3.9
       Timeout: 300
       VpcConfig:
         SecurityGroupIds:
