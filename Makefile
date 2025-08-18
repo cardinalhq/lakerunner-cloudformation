@@ -35,6 +35,9 @@ test-services:	## Run simplified tests for Services template
 test-migration:	## Run simplified tests for Migration template
 	source $(VENV_DIR)/bin/activate && $(PYTEST) tests/test_migration_simple.py -v
 
+test-grafana:	## Run simplified tests for Grafana template
+	source $(VENV_DIR)/bin/activate && $(PYTEST) tests/test_grafana_simple.py -v
+
 test-params:	## Run parameter and condition validation tests
 	source $(VENV_DIR)/bin/activate && $(PYTEST) tests/test_parameter_validation.py tests/test_condition_validation.py -v
 
