@@ -5,8 +5,8 @@ Conditions:
       - ''
   HasPublicSubnets: !Not
     - !Equals
-      - !Select
-        - 0
+      - !Join
+        - ','
         - !Ref 'PublicSubnets'
       - ''
   HasStorageProfilesOverride: !Not
@@ -84,14 +84,9 @@ Outputs:
       Name: !Sub '${AWS::StackName}-PublicSubnets'
     Value: !If
       - HasPublicSubnets
-      - !Sub
-        - ${Subnet1},${Subnet2}
-        - Subnet1: !Select
-            - 0
-            - !Ref 'PublicSubnets'
-          Subnet2: !Select
-            - 1
-            - !Ref 'PublicSubnets'
+      - !Join
+        - ','
+        - !Ref 'PublicSubnets'
       - ''
   SupportsInternetFacingAlb:
     Description: Whether this CommonInfra stack supports internet-facing ALBs (requires PublicSubnets)

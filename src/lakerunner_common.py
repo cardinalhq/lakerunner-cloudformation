@@ -17,7 +17,7 @@ import yaml
 import os
 from troposphere import (
     Template, Parameter, Ref, Sub, GetAtt, If, Equals, NoValue, Export, Output,
-    Select, Not, Tags
+    Select, Not, Tags, Join
 )
 from troposphere.ec2 import SecurityGroup, SecurityGroupIngress
 from troposphere.ecs import Cluster
@@ -102,7 +102,7 @@ t.set_metadata({
 # -----------------------
 t.add_condition("HasApiKeysOverride", Not(Equals(Ref(ApiKeysOverride), "")))
 t.add_condition("HasStorageProfilesOverride", Not(Equals(Ref(StorageProfilesOverride), "")))
-t.add_condition("HasPublicSubnets", Not(Equals(Select(0, Ref(PublicSubnets)), "")))
+t.add_condition("HasPublicSubnets", Not(Equals(Join(",", Ref(PublicSubnets)), "")))
 
 # Helper function to load defaults
 def load_defaults():
@@ -349,7 +349,7 @@ t.add_output(Output(
     "PublicSubnetsOut",
     Value=If(
         "HasPublicSubnets",
-        Sub("${Subnet1},${Subnet2}", Subnet1=Select(0, Ref(PublicSubnets)), Subnet2=Select(1, Ref(PublicSubnets))),
+        Join(",", Ref(PublicSubnets)),
         ""
     ),
     Export=Export(name=Sub("${AWS::StackName}-PublicSubnets"))
