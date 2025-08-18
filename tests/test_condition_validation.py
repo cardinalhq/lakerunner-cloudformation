@@ -169,7 +169,6 @@ class TestConditionValidation:
             template=json.loads(template.to_json()),
             imports={
                 "VpcId": "vpc-12345678",
-                "PublicSubnets": "subnet-12345,subnet-67890",
                 "PrivateSubnets": "subnet-abcde,subnet-fghij"
             }
         )
@@ -181,8 +180,8 @@ class TestConditionValidation:
         conditions = cf_template.template.get("Conditions", {})
         assert len(conditions) > 0
         
-        # Verify specific conditions exist and have proper structure
-        expected_conditions = ["IsInternetFacing", "HasApiKeysOverride", "HasStorageProfilesOverride"]
+        # Verify specific conditions exist and have proper structure (ALB conditions moved to Services stack)
+        expected_conditions = ["HasApiKeysOverride", "HasStorageProfilesOverride"]
         for condition_name in expected_conditions:
             assert condition_name in conditions, f"Expected condition {condition_name} not found"
 

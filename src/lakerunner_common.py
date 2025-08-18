@@ -21,9 +21,6 @@ from troposphere import (
 )
 from troposphere.ec2 import SecurityGroup, SecurityGroupIngress
 from troposphere.ecs import Cluster
-from troposphere.elasticloadbalancingv2 import LoadBalancer, Listener, TargetGroup, Matcher
-from troposphere.elasticloadbalancingv2 import Action as AlbAction
-from troposphere.elasticloadbalancingv2 import TargetGroupAttribute
 from troposphere.s3 import (
     Bucket, LifecycleRule, LifecycleConfiguration,
     NotificationConfiguration, QueueConfigurations,
@@ -51,21 +48,13 @@ PublicSubnets = t.add_parameter(Parameter(
     "PublicSubnets",
     Type="List<AWS::EC2::Subnet::Id>",
     Default="",
-    Description="Public subnet IDs (for internet-facing ALB). Required when AlbScheme=internet-facing. Provide at least two in different AZs."
+    Description="Public subnet IDs (for internet-facing ALB). Required when ALB uses internet-facing scheme. Provide at least two in different AZs."
 ))
 
 PrivateSubnets = t.add_parameter(Parameter(
     "PrivateSubnets",
     Type="List<AWS::EC2::Subnet::Id>",
     Description="REQUIRED: Private subnet IDs (for RDS/ECS/EFS). Provide at least two in different AZs."
-))
-
-AlbScheme = t.add_parameter(Parameter(
-    "AlbScheme",
-    Type="String",
-    AllowedValues=["internet-facing", "internal"],
-    Default="internal",
-    Description="Load balancer scheme: 'internet-facing' for external access or 'internal' for internal access only."
 ))
 
 # Configuration overrides (optional multi-line parameters)
@@ -94,19 +83,14 @@ t.set_metadata({
                 "Parameters": ["VpcId", "PublicSubnets", "PrivateSubnets"]
             },
             {
-                "Label": {"default": "Load Balancer"},
-                "Parameters": ["AlbScheme"]
-            },
-            {
                 "Label": {"default": "Configuration Overrides (Advanced)"},
                 "Parameters": ["ApiKeysOverride", "StorageProfilesOverride"]
             }
         ],
         "ParameterLabels": {
             "VpcId": {"default": "VPC Id"},
-            "PublicSubnets": {"default": "Public Subnets (required for internet-facing ALB)"},
+            "PublicSubnets": {"default": "Public Subnets (for ALB internet-facing)"},
             "PrivateSubnets": {"default": "Private Subnets (for ECS/RDS/EFS)"},
-            "AlbScheme": {"default": "Load Balancer Scheme"},
             "ApiKeysOverride": {"default": "Custom API Keys (YAML)"},
             "StorageProfilesOverride": {"default": "Custom Storage Profiles (YAML)"}
         }
@@ -116,7 +100,6 @@ t.set_metadata({
 # -----------------------
 # Conditions
 # -----------------------
-t.add_condition("IsInternetFacing", Equals(Ref(AlbScheme), "internet-facing"))
 t.add_condition("HasApiKeysOverride", Not(Equals(Ref(ApiKeysOverride), "")))
 t.add_condition("HasStorageProfilesOverride", Not(Equals(Ref(StorageProfilesOverride), "")))
 t.add_condition("HasPublicSubnets", Not(Equals(Select(0, Ref(PublicSubnets)), "")))
@@ -177,109 +160,6 @@ t.add_resource(SecurityGroupIngress(
     Description="task-to-EFS NFS",
 ))
 
-# ALB SG
-AlbSG = t.add_resource(SecurityGroup(
-    "AlbSecurityGroup",
-    GroupDescription="Security group for ALB",
-    VpcId=Ref(VpcId),
-    SecurityGroupEgress=[{
-        "IpProtocol": "-1",
-        "CidrIp": "0.0.0.0/0",
-        "Description": "Allow all outbound"
-    }]
-))
-
-t.add_resource(SecurityGroupIngress(
-    "Alb3000Open",
-    GroupId=Ref(AlbSG),
-    IpProtocol="tcp",
-    FromPort=3000, ToPort=3000,
-    CidrIp="0.0.0.0/0",
-    Description="HTTP 3000",
-))
-t.add_resource(SecurityGroupIngress(
-    "Alb7101Open",
-    GroupId=Ref(AlbSG),
-    IpProtocol="tcp",
-    FromPort=7101, ToPort=7101,
-    CidrIp="0.0.0.0/0",
-    Description="HTTP 7101",
-))
-
-for port in (3000, 7101):
-    t.add_resource(SecurityGroupIngress(
-        f"TaskFromAlb{port}",
-        GroupId=Ref(TaskSG),
-        IpProtocol="tcp",
-        FromPort=port, ToPort=port,
-        SourceSecurityGroupId=Ref(AlbSG),
-        Description=f"ALB to tasks {port}",
-    ))
-
-# -----------------------
-# ALB + listeners + target groups
-# -----------------------
-Alb = t.add_resource(LoadBalancer(
-    "Alb",
-    Scheme=Ref(AlbScheme),
-    SecurityGroups=[Ref(AlbSG)],
-    Subnets=If(
-        "IsInternetFacing",
-        Ref(PublicSubnets),
-        Ref(PrivateSubnets)
-    ),
-    Type="application",
-))
-
-Tg7101 = t.add_resource(TargetGroup(
-    "Tg7101",
-    Port=7101, Protocol="HTTP",
-    VpcId=Ref(VpcId),
-    TargetType="ip",
-    HealthCheckPath="/ready",
-    HealthCheckProtocol="HTTP",
-    HealthCheckIntervalSeconds=30,
-    HealthCheckTimeoutSeconds=5,
-    HealthyThresholdCount=2,
-    UnhealthyThresholdCount=3,
-    Matcher=Matcher(HttpCode="200"),
-    TargetGroupAttributes=[
-        TargetGroupAttribute(Key="stickiness.enabled", Value="false"),
-        TargetGroupAttribute(Key="deregistration_delay.timeout_seconds", Value="30")
-    ]
-))
-Tg3000 = t.add_resource(TargetGroup(
-    "Tg3000",
-    Port=3000, Protocol="HTTP",
-    VpcId=Ref(VpcId),
-    TargetType="ip",
-    HealthCheckPath="/api/health",
-    HealthCheckProtocol="HTTP",
-    HealthCheckIntervalSeconds=30,
-    HealthCheckTimeoutSeconds=5,
-    HealthyThresholdCount=2,
-    UnhealthyThresholdCount=3,
-    Matcher=Matcher(HttpCode="200"),
-    TargetGroupAttributes=[
-        TargetGroupAttribute(Key="stickiness.enabled", Value="false"),
-        TargetGroupAttribute(Key="deregistration_delay.timeout_seconds", Value="30")
-    ]
-))
-
-t.add_resource(Listener(
-    "Listener7101",
-    LoadBalancerArn=Ref(Alb),
-    Port="7101",
-    Protocol="HTTP",
-    DefaultActions=[AlbAction(Type="forward", TargetGroupArn=Ref(Tg7101))]
-))
-t.add_resource(Listener(
-    "Listener3000",
-    LoadBalancerArn=Ref(Alb),
-    Port="3000",
-    Protocol="HTTP",
-    DefaultActions=[AlbAction(Type="forward", TargetGroupArn=Ref(Tg3000))]
-))
 
 # -----------------------
 # ECS cluster (always create)
@@ -456,26 +336,6 @@ t.add_resource(SsmParameter(
 # Outputs (for access in other stacks)
 # -----------------------
 t.add_output(Output(
-    "AlbDNS",
-    Value=GetAtt(Alb, "DNSName"),
-    Export=Export(name=Sub("${AWS::StackName}-AlbDNS"))
-))
-t.add_output(Output(
-    "AlbArn",
-    Value=Ref(Alb),
-    Export=Export(name=Sub("${AWS::StackName}-AlbArn"))
-))
-t.add_output(Output(
-    "Tg7101Arn",
-    Value=Ref(Tg7101),
-    Export=Export(name=Sub("${AWS::StackName}-Tg7101Arn"))
-))
-t.add_output(Output(
-    "Tg3000Arn",
-    Value=Ref(Tg3000),
-    Export=Export(name=Sub("${AWS::StackName}-Tg3000Arn"))
-))
-t.add_output(Output(
     "TaskSecurityGroupId",
     Value=Ref(TaskSG),
     Export=Export(name=Sub("${AWS::StackName}-TaskSGId"))
@@ -487,9 +347,12 @@ t.add_output(Output(
 ))
 t.add_output(Output(
     "PublicSubnetsOut",
-    Value=Sub("${Subnet1},${Subnet2}", Subnet1=Select(0, Ref(PublicSubnets)), Subnet2=Select(1, Ref(PublicSubnets))),
-    Export=Export(name=Sub("${AWS::StackName}-PublicSubnets")),
-    Condition="HasPublicSubnets"
+    Value=If(
+        "HasPublicSubnets",
+        Sub("${Subnet1},${Subnet2}", Subnet1=Select(0, Ref(PublicSubnets)), Subnet2=Select(1, Ref(PublicSubnets))),
+        ""
+    ),
+    Export=Export(name=Sub("${AWS::StackName}-PublicSubnets"))
 ))
 t.add_output(Output(
     "VpcIdOut",
@@ -497,11 +360,12 @@ t.add_output(Output(
     Export=Export(name=Sub("${AWS::StackName}-VpcId"))
 ))
 
-# Export ALB scheme so Services template can use appropriate subnets
+# Export whether internet-facing ALB is supported
 t.add_output(Output(
-    "AlbSchemeValue",
-    Value=Ref(AlbScheme),
-    Export=Export(name=Sub("${AWS::StackName}-AlbScheme"))
+    "SupportsInternetFacingAlb",
+    Value=If("HasPublicSubnets", "Yes", "No"),
+    Export=Export(name=Sub("${AWS::StackName}-SupportsInternetFacingAlb")),
+    Description="Whether this CommonInfra stack supports internet-facing ALBs (requires PublicSubnets)"
 ))
 
 print(t.to_yaml())

@@ -26,11 +26,14 @@ from troposphere.ecs import (
     LoadBalancer as EcsLoadBalancer, EFSVolumeConfiguration, AuthorizationConfig
 )
 from troposphere.iam import Role, Policy
-from troposphere.elasticloadbalancingv2 import TargetGroup, TargetGroupAttribute, Listener, Matcher
+from troposphere.elasticloadbalancingv2 import LoadBalancer, TargetGroup, TargetGroupAttribute, Listener, Matcher
 from troposphere.elasticloadbalancingv2 import Action as AlbAction
+from troposphere.ssm import Parameter as SSMParameter
+from troposphere.ec2 import SecurityGroup, SecurityGroupIngress
 from troposphere.efs import AccessPoint, PosixUser, RootDirectory, CreationInfo
 from troposphere.logs import LogGroup
 from troposphere.secretsmanager import Secret, GenerateSecretString
+from troposphere.ssm import Parameter as SSMParameter
 
 def load_service_config(config_file="lakerunner-stack-defaults.yaml"):
     """Load service configuration from YAML file"""
@@ -91,13 +94,30 @@ def create_services_template():
         Description="OPTIONAL: OTEL collector HTTP endpoint URL (e.g., http://collector-dns:4318). Leave blank to disable OTLP telemetry export."
     ))
 
+    # Grafana Reset Token
+    GrafanaResetToken = t.add_parameter(Parameter(
+        "GrafanaResetToken", Type="String",
+        Default="",
+        Description="OPTIONAL: Change this value to reset Grafana data (wipe EFS volume). Leave blank for normal operation. Use any string (e.g., timestamp) to trigger reset."
+    ))
+
+    # ALB Configuration parameters
+
+    AlbScheme = t.add_parameter(Parameter(
+        "AlbScheme",
+        Type="String",
+        AllowedValues=["internet-facing", "internal"],
+        Default="internal",
+        Description="Load balancer scheme: 'internet-facing' for external access or 'internal' for internal access only."
+    ))
+
     # Parameter groups for console
     t.set_metadata({
         "AWS::CloudFormation::Interface": {
             "ParameterGroups": [
                 {
                     "Label": {"default": "Infrastructure"},
-                    "Parameters": ["CommonInfraStackName"]
+                    "Parameters": ["CommonInfraStackName", "AlbScheme"]
                 },
                 {
                     "Label": {"default": "Container Images"},
@@ -106,15 +126,21 @@ def create_services_template():
                 {
                     "Label": {"default": "Telemetry"},
                     "Parameters": ["OtelEndpoint"]
+                },
+                {
+                    "Label": {"default": "Grafana Configuration"},
+                    "Parameters": ["GrafanaResetToken"]
                 }
             ],
             "ParameterLabels": {
                 "CommonInfraStackName": {"default": "Common Infra Stack Name"},
+                "AlbScheme": {"default": "ALB Scheme"},
                 "GoServicesImage": {"default": "Go Services Image"},
                 "QueryApiImage": {"default": "Query API Image"},
                 "QueryWorkerImage": {"default": "Query Worker Image"},
                 "GrafanaImage": {"default": "Grafana Image"},
-                "OtelEndpoint": {"default": "OTEL Collector Endpoint"}
+                "OtelEndpoint": {"default": "OTEL Collector Endpoint"},
+                "GrafanaResetToken": {"default": "Grafana Reset Token"}
             }
         }
     })
@@ -147,8 +173,157 @@ def create_services_template():
     PrivateSubnetsValue = Split(",", ImportValue(ci_export("PrivateSubnets")))
     BucketArnValue = ImportValue(ci_export("BucketArn"))
 
+    # Import PublicSubnets - CommonInfra always exports this, but may be empty string if not provided
+    PublicSubnetsImport = ImportValue(ci_export("PublicSubnets"))
+    PublicSubnetsValue = Split(",", PublicSubnetsImport)
+
     # Conditions
     t.add_condition("EnableOtlp", Not(Equals(Ref(OtelEndpoint), "")))
+    t.add_condition("IsInternetFacing", Equals(Ref(AlbScheme), "internet-facing"))
+
+
+    # -----------------------
+    # ALB Security Group
+    # -----------------------
+    AlbSG = t.add_resource(SecurityGroup(
+        "AlbSecurityGroup",
+        GroupDescription="Security group for ALB",
+        VpcId=VpcIdValue,
+        SecurityGroupEgress=[{
+            "IpProtocol": "-1",
+            "CidrIp": "0.0.0.0/0",
+            "Description": "Allow all outbound"
+        }]
+    ))
+
+    t.add_resource(SecurityGroupIngress(
+        "Alb3000Open",
+        GroupId=Ref(AlbSG),
+        IpProtocol="tcp",
+        FromPort=3000, ToPort=3000,
+        CidrIp="0.0.0.0/0",
+        Description="HTTP 3000",
+    ))
+    t.add_resource(SecurityGroupIngress(
+        "Alb7101Open",
+        GroupId=Ref(AlbSG),
+        IpProtocol="tcp",
+        FromPort=7101, ToPort=7101,
+        CidrIp="0.0.0.0/0",
+        Description="HTTP 7101",
+    ))
+
+    # Add ingress rules to task security group to allow ALB traffic
+    for port in (3000, 7101):
+        t.add_resource(SecurityGroupIngress(
+            f"TaskFromAlb{port}",
+            GroupId=TaskSecurityGroupIdValue,
+            IpProtocol="tcp",
+            FromPort=port, ToPort=port,
+            SourceSecurityGroupId=Ref(AlbSG),
+            Description=f"ALB to tasks {port}",
+        ))
+
+    # -----------------------
+    # ALB + listeners + target groups
+    # -----------------------
+    Alb = t.add_resource(LoadBalancer(
+        "Alb",
+        Scheme=Ref(AlbScheme),
+        SecurityGroups=[Ref(AlbSG)],
+        Subnets=If(
+            "IsInternetFacing",
+            PublicSubnetsValue,
+            PrivateSubnetsValue
+        ),
+        Type="application",
+    ))
+
+    Tg7101 = t.add_resource(TargetGroup(
+        "Tg7101",
+        Port=7101, Protocol="HTTP",
+        VpcId=VpcIdValue,
+        TargetType="ip",
+        HealthCheckPath="/ready",
+        HealthCheckProtocol="HTTP",
+        HealthCheckIntervalSeconds=30,
+        HealthCheckTimeoutSeconds=5,
+        HealthyThresholdCount=2,
+        UnhealthyThresholdCount=3,
+        Matcher=Matcher(HttpCode="200"),
+        TargetGroupAttributes=[
+            TargetGroupAttribute(Key="stickiness.enabled", Value="false"),
+            TargetGroupAttribute(Key="deregistration_delay.timeout_seconds", Value="30")
+        ]
+    ))
+    Tg3000 = t.add_resource(TargetGroup(
+        "Tg3000",
+        Port=3000, Protocol="HTTP",
+        VpcId=VpcIdValue,
+        TargetType="ip",
+        HealthCheckPath="/api/health",
+        HealthCheckProtocol="HTTP",
+        HealthCheckIntervalSeconds=30,
+        HealthCheckTimeoutSeconds=5,
+        HealthyThresholdCount=2,
+        UnhealthyThresholdCount=3,
+        Matcher=Matcher(HttpCode="200"),
+        TargetGroupAttributes=[
+            TargetGroupAttribute(Key="stickiness.enabled", Value="false"),
+            TargetGroupAttribute(Key="deregistration_delay.timeout_seconds", Value="30")
+        ]
+    ))
+
+    t.add_resource(Listener(
+        "Listener7101",
+        LoadBalancerArn=Ref(Alb),
+        Port="7101",
+        Protocol="HTTP",
+        DefaultActions=[AlbAction(Type="forward", TargetGroupArn=Ref(Tg7101))]
+    ))
+    t.add_resource(Listener(
+        "Listener3000",
+        LoadBalancerArn=Ref(Alb),
+        Port="3000",
+        Protocol="HTTP",
+        DefaultActions=[AlbAction(Type="forward", TargetGroupArn=Ref(Tg3000))]
+    ))
+
+    # Create Grafana datasource configuration with ALB DNS
+    # Get the first API key from the config for the datasource
+    config = load_service_config()
+    api_keys = config.get('api_keys', [])
+    default_api_key = ""
+    if api_keys and api_keys[0].get('keys'):
+        default_api_key = api_keys[0]['keys'][0]
+
+    grafana_datasource_config = {
+        "apiVersion": 1,
+        "datasources": [
+            {
+                "name": "Cardinal",
+                "type": "cardinalhq-lakerunner-datasource",
+                "access": "proxy",
+                "isDefault": True,
+                "editable": True,
+                "jsonData": {
+                    "customPath": "http://${ALB_DNS}:7101"
+                },
+                "secureJsonData": {
+                    "apiKey": default_api_key
+                }
+            }
+        ]
+    }
+
+    # Create SSM Parameter with ALB DNS substitution
+    grafana_datasource_param = t.add_resource(SSMParameter(
+        "GrafanaDatasourceConfig",
+        Name=Sub("${AWS::StackName}-grafana-datasource-config"),
+        Type="String",
+        Value=Sub(yaml.dump(grafana_datasource_config), ALB_DNS=GetAtt(Alb, "DNSName")),
+        Description="Grafana datasource configuration for Cardinal plugin"
+    ))
 
     # -----------------------
     # Task Execution Role (shared by all services)
@@ -180,7 +355,8 @@ def create_services_template():
                                 "ssm:GetParameters"
                             ],
                             "Resource": [
-                                Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/*")
+                                Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/*"),
+                                Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}-*")
                             ]
                         },
                         {
@@ -314,9 +490,9 @@ def create_services_template():
         Name=Sub("${AWS::StackName}-grafana"),
         Description="Grafana admin password",
         GenerateSecretString=GenerateSecretString(
-            SecretStringTemplate='{"username": "admin"}',
+            SecretStringTemplate='{"username": "lakerunner"}',
             GenerateStringKey='password',
-            ExcludeCharacters=' "\\@/',
+            ExcludeCharacters=' !"#$%&\'()*+,./:;<=>?@[\\]^`{|}~',
             PasswordLength=32
         )
     ))
@@ -329,6 +505,8 @@ def create_services_template():
         Export=Export(Sub("${AWS::StackName}-GrafanaAdminSecretArn"))
     ))
 
+    # Grafana datasource configuration will be created after ALB is defined
+
     # Collect services that need EFS access points
     services_needing_efs = {}
     for service_name, service_config in services.items():
@@ -340,20 +518,32 @@ def create_services_template():
     # Create EFS access points
     access_points = {}
     for ap_name, mount_config in services_needing_efs.items():
+        # Configure access point based on service type
+        if ap_name == 'grafana':
+            # Grafana access point: don't enforce POSIX user, let containers use their own users
+            # Root-owned directory with group write permissions allows both root (init) and grafana user access
+            posix_user = PosixUser(Gid="0", Uid="0")  # Use root for access point
+            creation_info = CreationInfo(
+                OwnerGid="0",     # root group owns the directory
+                OwnerUid="0",     # root user owns the directory  
+                Permissions="755"  # owner rwx, group rx, others rx - allows access to multiple users
+            )
+        else:
+            # Default for other services (currently none use EFS except Grafana)
+            posix_user = PosixUser(Gid="0", Uid="0")
+            creation_info = CreationInfo(
+                OwnerGid="0",
+                OwnerUid="0", 
+                Permissions="750"
+            )
+            
         access_points[ap_name] = t.add_resource(AccessPoint(
             f"EfsAccessPoint{ap_name.title()}",
             FileSystemId=EfsIdValue,
-            PosixUser=PosixUser(
-                Gid="0",
-                Uid="0"
-            ),
+            PosixUser=posix_user,
             RootDirectory=RootDirectory(
                 Path=mount_config['efs_path'],
-                CreationInfo=CreationInfo(
-                    OwnerGid="0",
-                    OwnerUid="0",
-                    Permissions="750"
-                )
+                CreationInfo=creation_info
             ),
             AccessPointTags=Tags(Name=Sub("${AWS::StackName}-" + ap_name))
         ))
@@ -419,11 +609,11 @@ def create_services_template():
         # doesn't support conditional lists in environment arrays
         base_env.extend([
             Environment(
-                Name="OTEL_EXPORTER_OTLP_ENDPOINT", 
+                Name="OTEL_EXPORTER_OTLP_ENDPOINT",
                 Value=If("EnableOtlp", Ref(OtelEndpoint), Ref("AWS::NoValue"))
             ),
             Environment(
-                Name="ENABLE_OTLP_TELEMETRY", 
+                Name="ENABLE_OTLP_TELEMETRY",
                 Value=If("EnableOtlp", "true", Ref("AWS::NoValue"))
             )
         ])
@@ -433,7 +623,11 @@ def create_services_template():
         sensitive_keys = {'TOKEN_HMAC256_KEY', 'GF_SECURITY_ADMIN_PASSWORD'}
         for key, value in service_env.items():
             if key not in sensitive_keys:
-                base_env.append(Environment(Name=key, Value=value))
+                # Special handling for GF_RESET_TOKEN to use parameter instead of defaults
+                if key == 'GF_RESET_TOKEN':
+                    base_env.append(Environment(Name=key, Value=Ref(GrafanaResetToken)))
+                else:
+                    base_env.append(Environment(Name=key, Value=value))
 
         # Build secrets
         secrets = [
@@ -453,6 +647,13 @@ def create_services_template():
             secrets.append(EcsSecret(
                 Name="GF_SECURITY_ADMIN_PASSWORD",
                 ValueFrom=Sub("${SecretArn}:password::", SecretArn=Ref(grafana_secret))
+            ))
+
+        # Add Grafana datasource configuration for Grafana service
+        if service_name == 'grafana':
+            secrets.append(EcsSecret(
+                Name="GRAFANA_DATASOURCE_CONFIG",
+                ValueFrom=Ref(grafana_datasource_param)
             ))
 
         # Build mount points
@@ -512,17 +713,113 @@ def create_services_template():
             # All other services use Go services image (pubsub, ingest, compact, etc.)
             container_image = Ref(GoServicesImage)
 
-        container = ContainerDefinition(
-            Name="AppContainer",
-            Image=container_image,
-            Command=service_config.get('command', []),
-            Environment=base_env,
-            Secrets=secrets,
-            MountPoints=mount_points,
-            PortMappings=port_mappings,
-            HealthCheck=health_check,
-            User="0",
-            LogConfiguration=LogConfiguration(
+        # Get base container command from service config
+        container_command = service_config.get('command', [])
+
+        # Build container definitions - for Grafana we need init container + main container
+        container_definitions = []
+
+        if service_name == 'grafana':
+            # Create init container for Grafana setup (datasource provisioning + reset logic)
+            init_container = ContainerDefinition(
+                Name="GrafanaInit",
+                Image="public.ecr.aws/docker/library/alpine:latest",
+                Essential=False,
+                Command=["/bin/sh", "-c"],
+                Environment=[
+                    Environment(Name="PROVISIONING_DIR", Value="${GF_PATHS_PROVISIONING:-/etc/grafana/provisioning}"),
+                    Environment(Name="RESET_TOKEN", Value=Ref("GrafanaResetToken")),
+                    Environment(Name="ALB_DNS_URL", Value=Sub("http://${AlbDns}", AlbDns=GetAtt("Alb", "DNSName")))
+                ],
+                Secrets=[
+                    EcsSecret(
+                        Name="GRAFANA_DATASOURCE_CONFIG",
+                        ValueFrom=Sub("${AWS::StackName}-grafana-datasource-config")
+                    )
+                ],
+                MountPoints=mount_points,  # Same EFS mounts as main container
+                User="0",
+                LogConfiguration=LogConfiguration(
+                    LogDriver="awslogs",
+                    Options={
+                        "awslogs-group": Ref(log_group),
+                        "awslogs-region": Ref("AWS::Region"),
+                        "awslogs-stream-prefix": service_name + "-init"
+                    }
+                )
+            )
+
+            # Multi-line shell script for init container
+            init_script = '''
+# Install curl for health checks and other tools
+apk add --no-cache curl
+
+# Set up provisioning directory
+PROVISIONING_DIR="${GF_PATHS_PROVISIONING:-/etc/grafana/provisioning}"
+DATASOURCES_DIR="$PROVISIONING_DIR/datasources"
+RESET_TOKEN_FILE="/var/lib/grafana/.grafana_reset_token"
+
+echo "Provisioning directory: $PROVISIONING_DIR"
+echo "Datasources directory: $DATASOURCES_DIR"
+echo "Reset token file: $RESET_TOKEN_FILE"
+
+# Create provisioning directories
+mkdir -p "$DATASOURCES_DIR"
+
+# All containers run as root, so no ownership changes needed
+
+# Handle reset token logic
+if [ -n "$RESET_TOKEN" ] && [ "$RESET_TOKEN" != "" ]; then
+    echo "Reset token provided: $RESET_TOKEN"
+
+    # Check if token file exists and compare
+    if [ -f "$RESET_TOKEN_FILE" ]; then
+        STORED_TOKEN=$(cat "$RESET_TOKEN_FILE")
+        if [ "$STORED_TOKEN" != "$RESET_TOKEN" ]; then
+            echo "Reset token changed from '$STORED_TOKEN' to '$RESET_TOKEN' - wiping Grafana data"
+            # Remove all Grafana data
+            find /var/lib/grafana -mindepth 1 -delete || true
+            # Create new token file
+            echo "$RESET_TOKEN" > "$RESET_TOKEN_FILE"
+        else
+            echo "Reset token unchanged - no reset needed"
+        fi
+    else
+        echo "First time with reset token - storing: $RESET_TOKEN"
+        echo "$RESET_TOKEN" > "$RESET_TOKEN_FILE"
+    fi
+else
+    echo "No reset token provided - skipping reset logic"
+fi
+
+# Write datasource configuration
+echo "Writing Grafana datasource configuration..."
+# The datasource config comes from SSM parameter as YAML, just write it directly
+cat > "$DATASOURCES_DIR/cardinal.yaml" << DATASOURCE_EOF
+$GRAFANA_DATASOURCE_CONFIG
+DATASOURCE_EOF
+
+echo "Grafana initialization complete"
+'''
+
+            # Set the command arguments with the script
+            init_container.Command = ["/bin/sh", "-c", init_script]
+            container_definitions.append(init_container)
+
+        # Run all containers as root for now
+        user_setting = "0"
+
+        # Main application container
+        container_kwargs = {
+            "Name": "AppContainer",
+            "Image": container_image,
+            "Command": container_command,
+            "Environment": base_env,
+            "Secrets": secrets,
+            "MountPoints": mount_points,
+            "PortMappings": port_mappings,
+            "HealthCheck": health_check,
+            "LogConfiguration": LogConfiguration(
                 LogDriver="awslogs",
                 Options={
                     "awslogs-group": Ref(log_group),
@@ -530,7 +827,17 @@ def create_services_template():
                     "awslogs-stream-prefix": service_name
                 }
             )
-        )
+        }
+
+        # Always set User field to root
+        container_kwargs["User"] = user_setting
+
+        # For Grafana, add dependency on init container to ensure proper startup order
+        if service_name == 'grafana':
+            container_kwargs["DependsOn"] = [{"ContainerName": "GrafanaInit", "Condition": "SUCCESS"}]
+
+        container = ContainerDefinition(**container_kwargs)
+        container_definitions.append(container)
 
         # Create task definition
         task_def = t.add_resource(TaskDefinition(
@@ -542,7 +849,7 @@ def create_services_template():
             RequiresCompatibilities=["FARGATE"],
             ExecutionRoleArn=GetAtt(ExecutionRole, "Arn"),
             TaskRoleArn=GetAtt(TaskRole, "Arn"),
-            ContainerDefinitions=[container],
+            ContainerDefinitions=container_definitions,
             Volumes=volumes,
             RuntimePlatform=RuntimePlatform(
                 CpuArchitecture="ARM64",
@@ -569,17 +876,17 @@ def create_services_template():
             EnableExecuteCommand=True
         ))
 
-        # Store target group mapping for ALB services (use common stack target groups)
+        # Store target group mapping for ALB services (use local target groups)
         if ingress and ingress.get('attach_alb'):
             port = ingress['port']
 
-            # Map to the appropriate target group created in CommonInfra stack
+            # Map to the appropriate target group created in this stack
             if port == 7101:
-                target_group_arn = ImportValue(ci_export("Tg7101Arn"))
+                target_group_arn = Ref(Tg7101)
             elif port == 3000:
-                target_group_arn = ImportValue(ci_export("Tg3000Arn"))
+                target_group_arn = Ref(Tg3000)
             else:
-                # For other ports, we'd need to add them to the common stack
+                # For other ports, we'd need to add them to this stack
                 target_group_arn = None
 
             if target_group_arn:
@@ -597,16 +904,37 @@ def create_services_template():
                 ContainerPort=ingress['port'],
                 TargetGroupArn=target_groups[service_name]['target_group_arn']
             )]
-
-    # -----------------------
-    # ALB integration - use target groups created in common stack
-    # -----------------------
-    # Note: Listeners and target groups are created in the CommonInfra stack
-    # We just need to attach our services to the existing target groups
+            # Add dependency on the corresponding listener to ensure target group is attached to ALB
+            port = ingress['port']
+            listener_name = f"Listener{port}"
+            ecs_service.DependsOn = [listener_name]
 
     # -----------------------
     # Outputs
     # -----------------------
+    # ALB Outputs
+    t.add_output(Output(
+        "AlbDNS",
+        Value=GetAtt(Alb, "DNSName"),
+        Export=Export(name=Sub("${AWS::StackName}-AlbDNS"))
+    ))
+    t.add_output(Output(
+        "AlbArn",
+        Value=Ref(Alb),
+        Export=Export(name=Sub("${AWS::StackName}-AlbArn"))
+    ))
+    t.add_output(Output(
+        "Tg7101Arn",
+        Value=Ref(Tg7101),
+        Export=Export(name=Sub("${AWS::StackName}-Tg7101Arn"))
+    ))
+    t.add_output(Output(
+        "Tg3000Arn",
+        Value=Ref(Tg3000),
+        Export=Export(name=Sub("${AWS::StackName}-Tg3000Arn"))
+    ))
+
+    # Service Outputs
     t.add_output(Output(
         "TaskRoleArn",
         Value=GetAtt(TaskRole, "Arn"),
