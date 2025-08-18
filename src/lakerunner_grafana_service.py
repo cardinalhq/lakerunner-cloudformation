@@ -23,18 +23,17 @@ from troposphere.ecs import (
     Service, TaskDefinition, ContainerDefinition, Environment,
     LogConfiguration, Secret as EcsSecret, Volume, MountPoint,
     HealthCheck, PortMapping, RuntimePlatform, NetworkConfiguration, AwsvpcConfiguration,
-    LoadBalancer as EcsLoadBalancer, EFSVolumeConfiguration, AuthorizationConfig
+    LoadBalancer as EcsLoadBalancer
 )
 from troposphere.iam import Role, Policy
 from troposphere.elasticloadbalancingv2 import LoadBalancer, TargetGroup, TargetGroupAttribute, Listener, Matcher
 from troposphere.elasticloadbalancingv2 import Action as AlbAction
 from troposphere.ssm import Parameter as SSMParameter
 from troposphere.ec2 import SecurityGroup, SecurityGroupIngress
-from troposphere.efs import AccessPoint, PosixUser, RootDirectory, CreationInfo
 from troposphere.logs import LogGroup
 from troposphere.secretsmanager import Secret, GenerateSecretString
 
-def load_grafana_config(config_file="lakerunner-grafana-defaults.yaml"):
+def load_grafana_config(config_file="lakerunner-grafana-service-defaults.yaml"):
     """Load Grafana configuration from YAML file"""
     script_dir = os.path.dirname(os.path.abspath(__file__))
     config_path = os.path.join(script_dir, "..", config_file)
@@ -46,7 +45,7 @@ def create_grafana_template():
     """Create CloudFormation template for Grafana stack"""
 
     t = Template()
-    t.set_description("Lakerunner Grafana: Grafana service with ALB, EFS storage, and datasource configuration")
+    t.set_description("Lakerunner Grafana Service: Grafana service with ALB, PostgreSQL storage, and datasource configuration")
 
     # Load Grafana configuration
     config = load_grafana_config()
@@ -67,6 +66,11 @@ def create_grafana_template():
         Description="REQUIRED: Name of the Services stack to import Query API ALB DNS and port from."
     ))
 
+    GrafanaSetupStackName = t.add_parameter(Parameter(
+        "GrafanaSetupStackName", Type="String",
+        Description="REQUIRED: Name of the Grafana Setup stack to import database credentials from."
+    ))
+
     # Container image overrides for air-gapped deployments
     GrafanaImage = t.add_parameter(Parameter(
         "GrafanaImage", Type="String",
@@ -84,7 +88,7 @@ def create_grafana_template():
     GrafanaResetToken = t.add_parameter(Parameter(
         "GrafanaResetToken", Type="String",
         Default="",
-        Description="OPTIONAL: Change this value to reset Grafana data (wipe EFS volume). Leave blank for normal operation. Use any string (e.g., timestamp) to trigger reset."
+        Description="OPTIONAL: Change this value to reset Grafana data (wipe PostgreSQL data). Leave blank for normal operation. Use any string (e.g., timestamp) to trigger reset."
     ))
 
     # ALB Configuration parameters
@@ -102,7 +106,7 @@ def create_grafana_template():
             "ParameterGroups": [
                 {
                     "Label": {"default": "Infrastructure"},
-                    "Parameters": ["CommonInfraStackName", "ServicesStackName", "AlbScheme"]
+                    "Parameters": ["CommonInfraStackName", "ServicesStackName", "GrafanaSetupStackName", "AlbScheme"]
                 },
                 {
                     "Label": {"default": "Container Images"},
@@ -116,6 +120,7 @@ def create_grafana_template():
             "ParameterLabels": {
                 "CommonInfraStackName": {"default": "Common Infra Stack Name"},
                 "ServicesStackName": {"default": "Services Stack Name"},
+                "GrafanaSetupStackName": {"default": "Grafana Setup Stack Name"},
                 "AlbScheme": {"default": "ALB Scheme"},
                 "GrafanaImage": {"default": "Grafana Image"},
                 "GrafanaInitImage": {"default": "Grafana Init Image"},
@@ -134,7 +139,6 @@ def create_grafana_template():
 
     # Import values from other stacks
     ClusterArnValue = ImportValue(ci_export("ClusterArn"))
-    EfsIdValue = ImportValue(ci_export("EfsId"))
     TaskSecurityGroupIdValue = ImportValue(ci_export("TaskSGId"))
     VpcIdValue = ImportValue(ci_export("VpcId"))
     PrivateSubnetsValue = Split(",", ImportValue(ci_export("PrivateSubnets")))
@@ -331,19 +335,15 @@ def create_grafana_template():
         },
         Policies=[
             Policy(
-                PolicyName="EFSAccess",
+                PolicyName="LogAccess",
                 PolicyDocument={
                     "Version": "2012-10-17",
                     "Statement": [
                         {
                             "Effect": "Allow",
                             "Action": [
-                                "elasticfilesystem:ClientMount",
-                                "elasticfilesystem:ClientWrite",
-                                "elasticfilesystem:ClientRootAccess",
-                                "elasticfilesystem:DescribeFileSystems",
-                                "elasticfilesystem:DescribeMountTargets",
-                                "elasticfilesystem:DescribeAccessPoints"
+                                "logs:CreateLogStream",
+                                "logs:PutLogEvents"
                             ],
                             "Resource": "*"
                         }
@@ -377,22 +377,10 @@ def create_grafana_template():
     ))
 
     # -----------------------
-    # EFS Access Point for Grafana
+    # PostgreSQL Database Configuration
     # -----------------------
-    grafana_access_point = t.add_resource(AccessPoint(
-        "GrafanaEfsAccessPoint",
-        FileSystemId=EfsIdValue,
-        PosixUser=PosixUser(Gid="0", Uid="0"),  # Use root for access point
-        RootDirectory=RootDirectory(
-            Path="/grafana",
-            CreationInfo=CreationInfo(
-                OwnerGid="0",     # root group owns the directory
-                OwnerUid="0",     # root user owns the directory  
-                Permissions="755"  # owner rwx, group rx, others rx - allows access to multiple users
-            )
-        ),
-        AccessPointTags=Tags(Name=Sub("${AWS::StackName}-grafana"))
-    ))
+    # Database connection is handled via environment variables and secrets
+    # No additional resources needed here as database is managed by setup stack
 
     # -----------------------
     # Grafana Service
@@ -406,18 +394,7 @@ def create_grafana_template():
 
     # Build volumes list
     volumes = [
-        Volume(Name="scratch"),
-        Volume(
-            Name="efs-grafana",
-            EFSVolumeConfiguration=EFSVolumeConfiguration(
-                FilesystemId=EfsIdValue,
-                TransitEncryption="ENABLED",
-                AuthorizationConfig=AuthorizationConfig(
-                    AccessPointId=Ref(grafana_access_point),
-                    IAM="ENABLED"
-                )
-            )
-        )
+        Volume(Name="scratch")
     ]
 
     # Build environment variables
@@ -428,9 +405,16 @@ def create_grafana_template():
         Environment(Name="HOME", Value="/scratch")
     ]
 
+    # Add database connection environment variables
+    base_env.extend([
+        Environment(Name="GF_DATABASE_HOST", Value=ImportValue(Sub("${GrafanaSetupStackName}-DbHost", GrafanaSetupStackName=Ref(GrafanaSetupStackName)))),
+        Environment(Name="GF_DATABASE_PORT", Value=ImportValue(Sub("${GrafanaSetupStackName}-DbPort", GrafanaSetupStackName=Ref(GrafanaSetupStackName)))),
+        Environment(Name="GF_DATABASE_NAME", Value=ImportValue(Sub("${GrafanaSetupStackName}-DbName", GrafanaSetupStackName=Ref(GrafanaSetupStackName)))),
+    ])
+
     # Add Grafana-specific environment variables (excluding sensitive ones)
     env_config = grafana_config.get('environment', {})
-    sensitive_keys = {'GF_SECURITY_ADMIN_PASSWORD'}
+    sensitive_keys = {'GF_SECURITY_ADMIN_PASSWORD', 'GF_DATABASE_USER', 'GF_DATABASE_PASSWORD'}
     for key, value in env_config.items():
         if key not in sensitive_keys:
             # Special handling for GF_RESET_TOKEN to use parameter instead of defaults
@@ -446,6 +430,14 @@ def create_grafana_template():
             ValueFrom=Sub("${SecretArn}:password::", SecretArn=Ref(grafana_secret))
         ),
         EcsSecret(
+            Name="GF_DATABASE_USER",
+            ValueFrom=Sub("${DbSecretArn}:username::", DbSecretArn=ImportValue(Sub("${GrafanaSetupStackName}-DbSecretArn", GrafanaSetupStackName=Ref(GrafanaSetupStackName))))
+        ),
+        EcsSecret(
+            Name="GF_DATABASE_PASSWORD", 
+            ValueFrom=Sub("${DbSecretArn}:password::", DbSecretArn=ImportValue(Sub("${GrafanaSetupStackName}-DbSecretArn", GrafanaSetupStackName=Ref(GrafanaSetupStackName))))
+        ),
+        EcsSecret(
             Name="GRAFANA_DATASOURCE_CONFIG",
             ValueFrom=Ref(grafana_datasource_param)
         )
@@ -456,11 +448,6 @@ def create_grafana_template():
         MountPoint(
             ContainerPath="/scratch",
             SourceVolume="scratch",
-            ReadOnly=False
-        ),
-        MountPoint(
-            ContainerPath="/var/lib/grafana",
-            SourceVolume="efs-grafana",
             ReadOnly=False
         )
     ]

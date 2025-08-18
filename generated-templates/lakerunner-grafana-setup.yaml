@@ -1,0 +1,155 @@
+Description: 'Lakerunner Grafana Setup: Creates dedicated database for Grafana on existing RDS instance'
+Outputs:
+  GrafanaDbHost:
+    Description: Grafana database host (imported from CommonInfra)
+    Export:
+      Name: !Sub '${AWS::StackName}-DbHost'
+    Value: !ImportValue
+      Fn::Sub:
+        - ${CommonInfraStackName}-DbEndpoint
+        - CommonInfraStackName: !Ref 'CommonInfraStackName'
+  GrafanaDbName:
+    Description: Name of Grafana database
+    Export:
+      Name: !Sub '${AWS::StackName}-DbName'
+    Value: !Ref 'GrafanaDbName'
+  GrafanaDbPort:
+    Description: Grafana database port (imported from CommonInfra)
+    Export:
+      Name: !Sub '${AWS::StackName}-DbPort'
+    Value: !ImportValue
+      Fn::Sub:
+        - ${CommonInfraStackName}-DbPort
+        - CommonInfraStackName: !Ref 'CommonInfraStackName'
+  GrafanaDbSecretArn:
+    Description: ARN of Grafana database credentials secret
+    Export:
+      Name: !Sub '${AWS::StackName}-DbSecretArn'
+    Value: !Ref 'GrafanaDbSecret'
+  GrafanaDbUser:
+    Description: Grafana database username
+    Export:
+      Name: !Sub '${AWS::StackName}-DbUser'
+    Value: !Ref 'GrafanaDbUser'
+Parameters:
+  CommonInfraStackName:
+    Description: 'REQUIRED: Name of the CommonInfra stack to import RDS instance from.'
+    Type: String
+  GrafanaDbName:
+    Default: lakerunner_grafana
+    Description: Name of the database to create for Grafana
+    Type: String
+  GrafanaDbUser:
+    Default: grafana
+    Description: Database user for Grafana
+    Type: String
+Resources:
+  CreateDbFunction:
+    Properties:
+      Code:
+        ZipFile: "\nimport json\nimport boto3\nimport psycopg2\nimport urllib.request\n\ndef send_response(event, context, status, data=None, reason=\"\"):\n    resp = {\n        \"Status\": status,\n \
+          \       \"Reason\": f\"{reason} See CloudWatch Logs for details: {context.log_stream_name}\",\n        \"PhysicalResourceId\": event.get(\"PhysicalResourceId\") or \"GrafanaDbSetup\",\n      \
+          \  \"StackId\": event[\"StackId\"],\n        \"RequestId\": event[\"RequestId\"],\n        \"LogicalResourceId\": event[\"LogicalResourceId\"],\n        \"NoEcho\": False,\n        \"Data\": data\
+          \ or {}\n    }\n    body = json.dumps(resp).encode(\"utf-8\")\n    req = urllib.request.Request(event[\"ResponseURL\"], data=body, method=\"PUT\")\n    req.add_header(\"content-type\", \"\")\n\
+          \    req.add_header(\"content-length\", str(len(body)))\n    try:\n        with urllib.request.urlopen(req) as r:\n            r.read()\n    except Exception as e:\n        print(\"Failed to send\
+          \ response:\", e)\n\ndef get_secret(secret_arn):\n    client = boto3.client('secretsmanager')\n    response = client.get_secret_value(SecretId=secret_arn)\n    return json.loads(response['SecretString'])\n\
+          \ndef handler(event, context):\n    print(\"Event:\", json.dumps(event))\n    \n    try:\n        request_type = event[\"RequestType\"]\n        props = event.get(\"ResourceProperties\", {})\n\
+          \        \n        if request_type == \"Delete\":\n            send_response(event, context, \"SUCCESS\", {\"Message\": \"Delete no-op\"})\n            return\n            \n        # Get connection\
+          \ details\n        main_secret_arn = props[\"MainDbSecretArn\"]\n        grafana_secret_arn = props[\"GrafanaDbSecretArn\"]\n        db_host = props[\"DbHost\"]\n        db_port = int(props[\"\
+          DbPort\"])\n        grafana_db_name = props[\"GrafanaDbName\"]\n        grafana_db_user = props[\"GrafanaDbUser\"]\n        \n        # Get credentials\n        main_creds = get_secret(main_secret_arn)\n\
+          \        grafana_creds = get_secret(grafana_secret_arn)\n        \n        # Connect to main database as superuser\n        conn = psycopg2.connect(\n            host=db_host,\n            port=db_port,\n\
+          \            database=\"lakerunner\",\n            user=main_creds[\"username\"],\n            password=main_creds[\"password\"],\n            sslmode=\"require\"\n        )\n        conn.autocommit\
+          \ = True\n        cursor = conn.cursor()\n        \n        # Create database if it doesn't exist\n        cursor.execute(f\"SELECT 1 FROM pg_database WHERE datname = %s\", (grafana_db_name,))\n\
+          \        if not cursor.fetchone():\n            cursor.execute(f'CREATE DATABASE \"{grafana_db_name}\"')\n            print(f\"Created database {grafana_db_name}\")\n        else:\n          \
+          \  print(f\"Database {grafana_db_name} already exists\")\n            \n        # Create user if it doesn't exist  \n        cursor.execute(\"SELECT 1 FROM pg_user WHERE usename = %s\", (grafana_db_user,))\n\
+          \        if not cursor.fetchone():\n            cursor.execute(f'CREATE USER \"{grafana_db_user}\" WITH PASSWORD %s', \n                         (grafana_creds[\"password\"],))\n            print(f\"\
+          Created user {grafana_db_user}\")\n        else:\n            # Update password in case secret was rotated\n            cursor.execute(f'ALTER USER \"{grafana_db_user}\" WITH PASSWORD %s',\n \
+          \                        (grafana_creds[\"password\"],))\n            print(f\"Updated password for user {grafana_db_user}\")\n            \n        # Grant privileges\n        cursor.execute(f'GRANT\
+          \ ALL PRIVILEGES ON DATABASE \"{grafana_db_name}\" TO \"{grafana_db_user}\"')\n        \n        cursor.close()\n        conn.close()\n        \n        # Connect to Grafana database to set up\
+          \ schema permissions\n        conn = psycopg2.connect(\n            host=db_host,\n            port=db_port,\n            database=grafana_db_name,\n            user=main_creds[\"username\"],\n\
+          \            password=main_creds[\"password\"],\n            sslmode=\"require\"\n        )\n        conn.autocommit = True\n        cursor = conn.cursor()\n        \n        # Grant schema privileges\n\
+          \        cursor.execute(f'GRANT ALL ON SCHEMA public TO \"{grafana_db_user}\"')\n        cursor.execute(f'GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO \"{grafana_db_user}\"')\n     \
+          \   cursor.execute(f'GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO \"{grafana_db_user}\"')\n        cursor.execute(f'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO\
+          \ \"{grafana_db_user}\"')\n        cursor.execute(f'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO \"{grafana_db_user}\"')\n        \n        cursor.close()\n        conn.close()\n\
+          \        \n        send_response(event, context, \"SUCCESS\", {\n            \"DatabaseName\": grafana_db_name,\n            \"Username\": grafana_db_user\n        })\n        \n    except Exception\
+          \ as e:\n        print(\"Exception:\", str(e))\n        send_response(event, context, \"FAILED\", {\"Error\": str(e)}, reason=str(e))\n"
+      FunctionName: !Sub '${AWS::StackName}-grafana-db-setup'
+      Handler: index.handler
+      Role: !GetAtt 'CreateDbFunctionRole.Arn'
+      Runtime: python3.13
+      Timeout: 300
+      VpcConfig:
+        SecurityGroupIds:
+          - !ImportValue
+            Fn::Sub:
+              - ${CommonInfraStackName}-TaskSGId
+              - CommonInfraStackName: !Ref 'CommonInfraStackName'
+        SubnetIds: !Split
+          - ','
+          - !ImportValue
+            Fn::Sub:
+              - ${CommonInfraStackName}-PrivateSubnets
+              - CommonInfraStackName: !Ref 'CommonInfraStackName'
+    Type: AWS::Lambda::Function
+  CreateDbFunctionRole:
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+        Version: '2012-10-17'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCExecutionRole
+      Policies:
+        - PolicyDocument:
+            Statement:
+              - Action:
+                  - secretsmanager:GetSecretValue
+                Effect: Allow
+                Resource:
+                  - !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-DbSecretArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                  - !Ref 'GrafanaDbSecret'
+            Version: '2012-10-17'
+          PolicyName: DatabaseAccess
+    Type: AWS::IAM::Role
+  CreateDbLogGroup:
+    Properties:
+      LogGroupName: /aws/lambda/grafana-db-setup
+      RetentionInDays: 14
+    Type: AWS::Logs::LogGroup
+  GrafanaDbSecret:
+    Properties:
+      Description: Grafana database credentials
+      GenerateSecretString:
+        ExcludeCharacters: ' !"#$%&''()*+,./:;<=>?@[\]^`{|}~'
+        GenerateStringKey: password
+        PasswordLength: 32
+        SecretStringTemplate: !Sub
+          - '{"username":"${User}"}'
+          - User: !Ref 'GrafanaDbUser'
+    Type: AWS::SecretsManager::Secret
+  GrafanaDbSetup:
+    Properties:
+      DbHost: !ImportValue
+        Fn::Sub:
+          - ${CommonInfraStackName}-DbEndpoint
+          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      DbPort: !ImportValue
+        Fn::Sub:
+          - ${CommonInfraStackName}-DbPort
+          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      GrafanaDbName: !Ref 'GrafanaDbName'
+      GrafanaDbSecretArn: !Ref 'GrafanaDbSecret'
+      GrafanaDbUser: !Ref 'GrafanaDbUser'
+      MainDbSecretArn: !ImportValue
+        Fn::Sub:
+          - ${CommonInfraStackName}-DbSecretArn
+          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      ServiceToken: !GetAtt 'CreateDbFunction.Arn'
+    Type: AWS::CloudFormation::CustomResource
+
