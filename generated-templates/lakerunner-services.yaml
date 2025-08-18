@@ -1462,9 +1462,9 @@ Resources:
             - Name: METRIC_PREFIX
               Value: lakerunner-query-api
             - Name: NUM_MIN_QUERY_WORKERS
-              Value: '1'
+              Value: '8'
             - Name: NUM_MAX_QUERY_WORKERS
-              Value: '4'
+              Value: '8'
             - Name: SPRING_PROFILES_ACTIVE
               Value: aws
           HealthCheck:
