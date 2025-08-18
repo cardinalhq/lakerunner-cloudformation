@@ -275,6 +275,42 @@ def create_services_template():
         DefaultActions=[AlbAction(Type="forward", TargetGroupArn=Ref(Tg3000))]
     ))
 
+    # Create Grafana datasource configuration with ALB DNS
+    # Get the first API key from the config for the datasource
+    config = load_service_config()
+    api_keys = config.get('api_keys', [])
+    default_api_key = ""
+    if api_keys and api_keys[0].get('keys'):
+        default_api_key = api_keys[0]['keys'][0]
+
+    grafana_datasource_config = {
+        "apiVersion": 1,
+        "datasources": [
+            {
+                "name": "Cardinal",
+                "type": "cardinalhq-lakerunner-datasource",
+                "access": "proxy",
+                "isDefault": True,
+                "editable": True,
+                "jsonData": {
+                    "customPath": "http://${ALB_DNS}:7101"
+                },
+                "secureJsonData": {
+                    "apiKey": default_api_key
+                }
+            }
+        ]
+    }
+
+    # Create SSM Parameter with ALB DNS substitution
+    grafana_datasource_param = t.add_resource(SSMParameter(
+        "GrafanaDatasourceConfig",
+        Name=Sub("${AWS::StackName}-grafana-datasource-config"),
+        Type="String",
+        Value=Sub(yaml.dump(grafana_datasource_config), ALB_DNS=GetAtt(Alb, "DNSName")),
+        Description="Grafana datasource configuration for Cardinal plugin"
+    ))
+
     # -----------------------
     # Task Execution Role (shared by all services)
     # -----------------------
@@ -442,7 +478,7 @@ def create_services_template():
         GenerateSecretString=GenerateSecretString(
             SecretStringTemplate='{"username": "admin"}',
             GenerateStringKey='password',
-            ExcludeCharacters=' "\\@/',
+            ExcludeCharacters=' !"#$%&\'()*+,./:;<=>?@[\\]^`{|}~',
             PasswordLength=32
         )
     ))
@@ -455,41 +491,7 @@ def create_services_template():
         Export=Export(Sub("${AWS::StackName}-GrafanaAdminSecretArn"))
     ))
 
-    # Create Grafana datasource configuration
-    # Get the first API key from the config for the datasource
-    config = load_service_config()
-    api_keys = config.get('api_keys', [])
-    default_api_key = ""
-    if api_keys and api_keys[0].get('keys'):
-        default_api_key = api_keys[0]['keys'][0]
-
-    grafana_datasource_config = {
-        "apiVersion": 1,
-        "datasources": [
-            {
-                "name": "Cardinal",
-                "type": "cardinalhq-lakerunner-datasource",
-                "access": "proxy",
-                "isDefault": True,
-                "editable": True,
-                "jsonData": {
-                    "customPath": "http://lakerunner-query-api:7101"
-                },
-                "secureJsonData": {
-                    "apiKey": default_api_key
-                }
-            }
-        ]
-    }
-
-    # Store the datasource configuration in SSM Parameter for provisioning
-    grafana_datasource_param = t.add_resource(SSMParameter(
-        "GrafanaDatasourceConfig",
-        Name=Sub("${AWS::StackName}-grafana-datasource-config"),
-        Type="String",
-        Value=yaml.dump(grafana_datasource_config),
-        Description="Grafana datasource configuration for Cardinal plugin"
-    ))
+    # Grafana datasource configuration will be created after ALB is defined
 
     # Collect services that need EFS access points
     services_needing_efs = {}
@@ -688,11 +690,14 @@ def create_services_template():
             container_command = [
                 "/bin/sh", "-c",
                 '''
+                # Get provisioning base directory from environment variable
+                PROVISIONING_DIR="${GF_PATHS_PROVISIONING:-/etc/grafana/provisioning}"
+
                 # Create provisioning directories
-                mkdir -p /etc/grafana/provisioning/datasources
+                mkdir -p "$PROVISIONING_DIR/datasources"
 
                 # Write datasource configuration from environment variable
-                echo "$GRAFANA_DATASOURCE_CONFIG" > /etc/grafana/provisioning/datasources/cardinal.yaml
+                echo "$GRAFANA_DATASOURCE_CONFIG" > "$PROVISIONING_DIR/datasources/cardinal.yaml"
 
                 # Start Grafana
                 exec /run.sh

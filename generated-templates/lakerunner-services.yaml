@@ -261,24 +261,26 @@ Resources:
       Description: Grafana datasource configuration for Cardinal plugin
       Name: !Sub '${AWS::StackName}-grafana-datasource-config'
       Type: String
-      Value: |
-        apiVersion: 1
-        datasources:
-        - access: proxy
-          editable: true
-          isDefault: true
-          jsonData:
-            customPath: http://lakerunner-query-api:7101
-          name: Cardinal
-          secureJsonData:
-            apiKey: f70603aa00e6f67999cc66e336134887
-          type: cardinalhq-lakerunner-datasource
+      Value: !Sub
+        - |
+          apiVersion: 1
+          datasources:
+          - access: proxy
+            editable: true
+            isDefault: true
+            jsonData:
+              customPath: http://${ALB_DNS}:7101
+            name: Cardinal
+            secureJsonData:
+              apiKey: f70603aa00e6f67999cc66e336134887
+            type: cardinalhq-lakerunner-datasource
+        - ALB_DNS: !GetAtt 'Alb.DNSName'
     Type: AWS::SSM::Parameter
   GrafanaSecret:
     Properties:
       Description: Grafana admin password
       GenerateSecretString:
-        ExcludeCharacters: ' "\@/'
+        ExcludeCharacters: ' !"#$%&''()*+,./:;<=>?@[\]^`{|}~'
         GenerateStringKey: password
         PasswordLength: 32
         SecretStringTemplate: '{"username": "admin"}'
@@ -620,9 +622,9 @@ Resources:
         - Command:
             - /bin/sh
             - -c
-            - "\n                # Create provisioning directories\n                mkdir -p /etc/grafana/provisioning/datasources\n\n                # Write datasource configuration from environment variable\n\
-              \                echo \"$GRAFANA_DATASOURCE_CONFIG\" > /etc/grafana/provisioning/datasources/cardinal.yaml\n\n                # Start Grafana\n                exec /run.sh\n              \
-              \  "
+            - "\n                # Get provisioning base directory from environment variable\n                PROVISIONING_DIR=\"${GF_PATHS_PROVISIONING:-/etc/grafana/provisioning}\"\n\n               \
+              \ # Create provisioning directories\n                mkdir -p \"$PROVISIONING_DIR/datasources\"\n\n                # Write datasource configuration from environment variable\n            \
+              \    echo \"$GRAFANA_DATASOURCE_CONFIG\" > \"$PROVISIONING_DIR/datasources/cardinal.yaml\"\n\n                # Start Grafana\n                exec /run.sh\n                "
           Environment:
             - Name: BUMP_REVISION
               Value: '1'
