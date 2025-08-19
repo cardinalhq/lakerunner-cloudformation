@@ -9,7 +9,7 @@ database:
 # Container Images configuration (used by Service stack)
 images:
   grafana: "grafana/grafana:latest"
-  grafana_db_setup: "lakerunner-grafana-db-setup:latest"
+  grafana_init: "lakerunner-grafana-init:latest"
 
 # Grafana service configuration (used by Service stack)
 grafana:

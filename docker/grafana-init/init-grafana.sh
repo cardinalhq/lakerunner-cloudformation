@@ -1,10 +1,18 @@
 #!/bin/sh
 # Grafana Initialization Script
-# Handles datasource provisioning and data reset functionality
+# Handles datasource provisioning, data reset functionality, and database setup
 
 set -e
 
 echo "Starting Grafana initialization..."
+
+# Check if this is a database setup operation
+if [ -n "$GRAFANA_DB_NAME" ] && [ -n "$GRAFANA_DB_USER" ] && [ -n "$PGHOST" ]; then
+    echo "Database setup mode detected - running database setup script"
+    exec /app/scripts/setup-grafana-db.sh
+fi
+
+echo "Datasource provisioning mode - continuing with datasource setup"
 
 # Set up provisioning directory
 PROVISIONING_DIR="${GF_PATHS_PROVISIONING:-/etc/grafana/provisioning}"

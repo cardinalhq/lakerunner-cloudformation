@@ -74,10 +74,10 @@ def create_grafana_template():
         Description="Container image for Grafana service"
     ))
 
-    GrafanaDbSetupImage = t.add_parameter(Parameter(
-        "GrafanaDbSetupImage", Type="String",
-        Default=images.get('grafana_db_setup', 'lakerunner-grafana-db-setup:latest'),
-        Description="Container image for Grafana database setup init container"
+    GrafanaInitImage = t.add_parameter(Parameter(
+        "GrafanaInitImage", Type="String",
+        Default=images.get('grafana_init', 'lakerunner-grafana-init:latest'),
+        Description="Container image for Grafana init container (datasource provisioning and database setup)"
     ))
 
 
@@ -101,7 +101,7 @@ def create_grafana_template():
                 },
                 {
                     "Label": {"default": "Container Images"},
-                    "Parameters": ["GrafanaImage", "GrafanaDbSetupImage"]
+                    "Parameters": ["GrafanaImage", "GrafanaInitImage"]
                 }
             ],
             "ParameterLabels": {
@@ -109,7 +109,7 @@ def create_grafana_template():
                 "ServicesStackName": {"default": "Services Stack Name"},
                 "AlbScheme": {"default": "ALB Scheme"},
                 "GrafanaImage": {"default": "Grafana Image"},
-                "GrafanaDbSetupImage": {"default": "Grafana DB Setup Image"},
+                "GrafanaInitImage": {"default": "Grafana Init Image"},
             }
         }
     })
@@ -462,8 +462,8 @@ def create_grafana_template():
 
     # Init container for database setup
     init_container = ContainerDefinition(
-        Name="GrafanaDbSetup",
-        Image=Ref(GrafanaDbSetupImage),
+        Name="GrafanaInit",
+        Image=Ref(GrafanaInitImage),
         Essential=False,
         Environment=[
             Environment(Name="GRAFANA_DB_NAME", Value="grafana"),
@@ -497,7 +497,7 @@ def create_grafana_template():
             Options={
                 "awslogs-group": Ref(log_group),
                 "awslogs-region": Ref("AWS::Region"),
-                "awslogs-stream-prefix": "grafana-db-setup"
+                "awslogs-stream-prefix": "grafana-init"
             }
         )
     )
@@ -513,7 +513,7 @@ def create_grafana_template():
         PortMappings=port_mappings,
         HealthCheck=health_check,
         User="0",
-        DependsOn=[{"ContainerName": "GrafanaDbSetup", "Condition": "SUCCESS"}],
+        DependsOn=[{"ContainerName": "GrafanaInit", "Condition": "SUCCESS"}],
         LogConfiguration=LogConfiguration(
             LogDriver="awslogs",
             Options={

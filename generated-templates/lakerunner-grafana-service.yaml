@@ -16,16 +16,16 @@ Metadata:
           default: Container Images
         Parameters:
           - GrafanaImage
-          - GrafanaDbSetupImage
+          - GrafanaInitImage
     ParameterLabels:
       AlbScheme:
         default: ALB Scheme
       CommonInfraStackName:
         default: Common Infra Stack Name
-      GrafanaDbSetupImage:
-        default: Grafana DB Setup Image
       GrafanaImage:
         default: Grafana Image
+      GrafanaInitImage:
+        default: Grafana Init Image
       ServicesStackName:
         default: Services Stack Name
 Outputs:
@@ -62,13 +62,13 @@ Parameters:
   CommonInfraStackName:
     Description: 'REQUIRED: Name of the CommonInfra stack to import infrastructure values from.'
     Type: String
-  GrafanaDbSetupImage:
-    Default: lakerunner-grafana-db-setup:latest
-    Description: Container image for Grafana database setup init container
-    Type: String
   GrafanaImage:
     Default: grafana/grafana:latest
     Description: Container image for Grafana service
+    Type: String
+  GrafanaInitImage:
+    Default: lakerunner-grafana-init:latest
+    Description: Container image for Grafana init container (datasource provisioning and database setup)
     Type: String
   ServicesStackName:
     Description: 'REQUIRED: Name of the Services stack to import Query API ALB DNS and port from.'
@@ -263,14 +263,14 @@ Resources:
             - Name: PGSSLMODE
               Value: require
           Essential: false
-          Image: !Ref 'GrafanaDbSetupImage'
+          Image: !Ref 'GrafanaInitImage'
           LogConfiguration:
             LogDriver: awslogs
             Options:
               awslogs-group: !Ref 'GrafanaLogGroup'
               awslogs-region: !Ref 'AWS::Region'
-              awslogs-stream-prefix: grafana-db-setup
-          Name: GrafanaDbSetup
+              awslogs-stream-prefix: grafana-init
+          Name: GrafanaInit
           Secrets:
             - Name: PGUSER
               ValueFrom: !Sub
@@ -292,7 +292,7 @@ Resources:
                 - SecretArn: !Ref 'GrafanaDbSecret'
         - DependsOn:
             - Condition: SUCCESS
-              ContainerName: GrafanaDbSetup
+              ContainerName: GrafanaInit
           Environment:
             - Name: BUMP_REVISION
               Value: '1'
