@@ -1,0 +1,195 @@
+Description: 'EKS Cluster: EKS cluster, node groups, KEDA, and Lakerunner Helm deployments'
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Network Configuration
+        Parameters:
+          - VpcId
+          - PrivateSubnet1Id
+          - PrivateSubnet2Id
+          - ControlPlaneSecurityGroupId
+          - NodeGroupSecurityGroupId
+      - Label:
+          default: Data Layer Configuration
+        Parameters:
+          - DbEndpoint
+          - DbPort
+          - DbSecretArn
+          - BucketName
+          - QueueUrl
+      - Label:
+          default: Node Group Configuration
+        Parameters:
+          - NodeInstanceType
+          - NodeGroupMinSize
+          - NodeGroupMaxSize
+          - NodeGroupDesiredSize
+    ParameterLabels:
+      BucketName:
+        default: S3 Bucket Name
+      ControlPlaneSecurityGroupId:
+        default: Control Plane Security Group ID
+      DbEndpoint:
+        default: Database Endpoint
+      DbPort:
+        default: Database Port
+      DbSecretArn:
+        default: Database Secret ARN
+      NodeGroupDesiredSize:
+        default: Node Group Desired Size
+      NodeGroupMaxSize:
+        default: Node Group Max Size
+      NodeGroupMinSize:
+        default: Node Group Min Size
+      NodeGroupSecurityGroupId:
+        default: Node Group Security Group ID
+      NodeInstanceType:
+        default: Node Instance Type
+      PrivateSubnet1Id:
+        default: Private Subnet 1 ID
+      PrivateSubnet2Id:
+        default: Private Subnet 2 ID
+      QueueUrl:
+        default: SQS Queue URL
+      VpcId:
+        default: VPC ID
+Outputs:
+  ClusterRoleArn:
+    Description: EKS cluster role ARN
+    Value: !GetAtt 'EKSClusterRole.Arn'
+  EKSClusterNote:
+    Description: Placeholder for EKS resources
+    Value: EKS cluster, node groups, KEDA, and Lakerunner would be deployed here
+  NodeGroupRoleArn:
+    Description: EKS node group role ARN
+    Value: !GetAtt 'EKSNodeGroupRole.Arn'
+Parameters:
+  BucketName:
+    Description: S3 bucket name from data layer stack
+    Type: String
+  ControlPlaneSecurityGroupId:
+    Description: EKS Control Plane Security Group ID from VPC stack
+    Type: String
+  DbEndpoint:
+    Description: Database endpoint from data layer stack
+    Type: String
+  DbPort:
+    Description: Database port from data layer stack
+    Type: String
+  DbSecretArn:
+    Description: Database secret ARN from data layer stack
+    Type: String
+  NodeGroupDesiredSize:
+    Default: 3
+    Description: Desired number of nodes in the node group
+    MaxValue: 10
+    MinValue: 1
+    Type: Number
+  NodeGroupMaxSize:
+    Default: 10
+    Description: Maximum number of nodes in the node group
+    MaxValue: 20
+    MinValue: 1
+    Type: Number
+  NodeGroupMinSize:
+    Default: 2
+    Description: Minimum number of nodes in the node group
+    MaxValue: 10
+    MinValue: 1
+    Type: Number
+  NodeGroupSecurityGroupId:
+    Description: EKS Node Group Security Group ID from VPC stack
+    Type: String
+  NodeInstanceType:
+    AllowedValues:
+      - t3.small
+      - t3.medium
+      - t3.large
+      - t3.xlarge
+      - t3.2xlarge
+    Default: t3.medium
+    Description: Instance type for EKS worker nodes
+    Type: String
+  PrivateSubnet1Id:
+    Description: Private Subnet 1 ID from VPC stack
+    Type: String
+  PrivateSubnet2Id:
+    Description: Private Subnet 2 ID from VPC stack
+    Type: String
+  QueueUrl:
+    Description: SQS queue URL from data layer stack
+    Type: String
+  VpcId:
+    Description: VPC ID from VPC stack
+    Type: String
+Resources:
+  EKSClusterRole:
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: eks.amazonaws.com
+        Version: '2012-10-17'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEKSClusterPolicy
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-cluster-role'
+    Type: AWS::IAM::Role
+  EKSNodeGroupRole:
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+        Version: '2012-10-17'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy
+        - arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+      Policies:
+        - PolicyDocument:
+            Statement:
+              - Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                Effect: Allow
+                Resource:
+                  - !Sub
+                    - arn:aws:s3:::${BucketName}
+                    - BucketName: !Ref 'BucketName'
+                  - !Sub
+                    - arn:aws:s3:::${BucketName}/*
+                    - BucketName: !Ref 'BucketName'
+              - Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Effect: Allow
+                Resource:
+                  - !Sub 'arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:lakerunner-ingest-queue'
+              - Action:
+                  - secretsmanager:GetSecretValue
+                Effect: Allow
+                Resource:
+                  - !Ref 'DbSecretArn'
+              - Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                Effect: Allow
+                Resource:
+                  - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/*'
+            Version: '2012-10-17'
+          PolicyName: LakerunnerAccess
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-nodegroup-role'
+    Type: AWS::IAM::Role
+

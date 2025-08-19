@@ -1,0 +1,204 @@
+Description: 'EKS Production Stack: Orchestrates VPC, Data Layer, and EKS Cluster substacks'
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Network Configuration
+        Parameters:
+          - VpcCidr
+          - AvailabilityZone1
+          - AvailabilityZone2
+      - Label:
+          default: Node Group Configuration
+        Parameters:
+          - NodeInstanceType
+          - NodeGroupMinSize
+          - NodeGroupMaxSize
+          - NodeGroupDesiredSize
+      - Label:
+          default: Configuration Overrides (Advanced)
+        Parameters:
+          - ApiKeysOverride
+          - StorageProfilesOverride
+      - Label:
+          default: Template URLs (Advanced)
+        Parameters:
+          - VpcTemplateUrl
+          - DataTemplateUrl
+          - ClusterTemplateUrl
+    ParameterLabels:
+      ApiKeysOverride:
+        default: Custom API Keys (YAML)
+      AvailabilityZone1:
+        default: Availability Zone 1
+      AvailabilityZone2:
+        default: Availability Zone 2
+      ClusterTemplateUrl:
+        default: Cluster Template URL
+      DataTemplateUrl:
+        default: Data Template URL
+      NodeGroupDesiredSize:
+        default: Node Group Desired Size
+      NodeGroupMaxSize:
+        default: Node Group Max Size
+      NodeGroupMinSize:
+        default: Node Group Min Size
+      NodeInstanceType:
+        default: Node Instance Type
+      StorageProfilesOverride:
+        default: Custom Storage Profiles (YAML)
+      VpcCidr:
+        default: VPC CIDR Block
+      VpcTemplateUrl:
+        default: VPC Template URL
+Outputs:
+  ClusterRoleArn:
+    Description: EKS cluster service role ARN
+    Value: !GetAtt 'ClusterStack.Outputs.ClusterRoleArn'
+  ClusterStackId:
+    Description: EKS cluster stack ID
+    Value: !Ref 'ClusterStack'
+  DataStackId:
+    Description: Data layer stack ID
+    Value: !Ref 'DataStack'
+  DatabaseEndpoint:
+    Description: RDS database endpoint
+    Value: !GetAtt 'DataStack.Outputs.DbEndpoint'
+  DeploymentInstructions:
+    Description: Deployment completion instructions
+    Value: !Sub
+      - "\nProduction EKS deployment completed successfully!\n\nNext steps:\n1. Connect to the EKS cluster: aws eks update-kubeconfig --region ${AWS::Region} --name ${AWS::StackName}-cluster\n2. Verify\
+        \ KEDA is installed: kubectl get pods -n keda\n3. Verify Lakerunner is deployed: kubectl get pods -n lakerunner\n4. Check service endpoints: kubectl get services -n lakerunner\n\nDatabase endpoint:\
+        \ ${DbEndpoint}\nS3 bucket: ${BucketName}\n        "
+      - BucketName: !GetAtt 'DataStack.Outputs.BucketName'
+        DbEndpoint: !GetAtt 'DataStack.Outputs.DbEndpoint'
+  NodeGroupRoleArn:
+    Description: EKS node group role ARN
+    Value: !GetAtt 'ClusterStack.Outputs.NodeGroupRoleArn'
+  S3BucketName:
+    Description: S3 bucket name for data ingestion
+    Value: !GetAtt 'DataStack.Outputs.BucketName'
+  VpcId:
+    Description: VPC ID
+    Value: !GetAtt 'VpcStack.Outputs.VpcId'
+  VpcStackId:
+    Description: VPC stack ID
+    Value: !Ref 'VpcStack'
+Parameters:
+  ApiKeysOverride:
+    Default: ''
+    Description: 'OPTIONAL: Custom API keys configuration in YAML format'
+    Type: String
+  AvailabilityZone1:
+    Description: First Availability Zone for subnets
+    Type: AWS::EC2::AvailabilityZone::Name
+  AvailabilityZone2:
+    Description: Second Availability Zone for subnets
+    Type: AWS::EC2::AvailabilityZone::Name
+  ClusterTemplateUrl:
+    Default: https://s3.amazonaws.com/your-bucket/lakerunner-eks-cluster.yaml
+    Description: URL to EKS Cluster CloudFormation template
+    Type: String
+  DataTemplateUrl:
+    Default: https://s3.amazonaws.com/your-bucket/lakerunner-eks-data.yaml
+    Description: URL to Data Layer CloudFormation template
+    Type: String
+  NodeGroupDesiredSize:
+    Default: 3
+    Description: Desired number of nodes in the node group
+    MaxValue: 10
+    MinValue: 1
+    Type: Number
+  NodeGroupMaxSize:
+    Default: 10
+    Description: Maximum number of nodes in the node group
+    MaxValue: 20
+    MinValue: 1
+    Type: Number
+  NodeGroupMinSize:
+    Default: 2
+    Description: Minimum number of nodes in the node group
+    MaxValue: 10
+    MinValue: 1
+    Type: Number
+  NodeInstanceType:
+    AllowedValues:
+      - t3.small
+      - t3.medium
+      - t3.large
+      - t3.xlarge
+      - t3.2xlarge
+    Default: t3.medium
+    Description: Instance type for EKS worker nodes
+    Type: String
+  StorageProfilesOverride:
+    Default: ''
+    Description: 'OPTIONAL: Custom storage profiles configuration in YAML format'
+    Type: String
+  VpcCidr:
+    Default: 10.0.0.0/16
+    Description: CIDR block for the VPC
+    Type: String
+  VpcTemplateUrl:
+    Default: https://s3.amazonaws.com/your-bucket/lakerunner-eks-vpc.yaml
+    Description: URL to VPC CloudFormation template
+    Type: String
+Resources:
+  ClusterStack:
+    DependsOn:
+      - DataStack
+    Properties:
+      Parameters:
+        BucketName: !GetAtt 'DataStack.Outputs.BucketName'
+        ControlPlaneSecurityGroupId: !GetAtt 'VpcStack.Outputs.ControlPlaneSecurityGroupId'
+        DbEndpoint: !GetAtt 'DataStack.Outputs.DbEndpoint'
+        DbPort: !GetAtt 'DataStack.Outputs.DbPort'
+        DbSecretArn: !GetAtt 'DataStack.Outputs.DbSecretArn'
+        NodeGroupDesiredSize: !Ref 'NodeGroupDesiredSize'
+        NodeGroupMaxSize: !Ref 'NodeGroupMaxSize'
+        NodeGroupMinSize: !Ref 'NodeGroupMinSize'
+        NodeGroupSecurityGroupId: !GetAtt 'VpcStack.Outputs.NodeGroupSecurityGroupId'
+        NodeInstanceType: !Ref 'NodeInstanceType'
+        PrivateSubnet1Id: !GetAtt 'VpcStack.Outputs.PrivateSubnet1Id'
+        PrivateSubnet2Id: !GetAtt 'VpcStack.Outputs.PrivateSubnet2Id'
+        QueueUrl: !GetAtt 'DataStack.Outputs.QueueUrl'
+        VpcId: !GetAtt 'VpcStack.Outputs.VpcId'
+      Tags:
+        - Key: Component
+          Value: EKSCluster
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-cluster'
+      TemplateURL: !Ref 'ClusterTemplateUrl'
+    Type: AWS::CloudFormation::Stack
+  DataStack:
+    DependsOn:
+      - VpcStack
+    Properties:
+      Parameters:
+        ApiKeysOverride: !Ref 'ApiKeysOverride'
+        NodeGroupSecurityGroupId: !GetAtt 'VpcStack.Outputs.NodeGroupSecurityGroupId'
+        PrivateSubnet1Id: !GetAtt 'VpcStack.Outputs.PrivateSubnet1Id'
+        PrivateSubnet2Id: !GetAtt 'VpcStack.Outputs.PrivateSubnet2Id'
+        StorageProfilesOverride: !Ref 'StorageProfilesOverride'
+        VpcId: !GetAtt 'VpcStack.Outputs.VpcId'
+      Tags:
+        - Key: Component
+          Value: DataLayer
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-data'
+      TemplateURL: !Ref 'DataTemplateUrl'
+    Type: AWS::CloudFormation::Stack
+  VpcStack:
+    Properties:
+      Parameters:
+        AvailabilityZone1: !Ref 'AvailabilityZone1'
+        AvailabilityZone2: !Ref 'AvailabilityZone2'
+        VpcCidr: !Ref 'VpcCidr'
+      Tags:
+        - Key: Component
+          Value: VPC
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-vpc'
+      TemplateURL: !Ref 'VpcTemplateUrl'
+    Type: AWS::CloudFormation::Stack
+

@@ -1,0 +1,216 @@
+Conditions:
+  HasApiKeysOverride: !Not
+    - !Equals
+      - !Ref 'ApiKeysOverride'
+      - ''
+  HasStorageProfilesOverride: !Not
+    - !Equals
+      - !Ref 'StorageProfilesOverride'
+      - ''
+Description: 'EKS Data Layer: RDS PostgreSQL, S3 bucket, SQS queue, and Secrets Manager'
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Network Configuration
+        Parameters:
+          - VpcId
+          - PrivateSubnet1Id
+          - PrivateSubnet2Id
+          - NodeGroupSecurityGroupId
+      - Label:
+          default: Configuration Overrides (Advanced)
+        Parameters:
+          - ApiKeysOverride
+          - StorageProfilesOverride
+    ParameterLabels:
+      ApiKeysOverride:
+        default: Custom API Keys (YAML)
+      NodeGroupSecurityGroupId:
+        default: Node Group Security Group ID
+      PrivateSubnet1Id:
+        default: Private Subnet 1 ID
+      PrivateSubnet2Id:
+        default: Private Subnet 2 ID
+      StorageProfilesOverride:
+        default: Custom Storage Profiles (YAML)
+      VpcId:
+        default: VPC ID
+Outputs:
+  BucketArn:
+    Description: S3 ingest bucket ARN
+    Value: !GetAtt 'IngestBucket.Arn'
+  BucketName:
+    Description: S3 ingest bucket name
+    Value: !Ref 'IngestBucket'
+  DbEndpoint:
+    Description: Database endpoint
+    Value: !GetAtt 'LakerunnerDb.Endpoint.Address'
+  DbPort:
+    Description: Database port
+    Value: !GetAtt 'LakerunnerDb.Endpoint.Port'
+  DbSecretArn:
+    Description: Database credentials secret ARN
+    Value: !Ref 'DbSecret'
+  QueueArn:
+    Description: SQS ingest queue ARN
+    Value: !GetAtt 'IngestQueue.Arn'
+  QueueName:
+    Description: SQS ingest queue name
+    Value: !GetAtt 'IngestQueue.QueueName'
+  QueueUrl:
+    Description: SQS ingest queue URL
+    Value: !Ref 'IngestQueue'
+Parameters:
+  ApiKeysOverride:
+    Default: ''
+    Description: 'OPTIONAL: Custom API keys configuration in YAML format. Leave blank to use defaults from defaults.yaml.'
+    Type: String
+  NodeGroupSecurityGroupId:
+    Description: EKS Node Group Security Group ID from VPC stack
+    Type: String
+  PrivateSubnet1Id:
+    Description: Private Subnet 1 ID from VPC stack
+    Type: String
+  PrivateSubnet2Id:
+    Description: Private Subnet 2 ID from VPC stack
+    Type: String
+  StorageProfilesOverride:
+    Default: ''
+    Description: 'OPTIONAL: Custom storage profiles configuration in YAML format. Leave blank to use defaults from defaults.yaml.'
+    Type: String
+  VpcId:
+    Description: VPC ID from VPC stack
+    Type: String
+Resources:
+  ApiKeysParam:
+    Properties:
+      Description: API keys configuration
+      Name: /lakerunner/api_keys
+      Type: String
+      Value: !If
+        - HasApiKeysOverride
+        - !Ref 'ApiKeysOverride'
+        - "- keys:\n  - f70603aa00e6f67999cc66e336134887\n  organization_id: 12340000-0000-4000-8000-000000000000\n"
+    Type: AWS::SSM::Parameter
+  DbSecret:
+    Properties:
+      GenerateSecretString:
+        ExcludePunctuation: true
+        GenerateStringKey: password
+        SecretStringTemplate: '{"username":"lakerunner"}'
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-db-secret'
+    Type: AWS::SecretsManager::Secret
+  DbSubnetGroup:
+    Properties:
+      DBSubnetGroupDescription: DB subnets for EKS
+      SubnetIds:
+        - !Ref 'PrivateSubnet1Id'
+        - !Ref 'PrivateSubnet2Id'
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-db-subnet-group'
+    Type: AWS::RDS::DBSubnetGroup
+  IngestBucket:
+    DeletionPolicy: Delete
+    Properties:
+      LifecycleConfiguration:
+        Rules:
+          - ExpirationInDays: 10
+            Prefix: otel-raw/
+            Status: Enabled
+      NotificationConfiguration:
+        QueueConfigurations:
+          - Event: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: otel-raw/
+            Queue: !GetAtt 'IngestQueue.Arn'
+          - Event: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: logs-raw/
+            Queue: !GetAtt 'IngestQueue.Arn'
+          - Event: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: metrics-raw/
+            Queue: !GetAtt 'IngestQueue.Arn'
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-ingest-bucket'
+    Type: AWS::S3::Bucket
+  IngestQueue:
+    Properties:
+      MessageRetentionPeriod: 345600
+      QueueName: lakerunner-ingest-queue
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-ingest-queue'
+    Type: AWS::SQS::Queue
+  IngestQueuePolicy:
+    Properties:
+      PolicyDocument:
+        Statement:
+          - Action:
+              - sqs:GetQueueAttributes
+              - sqs:GetQueueUrl
+              - sqs:SendMessage
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref 'AWS::AccountId'
+            Effect: Allow
+            Principal:
+              Service: s3.amazonaws.com
+            Resource: !GetAtt 'IngestQueue.Arn'
+        Version: '2012-10-17'
+      Queues:
+        - !Ref 'IngestQueue'
+    Type: AWS::SQS::QueuePolicy
+  LakerunnerDb:
+    Properties:
+      AllocatedStorage: '100'
+      CopyTagsToSnapshot: true
+      DBInstanceClass: db.t3.medium
+      DBName: lakerunner
+      DBSubnetGroupName: !Ref 'DbSubnetGroup'
+      DeletionProtection: false
+      Engine: postgres
+      EngineVersion: '17'
+      MasterUserPassword: !Sub
+        - '{{resolve:secretsmanager:${S}:SecretString:password}}'
+        - S: !Ref 'DbSecret'
+      MasterUsername: !Sub
+        - '{{resolve:secretsmanager:${S}:SecretString:username}}'
+        - S: !Ref 'DbSecret'
+      MultiAZ: false
+      PubliclyAccessible: false
+      StorageType: gp3
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-db'
+      VPCSecurityGroups:
+        - !Ref 'NodeGroupSecurityGroupId'
+    Type: AWS::RDS::DBInstance
+  StorageProfilesParam:
+    Properties:
+      Description: Storage profiles configuration
+      Name: /lakerunner/storage_profiles
+      Type: String
+      Value: !If
+        - HasStorageProfilesOverride
+        - !Ref 'StorageProfilesOverride'
+        - !Sub
+          - "- bucket: ${Bucket}\n  cloud_provider: aws\n  collector_name: lakerunner\n  insecure_tls: false\n  instance_num: 1\n  organization_id: 12340000-0000-4000-8000-000000000000\n  region: ${AWS::Region}\n\
+            \  use_path_style: true\n"
+          - Bucket: !Ref 'IngestBucket'
+    Type: AWS::SSM::Parameter
+

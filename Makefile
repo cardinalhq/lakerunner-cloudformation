@@ -45,9 +45,9 @@ test-params:	## Run parameter and condition validation tests
 	source $(VENV_DIR)/bin/activate && $(PYTEST) tests/test_parameter_validation.py tests/test_condition_validation.py -v
 
 lint:		## Run CloudFormation linting (warnings are acceptable)
-	source $(VENV_DIR)/bin/activate && cfn-lint generated-templates/*.yaml || echo "cfn-lint completed with warnings (warnings are acceptable per CLAUDE.md)"
+	source $(VENV_DIR)/bin/activate && cfn-lint generated-templates/*/*.yaml || echo "cfn-lint completed with warnings (warnings are acceptable per CLAUDE.md)"
 
 clean:		## Clean generated files and test cache
-	rm -rf generated-templates/*.yaml .pytest_cache tests/__pycache__ src/__pycache__
+	rm -rf generated-templates/*/*.yaml .pytest_cache tests/__pycache__ src/__pycache__ src/*/__pycache__
 
 all: build test lint	## Run build, test, and lint

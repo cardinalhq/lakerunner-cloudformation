@@ -1,8 +1,13 @@
 import pytest
 import json
 import os
+import sys
 from unittest.mock import patch, mock_open
 from cloud_radar.cf.unit import Template as CloudRadarTemplate
+# Add ECS source directory to path for imports
+ecs_path = os.path.join(os.path.dirname(__file__), '..', 'src', 'ecs')
+if ecs_path not in sys.path:
+    sys.path.insert(0, ecs_path)
 
 
 class TestServicesTemplate:

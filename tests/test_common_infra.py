@@ -1,6 +1,12 @@
 import pytest
 import json
 from cloud_radar.cf.unit import Template as CloudRadarTemplate
+import sys
+import os
+# Add ECS source directory to path for imports
+ecs_path = os.path.join(os.path.dirname(__file__), '..', 'src', 'ecs')
+if ecs_path not in sys.path:
+    sys.path.insert(0, ecs_path)
 from lakerunner_common import t as template
 
 

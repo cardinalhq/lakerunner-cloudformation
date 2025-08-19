@@ -19,8 +19,10 @@ import os
 import unittest
 from unittest.mock import patch, MagicMock
 
-# Add src directory to Python path so we can import the template modules
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+# Add ECS source directory to path for imports
+ecs_path = os.path.join(os.path.dirname(__file__), '..', 'src', 'ecs')
+if ecs_path not in sys.path:
+    sys.path.insert(0, ecs_path)
 
 class TestGrafanaTemplateSimple(unittest.TestCase):
     """Simple smoke tests for Grafana template generation"""

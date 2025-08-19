@@ -28,26 +28,58 @@ fi
 if [ -d "generated-templates" ]; then
   rm -rf generated-templates
 fi
-mkdir generated-templates
+mkdir -p generated-templates/ecs generated-templates/eks
 
-echo "1. Generating Lakerunner Common Infrastructure..."
-python3 src/lakerunner_common.py > generated-templates/lakerunner-common.yaml
-cfn-lint generated-templates/lakerunner-common.yaml
+echo "=== Generating ECS Templates ==="
 
-echo "2. Generating Lakerunner Migration Task..."
-python3 src/lakerunner_migration.py > generated-templates/lakerunner-migration.yaml
-cfn-lint generated-templates/lakerunner-migration.yaml
+echo "1. Generating Lakerunner Common Infrastructure (ECS)..."
+python3 src/ecs/lakerunner_common.py > generated-templates/ecs/lakerunner-common.yaml
+cfn-lint generated-templates/ecs/lakerunner-common.yaml
 
-echo "3. Generating Lakerunner Services..."
-python3 src/lakerunner_services.py > generated-templates/lakerunner-services.yaml
-cfn-lint generated-templates/lakerunner-services.yaml
+echo "2. Generating Lakerunner Migration Task (ECS)..."
+python3 src/ecs/lakerunner_migration.py > generated-templates/ecs/lakerunner-migration.yaml
+cfn-lint generated-templates/ecs/lakerunner-migration.yaml
 
-echo "4. Generating Lakerunner Grafana Service..."
-python3 src/lakerunner_grafana_service.py > generated-templates/lakerunner-grafana-service.yaml
-cfn-lint generated-templates/lakerunner-grafana-service.yaml
+echo "3. Generating Lakerunner Services (ECS)..."
+python3 src/ecs/lakerunner_services.py > generated-templates/ecs/lakerunner-services.yaml
+cfn-lint generated-templates/ecs/lakerunner-services.yaml
+
+echo "4. Generating Lakerunner Grafana Service (ECS)..."
+python3 src/ecs/lakerunner_grafana_service.py > generated-templates/ecs/lakerunner-grafana-service.yaml
+cfn-lint generated-templates/ecs/lakerunner-grafana-service.yaml
+
+echo "=== Generating EKS Templates ==="
+
+# Check if EKS templates exist before attempting to generate
+if [ -f "src/eks/lakerunner_eks_vpc.py" ]; then
+  echo "5. Generating EKS VPC Infrastructure..."
+  python3 src/eks/lakerunner_eks_vpc.py > generated-templates/eks/lakerunner-eks-vpc.yaml
+  cfn-lint generated-templates/eks/lakerunner-eks-vpc.yaml
+fi
+
+if [ -f "src/eks/lakerunner_eks_data.py" ]; then
+  echo "6. Generating EKS Data Layer..."
+  python3 src/eks/lakerunner_eks_data.py > generated-templates/eks/lakerunner-eks-data.yaml
+  cfn-lint generated-templates/eks/lakerunner-eks-data.yaml
+fi
+
+if [ -f "src/eks/lakerunner_eks_cluster.py" ]; then
+  echo "7. Generating EKS Cluster..."
+  python3 src/eks/lakerunner_eks_cluster.py > generated-templates/eks/lakerunner-eks-cluster.yaml
+  cfn-lint generated-templates/eks/lakerunner-eks-cluster.yaml
+fi
+
+if [ -f "src/eks/lakerunner_eks_production.py" ]; then
+  echo "8. Generating EKS Production Orchestration..."
+  python3 src/eks/lakerunner_eks_production.py > generated-templates/eks/lakerunner-eks-production.yaml
+  cfn-lint generated-templates/eks/lakerunner-eks-production.yaml
+fi
 
 echo -e "\nGenerated CloudFormation templates:"
-ls -la generated-templates/
+echo "ECS Templates:"
+ls -la generated-templates/ecs/
+echo -e "\nEKS Templates:"
+ls -la generated-templates/eks/
 
 echo -e "\nNote: cfn-lint warnings above are safe to ignore:"
 echo "  - W1030: Empty PublicSubnets parameter is expected when using internal ALB"
