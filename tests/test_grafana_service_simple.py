@@ -166,8 +166,7 @@ class TestGrafanaTemplateSimple(unittest.TestCase):
         
         # Should have Grafana-specific parameters
         assert "GrafanaImage" in parameters
-        assert "GrafanaInitImage" in parameters
-        assert "GrafanaResetToken" in parameters
+        assert "GrafanaDbSetupImage" in parameters
         assert "AlbScheme" in parameters
     
     @patch('lakerunner_grafana_service.load_grafana_config')

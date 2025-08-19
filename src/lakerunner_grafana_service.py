@@ -74,18 +74,13 @@ def create_grafana_template():
         Description="Container image for Grafana service"
     ))
 
-    GrafanaInitImage = t.add_parameter(Parameter(
-        "GrafanaInitImage", Type="String",
-        Default=images.get('grafana_init', 'public.ecr.aws/cardinalhq.io/lakerunner-grafana-initcontainer:latest'),
-        Description="Container image for Grafana init container"
+    GrafanaDbSetupImage = t.add_parameter(Parameter(
+        "GrafanaDbSetupImage", Type="String",
+        Default=images.get('grafana_db_setup', 'lakerunner-grafana-db-setup:latest'),
+        Description="Container image for Grafana database setup init container"
     ))
 
-    # Grafana Reset Token
-    GrafanaResetToken = t.add_parameter(Parameter(
-        "GrafanaResetToken", Type="String",
-        Default="",
-        Description="OPTIONAL: Change this value to reset Grafana data (wipe PostgreSQL data). Leave blank for normal operation. Use any string (e.g., timestamp) to trigger reset."
-    ))
+
 
     # ALB Configuration parameters
     AlbScheme = t.add_parameter(Parameter(
@@ -106,11 +101,7 @@ def create_grafana_template():
                 },
                 {
                     "Label": {"default": "Container Images"},
-                    "Parameters": ["GrafanaImage", "GrafanaInitImage"]
-                },
-                {
-                    "Label": {"default": "Grafana Configuration"},
-                    "Parameters": ["GrafanaResetToken"]
+                    "Parameters": ["GrafanaImage", "GrafanaDbSetupImage"]
                 }
             ],
             "ParameterLabels": {
@@ -118,8 +109,7 @@ def create_grafana_template():
                 "ServicesStackName": {"default": "Services Stack Name"},
                 "AlbScheme": {"default": "ALB Scheme"},
                 "GrafanaImage": {"default": "Grafana Image"},
-                "GrafanaInitImage": {"default": "Grafana Init Image"},
-                "GrafanaResetToken": {"default": "Grafana Reset Token"}
+                "GrafanaDbSetupImage": {"default": "Grafana DB Setup Image"},
             }
         }
     })
@@ -353,10 +343,25 @@ def create_grafana_template():
     # -----------------------
     grafana_secret = t.add_resource(Secret(
         "GrafanaSecret",
-        Name=Sub("${AWS::StackName}-grafana"),
+        Name=Sub("${AWS::StackName}-grafana-admin"),
         Description="Grafana admin password",
         GenerateSecretString=GenerateSecretString(
             SecretStringTemplate='{"username": "lakerunner"}',
+            GenerateStringKey='password',
+            ExcludeCharacters=' !"#$%&\'()*+,./:;<=>?@[\\]^`{|}~',
+            PasswordLength=32
+        )
+    ))
+
+    # -----------------------
+    # Grafana database user secret
+    # -----------------------
+    grafana_db_secret = t.add_resource(Secret(
+        "GrafanaDbSecret",
+        Name=Sub("${AWS::StackName}-grafana-db"),
+        Description="Grafana database user password",
+        GenerateSecretString=GenerateSecretString(
+            SecretStringTemplate='{"username": "grafana"}',
             GenerateStringKey='password',
             ExcludeCharacters=' !"#$%&\'()*+,./:;<=>?@[\\]^`{|}~',
             PasswordLength=32
@@ -404,7 +409,8 @@ def create_grafana_template():
     base_env.extend([
         Environment(Name="GF_DATABASE_HOST", Value=ImportValue(Sub("${CommonInfraStackName}-DbEndpoint", CommonInfraStackName=Ref(CommonInfraStackName)))),
         Environment(Name="GF_DATABASE_PORT", Value=ImportValue(Sub("${CommonInfraStackName}-DbPort", CommonInfraStackName=Ref(CommonInfraStackName)))),
-        Environment(Name="GF_DATABASE_NAME", Value="lakerunner"),
+        Environment(Name="GF_DATABASE_NAME", Value="grafana"),
+        Environment(Name="GF_DATABASE_USER", Value="grafana"),
     ])
 
     # Add Grafana-specific environment variables (excluding sensitive ones)
@@ -412,11 +418,7 @@ def create_grafana_template():
     sensitive_keys = {'GF_SECURITY_ADMIN_PASSWORD', 'GF_DATABASE_USER', 'GF_DATABASE_PASSWORD'}
     for key, value in env_config.items():
         if key not in sensitive_keys:
-            # Special handling for GF_RESET_TOKEN to use parameter instead of defaults
-            if key == 'GF_RESET_TOKEN':
-                base_env.append(Environment(Name=key, Value=Ref(GrafanaResetToken)))
-            else:
-                base_env.append(Environment(Name=key, Value=value))
+            base_env.append(Environment(Name=key, Value=value))
 
     # Build secrets
     secrets = [
@@ -425,12 +427,8 @@ def create_grafana_template():
             ValueFrom=Sub("${SecretArn}:password::", SecretArn=Ref(grafana_secret))
         ),
         EcsSecret(
-            Name="GF_DATABASE_USER",
-            ValueFrom=Sub("${DbSecretArn}:username::", DbSecretArn=ImportValue(Sub("${CommonInfraStackName}-DbSecretArn", CommonInfraStackName=Ref(CommonInfraStackName))))
-        ),
-        EcsSecret(
             Name="GF_DATABASE_PASSWORD", 
-            ValueFrom=Sub("${DbSecretArn}:password::", DbSecretArn=ImportValue(Sub("${CommonInfraStackName}-DbSecretArn", CommonInfraStackName=Ref(CommonInfraStackName))))
+            ValueFrom=Sub("${SecretArn}:password::", SecretArn=Ref(grafana_db_secret))
         ),
         EcsSecret(
             Name="GRAFANA_DATASOURCE_CONFIG",
@@ -462,34 +460,47 @@ def create_grafana_template():
     # Build container definitions - init container + main container
     container_definitions = []
 
-    # Create init container for Grafana setup (datasource provisioning + reset logic)
+    # Init container for database setup
     init_container = ContainerDefinition(
-        Name="GrafanaInit",
-        Image=Ref(GrafanaInitImage),
+        Name="GrafanaDbSetup",
+        Image=Ref(GrafanaDbSetupImage),
         Essential=False,
         Environment=[
-            Environment(Name="PROVISIONING_DIR", Value="${GF_PATHS_PROVISIONING:-/etc/grafana/provisioning}"),
-            Environment(Name="RESET_TOKEN", Value=Ref(GrafanaResetToken)),
-            Environment(Name="QUERY_API_URL", Value=Sub("http://${QueryApiAlbDns}", QueryApiAlbDns=QueryApiAlbDns))
+            Environment(Name="GRAFANA_DB_NAME", Value="grafana"),
+            Environment(Name="GRAFANA_DB_USER", Value="grafana"),
+            Environment(Name="PGHOST", Value=ImportValue(Sub("${CommonInfraStackName}-DbEndpoint", CommonInfraStackName=Ref(CommonInfraStackName)))),
+            Environment(Name="PGPORT", Value=ImportValue(Sub("${CommonInfraStackName}-DbPort", CommonInfraStackName=Ref(CommonInfraStackName)))),
+            Environment(Name="PGDATABASE", Value="postgres"),  # Connect to default postgres db first
+            Environment(Name="PGSSLMODE", Value="require")
         ],
         Secrets=[
             EcsSecret(
-                Name="GRAFANA_DATASOURCE_CONFIG",
-                ValueFrom=Sub("${AWS::StackName}-grafana-datasource-config")
+                Name="PGUSER",
+                ValueFrom=Sub("${DbSecretArn}:username::",
+                             DbSecretArn=ImportValue(Sub("${CommonInfraStackName}-DbSecretArn",
+                                                        CommonInfraStackName=Ref(CommonInfraStackName))))
+            ),
+            EcsSecret(
+                Name="PGPASSWORD", 
+                ValueFrom=Sub("${DbSecretArn}:password::",
+                             DbSecretArn=ImportValue(Sub("${CommonInfraStackName}-DbSecretArn",
+                                                        CommonInfraStackName=Ref(CommonInfraStackName))))
+            ),
+            EcsSecret(
+                Name="GRAFANA_DB_PASSWORD",
+                ValueFrom=Sub("${SecretArn}:password::",
+                             SecretArn=Ref(grafana_db_secret))
             )
         ],
-        MountPoints=mount_points,
-        User="0",
         LogConfiguration=LogConfiguration(
             LogDriver="awslogs",
             Options={
                 "awslogs-group": Ref(log_group),
                 "awslogs-region": Ref("AWS::Region"),
-                "awslogs-stream-prefix": "grafana-init"
+                "awslogs-stream-prefix": "grafana-db-setup"
             }
         )
     )
-
     container_definitions.append(init_container)
 
     # Main Grafana container
@@ -502,7 +513,7 @@ def create_grafana_template():
         PortMappings=port_mappings,
         HealthCheck=health_check,
         User="0",
-        DependsOn=[{"ContainerName": "GrafanaInit", "Condition": "SUCCESS"}],
+        DependsOn=[{"ContainerName": "GrafanaDbSetup", "Condition": "SUCCESS"}],
         LogConfiguration=LogConfiguration(
             LogDriver="awslogs",
             Options={

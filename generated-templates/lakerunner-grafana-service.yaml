@@ -16,22 +16,16 @@ Metadata:
           default: Container Images
         Parameters:
           - GrafanaImage
-          - GrafanaInitImage
-      - Label:
-          default: Grafana Configuration
-        Parameters:
-          - GrafanaResetToken
+          - GrafanaDbSetupImage
     ParameterLabels:
       AlbScheme:
         default: ALB Scheme
       CommonInfraStackName:
         default: Common Infra Stack Name
+      GrafanaDbSetupImage:
+        default: Grafana DB Setup Image
       GrafanaImage:
         default: Grafana Image
-      GrafanaInitImage:
-        default: Grafana Init Image
-      GrafanaResetToken:
-        default: Grafana Reset Token
       ServicesStackName:
         default: Services Stack Name
 Outputs:
@@ -68,17 +62,13 @@ Parameters:
   CommonInfraStackName:
     Description: 'REQUIRED: Name of the CommonInfra stack to import infrastructure values from.'
     Type: String
+  GrafanaDbSetupImage:
+    Default: lakerunner-grafana-db-setup:latest
+    Description: Container image for Grafana database setup init container
+    Type: String
   GrafanaImage:
     Default: grafana/grafana:latest
     Description: Container image for Grafana service
-    Type: String
-  GrafanaInitImage:
-    Default: public.ecr.aws/cardinalhq.io/lakerunner/initcontainer-grafana:latest
-    Description: Container image for Grafana init container
-    Type: String
-  GrafanaResetToken:
-    Default: ''
-    Description: 'OPTIONAL: Change this value to reset Grafana data (wipe PostgreSQL data). Leave blank for normal operation. Use any string (e.g., timestamp) to trigger reset.'
     Type: String
   ServicesStackName:
     Description: 'REQUIRED: Name of the Services stack to import Query API ALB DNS and port from.'
@@ -149,6 +139,16 @@ Resources:
               - ${ServicesStackName}-AlbDNS
               - ServicesStackName: !Ref 'ServicesStackName'
     Type: AWS::SSM::Parameter
+  GrafanaDbSecret:
+    Properties:
+      Description: Grafana database user password
+      GenerateSecretString:
+        ExcludeCharacters: ' !"#$%&''()*+,./:;<=>?@[\]^`{|}~'
+        GenerateStringKey: password
+        PasswordLength: 32
+        SecretStringTemplate: '{"username": "grafana"}'
+      Name: !Sub '${AWS::StackName}-grafana-db'
+    Type: AWS::SecretsManager::Secret
   GrafanaExecRole:
     Properties:
       AssumeRolePolicyDocument:
@@ -207,7 +207,7 @@ Resources:
         GenerateStringKey: password
         PasswordLength: 32
         SecretStringTemplate: '{"username": "lakerunner"}'
-      Name: !Sub '${AWS::StackName}-grafana'
+      Name: !Sub '${AWS::StackName}-grafana-admin'
     Type: AWS::SecretsManager::Secret
   GrafanaService:
     DependsOn:
@@ -244,37 +244,55 @@ Resources:
     Properties:
       ContainerDefinitions:
         - Environment:
-            - Name: PROVISIONING_DIR
-              Value: ${GF_PATHS_PROVISIONING:-/etc/grafana/provisioning}
-            - Name: RESET_TOKEN
-              Value: !Ref 'GrafanaResetToken'
-            - Name: QUERY_API_URL
-              Value: !Sub
-                - http://${QueryApiAlbDns}
-                - QueryApiAlbDns: !ImportValue
-                    Fn::Sub:
-                      - ${ServicesStackName}-AlbDNS
-                      - ServicesStackName: !Ref 'ServicesStackName'
+            - Name: GRAFANA_DB_NAME
+              Value: grafana
+            - Name: GRAFANA_DB_USER
+              Value: grafana
+            - Name: PGHOST
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbEndpoint
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: PGPORT
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbPort
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: PGDATABASE
+              Value: postgres
+            - Name: PGSSLMODE
+              Value: require
           Essential: false
-          Image: !Ref 'GrafanaInitImage'
+          Image: !Ref 'GrafanaDbSetupImage'
           LogConfiguration:
             LogDriver: awslogs
             Options:
               awslogs-group: !Ref 'GrafanaLogGroup'
               awslogs-region: !Ref 'AWS::Region'
-              awslogs-stream-prefix: grafana-init
-          MountPoints:
-            - ContainerPath: /scratch
-              ReadOnly: false
-              SourceVolume: scratch
-          Name: GrafanaInit
+              awslogs-stream-prefix: grafana-db-setup
+          Name: GrafanaDbSetup
           Secrets:
-            - Name: GRAFANA_DATASOURCE_CONFIG
-              ValueFrom: !Sub '${AWS::StackName}-grafana-datasource-config'
-          User: '0'
+            - Name: PGUSER
+              ValueFrom: !Sub
+                - '${DbSecretArn}:username::'
+                - DbSecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-DbSecretArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: PGPASSWORD
+              ValueFrom: !Sub
+                - '${DbSecretArn}:password::'
+                - DbSecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-DbSecretArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: GRAFANA_DB_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !Ref 'GrafanaDbSecret'
         - DependsOn:
             - Condition: SUCCESS
-              ContainerName: GrafanaInit
+              ContainerName: GrafanaDbSetup
           Environment:
             - Name: BUMP_REVISION
               Value: '1'
@@ -295,7 +313,9 @@ Resources:
                   - ${CommonInfraStackName}-DbPort
                   - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: GF_DATABASE_NAME
-              Value: lakerunner
+              Value: grafana
+            - Name: GF_DATABASE_USER
+              Value: grafana
             - Name: GF_SECURITY_ADMIN_USER
               Value: lakerunner
             - Name: GF_SERVER_HTTP_PORT
@@ -340,20 +360,10 @@ Resources:
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
                 - SecretArn: !Ref 'GrafanaSecret'
-            - Name: GF_DATABASE_USER
-              ValueFrom: !Sub
-                - '${DbSecretArn}:username::'
-                - DbSecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-DbSecretArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: GF_DATABASE_PASSWORD
               ValueFrom: !Sub
-                - '${DbSecretArn}:password::'
-                - DbSecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-DbSecretArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                - '${SecretArn}:password::'
+                - SecretArn: !Ref 'GrafanaDbSecret'
             - Name: GRAFANA_DATASOURCE_CONFIG
               ValueFrom: !Ref 'GrafanaDatasourceConfig'
           User: '0'
