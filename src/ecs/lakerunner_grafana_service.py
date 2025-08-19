@@ -36,7 +36,7 @@ from troposphere.secretsmanager import Secret, GenerateSecretString
 def load_grafana_config(config_file="lakerunner-grafana-defaults.yaml"):
     """Load Grafana configuration from YAML file"""
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    config_path = os.path.join(script_dir, "..", config_file)
+    config_path = os.path.join(script_dir, "..", "..", config_file)
 
     with open(config_path, 'r') as f:
         return yaml.safe_load(f)
