@@ -9,7 +9,7 @@ database:
 # Container Images configuration (used by Service stack)
 images:
   grafana: "grafana/grafana:latest"
-  grafana_init: "lakerunner-grafana-init:latest"
+  grafana_init: "public.ecr.aws/cardinalhq.io/lakerunner/initcontainer-grafana:latest"
 
 # Grafana service configuration (used by Service stack)
 grafana:
