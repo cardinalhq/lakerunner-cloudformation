@@ -295,7 +295,10 @@ def create_grafana_template():
                                 "secretsmanager:GetSecretValue"
                             ],
                             "Resource": [
-                                Sub("arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*")
+                                Sub("arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*"),
+                                Sub("${DbSecretArn}*", 
+                                    DbSecretArn=ImportValue(Sub("${CommonInfraStackName}-DbSecretArn",
+                                                               CommonInfraStackName=Ref(CommonInfraStackName))))
                             ]
                         }
                     ]
