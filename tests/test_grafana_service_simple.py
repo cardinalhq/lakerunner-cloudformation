@@ -25,7 +25,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 class TestGrafanaTemplateSimple(unittest.TestCase):
     """Simple smoke tests for Grafana template generation"""
     
-    @patch('lakerunner_grafana.load_grafana_config')
+    @patch('lakerunner_grafana_service.load_grafana_config')
     def test_load_grafana_config_function(self, mock_load_config):
         """Test that load_grafana_config function can be imported and called"""
         mock_load_config.return_value = {
@@ -38,14 +38,14 @@ class TestGrafanaTemplateSimple(unittest.TestCase):
             "api_keys": []
         }
         
-        from lakerunner_grafana import load_grafana_config
+        from lakerunner_grafana_service import load_grafana_config
         
         config = load_grafana_config()
         assert isinstance(config, dict)
         assert "grafana" in config
         mock_load_config.assert_called_once()
     
-    @patch('lakerunner_grafana.load_grafana_config')
+    @patch('lakerunner_grafana_service.load_grafana_config')
     def test_create_grafana_template_function(self, mock_load_config):
         """Test that create_grafana_template function can be imported and called"""
         mock_load_config.return_value = {
@@ -61,13 +61,13 @@ class TestGrafanaTemplateSimple(unittest.TestCase):
             "api_keys": [{"keys": ["test-key"]}]
         }
         
-        from lakerunner_grafana import create_grafana_template
+        from lakerunner_grafana_service import create_grafana_template
         
         template = create_grafana_template()
         assert template is not None
         mock_load_config.assert_called_once()
     
-    @patch('lakerunner_grafana.load_grafana_config')
+    @patch('lakerunner_grafana_service.load_grafana_config')
     def test_template_generation_basic(self, mock_load_config):
         """Test basic template generation without errors"""
         mock_load_config.return_value = {
@@ -86,7 +86,7 @@ class TestGrafanaTemplateSimple(unittest.TestCase):
             "api_keys": [{"keys": ["test-key"]}]
         }
         
-        from lakerunner_grafana import create_grafana_template
+        from lakerunner_grafana_service import create_grafana_template
         
         template = create_grafana_template()
         
@@ -98,7 +98,7 @@ class TestGrafanaTemplateSimple(unittest.TestCase):
         template_dict = json.loads(template_json)
         assert isinstance(template_dict, dict)
     
-    @patch('lakerunner_grafana.load_grafana_config')
+    @patch('lakerunner_grafana_service.load_grafana_config')
     def test_template_has_basic_structure(self, mock_load_config):
         """Test that template has basic CloudFormation structure"""
         mock_load_config.return_value = {
@@ -112,7 +112,7 @@ class TestGrafanaTemplateSimple(unittest.TestCase):
             "api_keys": []
         }
         
-        from lakerunner_grafana import create_grafana_template
+        from lakerunner_grafana_service import create_grafana_template
         
         template = create_grafana_template()
         template_dict = json.loads(template.to_json())
@@ -127,7 +127,7 @@ class TestGrafanaTemplateSimple(unittest.TestCase):
         assert "Metadata" in template_dict
         assert "AWS::CloudFormation::Interface" in template_dict["Metadata"]
     
-    @patch('lakerunner_grafana.load_grafana_config')
+    @patch('lakerunner_grafana_service.load_grafana_config')
     def test_template_description_correct(self, mock_load_config):
         """Test that template has correct description"""
         mock_load_config.return_value = {
@@ -136,15 +136,15 @@ class TestGrafanaTemplateSimple(unittest.TestCase):
             "api_keys": []
         }
         
-        from lakerunner_grafana import create_grafana_template
+        from lakerunner_grafana_service import create_grafana_template
         
         template = create_grafana_template()
         template_dict = json.loads(template.to_json())
         
-        expected_description = "Lakerunner Grafana: Grafana service with ALB, EFS storage, and datasource configuration"
+        expected_description = "Lakerunner Grafana Service: Grafana service with ALB, PostgreSQL storage, and datasource configuration"
         assert template_dict["Description"] == expected_description
     
-    @patch('lakerunner_grafana.load_grafana_config')
+    @patch('lakerunner_grafana_service.load_grafana_config')
     def test_required_parameters_exist(self, mock_load_config):
         """Test that required parameters exist"""
         mock_load_config.return_value = {
@@ -153,7 +153,7 @@ class TestGrafanaTemplateSimple(unittest.TestCase):
             "api_keys": []
         }
         
-        from lakerunner_grafana import create_grafana_template
+        from lakerunner_grafana_service import create_grafana_template
         
         template = create_grafana_template()
         template_dict = json.loads(template.to_json())
@@ -166,10 +166,10 @@ class TestGrafanaTemplateSimple(unittest.TestCase):
         
         # Should have Grafana-specific parameters
         assert "GrafanaImage" in parameters
-        assert "GrafanaResetToken" in parameters
+        assert "GrafanaInitImage" in parameters
         assert "AlbScheme" in parameters
     
-    @patch('lakerunner_grafana.load_grafana_config')
+    @patch('lakerunner_grafana_service.load_grafana_config')
     def test_grafana_resources_exist(self, mock_load_config):
         """Test that Grafana-specific resources exist"""
         mock_load_config.return_value = {
@@ -183,7 +183,7 @@ class TestGrafanaTemplateSimple(unittest.TestCase):
             "api_keys": []
         }
         
-        from lakerunner_grafana import create_grafana_template
+        from lakerunner_grafana_service import create_grafana_template
         
         template = create_grafana_template()
         template_dict = json.loads(template.to_json())
@@ -196,10 +196,10 @@ class TestGrafanaTemplateSimple(unittest.TestCase):
         assert "GrafanaAlb" in resources
         assert "GrafanaTg" in resources
         assert "GrafanaSecret" in resources
-        assert "GrafanaEfsAccessPoint" in resources
+        # Note: EFS access point removed, using PostgreSQL now
         assert "GrafanaLogGroup" in resources
     
-    @patch('lakerunner_grafana.load_grafana_config')
+    @patch('lakerunner_grafana_service.load_grafana_config')
     def test_grafana_outputs_exist(self, mock_load_config):
         """Test that Grafana outputs exist"""
         mock_load_config.return_value = {
@@ -208,7 +208,7 @@ class TestGrafanaTemplateSimple(unittest.TestCase):
             "api_keys": []
         }
         
-        from lakerunner_grafana import create_grafana_template
+        from lakerunner_grafana_service import create_grafana_template
         
         template = create_grafana_template()
         template_dict = json.loads(template.to_json())

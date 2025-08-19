@@ -23,14 +23,13 @@ from troposphere.ecs import (
     Service, TaskDefinition, ContainerDefinition, Environment,
     LogConfiguration, Secret as EcsSecret, Volume, MountPoint,
     HealthCheck, PortMapping, RuntimePlatform, NetworkConfiguration, AwsvpcConfiguration,
-    LoadBalancer as EcsLoadBalancer, EFSVolumeConfiguration, AuthorizationConfig
+    LoadBalancer as EcsLoadBalancer
 )
 from troposphere.iam import Role, Policy
 from troposphere.elasticloadbalancingv2 import LoadBalancer, TargetGroup, TargetGroupAttribute, Listener, Matcher
 from troposphere.elasticloadbalancingv2 import Action as AlbAction
 from troposphere.ssm import Parameter as SSMParameter
 from troposphere.ec2 import SecurityGroup, SecurityGroupIngress
-from troposphere.efs import AccessPoint, PosixUser, RootDirectory, CreationInfo
 from troposphere.logs import LogGroup
 from troposphere.secretsmanager import Secret, GenerateSecretString
 
@@ -46,7 +45,7 @@ def create_grafana_template():
     """Create CloudFormation template for Grafana stack"""
 
     t = Template()
-    t.set_description("Lakerunner Grafana: Grafana service with ALB, EFS storage, and datasource configuration")
+    t.set_description("Lakerunner Grafana Service: Grafana service with ALB, PostgreSQL storage, and datasource configuration")
 
     # Load Grafana configuration
     config = load_grafana_config()
@@ -67,19 +66,21 @@ def create_grafana_template():
         Description="REQUIRED: Name of the Services stack to import Query API ALB DNS and port from."
     ))
 
-    # Container image override for air-gapped deployments
+
+    # Container image overrides for air-gapped deployments
     GrafanaImage = t.add_parameter(Parameter(
         "GrafanaImage", Type="String",
         Default=images.get('grafana', 'grafana/grafana:latest'),
         Description="Container image for Grafana service"
     ))
 
-    # Grafana Reset Token
-    GrafanaResetToken = t.add_parameter(Parameter(
-        "GrafanaResetToken", Type="String",
-        Default="",
-        Description="OPTIONAL: Change this value to reset Grafana data (wipe EFS volume). Leave blank for normal operation. Use any string (e.g., timestamp) to trigger reset."
+    GrafanaInitImage = t.add_parameter(Parameter(
+        "GrafanaInitImage", Type="String",
+        Default=images.get('grafana_init', 'lakerunner-grafana-init:latest'),
+        Description="Container image for Grafana init container (datasource provisioning and database setup)"
     ))
+
+
 
     # ALB Configuration parameters
     AlbScheme = t.add_parameter(Parameter(
@@ -100,11 +101,7 @@ def create_grafana_template():
                 },
                 {
                     "Label": {"default": "Container Images"},
-                    "Parameters": ["GrafanaImage"]
-                },
-                {
-                    "Label": {"default": "Grafana Configuration"},
-                    "Parameters": ["GrafanaResetToken"]
+                    "Parameters": ["GrafanaImage", "GrafanaInitImage"]
                 }
             ],
             "ParameterLabels": {
@@ -112,7 +109,7 @@ def create_grafana_template():
                 "ServicesStackName": {"default": "Services Stack Name"},
                 "AlbScheme": {"default": "ALB Scheme"},
                 "GrafanaImage": {"default": "Grafana Image"},
-                "GrafanaResetToken": {"default": "Grafana Reset Token"}
+                "GrafanaInitImage": {"default": "Grafana Init Image"},
             }
         }
     })
@@ -127,7 +124,6 @@ def create_grafana_template():
 
     # Import values from other stacks
     ClusterArnValue = ImportValue(ci_export("ClusterArn"))
-    EfsIdValue = ImportValue(ci_export("EfsId"))
     TaskSecurityGroupIdValue = ImportValue(ci_export("TaskSGId"))
     VpcIdValue = ImportValue(ci_export("VpcId"))
     PrivateSubnetsValue = Split(",", ImportValue(ci_export("PrivateSubnets")))
@@ -299,7 +295,10 @@ def create_grafana_template():
                                 "secretsmanager:GetSecretValue"
                             ],
                             "Resource": [
-                                Sub("arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*")
+                                Sub("arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*"),
+                                Sub("${DbSecretArn}*", 
+                                    DbSecretArn=ImportValue(Sub("${CommonInfraStackName}-DbSecretArn",
+                                                               CommonInfraStackName=Ref(CommonInfraStackName))))
                             ]
                         }
                     ]
@@ -324,19 +323,15 @@ def create_grafana_template():
         },
         Policies=[
             Policy(
-                PolicyName="EFSAccess",
+                PolicyName="LogAccess",
                 PolicyDocument={
                     "Version": "2012-10-17",
                     "Statement": [
                         {
                             "Effect": "Allow",
                             "Action": [
-                                "elasticfilesystem:ClientMount",
-                                "elasticfilesystem:ClientWrite",
-                                "elasticfilesystem:ClientRootAccess",
-                                "elasticfilesystem:DescribeFileSystems",
-                                "elasticfilesystem:DescribeMountTargets",
-                                "elasticfilesystem:DescribeAccessPoints"
+                                "logs:CreateLogStream",
+                                "logs:PutLogEvents"
                             ],
                             "Resource": "*"
                         }
@@ -351,10 +346,25 @@ def create_grafana_template():
     # -----------------------
     grafana_secret = t.add_resource(Secret(
         "GrafanaSecret",
-        Name=Sub("${AWS::StackName}-grafana"),
+        Name=Sub("${AWS::StackName}-grafana-admin"),
         Description="Grafana admin password",
         GenerateSecretString=GenerateSecretString(
             SecretStringTemplate='{"username": "lakerunner"}',
+            GenerateStringKey='password',
+            ExcludeCharacters=' !"#$%&\'()*+,./:;<=>?@[\\]^`{|}~',
+            PasswordLength=32
+        )
+    ))
+
+    # -----------------------
+    # Grafana database user secret
+    # -----------------------
+    grafana_db_secret = t.add_resource(Secret(
+        "GrafanaDbSecret",
+        Name=Sub("${AWS::StackName}-grafana-db"),
+        Description="Grafana database user password",
+        GenerateSecretString=GenerateSecretString(
+            SecretStringTemplate='{"username": "grafana"}',
             GenerateStringKey='password',
             ExcludeCharacters=' !"#$%&\'()*+,./:;<=>?@[\\]^`{|}~',
             PasswordLength=32
@@ -370,22 +380,10 @@ def create_grafana_template():
     ))
 
     # -----------------------
-    # EFS Access Point for Grafana
+    # PostgreSQL Database Configuration
     # -----------------------
-    grafana_access_point = t.add_resource(AccessPoint(
-        "GrafanaEfsAccessPoint",
-        FileSystemId=EfsIdValue,
-        PosixUser=PosixUser(Gid="0", Uid="0"),  # Use root for access point
-        RootDirectory=RootDirectory(
-            Path="/grafana",
-            CreationInfo=CreationInfo(
-                OwnerGid="0",     # root group owns the directory
-                OwnerUid="0",     # root user owns the directory  
-                Permissions="755"  # owner rwx, group rx, others rx - allows access to multiple users
-            )
-        ),
-        AccessPointTags=Tags(Name=Sub("${AWS::StackName}-grafana"))
-    ))
+    # Database connection is handled via environment variables and secrets
+    # No additional resources needed here as database is managed by setup stack
 
     # -----------------------
     # Grafana Service
@@ -399,18 +397,7 @@ def create_grafana_template():
 
     # Build volumes list
     volumes = [
-        Volume(Name="scratch"),
-        Volume(
-            Name="efs-grafana",
-            EFSVolumeConfiguration=EFSVolumeConfiguration(
-                FilesystemId=EfsIdValue,
-                TransitEncryption="ENABLED",
-                AuthorizationConfig=AuthorizationConfig(
-                    AccessPointId=Ref(grafana_access_point),
-                    IAM="ENABLED"
-                )
-            )
-        )
+        Volume(Name="scratch")
     ]
 
     # Build environment variables
@@ -421,22 +408,30 @@ def create_grafana_template():
         Environment(Name="HOME", Value="/scratch")
     ]
 
+    # Add database connection environment variables
+    base_env.extend([
+        Environment(Name="GF_DATABASE_HOST", Value=ImportValue(Sub("${CommonInfraStackName}-DbEndpoint", CommonInfraStackName=Ref(CommonInfraStackName)))),
+        Environment(Name="GF_DATABASE_PORT", Value=ImportValue(Sub("${CommonInfraStackName}-DbPort", CommonInfraStackName=Ref(CommonInfraStackName)))),
+        Environment(Name="GF_DATABASE_NAME", Value="grafana"),
+        Environment(Name="GF_DATABASE_USER", Value="grafana"),
+    ])
+
     # Add Grafana-specific environment variables (excluding sensitive ones)
     env_config = grafana_config.get('environment', {})
-    sensitive_keys = {'GF_SECURITY_ADMIN_PASSWORD'}
+    sensitive_keys = {'GF_SECURITY_ADMIN_PASSWORD', 'GF_DATABASE_USER', 'GF_DATABASE_PASSWORD'}
     for key, value in env_config.items():
         if key not in sensitive_keys:
-            # Special handling for GF_RESET_TOKEN to use parameter instead of defaults
-            if key == 'GF_RESET_TOKEN':
-                base_env.append(Environment(Name=key, Value=Ref(GrafanaResetToken)))
-            else:
-                base_env.append(Environment(Name=key, Value=value))
+            base_env.append(Environment(Name=key, Value=value))
 
     # Build secrets
     secrets = [
         EcsSecret(
             Name="GF_SECURITY_ADMIN_PASSWORD",
             ValueFrom=Sub("${SecretArn}:password::", SecretArn=Ref(grafana_secret))
+        ),
+        EcsSecret(
+            Name="GF_DATABASE_PASSWORD", 
+            ValueFrom=Sub("${SecretArn}:password::", SecretArn=Ref(grafana_db_secret))
         ),
         EcsSecret(
             Name="GRAFANA_DATASOURCE_CONFIG",
@@ -449,11 +444,6 @@ def create_grafana_template():
         MountPoint(
             ContainerPath="/scratch",
             SourceVolume="scratch",
-            ReadOnly=False
-        ),
-        MountPoint(
-            ContainerPath="/var/lib/grafana",
-            SourceVolume="efs-grafana",
             ReadOnly=False
         )
     ]
@@ -473,25 +463,38 @@ def create_grafana_template():
     # Build container definitions - init container + main container
     container_definitions = []
 
-    # Create init container for Grafana setup (datasource provisioning + reset logic)
+    # Init container for database setup
     init_container = ContainerDefinition(
         Name="GrafanaInit",
-        Image="public.ecr.aws/docker/library/alpine:latest",
+        Image=Ref(GrafanaInitImage),
         Essential=False,
-        Command=["/bin/sh", "-c"],
         Environment=[
-            Environment(Name="PROVISIONING_DIR", Value="${GF_PATHS_PROVISIONING:-/etc/grafana/provisioning}"),
-            Environment(Name="RESET_TOKEN", Value=Ref(GrafanaResetToken)),
-            Environment(Name="QUERY_API_URL", Value=Sub("http://${QueryApiAlbDns}", QueryApiAlbDns=QueryApiAlbDns))
+            Environment(Name="GRAFANA_DB_NAME", Value="grafana"),
+            Environment(Name="GRAFANA_DB_USER", Value="grafana"),
+            Environment(Name="PGHOST", Value=ImportValue(Sub("${CommonInfraStackName}-DbEndpoint", CommonInfraStackName=Ref(CommonInfraStackName)))),
+            Environment(Name="PGPORT", Value=ImportValue(Sub("${CommonInfraStackName}-DbPort", CommonInfraStackName=Ref(CommonInfraStackName)))),
+            Environment(Name="PGDATABASE", Value="postgres"),  # Connect to default postgres db first
+            Environment(Name="PGSSLMODE", Value="require")
         ],
         Secrets=[
             EcsSecret(
-                Name="GRAFANA_DATASOURCE_CONFIG",
-                ValueFrom=Sub("${AWS::StackName}-grafana-datasource-config")
+                Name="PGUSER",
+                ValueFrom=Sub("${DbSecretArn}:username::",
+                             DbSecretArn=ImportValue(Sub("${CommonInfraStackName}-DbSecretArn",
+                                                        CommonInfraStackName=Ref(CommonInfraStackName))))
+            ),
+            EcsSecret(
+                Name="PGPASSWORD", 
+                ValueFrom=Sub("${DbSecretArn}:password::",
+                             DbSecretArn=ImportValue(Sub("${CommonInfraStackName}-DbSecretArn",
+                                                        CommonInfraStackName=Ref(CommonInfraStackName))))
+            ),
+            EcsSecret(
+                Name="GRAFANA_DB_PASSWORD",
+                ValueFrom=Sub("${SecretArn}:password::",
+                             SecretArn=Ref(grafana_db_secret))
             )
         ],
-        MountPoints=mount_points,
-        User="0",
         LogConfiguration=LogConfiguration(
             LogDriver="awslogs",
             Options={
@@ -501,62 +504,6 @@ def create_grafana_template():
             }
         )
     )
-
-    # Multi-line shell script for init container
-    init_script = '''
-# Install curl for health checks and other tools
-apk add --no-cache curl
-
-# Set up provisioning directory
-PROVISIONING_DIR="${GF_PATHS_PROVISIONING:-/etc/grafana/provisioning}"
-DATASOURCES_DIR="$PROVISIONING_DIR/datasources"
-RESET_TOKEN_FILE="/var/lib/grafana/.grafana_reset_token"
-
-echo "Provisioning directory: $PROVISIONING_DIR"
-echo "Datasources directory: $DATASOURCES_DIR"
-echo "Reset token file: $RESET_TOKEN_FILE"
-
-# Create provisioning directories
-mkdir -p "$DATASOURCES_DIR"
-
-# All containers run as root, so no ownership changes needed
-
-# Handle reset token logic
-if [ -n "$RESET_TOKEN" ] && [ "$RESET_TOKEN" != "" ]; then
-    echo "Reset token provided: $RESET_TOKEN"
-
-    # Check if token file exists and compare
-    if [ -f "$RESET_TOKEN_FILE" ]; then
-        STORED_TOKEN=$(cat "$RESET_TOKEN_FILE")
-        if [ "$STORED_TOKEN" != "$RESET_TOKEN" ]; then
-            echo "Reset token changed from '$STORED_TOKEN' to '$RESET_TOKEN' - wiping Grafana data"
-            # Remove all Grafana data
-            find /var/lib/grafana -mindepth 1 -delete || true
-            # Create new token file
-            echo "$RESET_TOKEN" > "$RESET_TOKEN_FILE"
-        else
-            echo "Reset token unchanged - no reset needed"
-        fi
-    else
-        echo "First time with reset token - storing: $RESET_TOKEN"
-        echo "$RESET_TOKEN" > "$RESET_TOKEN_FILE"
-    fi
-else
-    echo "No reset token provided - skipping reset logic"
-fi
-
-# Write datasource configuration
-echo "Writing Grafana datasource configuration..."
-# The datasource config comes from SSM parameter as YAML, just write it directly
-cat > "$DATASOURCES_DIR/cardinal.yaml" << DATASOURCE_EOF
-$GRAFANA_DATASOURCE_CONFIG
-DATASOURCE_EOF
-
-echo "Grafana initialization complete"
-'''
-
-    # Set the command arguments with the script
-    init_container.Command = ["/bin/sh", "-c", init_script]
     container_definitions.append(init_container)
 
     # Main Grafana container

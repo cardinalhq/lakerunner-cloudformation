@@ -35,14 +35,17 @@ test-services:	## Run simplified tests for Services template
 test-migration:	## Run simplified tests for Migration template
 	source $(VENV_DIR)/bin/activate && $(PYTEST) tests/test_migration_simple.py -v
 
-test-grafana:	## Run simplified tests for Grafana template
-	source $(VENV_DIR)/bin/activate && $(PYTEST) tests/test_grafana_simple.py -v
+test-grafana-setup:	## Run simplified tests for Grafana Setup template
+	source $(VENV_DIR)/bin/activate && $(PYTEST) tests/test_grafana_setup_simple.py -v
+
+test-grafana-service:	## Run simplified tests for Grafana Service template
+	source $(VENV_DIR)/bin/activate && $(PYTEST) tests/test_grafana_service_simple.py -v
 
 test-params:	## Run parameter and condition validation tests
 	source $(VENV_DIR)/bin/activate && $(PYTEST) tests/test_parameter_validation.py tests/test_condition_validation.py -v
 
 lint:		## Run CloudFormation linting (warnings are acceptable)
-	source $(VENV_DIR)/bin/activate && cfn-lint generated-templates/*.yaml || echo "⚠️  cfn-lint completed with warnings (warnings are acceptable per CLAUDE.md)"
+	source $(VENV_DIR)/bin/activate && cfn-lint generated-templates/*.yaml || echo "cfn-lint completed with warnings (warnings are acceptable per CLAUDE.md)"
 
 clean:		## Clean generated files and test cache
 	rm -rf generated-templates/*.yaml .pytest_cache tests/__pycache__ src/__pycache__

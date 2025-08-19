@@ -1,11 +1,17 @@
 # Grafana configuration for Lakerunner deployment
-# This file contains configuration for the standalone Grafana stack
+# This file contains configuration for both Grafana Setup and Service stacks
 
-# Container Images configuration
+# Database configuration (used by Setup stack)
+database:
+  name: "lakerunner_grafana"
+  user: "grafana"
+
+# Container Images configuration (used by Service stack)
 images:
   grafana: "grafana/grafana:latest"
+  grafana_init: "public.ecr.aws/cardinalhq.io/lakerunner/initcontainer-grafana:latest"
 
-# Grafana service configuration
+# Grafana service configuration (used by Service stack)
 grafana:
   image: "grafana/grafana:latest"
   cpu: 512
@@ -21,11 +27,13 @@ grafana:
     GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s:%(http_port)s"
     GF_INSTALL_PLUGINS: "https://github.com/cardinalhq/cardinalhq-lakerunner-datasource/raw/refs/heads/main/cardinalhq-lakerunner-datasource.zip;cardinalhq-lakerunner-datasource"
     GF_PATHS_PROVISIONING: "/etc/grafana/provisioning"
-    GF_RESET_TOKEN: ""
-  efs_mounts:
-    - container_path: "/var/lib/grafana"
-      efs_path: "/grafana"
-      access_point_name: "grafana"
+    GF_SECURITY_ALLOW_EMBEDDING: "true"
+    # PostgreSQL database configuration
+    GF_DATABASE_TYPE: "postgres"
+    GF_DATABASE_SSL_MODE: "require"
+  database:
+    type: "postgres"
+    ssl_mode: "require"
   health_check:
     type: "curl"
     command: ["curl", "-f", "http://localhost:3000/api/health"]

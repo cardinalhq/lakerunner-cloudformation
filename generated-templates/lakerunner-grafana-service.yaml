@@ -2,7 +2,7 @@ Conditions:
   IsInternetFacing: !Equals
     - !Ref 'AlbScheme'
     - internet-facing
-Description: 'Lakerunner Grafana: Grafana service with ALB, EFS storage, and datasource configuration'
+Description: 'Lakerunner Grafana Service: Grafana service with ALB, PostgreSQL storage, and datasource configuration'
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
@@ -16,10 +16,7 @@ Metadata:
           default: Container Images
         Parameters:
           - GrafanaImage
-      - Label:
-          default: Grafana Configuration
-        Parameters:
-          - GrafanaResetToken
+          - GrafanaInitImage
     ParameterLabels:
       AlbScheme:
         default: ALB Scheme
@@ -27,8 +24,8 @@ Metadata:
         default: Common Infra Stack Name
       GrafanaImage:
         default: Grafana Image
-      GrafanaResetToken:
-        default: Grafana Reset Token
+      GrafanaInitImage:
+        default: Grafana Init Image
       ServicesStackName:
         default: Services Stack Name
 Outputs:
@@ -69,9 +66,9 @@ Parameters:
     Default: grafana/grafana:latest
     Description: Container image for Grafana service
     Type: String
-  GrafanaResetToken:
-    Default: ''
-    Description: 'OPTIONAL: Change this value to reset Grafana data (wipe EFS volume). Leave blank for normal operation. Use any string (e.g., timestamp) to trigger reset.'
+  GrafanaInitImage:
+    Default: public.ecr.aws/cardinalhq.io/lakerunner/initcontainer-grafana:latest
+    Description: Container image for Grafana init container (datasource provisioning and database setup)
     Type: String
   ServicesStackName:
     Description: 'REQUIRED: Name of the Services stack to import Query API ALB DNS and port from.'
@@ -142,25 +139,16 @@ Resources:
               - ${ServicesStackName}-AlbDNS
               - ServicesStackName: !Ref 'ServicesStackName'
     Type: AWS::SSM::Parameter
-  GrafanaEfsAccessPoint:
+  GrafanaDbSecret:
     Properties:
-      AccessPointTags:
-        - Key: Name
-          Value: !Sub '${AWS::StackName}-grafana'
-      FileSystemId: !ImportValue
-        Fn::Sub:
-          - ${CommonInfraStackName}-EfsId
-          - CommonInfraStackName: !Ref 'CommonInfraStackName'
-      PosixUser:
-        Gid: '0'
-        Uid: '0'
-      RootDirectory:
-        CreationInfo:
-          OwnerGid: '0'
-          OwnerUid: '0'
-          Permissions: '755'
-        Path: /grafana
-    Type: AWS::EFS::AccessPoint
+      Description: Grafana database user password
+      GenerateSecretString:
+        ExcludeCharacters: ' !"#$%&''()*+,./:;<=>?@[\]^`{|}~'
+        GenerateStringKey: password
+        PasswordLength: 32
+        SecretStringTemplate: '{"username": "grafana"}'
+      Name: !Sub '${AWS::StackName}-grafana-db'
+    Type: AWS::SecretsManager::Secret
   GrafanaExecRole:
     Properties:
       AssumeRolePolicyDocument:
@@ -193,6 +181,12 @@ Resources:
                 Effect: Allow
                 Resource:
                   - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*'
+                  - !Sub
+                    - ${DbSecretArn}*
+                    - DbSecretArn: !ImportValue
+                        Fn::Sub:
+                          - ${CommonInfraStackName}-DbSecretArn
+                          - CommonInfraStackName: !Ref 'CommonInfraStackName'
             Version: '2012-10-17'
           PolicyName: SSMParameterAccess
       RoleName: !Sub '${AWS::StackName}-exec-role'
@@ -219,7 +213,7 @@ Resources:
         GenerateStringKey: password
         PasswordLength: 32
         SecretStringTemplate: '{"username": "lakerunner"}'
-      Name: !Sub '${AWS::StackName}-grafana'
+      Name: !Sub '${AWS::StackName}-grafana-admin'
     Type: AWS::SecretsManager::Secret
   GrafanaService:
     DependsOn:
@@ -255,92 +249,53 @@ Resources:
   GrafanaTaskDef:
     Properties:
       ContainerDefinitions:
-        - Command:
-            - /bin/sh
-            - -c
-            - |2
-
-              # Install curl for health checks and other tools
-              apk add --no-cache curl
-
-              # Set up provisioning directory
-              PROVISIONING_DIR="${GF_PATHS_PROVISIONING:-/etc/grafana/provisioning}"
-              DATASOURCES_DIR="$PROVISIONING_DIR/datasources"
-              RESET_TOKEN_FILE="/var/lib/grafana/.grafana_reset_token"
-
-              echo "Provisioning directory: $PROVISIONING_DIR"
-              echo "Datasources directory: $DATASOURCES_DIR"
-              echo "Reset token file: $RESET_TOKEN_FILE"
-
-              # Create provisioning directories
-              mkdir -p "$DATASOURCES_DIR"
-
-              # All containers run as root, so no ownership changes needed
-
-              # Handle reset token logic
-              if [ -n "$RESET_TOKEN" ] && [ "$RESET_TOKEN" != "" ]; then
-                  echo "Reset token provided: $RESET_TOKEN"
-
-                  # Check if token file exists and compare
-                  if [ -f "$RESET_TOKEN_FILE" ]; then
-                      STORED_TOKEN=$(cat "$RESET_TOKEN_FILE")
-                      if [ "$STORED_TOKEN" != "$RESET_TOKEN" ]; then
-                          echo "Reset token changed from '$STORED_TOKEN' to '$RESET_TOKEN' - wiping Grafana data"
-                          # Remove all Grafana data
-                          find /var/lib/grafana -mindepth 1 -delete || true
-                          # Create new token file
-                          echo "$RESET_TOKEN" > "$RESET_TOKEN_FILE"
-                      else
-                          echo "Reset token unchanged - no reset needed"
-                      fi
-                  else
-                      echo "First time with reset token - storing: $RESET_TOKEN"
-                      echo "$RESET_TOKEN" > "$RESET_TOKEN_FILE"
-                  fi
-              else
-                  echo "No reset token provided - skipping reset logic"
-              fi
-
-              # Write datasource configuration
-              echo "Writing Grafana datasource configuration..."
-              # The datasource config comes from SSM parameter as YAML, just write it directly
-              cat > "$DATASOURCES_DIR/cardinal.yaml" << DATASOURCE_EOF
-              $GRAFANA_DATASOURCE_CONFIG
-              DATASOURCE_EOF
-
-              echo "Grafana initialization complete"
-          Environment:
-            - Name: PROVISIONING_DIR
-              Value: ${GF_PATHS_PROVISIONING:-/etc/grafana/provisioning}
-            - Name: RESET_TOKEN
-              Value: !Ref 'GrafanaResetToken'
-            - Name: QUERY_API_URL
-              Value: !Sub
-                - http://${QueryApiAlbDns}
-                - QueryApiAlbDns: !ImportValue
-                    Fn::Sub:
-                      - ${ServicesStackName}-AlbDNS
-                      - ServicesStackName: !Ref 'ServicesStackName'
+        - Environment:
+            - Name: GRAFANA_DB_NAME
+              Value: grafana
+            - Name: GRAFANA_DB_USER
+              Value: grafana
+            - Name: PGHOST
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbEndpoint
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: PGPORT
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbPort
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: PGDATABASE
+              Value: postgres
+            - Name: PGSSLMODE
+              Value: require
           Essential: false
-          Image: public.ecr.aws/docker/library/alpine:latest
+          Image: !Ref 'GrafanaInitImage'
           LogConfiguration:
             LogDriver: awslogs
             Options:
               awslogs-group: !Ref 'GrafanaLogGroup'
               awslogs-region: !Ref 'AWS::Region'
               awslogs-stream-prefix: grafana-init
-          MountPoints:
-            - ContainerPath: /scratch
-              ReadOnly: false
-              SourceVolume: scratch
-            - ContainerPath: /var/lib/grafana
-              ReadOnly: false
-              SourceVolume: efs-grafana
           Name: GrafanaInit
           Secrets:
-            - Name: GRAFANA_DATASOURCE_CONFIG
-              ValueFrom: !Sub '${AWS::StackName}-grafana-datasource-config'
-          User: '0'
+            - Name: PGUSER
+              ValueFrom: !Sub
+                - '${DbSecretArn}:username::'
+                - DbSecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-DbSecretArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: PGPASSWORD
+              ValueFrom: !Sub
+                - '${DbSecretArn}:password::'
+                - DbSecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-DbSecretArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: GRAFANA_DB_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !Ref 'GrafanaDbSecret'
         - DependsOn:
             - Condition: SUCCESS
               ContainerName: GrafanaInit
@@ -353,6 +308,20 @@ Resources:
               Value: /scratch
             - Name: HOME
               Value: /scratch
+            - Name: GF_DATABASE_HOST
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbEndpoint
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: GF_DATABASE_PORT
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbPort
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: GF_DATABASE_NAME
+              Value: grafana
+            - Name: GF_DATABASE_USER
+              Value: grafana
             - Name: GF_SECURITY_ADMIN_USER
               Value: lakerunner
             - Name: GF_SERVER_HTTP_PORT
@@ -363,8 +332,12 @@ Resources:
               Value: https://github.com/cardinalhq/cardinalhq-lakerunner-datasource/raw/refs/heads/main/cardinalhq-lakerunner-datasource.zip;cardinalhq-lakerunner-datasource
             - Name: GF_PATHS_PROVISIONING
               Value: /etc/grafana/provisioning
-            - Name: GF_RESET_TOKEN
-              Value: !Ref 'GrafanaResetToken'
+            - Name: GF_SECURITY_ALLOW_EMBEDDING
+              Value: 'true'
+            - Name: GF_DATABASE_TYPE
+              Value: postgres
+            - Name: GF_DATABASE_SSL_MODE
+              Value: require
           HealthCheck:
             Command:
               - CMD-SHELL
@@ -384,9 +357,6 @@ Resources:
             - ContainerPath: /scratch
               ReadOnly: false
               SourceVolume: scratch
-            - ContainerPath: /var/lib/grafana
-              ReadOnly: false
-              SourceVolume: efs-grafana
           Name: GrafanaContainer
           PortMappings:
             - ContainerPort: 3000
@@ -396,6 +366,10 @@ Resources:
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
                 - SecretArn: !Ref 'GrafanaSecret'
+            - Name: GF_DATABASE_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !Ref 'GrafanaDbSecret'
             - Name: GRAFANA_DATASOURCE_CONFIG
               ValueFrom: !Ref 'GrafanaDatasourceConfig'
           User: '0'
@@ -412,16 +386,6 @@ Resources:
       TaskRoleArn: !GetAtt 'GrafanaTaskRole.Arn'
       Volumes:
         - Name: scratch
-        - EFSVolumeConfiguration:
-            AuthorizationConfig:
-              AccessPointId: !Ref 'GrafanaEfsAccessPoint'
-              IAM: ENABLED
-            FilesystemId: !ImportValue
-              Fn::Sub:
-                - ${CommonInfraStackName}-EfsId
-                - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            TransitEncryption: ENABLED
-          Name: efs-grafana
     Type: AWS::ECS::TaskDefinition
   GrafanaTaskRole:
     Properties:
@@ -436,16 +400,12 @@ Resources:
         - PolicyDocument:
             Statement:
               - Action:
-                  - elasticfilesystem:ClientMount
-                  - elasticfilesystem:ClientWrite
-                  - elasticfilesystem:ClientRootAccess
-                  - elasticfilesystem:DescribeFileSystems
-                  - elasticfilesystem:DescribeMountTargets
-                  - elasticfilesystem:DescribeAccessPoints
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
                 Effect: Allow
                 Resource: '*'
             Version: '2012-10-17'
-          PolicyName: EFSAccess
+          PolicyName: LogAccess
       RoleName: !Sub '${AWS::StackName}-task-role'
     Type: AWS::IAM::Role
   GrafanaTg:

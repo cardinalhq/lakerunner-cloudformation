@@ -42,21 +42,13 @@ echo "3. Generating Lakerunner Services..."
 python3 src/lakerunner_services.py > generated-templates/lakerunner-services.yaml
 cfn-lint generated-templates/lakerunner-services.yaml
 
-echo "4. Generating Lakerunner Grafana..."
-python3 src/lakerunner_grafana.py > generated-templates/lakerunner-grafana.yaml
-cfn-lint generated-templates/lakerunner-grafana.yaml
+echo "4. Generating Lakerunner Grafana Service..."
+python3 src/lakerunner_grafana_service.py > generated-templates/lakerunner-grafana-service.yaml
+cfn-lint generated-templates/lakerunner-grafana-service.yaml
 
-echo "5. Generating Demo OTEL Collector..."
-python3 src/demo_otel_collector.py > generated-templates/lakerunner-demo-otel-collector.yaml
-cfn-lint generated-templates/lakerunner-demo-otel-collector.yaml
-
-echo "6. Generating Demo Sample Apps..."
-python3 src/demo_sample_apps.py > generated-templates/lakerunner-demo-sample-apps.yaml
-cfn-lint generated-templates/lakerunner-demo-sample-apps.yaml
-
-echo -e "\n✅ Generated CloudFormation templates:"
+echo -e "\nGenerated CloudFormation templates:"
 ls -la generated-templates/
 
-echo -e "\n📝 Note: cfn-lint warnings above are safe to ignore:"
+echo -e "\nNote: cfn-lint warnings above are safe to ignore:"
 echo "  - W1030: Empty PublicSubnets parameter is expected when using internal ALB"
 echo "  - W1020: Unnecessary Fn::Sub warnings are cosmetic and don't affect functionality"
