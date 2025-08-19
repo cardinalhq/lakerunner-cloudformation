@@ -41,19 +41,14 @@ The `src/` directory contains Python templates that generate CloudFormation YAML
 - **`src/lakerunner_common.py`** - Core infrastructure (VPC, RDS, EFS, S3, ALB)
 - **`src/lakerunner_migration.py`** - Database migration task
 - **`src/lakerunner_services.py`** - ECS services for all Lakerunner components
-
-**Demo Stacks:**
-- **`src/demo_otel_collector.py`** - OTEL collector for telemetry ingestion
-- **`src/demo_sample_apps.py`** - Sample applications with OTEL instrumentation
+- **`src/lakerunner_grafana_service.py`** - Grafana dashboard service
 
 ### Configuration Files
 
 Stack-specific configuration files define defaults and service settings:
 
 - **`lakerunner-stack-defaults.yaml`** - Core Lakerunner services configuration
-- **`otel-stack-defaults.yaml`** - OTEL collector configuration  
-- **`demo-apps-stack-defaults.yaml`** - Demo applications configuration
-- **`otel-collector-config.yaml`** - OTEL collector runtime configuration
+- **`lakerunner-grafana-defaults.yaml`** - Grafana service configuration
 
 ### Generated Output
 
@@ -62,8 +57,7 @@ The `generated-templates/` directory contains the final CloudFormation templates
 - **`lakerunner-common.yaml`** - Core infrastructure
 - **`lakerunner-migration.yaml`** - Database migration
 - **`lakerunner-services.yaml`** - Core services
-- **`lakerunner-demo-otel-collector.yaml`** - OTEL collector
-- **`lakerunner-demo-sample-apps.yaml`** - Demo applications
+- **`lakerunner-grafana-service.yaml`** - Grafana dashboard
 
 ## Development Workflow
 

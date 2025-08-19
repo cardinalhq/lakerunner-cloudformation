@@ -104,28 +104,7 @@ aws cloudformation create-stack \
 
 ### Getting the Collector Endpoint
 
-**Option 1: Using CardinalHQ OTEL Collector Stack**
-
-1. Deploy the OTEL collector stack first:
-
-```bash
-aws cloudformation create-stack \
-  --stack-name lakerunner-otel-collector \
-  --template-body file://generated-templates/lakerunner-demo-otel-collector.yaml \
-  --parameters ParameterKey=CommonInfraStackName,ParameterValue=lakerunner-common \
-  --capabilities CAPABILITY_IAM
-```
-
-2. Get the HTTP endpoint from stack outputs:
-
-```bash
-aws cloudformation describe-stacks \
-  --stack-name lakerunner-otel-collector \
-  --query 'Stacks[0].Outputs[?OutputKey==`HttpEndpoint`].OutputValue' \
-  --output text
-```
-
-**Option 2: External Collector**
+**External Collector**
 
 For collectors outside the ECS cluster, provide the full endpoint URL:
 
@@ -140,13 +119,14 @@ When `OtelEndpoint` is provided, these environment variables are automatically a
 - `OTEL_EXPORTER_OTLP_ENDPOINT` - The collector endpoint URL
 - `ENABLE_OTLP_TELEMETRY=true` - Enables telemetry export in the application
 
-### Deployment Order with Telemetry
+### Deployment Order
 
-For full telemetry setup, deploy in this order:
+Deploy in this order:
 
 1. `lakerunner-common` - Core infrastructure
-2. `lakerunner-demo-otel-collector` - OTEL collector (optional)
-3. `lakerunner-services` - Services with OTLP enabled
+2. `lakerunner-migration` - Database migration
+3. `lakerunner-services` - Core services
+4. `lakerunner-grafana-service` - Grafana dashboard (optional)
 
 ## Access Points
 
@@ -266,7 +246,6 @@ All services share:
 
 This repository includes several specialized guides:
 
-- **[Demo Applications](README-DEMO-APPS.md)** - OTEL-instrumented sample applications for testing telemetry collection
 - **[OTEL Collector](README-OTEL-COLLECTOR.md)** - Dedicated telemetry ingestion service setup and configuration
 - **[Building from Source](README-BUILDING.md)** - Development guide for modifying and building CloudFormation templates
 
@@ -274,13 +253,12 @@ This repository includes several specialized guides:
 
 ### All Available Stacks
 
-This repository provides **5 CloudFormation stacks** with specific dependencies:
+This repository provides **4 CloudFormation stacks** with specific dependencies:
 
 1. **Common Infrastructure** (`lakerunner-common.yaml`) - Core infrastructure
 2. **Migration** (`lakerunner-migration.yaml`) - Database migration task
 3. **Services** (`lakerunner-services.yaml`) - Core Lakerunner services
-4. **OTEL Collector** (`lakerunner-demo-otel-collector.yaml`) - Optional telemetry collector
-5. **Demo Sample Apps** (`lakerunner-demo-sample-apps.yaml`) - Optional test applications
+4. **Grafana Service** (`lakerunner-grafana-service.yaml`) - Optional Grafana dashboard
 
 ### Dependency Diagram
 
@@ -288,8 +266,7 @@ This repository provides **5 CloudFormation stacks** with specific dependencies:
 lakerunner-common (required)
 ├── lakerunner-migration (required after common)
 ├── lakerunner-services (required after common)
-├── lakerunner-demo-otel-collector (optional, after common)
-└── lakerunner-demo-sample-apps (optional, after services + otel-collector)
+└── lakerunner-grafana-service (optional, after common + services)
 ```
 
 ### Deployment Scenarios
@@ -307,7 +284,7 @@ aws cloudformation create-stack --stack-name lakerunner-migration ...
 aws cloudformation create-stack --stack-name lakerunner-services ...
 ```
 
-#### Full Deployment (With Telemetry Collection)
+#### Full Deployment (With Grafana Dashboard)
 
 ```bash
 # 1. Core infrastructure
@@ -316,16 +293,13 @@ aws cloudformation create-stack --stack-name lakerunner-common ...
 # 2. Database migration
 aws cloudformation create-stack --stack-name lakerunner-migration ...
 
-# 3. OTEL collector (optional, for telemetry ingestion)
-aws cloudformation create-stack --stack-name lakerunner-otel-collector ...
+# 3. Services
+aws cloudformation create-stack --stack-name lakerunner-services ...
 
-# 4. Services (with OTLP enabled to point to collector)
-aws cloudformation create-stack --stack-name lakerunner-services \
-  --parameters ParameterKey=OtelEndpoint,ParameterValue="http://collector-dns:4318" ...
-
-# 5. Demo applications (optional, for testing)
-aws cloudformation create-stack --stack-name lakerunner-demo-apps \
-  --parameters ParameterKey=OtelCollectorStackName,ParameterValue="lakerunner-otel-collector" ...
+# 4. Grafana dashboard (optional)
+aws cloudformation create-stack --stack-name lakerunner-grafana \
+  --parameters ParameterKey=CommonInfraStackName,ParameterValue="lakerunner-common" \
+               ParameterKey=ServicesStackName,ParameterValue="lakerunner-services" ...
 ```
 
 ### Cross-Stack Resource Sharing
