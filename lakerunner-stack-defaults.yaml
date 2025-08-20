@@ -22,8 +22,8 @@ storage_profiles:
 images:
   migration: "public.ecr.aws/cardinalhq.io/lakerunner:v1.2.0-rc1"
   go_services: "public.ecr.aws/cardinalhq.io/lakerunner:v1.2.0-rc1"
-  query_api: "public.ecr.aws/cardinalhq.io/lakerunner/query-api:v1.2.0-rc2"
-  query_worker: "public.ecr.aws/cardinalhq.io/lakerunner/query-worker:v1.2.0-rc2"
+  query_api: "public.ecr.aws/cardinalhq.io/lakerunner/query-api:v1.2.0-rc3"
+  query_worker: "public.ecr.aws/cardinalhq.io/lakerunner/query-worker:v1.2.0-rc3"
 
 # Service configurations for core Lakerunner services
 services:
@@ -98,7 +98,7 @@ services:
     environment: {}
 
   lakerunner-query-api:
-    image: "public.ecr.aws/cardinalhq.io/lakerunner/query-api:v1.2.0-rc2"
+    image: "public.ecr.aws/cardinalhq.io/lakerunner/query-api:v1.2.0-rc3"
     cpu: 2048
     memory_mib: 8192
     replicas: 1
@@ -122,7 +122,7 @@ services:
         read_only: false
 
   lakerunner-query-worker:
-    image: "public.ecr.aws/cardinalhq.io/lakerunner/query-worker:v1.2.0-rc2"
+    image: "public.ecr.aws/cardinalhq.io/lakerunner/query-worker:v1.2.0-rc3"
     cpu: 2048
     memory_mib: 8192
     replicas: 1
@@ -130,6 +130,7 @@ services:
       port: 7101
       description: "From Query API"
     environment:
+      EXECUTION_ENVIRONMENT: "ecs"
       METRIC_PREFIX: "lakerunner-query-worker"
       SPRING_PROFILES_ACTIVE: "aws"
     health_check:
@@ -139,4 +140,3 @@ services:
       - container_path: "/db"
         source_volume: "scratch"
         read_only: false
-

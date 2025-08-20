@@ -303,7 +303,7 @@ def create_services_template():
     # -----------------------
     # Task Roles
     # -----------------------
-    
+
     # Base task role for most services (without ECS discovery permissions)
     TaskRole = t.add_resource(Role(
         "TaskRole",
@@ -537,7 +537,7 @@ def create_services_template():
             posix_user = PosixUser(Gid="0", Uid="0")  # Use root for access point
             creation_info = CreationInfo(
                 OwnerGid="0",     # root group owns the directory
-                OwnerUid="0",     # root user owns the directory  
+                OwnerUid="0",     # root user owns the directory
                 Permissions="755"  # owner rwx, group rx, others rx - allows access to multiple users
             )
         else:
@@ -545,10 +545,10 @@ def create_services_template():
             posix_user = PosixUser(Gid="0", Uid="0")
             creation_info = CreationInfo(
                 OwnerGid="0",
-                OwnerUid="0", 
+                OwnerUid="0",
                 Permissions="750"
             )
-            
+
         access_points[ap_name] = t.add_resource(AccessPoint(
             f"EfsAccessPoint{ap_name.title()}",
             FileSystemId=EfsIdValue,
@@ -567,7 +567,6 @@ def create_services_template():
     # Create services
     # -----------------------
     for service_name, service_config in services.items():
-        safe_name = service_name.replace('-', '').replace('_', '')
         title_name = ''.join(word.capitalize() for word in service_name.replace('-', '_').split('_'))
 
         # Create log group
@@ -580,26 +579,8 @@ def create_services_template():
         # Build volumes list
         volumes = [Volume(Name="scratch")]
 
-        # Add EFS volumes
-        efs_mounts = service_config.get('efs_mounts', [])
-        for mount in efs_mounts:
-            ap_name = mount['access_point_name']
-            if ap_name in access_points:
-                volumes.append(Volume(
-                    Name=f"efs-{ap_name}",
-                    EFSVolumeConfiguration=EFSVolumeConfiguration(
-                        FilesystemId=EfsIdValue,
-                        TransitEncryption="ENABLED",
-                        AuthorizationConfig=AuthorizationConfig(
-                            AccessPointId=Ref(access_points[ap_name]),
-                            IAM="ENABLED"
-                        )
-                    )
-                ))
-
         # Build environment variables
         base_env = [
-            Environment(Name="BUMP_REVISION", Value="1"),
             Environment(Name="OTEL_SERVICE_NAME", Value=service_name),
             Environment(Name="TMPDIR", Value="/scratch"),
             Environment(Name="HOME", Value="/scratch"),
@@ -611,9 +592,9 @@ def create_services_template():
             Environment(Name="LRDB_PORT", Value=DbPortValue),
             Environment(Name="LRDB_DBNAME", Value="lakerunner"),
             Environment(Name="LRDB_USER", Value="lakerunner"),
-            Environment(Name="LRDB_SSLMODE", Value="require")
+            Environment(Name="LRDB_SSLMODE", Value="require"),
         ]
-        
+
         # Add service-specific discovery environment variables
         if service_name == 'lakerunner-query-worker':
             # Query workers need to discover query API instances
@@ -654,7 +635,7 @@ def create_services_template():
         ]
 
         # Add service-specific secrets for sensitive environment variables
-        if 'TOKEN_HMAC256_KEY' in service_env:
+        if service_name in ['lakerunner-query-api', 'lakerunner-query-worker']:
             secrets.append(EcsSecret(
                 Name="TOKEN_HMAC256_KEY",
                 ValueFrom=Sub("${SecretArn}:token_hmac256_key::", SecretArn=Ref(token_secret))

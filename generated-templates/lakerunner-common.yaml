@@ -32,7 +32,7 @@ Metadata:
       ApiKeysOverride:
         default: Custom API Keys (YAML)
       PrivateSubnets:
-        default: Private Subnets (for ECS/RDS/EFS)
+        default: Private Subnets (for ECS/RDS)
       PublicSubnets:
         default: Public Subnets (for ALB internet-facing)
       StorageProfilesOverride:
@@ -64,10 +64,6 @@ Outputs:
     Export:
       Name: !Sub '${AWS::StackName}-DbSecretArn'
     Value: !Ref 'DbSecret'
-  EfsId:
-    Export:
-      Name: !Sub '${AWS::StackName}-EfsId'
-    Value: !Ref 'Efs'
   PrivateSubnetsOut:
     Export:
       Name: !Sub '${AWS::StackName}-PrivateSubnets'
@@ -110,7 +106,7 @@ Parameters:
     Description: 'OPTIONAL: Custom API keys configuration in YAML format. Leave blank to use defaults from defaults.yaml. Example: - organization_id: xxx\n  keys:\n    - keyvalue'
     Type: String
   PrivateSubnets:
-    Description: 'REQUIRED: Private subnet IDs (for RDS/ECS/EFS). Provide at least two in different AZs.'
+    Description: 'REQUIRED: Private subnet IDs (for RDS/ECS). Provide at least two in different AZs.'
     Type: List<AWS::EC2::Subnet::Id>
   PublicSubnets:
     Default: ''
@@ -150,31 +146,6 @@ Resources:
       DBSubnetGroupDescription: DB subnets
       SubnetIds: !Ref 'PrivateSubnets'
     Type: AWS::RDS::DBSubnetGroup
-  Efs:
-    Properties:
-      Encrypted: true
-      FileSystemTags:
-        - Key: Name
-          Value: !Sub '${AWS::StackName}-efs'
-    Type: AWS::EFS::FileSystem
-  EfsMt1:
-    Properties:
-      FileSystemId: !Ref 'Efs'
-      SecurityGroups:
-        - !Ref 'TaskSG'
-      SubnetId: !Select
-        - 0
-        - !Ref 'PrivateSubnets'
-    Type: AWS::EFS::MountTarget
-  EfsMt2:
-    Properties:
-      FileSystemId: !Ref 'Efs'
-      SecurityGroups:
-        - !Ref 'TaskSG'
-      SubnetId: !Select
-        - 1
-        - !Ref 'PrivateSubnets'
-    Type: AWS::EFS::MountTarget
   IngestBucket:
     DeletionPolicy: Delete
     Properties:
@@ -292,14 +263,5 @@ Resources:
       IpProtocol: tcp
       SourceSecurityGroupId: !Ref 'TaskSG'
       ToPort: 5432
-    Type: AWS::EC2::SecurityGroupIngress
-  TaskSGEfsSelf:
-    Properties:
-      Description: task-to-EFS NFS
-      FromPort: 2049
-      GroupId: !Ref 'TaskSG'
-      IpProtocol: tcp
-      SourceSecurityGroupId: !Ref 'TaskSG'
-      ToPort: 2049
     Type: AWS::EC2::SecurityGroupIngress
 

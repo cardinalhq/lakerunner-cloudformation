@@ -115,11 +115,11 @@ Parameters:
     Description: 'OPTIONAL: OTEL collector HTTP endpoint URL (e.g., http://collector-dns:4318). Leave blank to disable OTLP telemetry export.'
     Type: String
   QueryApiImage:
-    Default: public.ecr.aws/cardinalhq.io/lakerunner/query-api:v1.2.0-rc2
+    Default: public.ecr.aws/cardinalhq.io/lakerunner/query-api:v1.2.0-rc3
     Description: Container image for query-api service
     Type: String
   QueryWorkerImage:
-    Default: public.ecr.aws/cardinalhq.io/lakerunner/query-worker:v1.2.0-rc2
+    Default: public.ecr.aws/cardinalhq.io/lakerunner/query-worker:v1.2.0-rc3
     Description: Container image for query-worker service
     Type: String
 Resources:
@@ -613,8 +613,6 @@ Resources:
             - /app/bin/lakerunner
             - compact-logs
           Environment:
-            - Name: BUMP_REVISION
-              Value: '1'
             - Name: OTEL_SERVICE_NAME
               Value: lakerunner-compact-logs
             - Name: TMPDIR
@@ -710,8 +708,6 @@ Resources:
             - /app/bin/lakerunner
             - compact-metrics
           Environment:
-            - Name: BUMP_REVISION
-              Value: '1'
             - Name: OTEL_SERVICE_NAME
               Value: lakerunner-compact-metrics
             - Name: TMPDIR
@@ -807,8 +803,6 @@ Resources:
             - /app/bin/lakerunner
             - ingest-logs
           Environment:
-            - Name: BUMP_REVISION
-              Value: '1'
             - Name: OTEL_SERVICE_NAME
               Value: lakerunner-ingest-logs
             - Name: TMPDIR
@@ -904,8 +898,6 @@ Resources:
             - /app/bin/lakerunner
             - ingest-metrics
           Environment:
-            - Name: BUMP_REVISION
-              Value: '1'
             - Name: OTEL_SERVICE_NAME
               Value: lakerunner-ingest-metrics
             - Name: TMPDIR
@@ -1002,8 +994,6 @@ Resources:
             - pubsub
             - sqs
           Environment:
-            - Name: BUMP_REVISION
-              Value: '1'
             - Name: OTEL_SERVICE_NAME
               Value: lakerunner-pubsub-sqs
             - Name: TMPDIR
@@ -1097,8 +1087,6 @@ Resources:
       ContainerDefinitions:
         - Command: []
           Environment:
-            - Name: BUMP_REVISION
-              Value: '1'
             - Name: OTEL_SERVICE_NAME
               Value: lakerunner-query-api
             - Name: TMPDIR
@@ -1190,6 +1178,10 @@ Resources:
                     Fn::Sub:
                       - ${CommonInfraStackName}-DbSecretArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: TOKEN_HMAC256_KEY
+              ValueFrom: !Sub
+                - '${SecretArn}:token_hmac256_key::'
+                - SecretArn: !Ref 'TokenSecret'
           User: '0'
       Cpu: '2048'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
@@ -1210,8 +1202,6 @@ Resources:
       ContainerDefinitions:
         - Command: []
           Environment:
-            - Name: BUMP_REVISION
-              Value: '1'
             - Name: OTEL_SERVICE_NAME
               Value: lakerunner-query-worker
             - Name: TMPDIR
@@ -1263,6 +1253,8 @@ Resources:
                 - EnableOtlp
                 - 'true'
                 - !Ref 'AWS::NoValue'
+            - Name: EXECUTION_ENVIRONMENT
+              Value: ecs
             - Name: METRIC_PREFIX
               Value: lakerunner-query-worker
             - Name: SPRING_PROFILES_ACTIVE
@@ -1306,6 +1298,10 @@ Resources:
                     Fn::Sub:
                       - ${CommonInfraStackName}-DbSecretArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: TOKEN_HMAC256_KEY
+              ValueFrom: !Sub
+                - '${SecretArn}:token_hmac256_key::'
+                - SecretArn: !Ref 'TokenSecret'
           User: '0'
       Cpu: '2048'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
@@ -1328,8 +1324,6 @@ Resources:
             - /app/bin/lakerunner
             - rollup-metrics
           Environment:
-            - Name: BUMP_REVISION
-              Value: '1'
             - Name: OTEL_SERVICE_NAME
               Value: lakerunner-rollup-metrics
             - Name: TMPDIR
@@ -1425,8 +1419,6 @@ Resources:
             - /app/bin/lakerunner
             - sweeper
           Environment:
-            - Name: BUMP_REVISION
-              Value: '1'
             - Name: OTEL_SERVICE_NAME
               Value: lakerunner-sweeper
             - Name: TMPDIR
