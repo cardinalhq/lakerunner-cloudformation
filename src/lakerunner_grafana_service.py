@@ -17,7 +17,7 @@ import yaml
 import os
 from troposphere import (
     Template, Parameter, Ref, Sub, GetAtt, If, Equals, Export, Output,
-    Select, Not, Tags, ImportValue, Join, And, Split, Condition
+    ImportValue, Split
 )
 from troposphere.ecs import (
     Service, TaskDefinition, ContainerDefinition, Environment,
@@ -127,7 +127,7 @@ def create_grafana_template():
     TaskSecurityGroupIdValue = ImportValue(ci_export("TaskSGId"))
     VpcIdValue = ImportValue(ci_export("VpcId"))
     PrivateSubnetsValue = Split(",", ImportValue(ci_export("PrivateSubnets")))
-    
+
     # Import PublicSubnets - CommonInfra always exports this, but may be empty string if not provided
     PublicSubnetsImport = ImportValue(ci_export("PublicSubnets"))
     PublicSubnetsValue = Split(",", PublicSubnetsImport)
@@ -296,7 +296,7 @@ def create_grafana_template():
                             ],
                             "Resource": [
                                 Sub("arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*"),
-                                Sub("${DbSecretArn}*", 
+                                Sub("${DbSecretArn}*",
                                     DbSecretArn=ImportValue(Sub("${CommonInfraStackName}-DbSecretArn",
                                                                CommonInfraStackName=Ref(CommonInfraStackName))))
                             ]
@@ -430,7 +430,7 @@ def create_grafana_template():
             ValueFrom=Sub("${SecretArn}:password::", SecretArn=Ref(grafana_secret))
         ),
         EcsSecret(
-            Name="GF_DATABASE_PASSWORD", 
+            Name="GF_DATABASE_PASSWORD",
             ValueFrom=Sub("${SecretArn}:password::", SecretArn=Ref(grafana_db_secret))
         ),
         EcsSecret(
@@ -484,7 +484,7 @@ def create_grafana_template():
                                                         CommonInfraStackName=Ref(CommonInfraStackName))))
             ),
             EcsSecret(
-                Name="PGPASSWORD", 
+                Name="PGPASSWORD",
                 ValueFrom=Sub("${DbSecretArn}:password::",
                              DbSecretArn=ImportValue(Sub("${CommonInfraStackName}-DbSecretArn",
                                                         CommonInfraStackName=Ref(CommonInfraStackName))))

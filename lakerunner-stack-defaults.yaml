@@ -20,10 +20,10 @@ storage_profiles:
 
 # Container Images configuration
 images:
-  migration: "public.ecr.aws/cardinalhq.io/lakerunner:v1.1.1-rc2"
-  go_services: "public.ecr.aws/cardinalhq.io/lakerunner:v1.1.1-rc2"
-  query_api: "public.ecr.aws/cardinalhq.io/lakerunner/query-api:latest"
-  query_worker: "public.ecr.aws/cardinalhq.io/lakerunner/query-worker:latest"
+  migration: "public.ecr.aws/cardinalhq.io/lakerunner:v1.2.0-rc1"
+  go_services: "public.ecr.aws/cardinalhq.io/lakerunner:v1.2.0-rc1"
+  query_api: "public.ecr.aws/cardinalhq.io/lakerunner/query-api:v1.2.0-rc3"
+  query_worker: "public.ecr.aws/cardinalhq.io/lakerunner/query-worker:v1.2.0-rc3"
 
 # Service configurations for core Lakerunner services
 services:
@@ -41,7 +41,7 @@ services:
     command: ["/app/bin/lakerunner", "ingest-logs"]
     cpu: 1024
     memory_mib: 2048
-    replicas: 1
+    replicas: 2
     health_check:
       type: "go"
       command: ["/app/bin/lakerunner", "sysinfo"]
@@ -61,7 +61,7 @@ services:
     command: ["/app/bin/lakerunner", "compact-logs"]
     cpu: 1024
     memory_mib: 2048
-    replicas: 1
+    replicas: 4
     health_check:
       type: "go"
       command: ["/app/bin/lakerunner", "sysinfo"]
@@ -98,7 +98,7 @@ services:
     environment: {}
 
   lakerunner-query-api:
-    image: "public.ecr.aws/cardinalhq.io/lakerunner/query-api:latest"
+    image: "public.ecr.aws/cardinalhq.io/lakerunner/query-api:v1.2.0-rc3"
     cpu: 2048
     memory_mib: 8192
     replicas: 1
@@ -108,8 +108,6 @@ services:
       health_check_path: "/ready"
     environment:
       EXECUTION_ENVIRONMENT: "ecs"
-      QUERY_WORKER_DEPLOYMENT_NAME: "lakerunner-query-worker"
-      QUERY_WORKER_SERVICE_NAME: "lakerunner-query-worker"
       QUERY_STACK: "local"
       METRIC_PREFIX: "lakerunner-query-api"
       NUM_MIN_QUERY_WORKERS: "8"
@@ -124,14 +122,15 @@ services:
         read_only: false
 
   lakerunner-query-worker:
-    image: "public.ecr.aws/cardinalhq.io/lakerunner/query-worker:latest"
+    image: "public.ecr.aws/cardinalhq.io/lakerunner/query-worker:v1.2.0-rc3"
     cpu: 2048
     memory_mib: 8192
-    replicas: 1
+    replicas: 8
     ingress:
       port: 7101
       description: "From Query API"
     environment:
+      EXECUTION_ENVIRONMENT: "ecs"
       METRIC_PREFIX: "lakerunner-query-worker"
       SPRING_PROFILES_ACTIVE: "aws"
     health_check:
@@ -141,4 +140,3 @@ services:
       - container_path: "/db"
         source_volume: "scratch"
         read_only: false
-

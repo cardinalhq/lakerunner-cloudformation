@@ -28,7 +28,6 @@ from troposphere.s3 import (
 )
 from troposphere.sqs import Queue, QueuePolicy
 from troposphere.secretsmanager import Secret, GenerateSecretString
-from troposphere.efs import FileSystem, MountTarget
 from troposphere.rds import DBInstance, DBSubnetGroup
 from troposphere.ssm import Parameter as SsmParameter
 
@@ -54,7 +53,7 @@ PublicSubnets = t.add_parameter(Parameter(
 PrivateSubnets = t.add_parameter(Parameter(
     "PrivateSubnets",
     Type="List<AWS::EC2::Subnet::Id>",
-    Description="REQUIRED: Private subnet IDs (for RDS/ECS/EFS). Provide at least two in different AZs."
+    Description="REQUIRED: Private subnet IDs (for RDS/ECS). Provide at least two in different AZs."
 ))
 
 # Configuration overrides (optional multi-line parameters)
@@ -90,7 +89,7 @@ t.set_metadata({
         "ParameterLabels": {
             "VpcId": {"default": "VPC Id"},
             "PublicSubnets": {"default": "Public Subnets (for ALB internet-facing)"},
-            "PrivateSubnets": {"default": "Private Subnets (for ECS/RDS/EFS)"},
+            "PrivateSubnets": {"default": "Private Subnets (for ECS/RDS)"},
             "ApiKeysOverride": {"default": "Custom API Keys (YAML)"},
             "StorageProfilesOverride": {"default": "Custom Storage Profiles (YAML)"}
         }
@@ -148,18 +147,6 @@ t.add_resource(SecurityGroupIngress(
     SourceSecurityGroupId=Ref(TaskSG),
     Description="task-to-database PostgreSQL",
 ))
-
-# Allow tasks to connect to EFS (NFS port 2049)
-t.add_resource(SecurityGroupIngress(
-    "TaskSGEfsSelf",
-    GroupId=Ref(TaskSG),
-    IpProtocol="tcp",
-    FromPort=2049,
-    ToPort=2049,
-    SourceSecurityGroupId=Ref(TaskSG),
-    Description="task-to-EFS NFS",
-))
-
 
 # -----------------------
 # ECS cluster (always create)
@@ -266,29 +253,6 @@ DbPort = GetAtt(DbRes, "Endpoint.Port")
 t.add_output(Output("DbEndpoint", Value=DbEndpoint, Export=Export(name=Sub("${AWS::StackName}-DbEndpoint"))))
 t.add_output(Output("DbPort", Value=DbPort, Export=Export(name=Sub("${AWS::StackName}-DbPort"))))
 t.add_output(Output("DbSecretArnOut", Value=DbSecretArnValue, Export=Export(name=Sub("${AWS::StackName}-DbSecretArn"))))
-
-# -----------------------
-# EFS (always create)
-# -----------------------
-Fs = t.add_resource(FileSystem(
-    "Efs",
-    Encrypted=True,
-    FileSystemTags=Tags(Name=Sub("${AWS::StackName}-efs")),
-))
-t.add_resource(MountTarget(
-    "EfsMt1",
-    FileSystemId=Ref(Fs),
-    SubnetId=Select(0, Ref(PrivateSubnets)),
-    SecurityGroups=[Ref(TaskSG)]
-))
-t.add_resource(MountTarget(
-    "EfsMt2",
-    FileSystemId=Ref(Fs),
-    SubnetId=Select(1, Ref(PrivateSubnets)),
-    SecurityGroups=[Ref(TaskSG)]
-))
-
-t.add_output(Output("EfsId", Value=Ref(Fs), Export=Export(name=Sub("${AWS::StackName}-EfsId"))))
 
 # Export S3 bucket name for IAM policies in other stacks
 t.add_output(Output("BucketName", Value=Ref(BucketRes), Export=Export(name=Sub("${AWS::StackName}-BucketName"))))

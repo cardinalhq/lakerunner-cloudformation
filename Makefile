@@ -21,7 +21,7 @@ build:		## Generate CloudFormation templates and validate
 	source $(VENV_DIR)/bin/activate && ./build.sh
 
 test:		## Run unit tests (working tests only)
-	source $(VENV_DIR)/bin/activate && $(PYTEST) tests/test_common_infra.py tests/test_*_simple.py tests/test_parameter_validation.py tests/test_condition_validation.py -v
+	source $(VENV_DIR)/bin/activate && $(PYTEST) tests/test_common_infra.py tests/test_*_simple.py tests/test_demo_otel_collector.py tests/test_parameter_validation.py tests/test_condition_validation.py -v
 
 test-all:	## Run all tests including complex ones (may have failures)
 	source $(VENV_DIR)/bin/activate && $(PYTEST) tests/ -v
@@ -40,6 +40,9 @@ test-grafana-setup:	## Run simplified tests for Grafana Setup template
 
 test-grafana-service:	## Run simplified tests for Grafana Service template
 	source $(VENV_DIR)/bin/activate && $(PYTEST) tests/test_grafana_service_simple.py -v
+
+test-otel-collector:	## Run simplified tests for Demo OTEL Collector template
+	source $(VENV_DIR)/bin/activate && $(PYTEST) tests/test_demo_otel_collector.py -v
 
 test-params:	## Run parameter and condition validation tests
 	source $(VENV_DIR)/bin/activate && $(PYTEST) tests/test_parameter_validation.py tests/test_condition_validation.py -v

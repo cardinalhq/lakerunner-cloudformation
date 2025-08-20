@@ -84,6 +84,55 @@ aws cloudformation create-stack \\
   --capabilities CAPABILITY_IAM
 ```
 
+## Updating Container Images
+
+When updating existing CloudFormation stacks, container image versions are not automatically updated to the new defaults. You must explicitly specify the image parameters during stack updates.
+
+### Current Image Versions
+
+- **Go Services**: `public.ecr.aws/cardinalhq.io/lakerunner:v1.2.0-rc1`
+- **Query API**: `public.ecr.aws/cardinalhq.io/lakerunner/query-api:v1.2.0-rc2`  
+- **Query Worker**: `public.ecr.aws/cardinalhq.io/lakerunner/query-worker:v1.2.0-rc2`
+- **Migration**: `public.ecr.aws/cardinalhq.io/lakerunner:v1.2.0-rc1`
+
+### Update Services Stack
+
+```bash
+aws cloudformation update-stack \\
+  --stack-name lakerunner-services \\
+  --template-body file://generated-templates/lakerunner-services.yaml \\
+  --parameters \\
+    ParameterKey=CommonInfraStackName,UsePreviousValue=true \\
+    ParameterKey=GoServicesImage,ParameterValue=public.ecr.aws/cardinalhq.io/lakerunner:v1.2.0-rc1 \\
+    ParameterKey=QueryApiImage,ParameterValue=public.ecr.aws/cardinalhq.io/lakerunner/query-api:v1.2.0-rc2 \\
+    ParameterKey=QueryWorkerImage,ParameterValue=public.ecr.aws/cardinalhq.io/lakerunner/query-worker:v1.2.0-rc2 \\
+  --capabilities CAPABILITY_IAM
+```
+
+### Update Migration Stack
+
+```bash
+aws cloudformation update-stack \\
+  --stack-name lakerunner-migration \\
+  --template-body file://generated-templates/lakerunner-migration.yaml \\
+  --parameters \\
+    ParameterKey=CommonInfraStackName,UsePreviousValue=true \\
+    ParameterKey=ContainerImage,ParameterValue=public.ecr.aws/cardinalhq.io/lakerunner:v1.2.0-rc1 \\
+  --capabilities CAPABILITY_IAM
+```
+
+### Helper Script
+
+For convenience, you can use the provided helper script:
+
+```bash
+# Update services stack
+./update-images.sh lakerunner-services services
+
+# Update migration stack  
+./update-images.sh lakerunner-migration migration
+```
+
 ## OTLP Telemetry Support
 
 The services stack supports optional OTLP (OpenTelemetry Protocol) telemetry export. When enabled, all Go services will export logs and metrics to the specified collector endpoint.

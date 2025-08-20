@@ -1,0 +1,77 @@
+# OTEL Collector Configuration
+# Updated to use standard awss3 exporter with separate paths for logs and metrics
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  memory_limiter:
+    limit_mib: 1024
+    check_interval: 1s
+
+  batch:
+    timeout: 10s
+    send_batch_max_size: 10000
+    send_batch_size: 10000
+
+exporters:
+  awss3/logs:
+    s3uploader:
+      region: ${env:AWS_REGION}
+      s3_bucket: ${env:AWS_S3_BUCKET}
+      s3_prefix: logs-raw/
+      s3_force_path_style: true
+      s3_partition_format: 'year=%Y/month=%m/day=%d/hour=%H/minute=%M'
+      compression: none
+    marshaler: otlp_proto
+
+  awss3/metrics:
+    s3uploader:
+      region: ${env:AWS_REGION}
+      s3_bucket: ${env:AWS_S3_BUCKET}
+      s3_prefix: metrics-raw/
+      s3_force_path_style: true
+      s3_partition_format: 'year=%Y/month=%m/day=%d/hour=%H/minute=%M'
+      compression: none
+    marshaler: otlp_proto
+
+  nop:
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions:
+    - health_check
+  pipelines:
+    traces:
+      receivers:
+        - otlp
+      processors:
+        - memory_limiter
+      exporters:
+        - nop
+
+    metrics:
+      receivers:
+        - otlp
+      processors:
+        - memory_limiter
+        - batch
+      exporters:
+        - awss3/metrics
+
+    logs:
+      receivers:
+        - otlp
+      processors:
+        - memory_limiter
+        - batch
+      exporters:
+        - awss3/logs
