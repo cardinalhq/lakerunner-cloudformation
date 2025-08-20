@@ -315,9 +315,9 @@ Resources:
                         s3_bucket: ${env:AWS_S3_BUCKET}
                         s3_prefix: raw-logs/
                         s3_force_path_style: true
-                        s3_partition: minute
+                        s3_partition_format: 'year=%Y/month=%m/day=%d/hour=%H/minute=%M'
+                        compression: gzip
                       marshaler: otlp_proto
-                      compression: gzip
 
                     awss3/metrics:
                       s3uploader:
@@ -325,9 +325,9 @@ Resources:
                         s3_bucket: ${env:AWS_S3_BUCKET}
                         s3_prefix: raw-metrics/
                         s3_force_path_style: true
-                        s3_partition: minute
+                        s3_partition_format: 'year=%Y/month=%m/day=%d/hour=%H/minute=%M'
+                        compression: gzip
                       marshaler: otlp_proto
-                      compression: gzip
 
                     nop:
 

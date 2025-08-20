@@ -381,7 +381,7 @@ Resources:
         Fn::Sub:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
-      DesiredCount: '1'
+      DesiredCount: '4'
       EnableExecuteCommand: true
       LaunchType: FARGATE
       NetworkConfiguration:
@@ -431,7 +431,7 @@ Resources:
         Fn::Sub:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
-      DesiredCount: '1'
+      DesiredCount: '2'
       EnableExecuteCommand: true
       LaunchType: FARGATE
       NetworkConfiguration:
@@ -537,7 +537,7 @@ Resources:
         Fn::Sub:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
-      DesiredCount: '1'
+      DesiredCount: '8'
       EnableExecuteCommand: true
       LaunchType: FARGATE
       NetworkConfiguration:

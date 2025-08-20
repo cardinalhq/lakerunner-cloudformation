@@ -41,7 +41,7 @@ services:
     command: ["/app/bin/lakerunner", "ingest-logs"]
     cpu: 1024
     memory_mib: 2048
-    replicas: 1
+    replicas: 2
     health_check:
       type: "go"
       command: ["/app/bin/lakerunner", "sysinfo"]
@@ -61,7 +61,7 @@ services:
     command: ["/app/bin/lakerunner", "compact-logs"]
     cpu: 1024
     memory_mib: 2048
-    replicas: 1
+    replicas: 4
     health_check:
       type: "go"
       command: ["/app/bin/lakerunner", "sysinfo"]
@@ -125,7 +125,7 @@ services:
     image: "public.ecr.aws/cardinalhq.io/lakerunner/query-worker:v1.2.0-rc3"
     cpu: 2048
     memory_mib: 8192
-    replicas: 1
+    replicas: 8
     ingress:
       port: 7101
       description: "From Query API"
