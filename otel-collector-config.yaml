@@ -27,7 +27,7 @@ exporters:
       s3_prefix: logs-raw/
       s3_force_path_style: true
       s3_partition_format: 'year=%Y/month=%m/day=%d/hour=%H/minute=%M'
-      compression: gzip
+      compression: none
     marshaler: otlp_proto
 
   awss3/metrics:
@@ -37,7 +37,7 @@ exporters:
       s3_prefix: metrics-raw/
       s3_force_path_style: true
       s3_partition_format: 'year=%Y/month=%m/day=%d/hour=%H/minute=%M'
-      compression: gzip
+      compression: none
     marshaler: otlp_proto
 
   nop:
