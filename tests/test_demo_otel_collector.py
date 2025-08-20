@@ -111,8 +111,6 @@ service:
             assert 'CommonInfraStackName' in yaml_output
             assert 'LoadBalancerType' in yaml_output
             assert 'OtelCollectorImage' in yaml_output
-            assert 'OrganizationId' in yaml_output
-            assert 'CollectorName' in yaml_output
             assert 'OtelConfigYaml' in yaml_output
 
     def test_template_has_required_resources(self):

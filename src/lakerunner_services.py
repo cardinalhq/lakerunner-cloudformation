@@ -301,8 +301,10 @@ def create_services_template():
     ))
 
     # -----------------------
-    # Task Role (shared by all services)
+    # Task Roles
     # -----------------------
+    
+    # Base task role for most services (without ECS discovery permissions)
     TaskRole = t.add_resource(Role(
         "TaskRole",
         RoleName=Sub("${AWS::StackName}-task-role"),
@@ -357,9 +359,126 @@ def create_services_template():
                         {
                             "Effect": "Allow",
                             "Action": [
+                                "elasticfilesystem:ClientMount",
+                                "elasticfilesystem:ClientWrite",
+                                "elasticfilesystem:ClientRootAccess",
+                                "elasticfilesystem:DescribeFileSystems",
+                                "elasticfilesystem:DescribeMountTargets",
+                                "elasticfilesystem:DescribeAccessPoints"
+                            ],
+                            "Resource": "*"
+                        }
+                    ]
+                }
+            )
+        ]
+    ))
+
+    # Task role for Query API (no ECS discovery permissions needed)
+    QueryApiTaskRole = t.add_resource(Role(
+        "QueryApiTaskRole",
+        RoleName=Sub("${AWS::StackName}-query-api-task-role"),
+        AssumeRolePolicyDocument={
+            "Version": "2012-10-17",
+            "Statement": [{
+                "Effect": "Allow",
+                "Principal": {"Service": "ecs-tasks.amazonaws.com"},
+                "Action": "sts:AssumeRole"
+            }]
+        },
+        Policies=[
+            Policy(
+                PolicyName="QueryApiAccess",
+                PolicyDocument={
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Action": [
+                                "s3:GetObject",
+                                "s3:PutObject",
+                                "s3:DeleteObject",
+                                "s3:ListBucket"
+                            ],
+                            "Resource": [
+                                BucketArnValue,
+                                Sub("${BucketArn}/*", BucketArn=BucketArnValue)
+                            ]
+                        },
+                        {
+                            "Effect": "Allow",
+                            "Action": [
+                                "secretsmanager:GetSecretValue"
+                            ],
+                            "Resource": [
+                                Sub("${SecretArn}*", SecretArn=DbSecretArnValue),
+                                Sub("arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*")
+                            ]
+                        },
+                        {
+                            "Effect": "Allow",
+                            "Action": [
+                                "elasticfilesystem:ClientMount",
+                                "elasticfilesystem:ClientWrite",
+                                "elasticfilesystem:ClientRootAccess",
+                                "elasticfilesystem:DescribeFileSystems",
+                                "elasticfilesystem:DescribeMountTargets",
+                                "elasticfilesystem:DescribeAccessPoints"
+                            ],
+                            "Resource": "*"
+                        }
+                    ]
+                }
+            )
+        ]
+    ))
+
+    # Task role for Query Worker (with ECS discovery permissions)
+    QueryWorkerTaskRole = t.add_resource(Role(
+        "QueryWorkerTaskRole",
+        RoleName=Sub("${AWS::StackName}-query-worker-task-role"),
+        AssumeRolePolicyDocument={
+            "Version": "2012-10-17",
+            "Statement": [{
+                "Effect": "Allow",
+                "Principal": {"Service": "ecs-tasks.amazonaws.com"},
+                "Action": "sts:AssumeRole"
+            }]
+        },
+        Policies=[
+            Policy(
+                PolicyName="QueryWorkerAccess",
+                PolicyDocument={
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Action": [
+                                "s3:GetObject",
+                                "s3:PutObject",
+                                "s3:DeleteObject",
+                                "s3:ListBucket"
+                            ],
+                            "Resource": [
+                                BucketArnValue,
+                                Sub("${BucketArn}/*", BucketArn=BucketArnValue)
+                            ]
+                        },
+                        {
+                            "Effect": "Allow",
+                            "Action": [
+                                "secretsmanager:GetSecretValue"
+                            ],
+                            "Resource": [
+                                Sub("${SecretArn}*", SecretArn=DbSecretArnValue),
+                                Sub("arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*")
+                            ]
+                        },
+                        {
+                            "Effect": "Allow",
+                            "Action": [
                                 "ecs:ListServices",
                                 "ecs:DescribeServices",
-                                "ecs:UpdateService",
                                 "ecs:ListTasks",
                                 "ecs:DescribeTasks"
                             ],
@@ -488,14 +607,23 @@ def create_services_template():
             Environment(Name="API_KEYS_FILE", Value="env:API_KEYS_ENV"),
             Environment(Name="SQS_QUEUE_URL", Value=Sub("https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/lakerunner-ingest-queue")),
             Environment(Name="SQS_REGION", Value=Ref("AWS::Region")),
-            Environment(Name="ECS_WORKER_CLUSTER_NAME", Value=Select(1, Split("/", ClusterArnValue))),
-            Environment(Name="ECS_WORKER_SERVICE_NAME", Value="lakerunner-query-worker"),
             Environment(Name="LRDB_HOST", Value=DbHostValue),
             Environment(Name="LRDB_PORT", Value=DbPortValue),
             Environment(Name="LRDB_DBNAME", Value="lakerunner"),
             Environment(Name="LRDB_USER", Value="lakerunner"),
             Environment(Name="LRDB_SSLMODE", Value="require")
         ]
+        
+        # Add service-specific discovery environment variables
+        if service_name == 'lakerunner-query-worker':
+            # Query workers need to discover query API instances
+            base_env.extend([
+                Environment(Name="ECS_API_SERVICE_NAME", Value="lakerunner-query-api"),
+                Environment(Name="QUERY_API_CLUSTER_NAME", Value=Select(1, Split("/", ClusterArnValue)))
+            ])
+        elif service_name == 'lakerunner-query-api':
+            # Query APIs will receive worker registrations (no discovery env vars needed)
+            pass
 
         # Add OTLP telemetry environment variables (conditionally)
         # Note: We add these individually with If() conditions since CloudFormation
@@ -622,6 +750,14 @@ def create_services_template():
         container = ContainerDefinition(**container_kwargs)
         container_definitions.append(container)
 
+        # Select appropriate task role based on service type
+        if service_name == 'lakerunner-query-api':
+            task_role_arn = GetAtt(QueryApiTaskRole, "Arn")
+        elif service_name == 'lakerunner-query-worker':
+            task_role_arn = GetAtt(QueryWorkerTaskRole, "Arn")
+        else:
+            task_role_arn = GetAtt(TaskRole, "Arn")
+
         # Create task definition
         task_def = t.add_resource(TaskDefinition(
             f"TaskDef{title_name}",
@@ -631,7 +767,7 @@ def create_services_template():
             NetworkMode="awsvpc",
             RequiresCompatibilities=["FARGATE"],
             ExecutionRoleArn=GetAtt(ExecutionRole, "Arn"),
-            TaskRoleArn=GetAtt(TaskRole, "Arn"),
+            TaskRoleArn=task_role_arn,
             ContainerDefinitions=container_definitions,
             Volumes=volumes,
             RuntimePlatform=RuntimePlatform(

@@ -107,7 +107,7 @@ Parameters:
     Description: 'REQUIRED: Name of the CommonInfra stack to import infrastructure values from.'
     Type: String
   GoServicesImage:
-    Default: public.ecr.aws/cardinalhq.io/lakerunner:v1.1.1-rc2
+    Default: public.ecr.aws/cardinalhq.io/lakerunner:v1.2.0-rc1
     Description: Container image for Go services (pubsub, ingest, compact, etc.)
     Type: String
   OtelEndpoint:
@@ -115,11 +115,11 @@ Parameters:
     Description: 'OPTIONAL: OTEL collector HTTP endpoint URL (e.g., http://collector-dns:4318). Leave blank to disable OTLP telemetry export.'
     Type: String
   QueryApiImage:
-    Default: public.ecr.aws/cardinalhq.io/lakerunner/query-api:latest
+    Default: public.ecr.aws/cardinalhq.io/lakerunner/query-api:v1.2.0-rc2
     Description: Container image for query-api service
     Type: String
   QueryWorkerImage:
-    Default: public.ecr.aws/cardinalhq.io/lakerunner/query-worker:latest
+    Default: public.ecr.aws/cardinalhq.io/lakerunner/query-worker:v1.2.0-rc2
     Description: Container image for query-worker service
     Type: String
 Resources:
@@ -262,6 +262,119 @@ Resources:
       LogGroupName: !Sub '/ecs/lakerunner-sweeper'
       RetentionInDays: 14
     Type: AWS::Logs::LogGroup
+  QueryApiTaskRole:
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+        Version: '2012-10-17'
+      Policies:
+        - PolicyDocument:
+            Statement:
+              - Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                Effect: Allow
+                Resource:
+                  - !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-BucketArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                  - !Sub
+                    - ${BucketArn}/*
+                    - BucketArn: !ImportValue
+                        Fn::Sub:
+                          - ${CommonInfraStackName}-BucketArn
+                          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+              - Action:
+                  - secretsmanager:GetSecretValue
+                Effect: Allow
+                Resource:
+                  - !Sub
+                    - ${SecretArn}*
+                    - SecretArn: !ImportValue
+                        Fn::Sub:
+                          - ${CommonInfraStackName}-DbSecretArn
+                          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                  - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*'
+              - Action:
+                  - elasticfilesystem:ClientMount
+                  - elasticfilesystem:ClientWrite
+                  - elasticfilesystem:ClientRootAccess
+                  - elasticfilesystem:DescribeFileSystems
+                  - elasticfilesystem:DescribeMountTargets
+                  - elasticfilesystem:DescribeAccessPoints
+                Effect: Allow
+                Resource: '*'
+            Version: '2012-10-17'
+          PolicyName: QueryApiAccess
+      RoleName: !Sub '${AWS::StackName}-query-api-task-role'
+    Type: AWS::IAM::Role
+  QueryWorkerTaskRole:
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+        Version: '2012-10-17'
+      Policies:
+        - PolicyDocument:
+            Statement:
+              - Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                Effect: Allow
+                Resource:
+                  - !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-BucketArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                  - !Sub
+                    - ${BucketArn}/*
+                    - BucketArn: !ImportValue
+                        Fn::Sub:
+                          - ${CommonInfraStackName}-BucketArn
+                          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+              - Action:
+                  - secretsmanager:GetSecretValue
+                Effect: Allow
+                Resource:
+                  - !Sub
+                    - ${SecretArn}*
+                    - SecretArn: !ImportValue
+                        Fn::Sub:
+                          - ${CommonInfraStackName}-DbSecretArn
+                          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                  - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*'
+              - Action:
+                  - ecs:ListServices
+                  - ecs:DescribeServices
+                  - ecs:ListTasks
+                  - ecs:DescribeTasks
+                Effect: Allow
+                Resource: '*'
+              - Action:
+                  - elasticfilesystem:ClientMount
+                  - elasticfilesystem:ClientWrite
+                  - elasticfilesystem:ClientRootAccess
+                  - elasticfilesystem:DescribeFileSystems
+                  - elasticfilesystem:DescribeMountTargets
+                  - elasticfilesystem:DescribeAccessPoints
+                Effect: Allow
+                Resource: '*'
+            Version: '2012-10-17'
+          PolicyName: QueryWorkerAccess
+      RoleName: !Sub '${AWS::StackName}-query-worker-task-role'
+    Type: AWS::IAM::Role
   ServiceLakerunnerCompactLogs:
     Properties:
       Cluster: !ImportValue
@@ -516,17 +629,6 @@ Resources:
               Value: !Sub 'https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/lakerunner-ingest-queue'
             - Name: SQS_REGION
               Value: !Ref 'AWS::Region'
-            - Name: ECS_WORKER_CLUSTER_NAME
-              Value: !Select
-                - 1
-                - !Split
-                  - /
-                  - !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-ClusterArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: ECS_WORKER_SERVICE_NAME
-              Value: lakerunner-query-worker
             - Name: LRDB_HOST
               Value: !ImportValue
                 Fn::Sub:
@@ -624,17 +726,6 @@ Resources:
               Value: !Sub 'https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/lakerunner-ingest-queue'
             - Name: SQS_REGION
               Value: !Ref 'AWS::Region'
-            - Name: ECS_WORKER_CLUSTER_NAME
-              Value: !Select
-                - 1
-                - !Split
-                  - /
-                  - !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-ClusterArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: ECS_WORKER_SERVICE_NAME
-              Value: lakerunner-query-worker
             - Name: LRDB_HOST
               Value: !ImportValue
                 Fn::Sub:
@@ -732,17 +823,6 @@ Resources:
               Value: !Sub 'https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/lakerunner-ingest-queue'
             - Name: SQS_REGION
               Value: !Ref 'AWS::Region'
-            - Name: ECS_WORKER_CLUSTER_NAME
-              Value: !Select
-                - 1
-                - !Split
-                  - /
-                  - !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-ClusterArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: ECS_WORKER_SERVICE_NAME
-              Value: lakerunner-query-worker
             - Name: LRDB_HOST
               Value: !ImportValue
                 Fn::Sub:
@@ -840,17 +920,6 @@ Resources:
               Value: !Sub 'https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/lakerunner-ingest-queue'
             - Name: SQS_REGION
               Value: !Ref 'AWS::Region'
-            - Name: ECS_WORKER_CLUSTER_NAME
-              Value: !Select
-                - 1
-                - !Split
-                  - /
-                  - !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-ClusterArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: ECS_WORKER_SERVICE_NAME
-              Value: lakerunner-query-worker
             - Name: LRDB_HOST
               Value: !ImportValue
                 Fn::Sub:
@@ -949,17 +1018,6 @@ Resources:
               Value: !Sub 'https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/lakerunner-ingest-queue'
             - Name: SQS_REGION
               Value: !Ref 'AWS::Region'
-            - Name: ECS_WORKER_CLUSTER_NAME
-              Value: !Select
-                - 1
-                - !Split
-                  - /
-                  - !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-ClusterArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: ECS_WORKER_SERVICE_NAME
-              Value: lakerunner-query-worker
             - Name: LRDB_HOST
               Value: !ImportValue
                 Fn::Sub:
@@ -1055,17 +1113,6 @@ Resources:
               Value: !Sub 'https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/lakerunner-ingest-queue'
             - Name: SQS_REGION
               Value: !Ref 'AWS::Region'
-            - Name: ECS_WORKER_CLUSTER_NAME
-              Value: !Select
-                - 1
-                - !Split
-                  - /
-                  - !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-ClusterArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: ECS_WORKER_SERVICE_NAME
-              Value: lakerunner-query-worker
             - Name: LRDB_HOST
               Value: !ImportValue
                 Fn::Sub:
@@ -1094,10 +1141,6 @@ Resources:
                 - !Ref 'AWS::NoValue'
             - Name: EXECUTION_ENVIRONMENT
               Value: ecs
-            - Name: QUERY_WORKER_DEPLOYMENT_NAME
-              Value: lakerunner-query-worker
-            - Name: QUERY_WORKER_SERVICE_NAME
-              Value: lakerunner-query-worker
             - Name: QUERY_STACK
               Value: local
             - Name: METRIC_PREFIX
@@ -1158,7 +1201,7 @@ Resources:
       RuntimePlatform:
         CpuArchitecture: ARM64
         OperatingSystemFamily: LINUX
-      TaskRoleArn: !GetAtt 'TaskRole.Arn'
+      TaskRoleArn: !GetAtt 'QueryApiTaskRole.Arn'
       Volumes:
         - Name: scratch
     Type: AWS::ECS::TaskDefinition
@@ -1183,17 +1226,6 @@ Resources:
               Value: !Sub 'https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/lakerunner-ingest-queue'
             - Name: SQS_REGION
               Value: !Ref 'AWS::Region'
-            - Name: ECS_WORKER_CLUSTER_NAME
-              Value: !Select
-                - 1
-                - !Split
-                  - /
-                  - !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-ClusterArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: ECS_WORKER_SERVICE_NAME
-              Value: lakerunner-query-worker
             - Name: LRDB_HOST
               Value: !ImportValue
                 Fn::Sub:
@@ -1210,6 +1242,17 @@ Resources:
               Value: lakerunner
             - Name: LRDB_SSLMODE
               Value: require
+            - Name: ECS_API_SERVICE_NAME
+              Value: lakerunner-query-api
+            - Name: QUERY_API_CLUSTER_NAME
+              Value: !Select
+                - 1
+                - !Split
+                  - /
+                  - !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-ClusterArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp
@@ -1274,7 +1317,7 @@ Resources:
       RuntimePlatform:
         CpuArchitecture: ARM64
         OperatingSystemFamily: LINUX
-      TaskRoleArn: !GetAtt 'TaskRole.Arn'
+      TaskRoleArn: !GetAtt 'QueryWorkerTaskRole.Arn'
       Volumes:
         - Name: scratch
     Type: AWS::ECS::TaskDefinition
@@ -1301,17 +1344,6 @@ Resources:
               Value: !Sub 'https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/lakerunner-ingest-queue'
             - Name: SQS_REGION
               Value: !Ref 'AWS::Region'
-            - Name: ECS_WORKER_CLUSTER_NAME
-              Value: !Select
-                - 1
-                - !Split
-                  - /
-                  - !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-ClusterArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: ECS_WORKER_SERVICE_NAME
-              Value: lakerunner-query-worker
             - Name: LRDB_HOST
               Value: !ImportValue
                 Fn::Sub:
@@ -1409,17 +1441,6 @@ Resources:
               Value: !Sub 'https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/lakerunner-ingest-queue'
             - Name: SQS_REGION
               Value: !Ref 'AWS::Region'
-            - Name: ECS_WORKER_CLUSTER_NAME
-              Value: !Select
-                - 1
-                - !Split
-                  - /
-                  - !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-ClusterArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: ECS_WORKER_SERVICE_NAME
-              Value: lakerunner-query-worker
             - Name: LRDB_HOST
               Value: !ImportValue
                 Fn::Sub:
@@ -1553,14 +1574,6 @@ Resources:
                           - ${CommonInfraStackName}-DbSecretArn
                           - CommonInfraStackName: !Ref 'CommonInfraStackName'
                   - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*'
-              - Action:
-                  - ecs:ListServices
-                  - ecs:DescribeServices
-                  - ecs:UpdateService
-                  - ecs:ListTasks
-                  - ecs:DescribeTasks
-                Effect: Allow
-                Resource: '*'
               - Action:
                   - elasticfilesystem:ClientMount
                   - elasticfilesystem:ClientWrite

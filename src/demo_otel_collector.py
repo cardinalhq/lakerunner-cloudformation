@@ -83,19 +83,6 @@ def create_otel_collector_template():
         Description="Container image for OTEL collector service"
     ))
 
-    # Customer configuration
-    OrganizationId = t.add_parameter(Parameter(
-        "OrganizationId", Type="String",
-        Default="12340000-0000-4000-8000-000000000000",
-        Description="Organization ID for OTEL data routing"
-    ))
-
-    CollectorName = t.add_parameter(Parameter(
-        "CollectorName", Type="String",
-        Default="lakerunner",
-        Description="Collector name for OTEL data routing"
-    ))
-
     # OTEL Configuration (optional override)
     OtelConfigYaml = t.add_parameter(Parameter(
         "OtelConfigYaml", Type="String",
@@ -117,16 +104,14 @@ def create_otel_collector_template():
                     "Parameters": ["OtelCollectorImage"]
                 },
                 {
-                    "Label": {"default": "Customer Configuration"},
-                    "Parameters": ["OrganizationId", "CollectorName", "OtelConfigYaml"]
+                    "Label": {"default": "Configuration"},
+                    "Parameters": ["OtelConfigYaml"]
                 }
             ],
             "ParameterLabels": {
                 "CommonInfraStackName": {"default": "Common Infra Stack Name"},
                 "LoadBalancerType": {"default": "Load Balancer Type"},
                 "OtelCollectorImage": {"default": "OTEL Collector Image"},
-                "OrganizationId": {"default": "Organization ID"},
-                "CollectorName": {"default": "Collector Name"},
                 "OtelConfigYaml": {"default": "Custom OTEL Configuration (YAML)"}
             }
         }
@@ -394,8 +379,6 @@ def create_otel_collector_template():
         Environment(Name="OTEL_SERVICE_NAME", Value="otel-gateway"),
         Environment(Name="AWS_S3_BUCKET", Value=BucketNameValue),
         Environment(Name="AWS_REGION", Value=Ref("AWS::Region")),
-        Environment(Name="ORGANIZATION_ID", Value=Ref(OrganizationId)),
-        Environment(Name="COLLECTOR_NAME", Value=Ref(CollectorName)),
         Environment(
             Name="CHQ_COLLECTOR_CONFIG_YAML",
             Value=If(
