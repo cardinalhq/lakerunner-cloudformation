@@ -46,6 +46,10 @@ echo "4. Generating Lakerunner Grafana Service..."
 python3 src/lakerunner_grafana_service.py > generated-templates/lakerunner-grafana-service.yaml
 cfn-lint generated-templates/lakerunner-grafana-service.yaml
 
+echo "5. Generating Demo OTEL Collector..."
+python3 src/demo_otel_collector.py > generated-templates/lakerunner-demo-otel-collector.yaml
+cfn-lint generated-templates/lakerunner-demo-otel-collector.yaml
+
 echo -e "\nGenerated CloudFormation templates:"
 ls -la generated-templates/
 

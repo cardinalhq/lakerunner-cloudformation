@@ -1,0 +1,483 @@
+Conditions:
+  HasCustomConfig: !Not
+    - !Equals
+      - !Ref 'OtelConfigYaml'
+      - ''
+  IsInternal: !Equals
+    - !Ref 'LoadBalancerType'
+    - internal
+Description: 'Lakerunner OTEL Collector: ECS service with ALB for telemetry ingestion'
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Infrastructure
+        Parameters:
+          - CommonInfraStackName
+          - LoadBalancerType
+      - Label:
+          default: Container Images
+        Parameters:
+          - OtelCollectorImage
+      - Label:
+          default: Customer Configuration
+        Parameters:
+          - OrganizationId
+          - CollectorName
+          - OtelConfigYaml
+    ParameterLabels:
+      CollectorName:
+        default: Collector Name
+      CommonInfraStackName:
+        default: Common Infra Stack Name
+      LoadBalancerType:
+        default: Load Balancer Type
+      OrganizationId:
+        default: Organization ID
+      OtelCollectorImage:
+        default: OTEL Collector Image
+      OtelConfigYaml:
+        default: Custom OTEL Configuration (YAML)
+Outputs:
+  GrpcEndpoint:
+    Description: OTEL gRPC endpoint URL
+    Export:
+      Name: !Sub '${AWS::StackName}-GrpcEndpoint'
+    Value: !Sub
+      - http://${LoadBalancerDNS}:4317
+      - LoadBalancerDNS: !GetAtt 'ApplicationLoadBalancer.DNSName'
+  HttpEndpoint:
+    Description: OTEL HTTP endpoint URL
+    Export:
+      Name: !Sub '${AWS::StackName}-HttpEndpoint'
+    Value: !Sub
+      - http://${LoadBalancerDNS}:4318
+      - LoadBalancerDNS: !GetAtt 'ApplicationLoadBalancer.DNSName'
+  LoadBalancerDNS:
+    Description: DNS name of the OTEL collector load balancer
+    Export:
+      Name: !Sub '${AWS::StackName}-LoadBalancerDNS'
+    Value: !GetAtt 'ApplicationLoadBalancer.DNSName'
+  ServiceArn:
+    Description: ARN of the OTEL gateway service
+    Export:
+      Name: !Sub '${AWS::StackName}-ServiceArn'
+    Value: !Ref 'ServiceOtelGateway'
+Parameters:
+  CollectorName:
+    Default: lakerunner
+    Description: Collector name for OTEL data routing
+    Type: String
+  CommonInfraStackName:
+    Description: 'REQUIRED: Name of the CommonInfra stack to import infrastructure values from.'
+    Type: String
+  LoadBalancerType:
+    AllowedValues:
+      - internal
+      - internet-facing
+    Default: internal
+    Description: Whether to create an internal or external ALB for the OTEL collector.
+    Type: String
+  OrganizationId:
+    Default: 12340000-0000-4000-8000-000000000000
+    Description: Organization ID for OTEL data routing
+    Type: String
+  OtelCollectorImage:
+    Default: public.ecr.aws/cardinalhq.io/cardinalhq-otel-collector:latest
+    Description: Container image for OTEL collector service
+    Type: String
+  OtelConfigYaml:
+    Default: ''
+    Description: 'OPTIONAL: Custom OTEL collector configuration in YAML format. Leave blank to use default configuration.'
+    Type: String
+Resources:
+  AlbSecurityGroup:
+    Properties:
+      GroupDescription: Security group for OTEL collector ALB
+      SecurityGroupIngress:
+        - CidrIp: '0.0.0.0/0'
+          Description: OTEL gRPC receiver
+          FromPort: 4317
+          IpProtocol: tcp
+          ToPort: 4317
+        - CidrIp: '0.0.0.0/0'
+          Description: OTEL HTTP receiver
+          FromPort: 4318
+          IpProtocol: tcp
+          ToPort: 4318
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-alb-sg'
+      VpcId: !ImportValue
+        Fn::Sub:
+          - ${CommonInfraStackName}-VpcId
+          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+    Type: AWS::EC2::SecurityGroup
+  ApplicationLoadBalancer:
+    Properties:
+      IpAddressType: ipv4
+      Name: !Sub '${AWS::StackName}-alb'
+      Scheme: !If
+        - IsInternal
+        - internal
+        - internet-facing
+      SecurityGroups:
+        - !Ref 'AlbSecurityGroup'
+      Subnets: !If
+        - IsInternal
+        - !Split
+          - ','
+          - !ImportValue
+            Fn::Sub:
+              - ${CommonInfraStackName}-PrivateSubnets
+              - CommonInfraStackName: !Ref 'CommonInfraStackName'
+        - !Split
+          - ','
+          - !ImportValue
+            Fn::Sub:
+              - ${CommonInfraStackName}-PublicSubnets
+              - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-alb'
+      Type: application
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+  ExecRole:
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+        Version: '2012-10-17'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyDocument:
+            Statement:
+              - Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                Effect: Allow
+                Resource:
+                  - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/otel/*'
+              - Action:
+                  - ssmmessages:CreateControlChannel
+                  - ssmmessages:CreateDataChannel
+                  - ssmmessages:OpenControlChannel
+                  - ssmmessages:OpenDataChannel
+                Effect: Allow
+                Resource: '*'
+            Version: '2012-10-17'
+          PolicyName: SSMParameterAccess
+      RoleName: !Sub '${AWS::StackName}-exec-role'
+    Type: AWS::IAM::Role
+  GrpcListener:
+    Properties:
+      DefaultActions:
+        - TargetGroupArn: !Ref 'OtelGrpcTargetGroup'
+          Type: forward
+      LoadBalancerArn: !Ref 'ApplicationLoadBalancer'
+      Port: 4317
+      Protocol: HTTP
+    Type: AWS::ElasticLoadBalancingV2::Listener
+  HttpListener:
+    Properties:
+      DefaultActions:
+        - TargetGroupArn: !Ref 'OtelHttpTargetGroup'
+          Type: forward
+      LoadBalancerArn: !Ref 'ApplicationLoadBalancer'
+      Port: 4318
+      Protocol: HTTP
+    Type: AWS::ElasticLoadBalancingV2::Listener
+  LogGroupOtelGateway:
+    Properties:
+      LogGroupName: !Sub '/ecs/otel-gateway'
+      RetentionInDays: 14
+    Type: AWS::Logs::LogGroup
+  OtelGrpcTargetGroup:
+    Properties:
+      HealthCheckIntervalSeconds: 30
+      HealthCheckPath: /healthz
+      HealthCheckPort: '13133'
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      Matcher:
+        HttpCode: '200'
+      Name: !Sub '${AWS::StackName}-otel-grpc'
+      Port: 4317
+      Protocol: HTTP
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-otel-grpc-tg'
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: '30'
+      TargetType: ip
+      UnhealthyThresholdCount: 3
+      VpcId: !ImportValue
+        Fn::Sub:
+          - ${CommonInfraStackName}-VpcId
+          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+  OtelHttpTargetGroup:
+    Properties:
+      HealthCheckIntervalSeconds: 30
+      HealthCheckPath: /healthz
+      HealthCheckPort: '13133'
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      Matcher:
+        HttpCode: '200'
+      Name: !Sub '${AWS::StackName}-otel-http'
+      Port: 4318
+      Protocol: HTTP
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-otel-http-tg'
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: '30'
+      TargetType: ip
+      UnhealthyThresholdCount: 3
+      VpcId: !ImportValue
+        Fn::Sub:
+          - ${CommonInfraStackName}-VpcId
+          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+  ServiceOtelGateway:
+    DependsOn:
+      - GrpcListener
+      - HttpListener
+    Properties:
+      Cluster: !ImportValue
+        Fn::Sub:
+          - ${CommonInfraStackName}-ClusterArn
+          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      DesiredCount: '1'
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      LoadBalancers:
+        - ContainerName: OtelCollector
+          ContainerPort: 4317
+          TargetGroupArn: !Ref 'OtelGrpcTargetGroup'
+        - ContainerName: OtelCollector
+          ContainerPort: 4318
+          TargetGroupArn: !Ref 'OtelHttpTargetGroup'
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - !Ref 'TaskSecurityGroup'
+          Subnets: !Split
+            - ','
+            - !ImportValue
+              Fn::Sub:
+                - ${CommonInfraStackName}-PrivateSubnets
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      ServiceName: otel-gateway
+      TaskDefinition: !Ref 'TaskDefOtelGateway'
+    Type: AWS::ECS::Service
+  TaskDefOtelGateway:
+    Properties:
+      ContainerDefinitions:
+        - Command:
+            - /app/bin/run-with-env-config
+          Environment:
+            - Name: OTEL_SERVICE_NAME
+              Value: otel-gateway
+            - Name: AWS_S3_BUCKET
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-BucketName
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: AWS_REGION
+              Value: !Ref 'AWS::Region'
+            - Name: ORGANIZATION_ID
+              Value: !Ref 'OrganizationId'
+            - Name: COLLECTOR_NAME
+              Value: !Ref 'CollectorName'
+            - Name: CHQ_COLLECTOR_CONFIG_YAML
+              Value: !If
+                - HasCustomConfig
+                - !Ref 'OtelConfigYaml'
+                - |-
+                  # OTEL Collector Configuration
+                  # Updated to use standard awss3 exporter with separate paths for logs and metrics
+
+                  receivers:
+                    otlp:
+                      protocols:
+                        grpc:
+                          endpoint: 0.0.0.0:4317
+                        http:
+                          endpoint: 0.0.0.0:4318
+
+                  processors:
+                    memory_limiter:
+                      limit_mib: 1024
+                      check_interval: 1s
+
+                    batch:
+                      timeout: 10s
+                      send_batch_max_size: 10000
+                      send_batch_size: 10000
+
+                  exporters:
+                    awss3/logs:
+                      s3uploader:
+                        region: ${env:AWS_REGION}
+                        s3_bucket: ${env:AWS_S3_BUCKET}
+                        s3_prefix: raw-logs/
+                        s3_force_path_style: true
+                        s3_partition: minute
+                      marshaler: otlp_proto
+                      compression: gzip
+
+                    awss3/metrics:
+                      s3uploader:
+                        region: ${env:AWS_REGION}
+                        s3_bucket: ${env:AWS_S3_BUCKET}
+                        s3_prefix: raw-metrics/
+                        s3_force_path_style: true
+                        s3_partition: minute
+                      marshaler: otlp_proto
+                      compression: gzip
+
+                    nop:
+
+                  extensions:
+                    health_check:
+                      endpoint: 0.0.0.0:13133
+
+                  service:
+                    extensions:
+                      - health_check
+                    pipelines:
+                      traces:
+                        receivers:
+                          - otlp
+                        processors:
+                          - memory_limiter
+                        exporters:
+                          - nop
+
+                      metrics:
+                        receivers:
+                          - otlp
+                        processors:
+                          - memory_limiter
+                          - batch
+                        exporters:
+                          - awss3/metrics
+
+                      logs:
+                        receivers:
+                          - otlp
+                        processors:
+                          - memory_limiter
+                          - batch
+                        exporters:
+                          - awss3/logs
+            - Name: OTEL_RESOURCE_ATTRIBUTES
+              Value: service.name=otel-gateway
+          Image: !Ref 'OtelCollectorImage'
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref 'LogGroupOtelGateway'
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: otel-gateway
+          MountPoints:
+            - ContainerPath: /scratch
+              ReadOnly: false
+              SourceVolume: scratch
+          Name: OtelCollector
+          PortMappings:
+            - ContainerPort: 4317
+              Protocol: tcp
+            - ContainerPort: 4318
+              Protocol: tcp
+            - ContainerPort: 13133
+              Protocol: tcp
+          User: '0'
+      Cpu: '1024'
+      ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
+      Family: otel-gateway-task
+      Memory: '2048'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      RuntimePlatform:
+        CpuArchitecture: ARM64
+        OperatingSystemFamily: LINUX
+      TaskRoleArn: !GetAtt 'TaskRole.Arn'
+      Volumes:
+        - Name: scratch
+    Type: AWS::ECS::TaskDefinition
+  TaskRole:
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+        Version: '2012-10-17'
+      Policies:
+        - PolicyDocument:
+            Statement:
+              - Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                Effect: Allow
+                Resource:
+                  - !Sub
+                    - arn:aws:s3:::${BucketName}
+                    - BucketName: !ImportValue
+                        Fn::Sub:
+                          - ${CommonInfraStackName}-BucketName
+                          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                  - !Sub
+                    - arn:aws:s3:::${BucketName}/*
+                    - BucketName: !ImportValue
+                        Fn::Sub:
+                          - ${CommonInfraStackName}-BucketName
+                          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            Version: '2012-10-17'
+          PolicyName: S3Access
+      RoleName: !Sub '${AWS::StackName}-task-role'
+    Type: AWS::IAM::Role
+  TaskSecurityGroup:
+    Properties:
+      GroupDescription: Security group for OTEL collector tasks
+      SecurityGroupIngress:
+        - Description: OTEL gRPC from ALB
+          FromPort: 4317
+          IpProtocol: tcp
+          SourceSecurityGroupId: !Ref 'AlbSecurityGroup'
+          ToPort: 4317
+        - Description: OTEL HTTP from ALB
+          FromPort: 4318
+          IpProtocol: tcp
+          SourceSecurityGroupId: !Ref 'AlbSecurityGroup'
+          ToPort: 4318
+        - Description: OTEL health check from ALB
+          FromPort: 13133
+          IpProtocol: tcp
+          SourceSecurityGroupId: !Ref 'AlbSecurityGroup'
+          ToPort: 13133
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-task-sg'
+      VpcId: !ImportValue
+        Fn::Sub:
+          - ${CommonInfraStackName}-VpcId
+          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+    Type: AWS::EC2::SecurityGroup
+
