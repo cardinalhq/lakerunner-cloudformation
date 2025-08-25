@@ -30,23 +30,27 @@ if [ -d "generated-templates" ]; then
 fi
 mkdir generated-templates
 
-echo "1. Generating Lakerunner Common Infrastructure..."
+echo "1. Generating Lakerunner VPC..."
+python3 src/lakerunner_vpc.py > generated-templates/lakerunner-vpc.yaml
+cfn-lint generated-templates/lakerunner-vpc.yaml
+
+echo "2. Generating Lakerunner Common Infrastructure..."
 python3 src/lakerunner_common.py > generated-templates/lakerunner-common.yaml
 cfn-lint generated-templates/lakerunner-common.yaml
 
-echo "2. Generating Lakerunner Migration Task..."
+echo "3. Generating Lakerunner Migration Task..."
 python3 src/lakerunner_migration.py > generated-templates/lakerunner-migration.yaml
 cfn-lint generated-templates/lakerunner-migration.yaml
 
-echo "3. Generating Lakerunner Services..."
+echo "4. Generating Lakerunner Services..."
 python3 src/lakerunner_services.py > generated-templates/lakerunner-services.yaml
 cfn-lint generated-templates/lakerunner-services.yaml
 
-echo "4. Generating Lakerunner Grafana Service..."
+echo "5. Generating Lakerunner Grafana Service..."
 python3 src/lakerunner_grafana_service.py > generated-templates/lakerunner-grafana-service.yaml
 cfn-lint generated-templates/lakerunner-grafana-service.yaml
 
-echo "5. Generating Demo OTEL Collector..."
+echo "6. Generating Demo OTEL Collector..."
 python3 src/demo_otel_collector.py > generated-templates/lakerunner-demo-otel-collector.yaml
 cfn-lint generated-templates/lakerunner-demo-otel-collector.yaml
 

@@ -4,11 +4,78 @@ This repository contains CloudFormation templates for deploying the core Lakerun
 
 ## Architecture
 
-The core Lakerunner deployment consists of three CloudFormation stacks that must be deployed in order:
+The core Lakerunner deployment consists of CloudFormation stacks that can be deployed in order:
 
-1. **Common Infrastructure** (`lakerunner-common.yaml`) - VPC resources, RDS database, EFS, S3 bucket, SQS queue, and ALB
-2. **Migration** (`lakerunner-migration.yaml`) - Database migration task that runs once during initial setup
+**Option 1: Use Existing VPC**
+1. **Common Infrastructure** (`lakerunner-common.yaml`) - RDS database, EFS, S3 bucket, SQS queue, and ALB
+2. **Migration** (`lakerunner-migration.yaml`) - Database migration task that runs once during initial setup  
 3. **Services** (`lakerunner-services.yaml`) - ECS Fargate services for all Lakerunner microservices
+
+**Option 2: Create New VPC (Recommended for POCs)**
+1. **VPC Infrastructure** (`lakerunner-vpc.yaml`) - Cost-optimized VPC with essential VPC endpoints
+2. **Common Infrastructure** (`lakerunner-common.yaml`) - RDS database, EFS, S3 bucket, SQS queue, and ALB
+3. **Migration** (`lakerunner-migration.yaml`) - Database migration task that runs once during initial setup
+4. **Services** (`lakerunner-services.yaml`) - ECS Fargate services for all Lakerunner microservices
+
+## VPC Template (For POCs without existing VPC)
+
+If you don't have a VPC ready, use the `lakerunner-vpc.yaml` template to create a cost-optimized VPC for your POC deployment:
+
+### Security Design
+- **NAT Gateway**: For ECS nodes to pull container images and reach internet services
+- **VPC Endpoint - Secrets Manager**: For RDS password retrieval without internet routing
+- **VPC Endpoint - CloudWatch Logs**: For ECS logging without internet egress charges
+- **VPC Endpoint - ECS/ECR**: For container orchestration and image pulls from private subnets
+- **S3 Gateway Endpoint**: For S3 access without internet data transfer costs
+- **Private subnets only**: All Lakerunner services run without public IP addresses
+- **Security groups**: VPC endpoints restricted to HTTPS (port 443) from VPC CIDR only
+
+### Cost Optimization
+- **Single NAT Gateway**: Shared across AZs instead of per-AZ (saves ~$45/month)
+- **Minimal VPC endpoints**: Only essential AWS services to reduce interface endpoint costs
+- **Gateway endpoints where available**: S3 uses free gateway endpoint instead of paid interface endpoint
+
+### Deployment
+
+```bash
+aws cloudformation create-stack \
+  --stack-name lakerunner-vpc \
+  --template-body file://generated-templates/lakerunner-vpc.yaml \
+  --parameters ParameterKey=EnvironmentName,ParameterValue=lakerunner \
+               ParameterKey=VpcCidr,ParameterValue=10.0.0.0/16
+```
+
+### Parameters
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `EnvironmentName` | String | No | lakerunner | Environment name for resource naming |
+| `VpcCidr` | String | No | 10.0.0.0/16 | CIDR block for the VPC |
+| `CreateNatGateway` | String | No | Yes | Create NAT Gateway for private subnet internet access |
+
+### Outputs
+
+The VPC template exports these values for use by other stacks:
+- `VpcId` - VPC ID  
+- `PublicSubnets` - Comma-separated public subnet IDs
+- `PrivateSubnets` - Comma-separated private subnet IDs
+- `VPCEndpointSecurityGroupId` - Security group for VPC endpoints
+
+When using the VPC template, pass the exported values to the Common Infrastructure stack:
+
+```bash
+# Get VPC outputs
+VPC_ID=$(aws cloudformation describe-stacks --stack-name lakerunner-vpc --query 'Stacks[0].Outputs[?OutputKey==`VpcId`].OutputValue' --output text)
+PRIVATE_SUBNETS=$(aws cloudformation describe-stacks --stack-name lakerunner-vpc --query 'Stacks[0].Outputs[?OutputKey==`PrivateSubnets`].OutputValue' --output text)
+
+# Deploy common infrastructure
+aws cloudformation create-stack \
+  --stack-name lakerunner-common \
+  --template-body file://generated-templates/lakerunner-common.yaml \
+  --parameters ParameterKey=VpcId,ParameterValue=$VPC_ID \
+               ParameterKey=PrivateSubnets,ParameterValue=$PRIVATE_SUBNETS \
+  --capabilities CAPABILITY_IAM
+```
 
 ## Quick Start
 
