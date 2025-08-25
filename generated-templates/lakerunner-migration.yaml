@@ -93,6 +93,10 @@ Resources:
               Value: lakerunner
             - Name: CONFIGDB_SSLMODE
               Value: require
+            - Name: API_KEYS_FILE
+              Value: env:API_KEYS_ENV
+            - Name: STORAGE_PROFILE_FILE
+              Value: env:STORAGE_PROFILES_ENV
           Image: !Ref 'ContainerImage'
           LogConfiguration:
             LogDriver: awslogs
@@ -112,6 +116,10 @@ Resources:
                 - '${S}:password::'
                 - S: !ImportValue
                     Fn::Sub: ${CommonInfraStackName}-DbSecretArn
+            - Name: API_KEYS_ENV
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
+            - Name: STORAGE_PROFILES_ENV
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
       Cpu: !Ref 'Cpu'
       ExecutionRoleArn: !GetAtt 'TaskExecutionRole.Arn'
       Family: lakerunner-migration
@@ -323,6 +331,12 @@ Resources:
                     - ${SecretArn}*
                     - SecretArn: !ImportValue
                         Fn::Sub: ${CommonInfraStackName}-DbSecretArn
+              - Action:
+                  - ssm:GetParameter
+                Effect: Allow
+                Resource:
+                  - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
+                  - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
             Version: '2012-10-17'
           PolicyName: TaskExecutionSecretsPolicy
     Type: AWS::IAM::Role

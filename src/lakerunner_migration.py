@@ -181,6 +181,14 @@ ExecutionRole = t.add_resource(Role(
                         "Effect": "Allow",
                         "Action": ["secretsmanager:GetSecretValue"],
                         "Resource": [Sub("${SecretArn}*", SecretArn=DbSecretArnValue)]
+                    },
+                    {
+                        "Effect": "Allow",
+                        "Action": ["ssm:GetParameter"],
+                        "Resource": [
+                            Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys"),
+                            Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles")
+                        ]
                     }
                 ]
             }
@@ -224,10 +232,14 @@ TaskDef = t.add_resource(TaskDefinition(
                 Environment(Name="CONFIGDB_DBNAME", Value="lakerunner"),
                 Environment(Name="CONFIGDB_USER", Value="lakerunner"),
                 Environment(Name="CONFIGDB_SSLMODE", Value="require"),
+                Environment(Name="API_KEYS_FILE", Value="env:API_KEYS_ENV"),
+                Environment(Name="STORAGE_PROFILE_FILE", Value="env:STORAGE_PROFILES_ENV"),
             ],
             Secrets=[
                 EcsSecret(Name="LRDB_PASSWORD", ValueFrom=Sub("${S}:password::", S=DbSecretArnValue)),
-                EcsSecret(Name="CONFIGDB_PASSWORD", ValueFrom=Sub("${S}:password::", S=DbSecretArnValue))
+                EcsSecret(Name="CONFIGDB_PASSWORD", ValueFrom=Sub("${S}:password::", S=DbSecretArnValue)),
+                EcsSecret(Name="API_KEYS_ENV", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys")),
+                EcsSecret(Name="STORAGE_PROFILES_ENV", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles"))
             ]
         )
     ]
