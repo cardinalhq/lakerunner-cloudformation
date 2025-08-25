@@ -16,10 +16,10 @@ if [ -z "$STACK_NAME" ] || [ -z "$STACK_TYPE" ]; then
 fi
 
 # Current image versions
-GO_SERVICES_IMAGE="public.ecr.aws/cardinalhq.io/lakerunner:v1.2.0-rc1"
-QUERY_API_IMAGE="public.ecr.aws/cardinalhq.io/lakerunner/query-api:v1.2.0-rc2"
-QUERY_WORKER_IMAGE="public.ecr.aws/cardinalhq.io/lakerunner/query-worker:v1.2.0-rc2"
-MIGRATION_IMAGE="public.ecr.aws/cardinalhq.io/lakerunner:v1.2.0-rc1"
+GO_SERVICES_IMAGE="public.ecr.aws/cardinalhq.io/lakerunner:v1.2.1"
+QUERY_API_IMAGE="public.ecr.aws/cardinalhq.io/lakerunner/query-api:v1.2.1"
+QUERY_WORKER_IMAGE="public.ecr.aws/cardinalhq.io/lakerunner/query-worker:v1.2.1"
+MIGRATION_IMAGE="public.ecr.aws/cardinalhq.io/lakerunner:v1.2.1"
 
 case "$STACK_TYPE" in
     "services")

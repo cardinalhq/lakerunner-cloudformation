@@ -90,10 +90,10 @@ When updating existing CloudFormation stacks, container image versions are not a
 
 ### Current Image Versions
 
-- **Go Services**: `public.ecr.aws/cardinalhq.io/lakerunner:v1.2.0-rc1`
-- **Query API**: `public.ecr.aws/cardinalhq.io/lakerunner/query-api:v1.2.0-rc2`  
-- **Query Worker**: `public.ecr.aws/cardinalhq.io/lakerunner/query-worker:v1.2.0-rc2`
-- **Migration**: `public.ecr.aws/cardinalhq.io/lakerunner:v1.2.0-rc1`
+- **Go Services**: `public.ecr.aws/cardinalhq.io/lakerunner:v1.2.1`
+- **Query API**: `public.ecr.aws/cardinalhq.io/lakerunner/query-api:v1.2.1`  
+- **Query Worker**: `public.ecr.aws/cardinalhq.io/lakerunner/query-worker:v1.2.1`
+- **Migration**: `public.ecr.aws/cardinalhq.io/lakerunner:v1.2.1`
 
 ### Update Services Stack
 
@@ -103,9 +103,9 @@ aws cloudformation update-stack \\
   --template-body file://generated-templates/lakerunner-services.yaml \\
   --parameters \\
     ParameterKey=CommonInfraStackName,UsePreviousValue=true \\
-    ParameterKey=GoServicesImage,ParameterValue=public.ecr.aws/cardinalhq.io/lakerunner:v1.2.0-rc1 \\
-    ParameterKey=QueryApiImage,ParameterValue=public.ecr.aws/cardinalhq.io/lakerunner/query-api:v1.2.0-rc2 \\
-    ParameterKey=QueryWorkerImage,ParameterValue=public.ecr.aws/cardinalhq.io/lakerunner/query-worker:v1.2.0-rc2 \\
+    ParameterKey=GoServicesImage,ParameterValue=public.ecr.aws/cardinalhq.io/lakerunner:v1.2.1 \\
+    ParameterKey=QueryApiImage,ParameterValue=public.ecr.aws/cardinalhq.io/lakerunner/query-api:v1.2.1 \\
+    ParameterKey=QueryWorkerImage,ParameterValue=public.ecr.aws/cardinalhq.io/lakerunner/query-worker:v1.2.1 \\
   --capabilities CAPABILITY_IAM
 ```
 
@@ -117,7 +117,7 @@ aws cloudformation update-stack \\
   --template-body file://generated-templates/lakerunner-migration.yaml \\
   --parameters \\
     ParameterKey=CommonInfraStackName,UsePreviousValue=true \\
-    ParameterKey=ContainerImage,ParameterValue=public.ecr.aws/cardinalhq.io/lakerunner:v1.2.0-rc1 \\
+    ParameterKey=ContainerImage,ParameterValue=public.ecr.aws/cardinalhq.io/lakerunner:v1.2.1 \\
   --capabilities CAPABILITY_IAM
 ```
 
@@ -402,7 +402,7 @@ aws cloudformation create-stack --stack-name lakerunner-grafana \
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `CommonInfraStackName` | String | Yes | - | Name of the CommonInfra stack to import values from |
-| `ContainerImage` | String | No | public.ecr.aws/cardinalhq.io/lakerunner:v1.1.0 | Migration container image |
+| `ContainerImage` | String | No | public.ecr.aws/cardinalhq.io/lakerunner:v1.2.1 | Migration container image |
 | `Cpu` | String | No | "512" | Fargate CPU units (256/512/1024/2048/4096) |
 | `MemoryMiB` | String | No | "1024" | Fargate Memory in MiB (512/1024/2048/3072/4096/5120/6144/7168/8192) |
 
@@ -414,7 +414,7 @@ aws cloudformation create-stack --stack-name lakerunner-grafana \
 | `AlbScheme` | String | No | "internal" | ALB scheme: "internal" or "internet-facing" |
 | `OtelEndpoint` | String | No | "" | OTEL collector HTTP endpoint (e.g., http://collector-dns:4318) |
 | `GrafanaResetToken` | String | No | "" | Change this value to reset Grafana data (wipe EFS volume) |
-| `GoServicesImage` | String | No | public.ecr.aws/cardinalhq.io/lakerunner:v1.1.0 | Container image for Go services |
+| `GoServicesImage` | String | No | public.ecr.aws/cardinalhq.io/lakerunner:v1.2.1 | Container image for Go services |
 | `QueryApiImage` | String | No | public.ecr.aws/cardinalhq.io/lakerunner/query-api:latest | Container image for query-api service |
 | `QueryWorkerImage` | String | No | public.ecr.aws/cardinalhq.io/lakerunner/query-worker:latest | Container image for query-worker service |
 | `GrafanaImage` | String | No | grafana/grafana:latest | Container image for Grafana service |

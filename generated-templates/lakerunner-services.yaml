@@ -107,7 +107,7 @@ Parameters:
     Description: 'REQUIRED: Name of the CommonInfra stack to import infrastructure values from.'
     Type: String
   GoServicesImage:
-    Default: public.ecr.aws/cardinalhq.io/lakerunner:v1.2.0-rc1
+    Default: public.ecr.aws/cardinalhq.io/lakerunner:v1.2.1
     Description: Container image for Go services (pubsub, ingest, compact, etc.)
     Type: String
   OtelEndpoint:
@@ -115,11 +115,11 @@ Parameters:
     Description: 'OPTIONAL: OTEL collector HTTP endpoint URL (e.g., http://collector-dns:4318). Leave blank to disable OTLP telemetry export.'
     Type: String
   QueryApiImage:
-    Default: public.ecr.aws/cardinalhq.io/lakerunner/query-api:v1.2.0-rc3
+    Default: public.ecr.aws/cardinalhq.io/lakerunner/query-api:v1.2.1
     Description: Container image for query-api service
     Type: String
   QueryWorkerImage:
-    Default: public.ecr.aws/cardinalhq.io/lakerunner/query-worker:v1.2.0-rc3
+    Default: public.ecr.aws/cardinalhq.io/lakerunner/query-worker:v1.2.1
     Description: Container image for query-worker service
     Type: String
 Resources:
