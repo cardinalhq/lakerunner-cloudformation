@@ -221,14 +221,14 @@ def create_services_template():
         TargetType="ip",
         HealthCheckPath="/ready",
         HealthCheckProtocol="HTTP",
-        HealthCheckIntervalSeconds=30,
-        HealthCheckTimeoutSeconds=5,
+        HealthCheckIntervalSeconds=5,
+        HealthCheckTimeoutSeconds=2,
         HealthyThresholdCount=2,
-        UnhealthyThresholdCount=3,
+        UnhealthyThresholdCount=2,
         Matcher=Matcher(HttpCode="200"),
         TargetGroupAttributes=[
             TargetGroupAttribute(Key="stickiness.enabled", Value="false"),
-            TargetGroupAttribute(Key="deregistration_delay.timeout_seconds", Value="30")
+            TargetGroupAttribute(Key="deregistration_delay.timeout_seconds", Value="5")
         ]
     ))
 
@@ -375,7 +375,7 @@ def create_services_template():
         ]
     ))
 
-    # Task role for Query API (no ECS discovery permissions needed)
+    # Task role for Query API (with ECS discovery permissions)
     QueryApiTaskRole = t.add_resource(Role(
         "QueryApiTaskRole",
         RoleName=Sub("${AWS::StackName}-query-api-task-role"),
@@ -419,6 +419,16 @@ def create_services_template():
                         {
                             "Effect": "Allow",
                             "Action": [
+                                "ecs:ListServices",
+                                "ecs:DescribeServices",
+                                "ecs:ListTasks",
+                                "ecs:DescribeTasks"
+                            ],
+                            "Resource": "*"
+                        },
+                        {
+                            "Effect": "Allow",
+                            "Action": [
                                 "elasticfilesystem:ClientMount",
                                 "elasticfilesystem:ClientWrite",
                                 "elasticfilesystem:ClientRootAccess",
@@ -434,7 +444,7 @@ def create_services_template():
         ]
     ))
 
-    # Task role for Query Worker (with ECS discovery permissions)
+    # Task role for Query Worker (no ECS discovery permissions needed)
     QueryWorkerTaskRole = t.add_resource(Role(
         "QueryWorkerTaskRole",
         RoleName=Sub("${AWS::StackName}-query-worker-task-role"),
@@ -474,16 +484,6 @@ def create_services_template():
                                 Sub("${SecretArn}*", SecretArn=DbSecretArnValue),
                                 Sub("arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*")
                             ]
-                        },
-                        {
-                            "Effect": "Allow",
-                            "Action": [
-                                "ecs:ListServices",
-                                "ecs:DescribeServices",
-                                "ecs:ListTasks",
-                                "ecs:DescribeTasks"
-                            ],
-                            "Resource": "*"
                         },
                         {
                             "Effect": "Allow",
@@ -596,20 +596,20 @@ def create_services_template():
             Environment(Name="LRDB_SSLMODE", Value="require"),
             Environment(Name="CONFIGDB_HOST", Value=DbHostValue),
             Environment(Name="CONFIGDB_PORT", Value=DbPortValue),
-            Environment(Name="CONFIGDB_DBNAME", Value="config"),
+            Environment(Name="CONFIGDB_DBNAME", Value="lakerunner"),
             Environment(Name="CONFIGDB_USER", Value="lakerunner"),
             Environment(Name="CONFIGDB_SSLMODE", Value="require"),
         ]
 
         # Add service-specific discovery environment variables
-        if service_name == 'lakerunner-query-worker':
-            # Query workers need to discover query API instances
+        if service_name == 'lakerunner-query-api':
+            # Query API needs to discover query worker instances
             base_env.extend([
-                Environment(Name="ECS_API_SERVICE_NAME", Value="lakerunner-query-api"),
-                Environment(Name="QUERY_API_CLUSTER_NAME", Value=Select(1, Split("/", ClusterArnValue)))
+                Environment(Name="ECS_WORKER_SERVICE_NAME", Value="lakerunner-query-worker"),
+                Environment(Name="QUERY_WORKER_CLUSTER_NAME", Value=Select(1, Split("/", ClusterArnValue)))
             ])
-        elif service_name == 'lakerunner-query-api':
-            # Query APIs will receive worker registrations (no discovery env vars needed)
+        elif service_name == 'lakerunner-query-worker':
+            # Query workers will receive API registrations (no discovery env vars needed)
             pass
 
         # Add OTLP telemetry environment variables (conditionally)

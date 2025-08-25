@@ -88,7 +88,7 @@ Resources:
             - Name: CONFIGDB_PORT
               Value: '5432'
             - Name: CONFIGDB_DBNAME
-              Value: config
+              Value: lakerunner
             - Name: CONFIGDB_USER
               Value: lakerunner
             - Name: CONFIGDB_SSLMODE

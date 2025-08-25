@@ -303,6 +303,13 @@ Resources:
                           - CommonInfraStackName: !Ref 'CommonInfraStackName'
                   - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*'
               - Action:
+                  - ecs:ListServices
+                  - ecs:DescribeServices
+                  - ecs:ListTasks
+                  - ecs:DescribeTasks
+                Effect: Allow
+                Resource: '*'
+              - Action:
                   - elasticfilesystem:ClientMount
                   - elasticfilesystem:ClientWrite
                   - elasticfilesystem:ClientRootAccess
@@ -355,13 +362,6 @@ Resources:
                           - ${CommonInfraStackName}-DbSecretArn
                           - CommonInfraStackName: !Ref 'CommonInfraStackName'
                   - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*'
-              - Action:
-                  - ecs:ListServices
-                  - ecs:DescribeServices
-                  - ecs:ListTasks
-                  - ecs:DescribeTasks
-                Effect: Allow
-                Resource: '*'
               - Action:
                   - elasticfilesystem:ClientMount
                   - elasticfilesystem:ClientWrite
@@ -654,7 +654,7 @@ Resources:
                   - ${CommonInfraStackName}-DbPort
                   - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: CONFIGDB_DBNAME
-              Value: config
+              Value: lakerunner
             - Name: CONFIGDB_USER
               Value: lakerunner
             - Name: CONFIGDB_SSLMODE
@@ -772,7 +772,7 @@ Resources:
                   - ${CommonInfraStackName}-DbPort
                   - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: CONFIGDB_DBNAME
-              Value: config
+              Value: lakerunner
             - Name: CONFIGDB_USER
               Value: lakerunner
             - Name: CONFIGDB_SSLMODE
@@ -890,7 +890,7 @@ Resources:
                   - ${CommonInfraStackName}-DbPort
                   - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: CONFIGDB_DBNAME
-              Value: config
+              Value: lakerunner
             - Name: CONFIGDB_USER
               Value: lakerunner
             - Name: CONFIGDB_SSLMODE
@@ -1008,7 +1008,7 @@ Resources:
                   - ${CommonInfraStackName}-DbPort
                   - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: CONFIGDB_DBNAME
-              Value: config
+              Value: lakerunner
             - Name: CONFIGDB_USER
               Value: lakerunner
             - Name: CONFIGDB_SSLMODE
@@ -1127,7 +1127,7 @@ Resources:
                   - ${CommonInfraStackName}-DbPort
                   - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: CONFIGDB_DBNAME
-              Value: config
+              Value: lakerunner
             - Name: CONFIGDB_USER
               Value: lakerunner
             - Name: CONFIGDB_SSLMODE
@@ -1243,11 +1243,22 @@ Resources:
                   - ${CommonInfraStackName}-DbPort
                   - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: CONFIGDB_DBNAME
-              Value: config
+              Value: lakerunner
             - Name: CONFIGDB_USER
               Value: lakerunner
             - Name: CONFIGDB_SSLMODE
               Value: require
+            - Name: ECS_WORKER_SERVICE_NAME
+              Value: lakerunner-query-worker
+            - Name: QUERY_WORKER_CLUSTER_NAME
+              Value: !Select
+                - 1
+                - !Split
+                  - /
+                  - !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-ClusterArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp
@@ -1381,22 +1392,11 @@ Resources:
                   - ${CommonInfraStackName}-DbPort
                   - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: CONFIGDB_DBNAME
-              Value: config
+              Value: lakerunner
             - Name: CONFIGDB_USER
               Value: lakerunner
             - Name: CONFIGDB_SSLMODE
               Value: require
-            - Name: ECS_API_SERVICE_NAME
-              Value: lakerunner-query-api
-            - Name: QUERY_API_CLUSTER_NAME
-              Value: !Select
-                - 1
-                - !Split
-                  - /
-                  - !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-ClusterArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp
@@ -1526,7 +1526,7 @@ Resources:
                   - ${CommonInfraStackName}-DbPort
                   - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: CONFIGDB_DBNAME
-              Value: config
+              Value: lakerunner
             - Name: CONFIGDB_USER
               Value: lakerunner
             - Name: CONFIGDB_SSLMODE
@@ -1644,7 +1644,7 @@ Resources:
                   - ${CommonInfraStackName}-DbPort
                   - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: CONFIGDB_DBNAME
-              Value: config
+              Value: lakerunner
             - Name: CONFIGDB_USER
               Value: lakerunner
             - Name: CONFIGDB_SSLMODE
@@ -1788,10 +1788,10 @@ Resources:
     Type: AWS::IAM::Role
   Tg7101:
     Properties:
-      HealthCheckIntervalSeconds: 30
+      HealthCheckIntervalSeconds: 5
       HealthCheckPath: /ready
       HealthCheckProtocol: HTTP
-      HealthCheckTimeoutSeconds: 5
+      HealthCheckTimeoutSeconds: 2
       HealthyThresholdCount: 2
       Matcher:
         HttpCode: '200'
@@ -1801,9 +1801,9 @@ Resources:
         - Key: stickiness.enabled
           Value: 'false'
         - Key: deregistration_delay.timeout_seconds
-          Value: '30'
+          Value: '5'
       TargetType: ip
-      UnhealthyThresholdCount: 3
+      UnhealthyThresholdCount: 2
       VpcId: !ImportValue
         Fn::Sub:
           - ${CommonInfraStackName}-VpcId
