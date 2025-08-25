@@ -82,6 +82,17 @@ Resources:
               Value: lakerunner
             - Name: LRDB_SSLMODE
               Value: require
+            - Name: CONFIGDB_HOST
+              Value: !ImportValue
+                Fn::Sub: ${CommonInfraStackName}-DbEndpoint
+            - Name: CONFIGDB_PORT
+              Value: '5432'
+            - Name: CONFIGDB_DBNAME
+              Value: config
+            - Name: CONFIGDB_USER
+              Value: lakerunner
+            - Name: CONFIGDB_SSLMODE
+              Value: require
           Image: !Ref 'ContainerImage'
           LogConfiguration:
             LogDriver: awslogs
@@ -92,6 +103,11 @@ Resources:
           Name: Migrator
           Secrets:
             - Name: LRDB_PASSWORD
+              ValueFrom: !Sub
+                - '${S}:password::'
+                - S: !ImportValue
+                    Fn::Sub: ${CommonInfraStackName}-DbSecretArn
+            - Name: CONFIGDB_PASSWORD
               ValueFrom: !Sub
                 - '${S}:password::'
                 - S: !ImportValue

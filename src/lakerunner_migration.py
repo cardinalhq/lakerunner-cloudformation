@@ -219,9 +219,15 @@ TaskDef = t.add_resource(TaskDefinition(
                 Environment(Name="LRDB_DBNAME", Value="lakerunner"),
                 Environment(Name="LRDB_USER", Value="lakerunner"),
                 Environment(Name="LRDB_SSLMODE", Value="require"),
+                Environment(Name="CONFIGDB_HOST", Value=DbHostValue),
+                Environment(Name="CONFIGDB_PORT", Value="5432"),
+                Environment(Name="CONFIGDB_DBNAME", Value="config"),
+                Environment(Name="CONFIGDB_USER", Value="lakerunner"),
+                Environment(Name="CONFIGDB_SSLMODE", Value="require"),
             ],
             Secrets=[
-                EcsSecret(Name="LRDB_PASSWORD", ValueFrom=Sub("${S}:password::", S=DbSecretArnValue))
+                EcsSecret(Name="LRDB_PASSWORD", ValueFrom=Sub("${S}:password::", S=DbSecretArnValue)),
+                EcsSecret(Name="CONFIGDB_PASSWORD", ValueFrom=Sub("${S}:password::", S=DbSecretArnValue))
             ]
         )
     ]

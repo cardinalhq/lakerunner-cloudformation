@@ -643,6 +643,22 @@ Resources:
               Value: lakerunner
             - Name: LRDB_SSLMODE
               Value: require
+            - Name: CONFIGDB_HOST
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbEndpoint
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: CONFIGDB_PORT
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbPort
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: CONFIGDB_DBNAME
+              Value: config
+            - Name: CONFIGDB_USER
+              Value: lakerunner
+            - Name: CONFIGDB_SSLMODE
+              Value: require
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp
@@ -680,6 +696,13 @@ Resources:
             - Name: API_KEYS_ENV
               ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
             - Name: LRDB_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-DbSecretArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: CONFIGDB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
                 - SecretArn: !ImportValue
@@ -738,6 +761,22 @@ Resources:
               Value: lakerunner
             - Name: LRDB_SSLMODE
               Value: require
+            - Name: CONFIGDB_HOST
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbEndpoint
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: CONFIGDB_PORT
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbPort
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: CONFIGDB_DBNAME
+              Value: config
+            - Name: CONFIGDB_USER
+              Value: lakerunner
+            - Name: CONFIGDB_SSLMODE
+              Value: require
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp
@@ -775,6 +814,13 @@ Resources:
             - Name: API_KEYS_ENV
               ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
             - Name: LRDB_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-DbSecretArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: CONFIGDB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
                 - SecretArn: !ImportValue
@@ -833,6 +879,22 @@ Resources:
               Value: lakerunner
             - Name: LRDB_SSLMODE
               Value: require
+            - Name: CONFIGDB_HOST
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbEndpoint
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: CONFIGDB_PORT
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbPort
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: CONFIGDB_DBNAME
+              Value: config
+            - Name: CONFIGDB_USER
+              Value: lakerunner
+            - Name: CONFIGDB_SSLMODE
+              Value: require
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp
@@ -870,6 +932,13 @@ Resources:
             - Name: API_KEYS_ENV
               ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
             - Name: LRDB_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-DbSecretArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: CONFIGDB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
                 - SecretArn: !ImportValue
@@ -928,6 +997,22 @@ Resources:
               Value: lakerunner
             - Name: LRDB_SSLMODE
               Value: require
+            - Name: CONFIGDB_HOST
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbEndpoint
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: CONFIGDB_PORT
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbPort
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: CONFIGDB_DBNAME
+              Value: config
+            - Name: CONFIGDB_USER
+              Value: lakerunner
+            - Name: CONFIGDB_SSLMODE
+              Value: require
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp
@@ -965,6 +1050,13 @@ Resources:
             - Name: API_KEYS_ENV
               ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
             - Name: LRDB_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-DbSecretArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: CONFIGDB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
                 - SecretArn: !ImportValue
@@ -1024,6 +1116,22 @@ Resources:
               Value: lakerunner
             - Name: LRDB_SSLMODE
               Value: require
+            - Name: CONFIGDB_HOST
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbEndpoint
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: CONFIGDB_PORT
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbPort
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: CONFIGDB_DBNAME
+              Value: config
+            - Name: CONFIGDB_USER
+              Value: lakerunner
+            - Name: CONFIGDB_SSLMODE
+              Value: require
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp
@@ -1061,6 +1169,13 @@ Resources:
             - Name: API_KEYS_ENV
               ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
             - Name: LRDB_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-DbSecretArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: CONFIGDB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
                 - SecretArn: !ImportValue
@@ -1116,6 +1231,22 @@ Resources:
             - Name: LRDB_USER
               Value: lakerunner
             - Name: LRDB_SSLMODE
+              Value: require
+            - Name: CONFIGDB_HOST
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbEndpoint
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: CONFIGDB_PORT
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbPort
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: CONFIGDB_DBNAME
+              Value: config
+            - Name: CONFIGDB_USER
+              Value: lakerunner
+            - Name: CONFIGDB_SSLMODE
               Value: require
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
@@ -1178,6 +1309,13 @@ Resources:
                     Fn::Sub:
                       - ${CommonInfraStackName}-DbSecretArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: CONFIGDB_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-DbSecretArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: TOKEN_HMAC256_KEY
               ValueFrom: !Sub
                 - '${SecretArn}:token_hmac256_key::'
@@ -1231,6 +1369,22 @@ Resources:
             - Name: LRDB_USER
               Value: lakerunner
             - Name: LRDB_SSLMODE
+              Value: require
+            - Name: CONFIGDB_HOST
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbEndpoint
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: CONFIGDB_PORT
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbPort
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: CONFIGDB_DBNAME
+              Value: config
+            - Name: CONFIGDB_USER
+              Value: lakerunner
+            - Name: CONFIGDB_SSLMODE
               Value: require
             - Name: ECS_API_SERVICE_NAME
               Value: lakerunner-query-api
@@ -1298,6 +1452,13 @@ Resources:
                     Fn::Sub:
                       - ${CommonInfraStackName}-DbSecretArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: CONFIGDB_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-DbSecretArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: TOKEN_HMAC256_KEY
               ValueFrom: !Sub
                 - '${SecretArn}:token_hmac256_key::'
@@ -1354,6 +1515,22 @@ Resources:
               Value: lakerunner
             - Name: LRDB_SSLMODE
               Value: require
+            - Name: CONFIGDB_HOST
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbEndpoint
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: CONFIGDB_PORT
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbPort
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: CONFIGDB_DBNAME
+              Value: config
+            - Name: CONFIGDB_USER
+              Value: lakerunner
+            - Name: CONFIGDB_SSLMODE
+              Value: require
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp
@@ -1391,6 +1568,13 @@ Resources:
             - Name: API_KEYS_ENV
               ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
             - Name: LRDB_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-DbSecretArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: CONFIGDB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
                 - SecretArn: !ImportValue
@@ -1449,6 +1633,22 @@ Resources:
               Value: lakerunner
             - Name: LRDB_SSLMODE
               Value: require
+            - Name: CONFIGDB_HOST
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbEndpoint
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: CONFIGDB_PORT
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbPort
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: CONFIGDB_DBNAME
+              Value: config
+            - Name: CONFIGDB_USER
+              Value: lakerunner
+            - Name: CONFIGDB_SSLMODE
+              Value: require
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp
@@ -1486,6 +1686,13 @@ Resources:
             - Name: API_KEYS_ENV
               ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
             - Name: LRDB_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-DbSecretArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: CONFIGDB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
                 - SecretArn: !ImportValue

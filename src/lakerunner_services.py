@@ -90,6 +90,7 @@ def create_services_template():
     ))
 
 
+
     # ALB Configuration parameters
 
     AlbScheme = t.add_parameter(Parameter(
@@ -593,6 +594,11 @@ def create_services_template():
             Environment(Name="LRDB_DBNAME", Value="lakerunner"),
             Environment(Name="LRDB_USER", Value="lakerunner"),
             Environment(Name="LRDB_SSLMODE", Value="require"),
+            Environment(Name="CONFIGDB_HOST", Value=DbHostValue),
+            Environment(Name="CONFIGDB_PORT", Value=DbPortValue),
+            Environment(Name="CONFIGDB_DBNAME", Value="config"),
+            Environment(Name="CONFIGDB_USER", Value="lakerunner"),
+            Environment(Name="CONFIGDB_SSLMODE", Value="require"),
         ]
 
         # Add service-specific discovery environment variables
@@ -631,7 +637,8 @@ def create_services_template():
         secrets = [
             EcsSecret(Name="STORAGE_PROFILES_ENV", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles")),
             EcsSecret(Name="API_KEYS_ENV", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys")),
-            EcsSecret(Name="LRDB_PASSWORD", ValueFrom=Sub("${SecretArn}:password::", SecretArn=DbSecretArnValue))
+            EcsSecret(Name="LRDB_PASSWORD", ValueFrom=Sub("${SecretArn}:password::", SecretArn=DbSecretArnValue)),
+            EcsSecret(Name="CONFIGDB_PASSWORD", ValueFrom=Sub("${SecretArn}:password::", SecretArn=DbSecretArnValue))
         ]
 
         # Add service-specific secrets for sensitive environment variables
