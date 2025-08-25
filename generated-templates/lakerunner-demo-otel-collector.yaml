@@ -184,11 +184,11 @@ Resources:
     Type: AWS::Logs::LogGroup
   OtelGrpcTargetGroup:
     Properties:
-      HealthCheckIntervalSeconds: 30
+      HealthCheckIntervalSeconds: 5
       HealthCheckPath: /healthz
       HealthCheckPort: '13133'
       HealthCheckProtocol: HTTP
-      HealthCheckTimeoutSeconds: 5
+      HealthCheckTimeoutSeconds: 2
       HealthyThresholdCount: 2
       Matcher:
         HttpCode: '200'
@@ -200,9 +200,9 @@ Resources:
           Value: !Sub '${AWS::StackName}-otel-grpc-tg'
       TargetGroupAttributes:
         - Key: deregistration_delay.timeout_seconds
-          Value: '30'
+          Value: '5'
       TargetType: ip
-      UnhealthyThresholdCount: 3
+      UnhealthyThresholdCount: 2
       VpcId: !ImportValue
         Fn::Sub:
           - ${CommonInfraStackName}-VpcId
@@ -210,11 +210,11 @@ Resources:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
   OtelHttpTargetGroup:
     Properties:
-      HealthCheckIntervalSeconds: 30
+      HealthCheckIntervalSeconds: 5
       HealthCheckPath: /healthz
       HealthCheckPort: '13133'
       HealthCheckProtocol: HTTP
-      HealthCheckTimeoutSeconds: 5
+      HealthCheckTimeoutSeconds: 2
       HealthyThresholdCount: 2
       Matcher:
         HttpCode: '200'
@@ -226,9 +226,9 @@ Resources:
           Value: !Sub '${AWS::StackName}-otel-http-tg'
       TargetGroupAttributes:
         - Key: deregistration_delay.timeout_seconds
-          Value: '30'
+          Value: '5'
       TargetType: ip
-      UnhealthyThresholdCount: 3
+      UnhealthyThresholdCount: 2
       VpcId: !ImportValue
         Fn::Sub:
           - ${CommonInfraStackName}-VpcId

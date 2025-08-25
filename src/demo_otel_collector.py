@@ -216,13 +216,13 @@ def create_otel_collector_template():
         HealthCheckPath="/healthz",
         HealthCheckProtocol="HTTP",
         HealthCheckPort="13133",
-        HealthCheckIntervalSeconds=30,
-        HealthCheckTimeoutSeconds=5,
+        HealthCheckIntervalSeconds=5,
+        HealthCheckTimeoutSeconds=2,
         HealthyThresholdCount=2,
-        UnhealthyThresholdCount=3,
+        UnhealthyThresholdCount=2,
         Matcher=Matcher(HttpCode="200"),
         TargetGroupAttributes=[
-            TargetGroupAttribute(Key="deregistration_delay.timeout_seconds", Value="30")
+            TargetGroupAttribute(Key="deregistration_delay.timeout_seconds", Value="5")
         ],
         Tags=Tags(Name=Sub("${AWS::StackName}-otel-grpc-tg"))
     ))
@@ -237,13 +237,13 @@ def create_otel_collector_template():
         HealthCheckPath="/healthz",
         HealthCheckProtocol="HTTP",
         HealthCheckPort="13133",
-        HealthCheckIntervalSeconds=30,
-        HealthCheckTimeoutSeconds=5,
+        HealthCheckIntervalSeconds=5,
+        HealthCheckTimeoutSeconds=2,
         HealthyThresholdCount=2,
-        UnhealthyThresholdCount=3,
+        UnhealthyThresholdCount=2,
         Matcher=Matcher(HttpCode="200"),
         TargetGroupAttributes=[
-            TargetGroupAttribute(Key="deregistration_delay.timeout_seconds", Value="30")
+            TargetGroupAttribute(Key="deregistration_delay.timeout_seconds", Value="5")
         ],
         Tags=Tags(Name=Sub("${AWS::StackName}-otel-http-tg"))
     ))
