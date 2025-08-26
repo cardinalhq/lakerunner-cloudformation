@@ -332,6 +332,7 @@ Resources:
                     - SecretArn: !ImportValue
                         Fn::Sub: ${CommonInfraStackName}-DbSecretArn
               - Action:
+                  - ssm:GetParameters
                   - ssm:GetParameter
                 Effect: Allow
                 Resource:

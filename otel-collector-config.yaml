@@ -24,7 +24,7 @@ exporters:
     s3uploader:
       region: ${env:AWS_REGION}
       s3_bucket: ${env:AWS_S3_BUCKET}
-      s3_prefix: logs-raw/
+      s3_prefix: otel-raw/${env:ORG}/${env:COLLECTOR}
       s3_force_path_style: true
       s3_partition_format: 'year=%Y/month=%m/day=%d/hour=%H/minute=%M'
       compression: none
@@ -34,7 +34,7 @@ exporters:
     s3uploader:
       region: ${env:AWS_REGION}
       s3_bucket: ${env:AWS_S3_BUCKET}
-      s3_prefix: metrics-raw/
+      s3_prefix: otel-raw/${env:ORG}/${env:COLLECTOR}
       s3_force_path_style: true
       s3_partition_format: 'year=%Y/month=%m/day=%d/hour=%H/minute=%M'
       compression: none

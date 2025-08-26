@@ -184,7 +184,7 @@ ExecutionRole = t.add_resource(Role(
                     },
                     {
                         "Effect": "Allow",
-                        "Action": ["ssm:GetParameter"],
+                        "Action": ["ssm:GetParameters", "ssm:GetParameter"],
                         "Resource": [
                             Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys"),
                             Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles")

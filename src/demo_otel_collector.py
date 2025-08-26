@@ -50,6 +50,22 @@ def load_default_otel_yaml():
     with open(config_path, 'r') as f:
         return f.read().strip()
 
+def load_lakerunner_config():
+    """Load lakerunner stack defaults to extract organization_id and collector_name"""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    config_path = os.path.join(script_dir, "..", "lakerunner-stack-defaults.yaml")
+    
+    with open(config_path, 'r') as f:
+        config = yaml.safe_load(f)
+    
+    # Extract organization_id from api_keys section
+    organization_id = config['api_keys'][0]['organization_id']
+    
+    # Extract collector_name from storage_profiles section  
+    collector_name = config['storage_profiles'][0]['collector_name']
+    
+    return organization_id, collector_name
+
 def create_otel_collector_template():
     """Create CloudFormation template for OTEL collector stack"""
 
@@ -60,6 +76,9 @@ def create_otel_collector_template():
     config = load_otel_config()
     otel_services = config.get('otel_services', {})
     images = config.get('images', {})
+    
+    # Load organization and collector info from lakerunner stack defaults
+    organization_id, collector_name = load_lakerunner_config()
 
     # -----------------------
     # Parameters
@@ -89,6 +108,7 @@ def create_otel_collector_template():
         Default="",
         Description="OPTIONAL: Custom OTEL collector configuration in YAML format. Leave blank to use default configuration."
     ))
+
 
 
     # Parameter groups for console
@@ -379,6 +399,8 @@ def create_otel_collector_template():
         Environment(Name="OTEL_SERVICE_NAME", Value="otel-gateway"),
         Environment(Name="AWS_S3_BUCKET", Value=BucketNameValue),
         Environment(Name="AWS_REGION", Value=Ref("AWS::Region")),
+        Environment(Name="ORG", Value=organization_id),
+        Environment(Name="COLLECTOR", Value=collector_name),
         Environment(
             Name="CHQ_COLLECTOR_CONFIG_YAML",
             Value=If(

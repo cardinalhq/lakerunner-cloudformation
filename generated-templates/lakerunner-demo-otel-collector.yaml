@@ -23,11 +23,17 @@ Metadata:
           default: Configuration
         Parameters:
           - OtelConfigYaml
+          - OrganizationId
+          - CollectorName
     ParameterLabels:
+      CollectorName:
+        default: Collector Name
       CommonInfraStackName:
         default: Common Infra Stack Name
       LoadBalancerType:
         default: Load Balancer Type
+      OrganizationId:
+        default: Organization UUID
       OtelCollectorImage:
         default: OTEL Collector Image
       OtelConfigYaml:
@@ -58,6 +64,10 @@ Outputs:
       Name: !Sub '${AWS::StackName}-ServiceArn'
     Value: !Ref 'ServiceOtelGateway'
 Parameters:
+  CollectorName:
+    Default: lakerunner
+    Description: Collector name for S3 path organization
+    Type: String
   CommonInfraStackName:
     Description: 'REQUIRED: Name of the CommonInfra stack to import infrastructure values from.'
     Type: String
@@ -67,6 +77,10 @@ Parameters:
       - internet-facing
     Default: internal
     Description: Whether to create an internal or external ALB for the OTEL collector.
+    Type: String
+  OrganizationId:
+    Default: 12340000-0000-4000-8000-000000000000
+    Description: Organization UUID for S3 path organization
     Type: String
   OtelCollectorImage:
     Default: public.ecr.aws/cardinalhq.io/cardinalhq-otel-collector:latest
@@ -282,6 +296,10 @@ Resources:
                   - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: AWS_REGION
               Value: !Ref 'AWS::Region'
+            - Name: ORG
+              Value: !Ref 'OrganizationId'
+            - Name: COLLECTOR
+              Value: !Ref 'CollectorName'
             - Name: CHQ_COLLECTOR_CONFIG_YAML
               Value: !If
                 - HasCustomConfig
@@ -313,7 +331,7 @@ Resources:
                       s3uploader:
                         region: ${env:AWS_REGION}
                         s3_bucket: ${env:AWS_S3_BUCKET}
-                        s3_prefix: logs-raw/
+                        s3_prefix: otel-raw/${env:ORG}/${env:COLLECTOR}
                         s3_force_path_style: true
                         s3_partition_format: 'year=%Y/month=%m/day=%d/hour=%H/minute=%M'
                         compression: none
@@ -323,7 +341,7 @@ Resources:
                       s3uploader:
                         region: ${env:AWS_REGION}
                         s3_bucket: ${env:AWS_S3_BUCKET}
-                        s3_prefix: metrics-raw/
+                        s3_prefix: otel-raw/${env:ORG}/${env:COLLECTOR}
                         s3_force_path_style: true
                         s3_partition_format: 'year=%Y/month=%m/day=%d/hour=%H/minute=%M'
                         compression: none
