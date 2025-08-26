@@ -23,17 +23,11 @@ Metadata:
           default: Configuration
         Parameters:
           - OtelConfigYaml
-          - OrganizationId
-          - CollectorName
     ParameterLabels:
-      CollectorName:
-        default: Collector Name
       CommonInfraStackName:
         default: Common Infra Stack Name
       LoadBalancerType:
         default: Load Balancer Type
-      OrganizationId:
-        default: Organization UUID
       OtelCollectorImage:
         default: OTEL Collector Image
       OtelConfigYaml:
@@ -64,10 +58,6 @@ Outputs:
       Name: !Sub '${AWS::StackName}-ServiceArn'
     Value: !Ref 'ServiceOtelGateway'
 Parameters:
-  CollectorName:
-    Default: lakerunner
-    Description: Collector name for S3 path organization
-    Type: String
   CommonInfraStackName:
     Description: 'REQUIRED: Name of the CommonInfra stack to import infrastructure values from.'
     Type: String
@@ -77,10 +67,6 @@ Parameters:
       - internet-facing
     Default: internal
     Description: Whether to create an internal or external ALB for the OTEL collector.
-    Type: String
-  OrganizationId:
-    Default: 12340000-0000-4000-8000-000000000000
-    Description: Organization UUID for S3 path organization
     Type: String
   OtelCollectorImage:
     Default: public.ecr.aws/cardinalhq.io/cardinalhq-otel-collector:latest
@@ -297,9 +283,9 @@ Resources:
             - Name: AWS_REGION
               Value: !Ref 'AWS::Region'
             - Name: ORG
-              Value: !Ref 'OrganizationId'
+              Value: 12340000-0000-4000-8000-000000000000
             - Name: COLLECTOR
-              Value: !Ref 'CollectorName'
+              Value: lakerunner
             - Name: CHQ_COLLECTOR_CONFIG_YAML
               Value: !If
                 - HasCustomConfig
