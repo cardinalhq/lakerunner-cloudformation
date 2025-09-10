@@ -152,6 +152,7 @@ t.add_condition("HasApiKeysOverride", Not(Equals(Ref(ApiKeysOverride), "")))
 t.add_condition("HasStorageProfilesOverride", Not(Equals(Ref(StorageProfilesOverride), "")))
 t.add_condition("HasPublicSubnets", Not(Equals(Join(",", Ref(PublicSubnets)), "")))
 t.add_condition("CreateMSK", Equals(Ref(EnableMSK), "Yes"))
+t.add_condition("UseTLS", Not(Equals(Ref(MSKClientBrokerEncryption), "PLAINTEXT")))
 
 # Helper function to load defaults
 def load_defaults():
@@ -376,7 +377,7 @@ MSKCluster = t.add_resource(MSKCluster(
         )
     ),
     ClientAuthentication=ClientAuthentication(
-        Tls=Tls(Enabled=Not(Equals(Ref(MSKClientBrokerEncryption), "PLAINTEXT"))),
+        Tls=Tls(Enabled=If("UseTLS", True, False)),
         Sasl=Sasl(
             Scram=Scram(Enabled=True)
         )
@@ -405,7 +406,6 @@ MSKCluster = t.add_resource(MSKCluster(
     }
 ))
 
-# MSK Outputs
 t.add_output(Output(
     "MSKClusterArn",
     Condition="CreateMSK", 
@@ -417,16 +417,16 @@ t.add_output(Output(
 t.add_output(Output(
     "MSKBootstrapServers",
     Condition="CreateMSK",
-    Description="Bootstrap servers for MSK cluster (plaintext)",
-    Value=GetAtt(MSKCluster, "BootstrapBrokerString"),
+    Description="Bootstrap servers for MSK cluster (PLAINTEXT)",
+    Value=Sub("${" + MSKCluster.title + ".BootstrapBrokers}"),
     Export=Export(name=Sub("${AWS::StackName}-MSKBootstrapServers"))
 ))
 
 t.add_output(Output(
     "MSKBootstrapServersTLS",
-    Condition="CreateMSK", 
+    Condition="CreateMSK",
     Description="Bootstrap servers for MSK cluster (TLS)",
-    Value=GetAtt(MSKCluster, "BootstrapBrokerStringTls"),
+    Value=Sub("${" + MSKCluster.title + ".BootstrapBrokersTls}"),
     Export=Export(name=Sub("${AWS::StackName}-MSKBootstrapServersTLS"))
 ))
 
@@ -434,7 +434,7 @@ t.add_output(Output(
     "MSKBootstrapServersSASL",
     Condition="CreateMSK",
     Description="Bootstrap servers for MSK cluster (SASL/SCRAM)",
-    Value=GetAtt(MSKCluster, "BootstrapBrokerStringSaslScram"),
+    Value=Sub("${" + MSKCluster.title + ".BootstrapBrokersSaslScram}"),
     Export=Export(name=Sub("${AWS::StackName}-MSKBootstrapServersSASL"))
 ))
 
