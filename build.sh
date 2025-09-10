@@ -54,6 +54,10 @@ echo "6. Generating Demo OTEL Collector..."
 python3 src/demo_otel_collector.py > generated-templates/lakerunner-demo-otel-collector.yaml
 cfn-lint generated-templates/lakerunner-demo-otel-collector.yaml
 
+echo "7. Generating Lakerunner Root Stack..."
+python3 src/lakerunner_root.py > generated-templates/lakerunner-root.yaml
+cfn-lint generated-templates/lakerunner-root.yaml
+
 echo -e "\nGenerated CloudFormation templates:"
 ls -la generated-templates/
 

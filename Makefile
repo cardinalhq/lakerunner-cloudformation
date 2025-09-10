@@ -17,8 +17,11 @@ help:	## Show this help
 install:	## Install dependencies in virtual environment
 	source $(VENV_DIR)/bin/activate && pip install -r requirements.txt
 
-build:		## Generate CloudFormation templates and validate
+build:		## Generate CloudFormation templates and validate (includes root stack)
 	source $(VENV_DIR)/bin/activate && ./build.sh
+
+build-root:	## Generate only the Lakerunner root template
+	source $(VENV_DIR)/bin/activate && python src/lakerunner_root.py > generated-templates/lakerunner-root.yaml && cfn-lint generated-templates/lakerunner-root.yaml
 
 test:		## Run unit tests (working tests only)
 	source $(VENV_DIR)/bin/activate && $(PYTEST) tests/test_common_infra.py tests/test_*_simple.py tests/test_demo_otel_collector.py tests/test_parameter_validation.py tests/test_condition_validation.py -v

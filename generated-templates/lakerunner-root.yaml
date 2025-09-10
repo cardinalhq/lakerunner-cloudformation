@@ -1,0 +1,169 @@
+{
+ "Conditions": {
+  "DeployCommon": {
+   "Fn::Equals": [
+    {
+     "Ref": "DeployCommon"
+    },
+    "Yes"
+   ]
+  },
+  "DeployGrafanaService": {
+   "Fn::Equals": [
+    {
+     "Ref": "DeployGrafanaService"
+    },
+    "Yes"
+   ]
+  },
+  "DeployMigration": {
+   "Fn::Equals": [
+    {
+     "Ref": "DeployMigration"
+    },
+    "Yes"
+   ]
+  },
+  "DeployOtelCollector": {
+   "Fn::Equals": [
+    {
+     "Ref": "DeployOtelCollector"
+    },
+    "Yes"
+   ]
+  },
+  "DeployServices": {
+   "Fn::Equals": [
+    {
+     "Ref": "DeployServices"
+    },
+    "Yes"
+   ]
+  },
+  "DeployVpc": {
+   "Fn::Equals": [
+    {
+     "Ref": "DeployVpc"
+    },
+    "Yes"
+   ]
+  }
+ },
+ "Description": "Root stack that links all Lakerunner nested stacks. Set Deploy* parameters to control which components are launched.",
+ "Parameters": {
+  "DeployCommon": {
+   "AllowedValues": [
+    "Yes",
+    "No"
+   ],
+   "Default": "Yes",
+   "Description": "Deploy the Common Infrastructure stack",
+   "Type": "String"
+  },
+  "DeployGrafanaService": {
+   "AllowedValues": [
+    "Yes",
+    "No"
+   ],
+   "Default": "No",
+   "Description": "Deploy the Grafana Service stack",
+   "Type": "String"
+  },
+  "DeployMigration": {
+   "AllowedValues": [
+    "Yes",
+    "No"
+   ],
+   "Default": "No",
+   "Description": "Deploy the Migration stack",
+   "Type": "String"
+  },
+  "DeployOtelCollector": {
+   "AllowedValues": [
+    "Yes",
+    "No"
+   ],
+   "Default": "No",
+   "Description": "Deploy the demo OTEL Collector stack",
+   "Type": "String"
+  },
+  "DeployServices": {
+   "AllowedValues": [
+    "Yes",
+    "No"
+   ],
+   "Default": "Yes",
+   "Description": "Deploy the Services stack",
+   "Type": "String"
+  },
+  "DeployVpc": {
+   "AllowedValues": [
+    "Yes",
+    "No"
+   ],
+   "Default": "Yes",
+   "Description": "Deploy the VPC stack",
+   "Type": "String"
+  },
+  "TemplateBaseUrl": {
+   "Description": "Base URL where nested templates are stored",
+   "Type": "String"
+  }
+ },
+ "Resources": {
+  "CommonInfraStack": {
+   "Condition": "DeployCommon",
+   "Properties": {
+    "TemplateURL": {
+     "Fn::Sub": "${TemplateBaseUrl}/lakerunner-common.yaml"
+    }
+   },
+   "Type": "AWS::CloudFormation::Stack"
+  },
+  "GrafanaServiceStack": {
+   "Condition": "DeployGrafanaService",
+   "Properties": {
+    "TemplateURL": {
+     "Fn::Sub": "${TemplateBaseUrl}/lakerunner-grafana-service.yaml"
+    }
+   },
+   "Type": "AWS::CloudFormation::Stack"
+  },
+  "MigrationStack": {
+   "Condition": "DeployMigration",
+   "Properties": {
+    "TemplateURL": {
+     "Fn::Sub": "${TemplateBaseUrl}/lakerunner-migration.yaml"
+    }
+   },
+   "Type": "AWS::CloudFormation::Stack"
+  },
+  "OtelCollectorStack": {
+   "Condition": "DeployOtelCollector",
+   "Properties": {
+    "TemplateURL": {
+     "Fn::Sub": "${TemplateBaseUrl}/lakerunner-demo-otel-collector.yaml"
+    }
+   },
+   "Type": "AWS::CloudFormation::Stack"
+  },
+  "ServicesStack": {
+   "Condition": "DeployServices",
+   "Properties": {
+    "TemplateURL": {
+     "Fn::Sub": "${TemplateBaseUrl}/lakerunner-services.yaml"
+    }
+   },
+   "Type": "AWS::CloudFormation::Stack"
+  },
+  "VpcStack": {
+   "Condition": "DeployVpc",
+   "Properties": {
+    "TemplateURL": {
+     "Fn::Sub": "${TemplateBaseUrl}/lakerunner-vpc.yaml"
+    }
+   },
+   "Type": "AWS::CloudFormation::Stack"
+  }
+ }
+}
