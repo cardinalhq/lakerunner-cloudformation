@@ -30,6 +30,8 @@ from troposphere.sqs import Queue, QueuePolicy
 from troposphere.secretsmanager import Secret, GenerateSecretString
 from troposphere.rds import DBInstance, DBSubnetGroup
 from troposphere.ssm import Parameter as SsmParameter
+from troposphere.msk import Cluster as MSKCluster, BrokerNodeGroupInfo, EBSStorageInfo, StorageInfo, ClientAuthentication, Tls, Sasl, Scram, EncryptionInfo, EncryptionAtRest, EncryptionInTransit, LoggingInfo, BrokerLogs, CloudWatchLogs
+from troposphere.logs import LogGroup
 
 t = Template()
 t.set_description("CommonInfra stack for Lakerunner.")
@@ -71,6 +73,44 @@ StorageProfilesOverride = t.add_parameter(Parameter(
     Description="OPTIONAL: Custom storage profiles configuration in YAML format. Leave blank to use defaults from defaults.yaml. Bucket name and region will be auto-filled."
 ))
 
+# MSK Configuration
+EnableMSK = t.add_parameter(Parameter(
+    "EnableMSK",
+    Type="String",
+    AllowedValues=["Yes", "No"],
+    Default="Yes",
+    Description="Enable Amazon MSK cluster for Kafka messaging. Choose 'Yes' to create MSK cluster, 'No' to use SQS only."
+))
+
+MSKInstanceType = t.add_parameter(Parameter(
+    "MSKInstanceType",
+    Type="String",
+    Default="kafka.t3.small",
+    Description="Instance type for MSK brokers (only used when EnableMSK=Yes)"
+))
+
+MSKVolumeSize = t.add_parameter(Parameter(
+    "MSKVolumeSize",
+    Type="Number",
+    Default=100,
+    Description="EBS volume size in GB for each MSK broker (only used when EnableMSK=Yes)."
+))
+
+MSKBrokerCount = t.add_parameter(Parameter(
+    "MSKBrokerCount",
+    Type="Number",
+    Default=3,
+    Description="Number of MSK brokers (must be multiple of AZs). 3=minimum HA, 6=production scale (only used when EnableMSK=Yes)."
+))
+
+MSKClientBrokerEncryption = t.add_parameter(Parameter(
+    "MSKClientBrokerEncryption",
+    Type="String",
+    AllowedValues=["TLS", "TLS_PLAINTEXT", "PLAINTEXT"],
+    Default="TLS_PLAINTEXT",
+    Description="Client-broker encryption: TLS (prod), TLS_PLAINTEXT (dev), PLAINTEXT (dev only) (only used when EnableMSK=Yes)."
+))
+
 # -----------------------
 # UI Hints in Console (Parameter Groups & Labels)
 # -----------------------
@@ -82,6 +122,10 @@ t.set_metadata({
                 "Parameters": ["VpcId", "PublicSubnets", "PrivateSubnets"]
             },
             {
+                "Label": {"default": "Kafka Configuration"},
+                "Parameters": ["EnableMSK", "MSKInstanceType", "MSKVolumeSize", "MSKBrokerCount", "MSKClientBrokerEncryption"]
+            },
+            {
                 "Label": {"default": "Configuration Overrides (Advanced)"},
                 "Parameters": ["ApiKeysOverride", "StorageProfilesOverride"]
             }
@@ -90,6 +134,11 @@ t.set_metadata({
             "VpcId": {"default": "VPC Id"},
             "PublicSubnets": {"default": "Public Subnets (for ALB internet-facing)"},
             "PrivateSubnets": {"default": "Private Subnets (for ECS/RDS)"},
+            "EnableMSK": {"default": "Enable MSK Cluster"},
+            "MSKInstanceType": {"default": "MSK Instance Type"},
+            "MSKVolumeSize": {"default": "MSK Volume Size (GB)"},
+            "MSKBrokerCount": {"default": "Number of MSK Brokers"},
+            "MSKClientBrokerEncryption": {"default": "Client-Broker Encryption"},
             "ApiKeysOverride": {"default": "Custom API Keys (YAML)"},
             "StorageProfilesOverride": {"default": "Custom Storage Profiles (YAML)"}
         }
@@ -102,6 +151,8 @@ t.set_metadata({
 t.add_condition("HasApiKeysOverride", Not(Equals(Ref(ApiKeysOverride), "")))
 t.add_condition("HasStorageProfilesOverride", Not(Equals(Ref(StorageProfilesOverride), "")))
 t.add_condition("HasPublicSubnets", Not(Equals(Join(",", Ref(PublicSubnets)), "")))
+t.add_condition("CreateMSK", Equals(Ref(EnableMSK), "Yes"))
+t.add_condition("UseTLS", Not(Equals(Ref(MSKClientBrokerEncryption), "PLAINTEXT")))
 
 # Helper function to load defaults
 def load_defaults():
@@ -146,6 +197,47 @@ t.add_resource(SecurityGroupIngress(
     ToPort=5432,
     SourceSecurityGroupId=Ref(TaskSG),
     Description="task-to-database PostgreSQL",
+))
+
+# MSK Security Group (conditional)
+MSKSecurityGroup = t.add_resource(SecurityGroup(
+    "MSKSecurityGroup",
+    Condition="CreateMSK",
+    GroupDescription="Security group for MSK cluster",
+    VpcId=Ref(VpcId),
+    SecurityGroupIngress=[
+        {
+            "Description": "Kafka plaintext from ECS tasks",
+            "IpProtocol": "tcp",
+            "FromPort": 9092,
+            "ToPort": 9092,
+            "SourceSecurityGroupId": Ref(TaskSG)
+        },
+        {
+            "Description": "Kafka TLS from ECS tasks",
+            "IpProtocol": "tcp",
+            "FromPort": 9094,
+            "ToPort": 9094,
+            "SourceSecurityGroupId": Ref(TaskSG)
+        },
+        {
+            "Description": "Kafka SASL/SCRAM from ECS tasks",
+            "IpProtocol": "tcp",
+            "FromPort": 9096,
+            "ToPort": 9096,
+            "SourceSecurityGroupId": Ref(TaskSG)
+        },
+        {
+            "Description": "Kafka IAM from ECS tasks",
+            "IpProtocol": "tcp",
+            "FromPort": 9098,
+            "ToPort": 9098,
+            "SourceSecurityGroupId": Ref(TaskSG)
+        }
+    ],
+    Tags=Tags(
+        Name=Sub("${AWS::StackName}-msk-sg")
+    )
 ))
 
 # -----------------------
@@ -258,6 +350,74 @@ t.add_output(Output("DbSecretArnOut", Value=DbSecretArnValue, Export=Export(name
 t.add_output(Output("BucketName", Value=Ref(BucketRes), Export=Export(name=Sub("${AWS::StackName}-BucketName"))))
 t.add_output(Output("BucketArn", Value=GetAtt(BucketRes, "Arn"), Export=Export(name=Sub("${AWS::StackName}-BucketArn"))))
 
+# -----------------------
+# MSK Cluster (conditional)
+# -----------------------
+MSKLogGroup = t.add_resource(LogGroup(
+    "MSKLogGroup",
+    Condition="CreateMSK",
+    LogGroupName=Sub("/aws/msk/${AWS::StackName}"),
+    RetentionInDays=7
+))
+
+MSKCluster = t.add_resource(MSKCluster(
+    "MSKCluster",
+    Condition="CreateMSK",
+    ClusterName=Sub("${AWS::StackName}-msk"),
+    KafkaVersion="3.8.0",
+    NumberOfBrokerNodes=Ref(MSKBrokerCount),
+    BrokerNodeGroupInfo=BrokerNodeGroupInfo(
+        InstanceType=Ref(MSKInstanceType),
+        ClientSubnets=Ref(PrivateSubnets),
+        SecurityGroups=[Ref(MSKSecurityGroup)],
+        StorageInfo=StorageInfo(
+            EBSStorageInfo=EBSStorageInfo(
+                VolumeSize=Ref(MSKVolumeSize)
+            )
+        )
+    ),
+    ClientAuthentication=ClientAuthentication(
+        Tls=Tls(Enabled=If("UseTLS", True, False)),
+        Sasl=Sasl(
+            Scram=Scram(Enabled=True)
+        )
+    ),
+    EncryptionInfo=EncryptionInfo(
+        EncryptionAtRest=EncryptionAtRest(
+            DataVolumeKMSKeyId="alias/aws/msk"
+        ),
+        EncryptionInTransit=EncryptionInTransit(
+            ClientBroker=Ref(MSKClientBrokerEncryption),
+            InCluster=True
+        )
+    ),
+    EnhancedMonitoring="PER_TOPIC_PER_BROKER",
+    LoggingInfo=LoggingInfo(
+        BrokerLogs=BrokerLogs(
+            CloudWatchLogs=CloudWatchLogs(
+                Enabled=True,
+                LogGroup=Ref(MSKLogGroup)
+            )
+        )
+    ),
+    Tags={
+        "Name": Sub("${AWS::StackName}-msk"),
+        "Environment": "lakerunner"
+    }
+))
+
+t.add_output(Output(
+    "MSKClusterArn",
+    Condition="CreateMSK", 
+    Description="ARN of the MSK cluster",
+    Value=Ref(MSKCluster),
+    Export=Export(name=Sub("${AWS::StackName}-MSKClusterArn"))
+))
+
+# Note: MSK bootstrap broker strings are not available via CloudFormation
+# Only the cluster ARN is available. Bootstrap servers must be retrieved using:
+# aws kafka get-bootstrap-brokers --cluster-arn <MSK_CLUSTER_ARN>
+
 # Load defaults for SSM parameters
 defaults = load_defaults()
 
@@ -295,6 +455,17 @@ t.add_resource(SsmParameter(
     Description="Storage profiles configuration",
 ))
 
+# Kafka Topics parameter - extract just the topics array that setup.go expects
+kafka_topics_array = defaults['kafka_topics']['ensure_topics']
+kafka_topics_yaml = yaml.dump(kafka_topics_array, default_flow_style=False)
+t.add_resource(SsmParameter(
+    "KafkaTopicsParam",
+    Name="/lakerunner/kafka_topics",
+    Type="String", 
+    Value=kafka_topics_yaml,
+    Description="Kafka topics configuration array for setup job",
+))
+
 
 # -----------------------
 # Outputs (for access in other stacks)
@@ -330,6 +501,14 @@ t.add_output(Output(
     Value=If("HasPublicSubnets", "Yes", "No"),
     Export=Export(name=Sub("${AWS::StackName}-SupportsInternetFacingAlb")),
     Description="Whether this CommonInfra stack supports internet-facing ALBs (requires PublicSubnets)"
+))
+
+# Export MSK enablement status for other stacks
+t.add_output(Output(
+    "EnableMSKOut",
+    Value=Ref(EnableMSK),
+    Export=Export(name=Sub("${AWS::StackName}-EnableMSK")),
+    Description="Whether MSK cluster is enabled"
 ))
 
 print(t.to_yaml())

@@ -15,8 +15,10 @@
 
 from troposphere import (
   AWSObject,
+  Equals,
   Export,
   GetAtt,
+  If,
   ImportValue,
   Output,
   Parameter,
@@ -113,6 +115,18 @@ DbHostValue = ImportValue(ci_export("DbEndpoint"))
 DbSecretArnValue = ImportValue(ci_export("DbSecretArn"))
 SecurityGroupsValue = ImportValue(ci_export("TaskSGId"))
 PrivateSubnetsValue = Split(",", ImportValue(ci_export("PrivateSubnets")))
+
+# Check if MSK is enabled in CommonInfra
+EnableMSKValue = ImportValue(ci_export("EnableMSK"))
+
+# MSK Cluster ARN (conditional - will be imported if MSK enabled in CommonInfra)
+# Bootstrap servers must be retrieved at runtime using AWS CLI/SDK
+MSKClusterArnValue = ImportValue(ci_export("MSKClusterArn"))
+
+# -----------------------
+# Conditions
+# -----------------------
+t.add_condition("MSKEnabled", Equals(EnableMSKValue, "Yes"))
 
 # -----------------------
 # CloudWatch Logs
@@ -212,7 +226,7 @@ TaskDef = t.add_resource(TaskDefinition(
         ContainerDefinition(
             Name="Migrator",
             Image=Ref(ContainerImage),
-            Command=["/app/bin/lakerunner", "migrate"],
+            Command=["/app/bin/lakerunner", "setup"],
             LogConfiguration=LogConfiguration(
                 LogDriver="awslogs",
                 Options={
@@ -234,12 +248,23 @@ TaskDef = t.add_resource(TaskDefinition(
                 Environment(Name="CONFIGDB_SSLMODE", Value="require"),
                 Environment(Name="API_KEYS_FILE", Value="env:API_KEYS_ENV"),
                 Environment(Name="STORAGE_PROFILE_FILE", Value="env:STORAGE_PROFILES_ENV"),
+                # Kafka configuration (conditional based on MSK enablement)
+                Environment(Name="LAKERUNNER_FLY_ENABLED", Value=EnableMSKValue),
+                # Note: Bootstrap brokers must be retrieved at runtime using:
+                # aws kafka get-bootstrap-brokers --cluster-arn $MSK_CLUSTER_ARN
+                Environment(Name="MSK_CLUSTER_ARN", Value=If(
+                    "MSKEnabled",
+                    MSKClusterArnValue,
+                    ""
+                )),
+                Environment(Name="KAFKA_TOPICS_FILE", Value="env:KAFKA_TOPICS_ENV"),
             ],
             Secrets=[
                 EcsSecret(Name="LRDB_PASSWORD", ValueFrom=Sub("${S}:password::", S=DbSecretArnValue)),
                 EcsSecret(Name="CONFIGDB_PASSWORD", ValueFrom=Sub("${S}:password::", S=DbSecretArnValue)),
                 EcsSecret(Name="API_KEYS_ENV", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys")),
-                EcsSecret(Name="STORAGE_PROFILES_ENV", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles"))
+                EcsSecret(Name="STORAGE_PROFILES_ENV", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles")),
+                EcsSecret(Name="KAFKA_TOPICS_ENV", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/kafka_topics"))
             ]
         )
     ]
