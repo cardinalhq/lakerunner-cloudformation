@@ -114,6 +114,9 @@ DbSecretArnValue = ImportValue(ci_export("DbSecretArn"))
 SecurityGroupsValue = ImportValue(ci_export("TaskSGId"))
 PrivateSubnetsValue = Split(",", ImportValue(ci_export("PrivateSubnets")))
 
+# MSK Bootstrap servers (conditional - will be imported if MSK enabled in CommonInfra)
+MSKBootstrapServersValue = ImportValue(ci_export("MSKBootstrapServers"))
+
 # -----------------------
 # CloudWatch Logs
 # -----------------------
@@ -212,7 +215,7 @@ TaskDef = t.add_resource(TaskDefinition(
         ContainerDefinition(
             Name="Migrator",
             Image=Ref(ContainerImage),
-            Command=["/app/bin/lakerunner", "migrate"],
+            Command=["/app/bin/lakerunner", "setup"],
             LogConfiguration=LogConfiguration(
                 LogDriver="awslogs",
                 Options={
@@ -234,12 +237,17 @@ TaskDef = t.add_resource(TaskDefinition(
                 Environment(Name="CONFIGDB_SSLMODE", Value="require"),
                 Environment(Name="API_KEYS_FILE", Value="env:API_KEYS_ENV"),
                 Environment(Name="STORAGE_PROFILE_FILE", Value="env:STORAGE_PROFILES_ENV"),
+                # Kafka configuration (for topic setup)
+                Environment(Name="LAKERUNNER_FLY_ENABLED", Value="true"),
+                Environment(Name="LAKERUNNER_FLY_BROKERS", Value=MSKBootstrapServersValue),
+                Environment(Name="KAFKA_TOPICS_FILE", Value="env:KAFKA_TOPICS_ENV"),
             ],
             Secrets=[
                 EcsSecret(Name="LRDB_PASSWORD", ValueFrom=Sub("${S}:password::", S=DbSecretArnValue)),
                 EcsSecret(Name="CONFIGDB_PASSWORD", ValueFrom=Sub("${S}:password::", S=DbSecretArnValue)),
                 EcsSecret(Name="API_KEYS_ENV", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys")),
-                EcsSecret(Name="STORAGE_PROFILES_ENV", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles"))
+                EcsSecret(Name="STORAGE_PROFILES_ENV", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles")),
+                EcsSecret(Name="KAFKA_TOPICS_ENV", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/kafka_topics"))
             ]
         )
     ]

@@ -121,6 +121,38 @@ services:
         source_volume: "scratch"
         read_only: false
 
+# Kafka topic setup configuration
+kafka_topics:
+  enabled: true
+  ensure_topics:
+    - name: "lakerunner.objstore.ingest.logs"
+      partitions: 6
+      replicationFactor: 3
+    - name: "lakerunner.objstore.ingest.metrics"
+      partitions: 12
+      replicationFactor: 3
+    - name: "lakerunner.objstore.ingest.traces"
+      partitions: 6
+      replicationFactor: 3
+    - name: "lakerunner.segments.logs.compact"
+      partitions: 3
+      replicationFactor: 3
+      config:
+        cleanup.policy: compact
+    - name: "lakerunner.segments.metrics.compact"
+      partitions: 3
+      replicationFactor: 3
+      config:
+        cleanup.policy: compact
+    - name: "lakerunner.segments.metrics.rollup"
+      partitions: 3
+      replicationFactor: 3
+    - name: "lakerunner.segments.traces.compact"
+      partitions: 3
+      replicationFactor: 3
+      config:
+        cleanup.policy: compact
+
   lakerunner-query-worker:
     image: "public.ecr.aws/cardinalhq.io/lakerunner/query-worker:v1.2.1"
     cpu: 2048
