@@ -15,8 +15,10 @@
 
 from troposphere import (
   AWSObject,
+  Equals,
   Export,
   GetAtt,
+  If,
   ImportValue,
   Output,
   Parameter,
@@ -114,8 +116,16 @@ DbSecretArnValue = ImportValue(ci_export("DbSecretArn"))
 SecurityGroupsValue = ImportValue(ci_export("TaskSGId"))
 PrivateSubnetsValue = Split(",", ImportValue(ci_export("PrivateSubnets")))
 
-# MSK Bootstrap servers (conditional - will be imported if MSK enabled in CommonInfra)
+# Check if MSK is enabled in CommonInfra
+EnableMSKValue = ImportValue(ci_export("EnableMSK"))
+
+# MSK Bootstrap servers (conditional - will be imported if MSK enabled in CommonInfra) 
 MSKBootstrapServersValue = ImportValue(ci_export("MSKBootstrapServers"))
+
+# -----------------------
+# Conditions
+# -----------------------
+t.add_condition("MSKEnabled", Equals(EnableMSKValue, "Yes"))
 
 # -----------------------
 # CloudWatch Logs
@@ -237,9 +247,13 @@ TaskDef = t.add_resource(TaskDefinition(
                 Environment(Name="CONFIGDB_SSLMODE", Value="require"),
                 Environment(Name="API_KEYS_FILE", Value="env:API_KEYS_ENV"),
                 Environment(Name="STORAGE_PROFILE_FILE", Value="env:STORAGE_PROFILES_ENV"),
-                # Kafka configuration (for topic setup)
-                Environment(Name="LAKERUNNER_FLY_ENABLED", Value="true"),
-                Environment(Name="LAKERUNNER_FLY_BROKERS", Value=MSKBootstrapServersValue),
+                # Kafka configuration (conditional based on MSK enablement)
+                Environment(Name="LAKERUNNER_FLY_ENABLED", Value=EnableMSKValue),
+                Environment(Name="LAKERUNNER_FLY_BROKERS", Value=If(
+                    "MSKEnabled",
+                    MSKBootstrapServersValue,
+                    ""
+                )),
                 Environment(Name="KAFKA_TOPICS_FILE", Value="env:KAFKA_TOPICS_ENV"),
             ],
             Secrets=[

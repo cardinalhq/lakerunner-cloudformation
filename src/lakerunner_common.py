@@ -363,7 +363,7 @@ MSKCluster = t.add_resource(MSKCluster(
     "MSKCluster",
     Condition="CreateMSK",
     ClusterName=Sub("${AWS::StackName}-msk"),
-    KafkaVersion="2.8.1",
+    KafkaVersion="3.8.0",
     NumberOfBrokerNodes=Ref(MSKBrokerCount),
     BrokerNodeGroupInfo=BrokerNodeGroupInfo(
         InstanceType=Ref(MSKInstanceType),
@@ -376,7 +376,7 @@ MSKCluster = t.add_resource(MSKCluster(
         )
     ),
     ClientAuthentication=ClientAuthentication(
-        Tls=Tls(Enabled=False),  # Can be enabled later if needed
+        Tls=Tls(Enabled=Not(Equals(Ref(MSKClientBrokerEncryption), "PLAINTEXT"))),
         Sasl=Sasl(
             Scram=Scram(Enabled=True)
         )
@@ -521,6 +521,14 @@ t.add_output(Output(
     Value=If("HasPublicSubnets", "Yes", "No"),
     Export=Export(name=Sub("${AWS::StackName}-SupportsInternetFacingAlb")),
     Description="Whether this CommonInfra stack supports internet-facing ALBs (requires PublicSubnets)"
+))
+
+# Export MSK enablement status for other stacks
+t.add_output(Output(
+    "EnableMSKOut",
+    Value=Ref(EnableMSK),
+    Export=Export(name=Sub("${AWS::StackName}-EnableMSK")),
+    Description="Whether MSK cluster is enabled"
 ))
 
 print(t.to_yaml())
