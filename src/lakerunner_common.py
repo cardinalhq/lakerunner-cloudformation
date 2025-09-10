@@ -414,29 +414,9 @@ t.add_output(Output(
     Export=Export(name=Sub("${AWS::StackName}-MSKClusterArn"))
 ))
 
-t.add_output(Output(
-    "MSKBootstrapServers",
-    Condition="CreateMSK",
-    Description="Bootstrap servers for MSK cluster (PLAINTEXT)",
-    Value=Sub("${" + MSKCluster.title + ".BootstrapBrokers}"),
-    Export=Export(name=Sub("${AWS::StackName}-MSKBootstrapServers"))
-))
-
-t.add_output(Output(
-    "MSKBootstrapServersTLS",
-    Condition="CreateMSK",
-    Description="Bootstrap servers for MSK cluster (TLS)",
-    Value=Sub("${" + MSKCluster.title + ".BootstrapBrokersTls}"),
-    Export=Export(name=Sub("${AWS::StackName}-MSKBootstrapServersTLS"))
-))
-
-t.add_output(Output(
-    "MSKBootstrapServersSASL",
-    Condition="CreateMSK",
-    Description="Bootstrap servers for MSK cluster (SASL/SCRAM)",
-    Value=Sub("${" + MSKCluster.title + ".BootstrapBrokersSaslScram}"),
-    Export=Export(name=Sub("${AWS::StackName}-MSKBootstrapServersSASL"))
-))
+# Note: MSK bootstrap broker strings are not available via CloudFormation
+# Only the cluster ARN is available. Bootstrap servers must be retrieved using:
+# aws kafka get-bootstrap-brokers --cluster-arn <MSK_CLUSTER_ARN>
 
 # Load defaults for SSM parameters
 defaults = load_defaults()

@@ -119,8 +119,9 @@ PrivateSubnetsValue = Split(",", ImportValue(ci_export("PrivateSubnets")))
 # Check if MSK is enabled in CommonInfra
 EnableMSKValue = ImportValue(ci_export("EnableMSK"))
 
-# MSK Bootstrap servers (conditional - will be imported if MSK enabled in CommonInfra) 
-MSKBootstrapServersValue = ImportValue(ci_export("MSKBootstrapServers"))
+# MSK Cluster ARN (conditional - will be imported if MSK enabled in CommonInfra)
+# Bootstrap servers must be retrieved at runtime using AWS CLI/SDK
+MSKClusterArnValue = ImportValue(ci_export("MSKClusterArn"))
 
 # -----------------------
 # Conditions
@@ -249,9 +250,11 @@ TaskDef = t.add_resource(TaskDefinition(
                 Environment(Name="STORAGE_PROFILE_FILE", Value="env:STORAGE_PROFILES_ENV"),
                 # Kafka configuration (conditional based on MSK enablement)
                 Environment(Name="LAKERUNNER_FLY_ENABLED", Value=EnableMSKValue),
-                Environment(Name="LAKERUNNER_FLY_BROKERS", Value=If(
+                # Note: Bootstrap brokers must be retrieved at runtime using:
+                # aws kafka get-bootstrap-brokers --cluster-arn $MSK_CLUSTER_ARN
+                Environment(Name="MSK_CLUSTER_ARN", Value=If(
                     "MSKEnabled",
-                    MSKBootstrapServersValue,
+                    MSKClusterArnValue,
                     ""
                 )),
                 Environment(Name="KAFKA_TOPICS_FILE", Value="env:KAFKA_TOPICS_ENV"),
