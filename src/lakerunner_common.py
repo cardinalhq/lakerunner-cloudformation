@@ -205,34 +205,34 @@ MSKSecurityGroup = t.add_resource(SecurityGroup(
     GroupDescription="Security group for MSK cluster",
     VpcId=Ref(VpcId),
     SecurityGroupIngress=[
-        SecurityGroupIngress(
-            Description="Kafka plaintext from ECS tasks",
-            IpProtocol="tcp",
-            FromPort=9092,
-            ToPort=9092,
-            SourceSecurityGroupId=Ref(TaskSG)
-        ),
-        SecurityGroupIngress(
-            Description="Kafka TLS from ECS tasks",
-            IpProtocol="tcp",
-            FromPort=9094,
-            ToPort=9094,
-            SourceSecurityGroupId=Ref(TaskSG)
-        ),
-        SecurityGroupIngress(
-            Description="Kafka SASL/SCRAM from ECS tasks",
-            IpProtocol="tcp",
-            FromPort=9096,
-            ToPort=9096,
-            SourceSecurityGroupId=Ref(TaskSG)
-        ),
-        SecurityGroupIngress(
-            Description="Kafka IAM from ECS tasks",
-            IpProtocol="tcp",
-            FromPort=9098,
-            ToPort=9098,
-            SourceSecurityGroupId=Ref(TaskSG)
-        )
+        {
+            "Description": "Kafka plaintext from ECS tasks",
+            "IpProtocol": "tcp",
+            "FromPort": 9092,
+            "ToPort": 9092,
+            "SourceSecurityGroupId": Ref(TaskSG)
+        },
+        {
+            "Description": "Kafka TLS from ECS tasks",
+            "IpProtocol": "tcp",
+            "FromPort": 9094,
+            "ToPort": 9094,
+            "SourceSecurityGroupId": Ref(TaskSG)
+        },
+        {
+            "Description": "Kafka SASL/SCRAM from ECS tasks",
+            "IpProtocol": "tcp",
+            "FromPort": 9096,
+            "ToPort": 9096,
+            "SourceSecurityGroupId": Ref(TaskSG)
+        },
+        {
+            "Description": "Kafka IAM from ECS tasks",
+            "IpProtocol": "tcp",
+            "FromPort": 9098,
+            "ToPort": 9098,
+            "SourceSecurityGroupId": Ref(TaskSG)
+        }
     ],
     Tags=Tags(
         Name=Sub("${AWS::StackName}-msk-sg")
