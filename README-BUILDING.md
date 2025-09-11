@@ -199,7 +199,7 @@ pip install cfn-lint
 cfn-lint generated-templates/*.yaml
 
 # Validate specific template with context
-cfn-lint --template generated-templates/lakerunner-services.yaml --ignore-checks W1020
+cfn-lint --template generated-templates/lakerunner-services.yaml
 ```
 
 ### Common Warnings
@@ -207,7 +207,8 @@ cfn-lint --template generated-templates/lakerunner-services.yaml --ignore-checks
 These warnings are typically safe to ignore:
 
 - **W1030** - Empty PublicSubnets parameter (expected for internal ALB)
-- **W1020** - Unnecessary Fn::Sub (cosmetic, doesn't affect functionality)
+
+The build script suppresses **W1020** (cosmetic Fn::Sub usage) to keep output clean.
 
 ### Testing Changes
 
