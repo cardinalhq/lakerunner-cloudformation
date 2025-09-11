@@ -1,0 +1,57 @@
+Description: RDS PostgreSQL database stack for Lakerunner.
+Outputs:
+  DbEndpoint:
+    Export:
+      Name: !Sub '${AWS::StackName}-DbEndpoint'
+    Value: !GetAtt 'LakerunnerDb.Endpoint.Address'
+  DbPort:
+    Export:
+      Name: !Sub '${AWS::StackName}-DbPort'
+    Value: !GetAtt 'LakerunnerDb.Endpoint.Port'
+  DbSecretArn:
+    Export:
+      Name: !Sub '${AWS::StackName}-DbSecretArn'
+    Value: !Ref 'DbSecret'
+Parameters:
+  PrivateSubnets:
+    Description: 'REQUIRED: Private subnet IDs for the database'
+    Type: List<AWS::EC2::Subnet::Id>
+  TaskSecurityGroupId:
+    Description: 'REQUIRED: Security group used by ECS tasks (allows DB access)'
+    Type: AWS::EC2::SecurityGroup::Id
+Resources:
+  DbSecret:
+    Properties:
+      GenerateSecretString:
+        ExcludePunctuation: true
+        GenerateStringKey: password
+        SecretStringTemplate: '{"username":"lakerunner"}'
+    Type: AWS::SecretsManager::Secret
+  DbSubnetGroup:
+    Properties:
+      DBSubnetGroupDescription: DB subnets
+      SubnetIds: !Ref 'PrivateSubnets'
+    Type: AWS::RDS::DBSubnetGroup
+  LakerunnerDb:
+    Properties:
+      AllocatedStorage: '100'
+      CopyTagsToSnapshot: true
+      DBInstanceClass: db.t3.medium
+      DBName: lakerunner
+      DBSubnetGroupName: !Ref 'DbSubnetGroup'
+      DeletionProtection: false
+      Engine: postgres
+      EngineVersion: '17'
+      MasterUserPassword: !Sub
+        - '{{resolve:secretsmanager:${S}:SecretString:password}}'
+        - S: !Ref 'DbSecret'
+      MasterUsername: !Sub
+        - '{{resolve:secretsmanager:${S}:SecretString:username}}'
+        - S: !Ref 'DbSecret'
+      MultiAZ: false
+      PubliclyAccessible: false
+      StorageType: gp3
+      VPCSecurityGroups:
+        - !Ref 'TaskSecurityGroupId'
+    Type: AWS::RDS::DBInstance
+

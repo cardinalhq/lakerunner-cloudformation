@@ -24,7 +24,7 @@ build-root:	## Generate only the Lakerunner root template
 	source $(VENV_DIR)/bin/activate && python src/lakerunner_root.py > generated-templates/lakerunner-root.yaml && cfn-lint generated-templates/lakerunner-root.yaml
 
 test:		## Run unit tests (working tests only)
-	source $(VENV_DIR)/bin/activate && $(PYTEST) tests/test_common_infra.py tests/test_*_simple.py tests/test_demo_otel_collector.py tests/test_parameter_validation.py tests/test_condition_validation.py -v
+	source $(VENV_DIR)/bin/activate && $(PYTEST) tests/test_storage_stack.py tests/test_ecs_stack.py tests/test_rds_stack.py tests/test_*_simple.py tests/test_demo_otel_collector.py tests/test_parameter_validation.py tests/test_condition_validation.py -v
 
 test-all:	## Run all tests including complex ones (may have failures)
 	source $(VENV_DIR)/bin/activate && $(PYTEST) tests/ -v

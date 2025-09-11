@@ -1,9 +1,9 @@
 {
  "Conditions": {
-  "DeployCommon": {
+  "DeployEcs": {
    "Fn::Equals": [
     {
-     "Ref": "DeployCommon"
+     "Ref": "DeployEcs"
     },
     "Yes"
    ]
@@ -32,10 +32,26 @@
     "Yes"
    ]
   },
+  "DeployRds": {
+   "Fn::Equals": [
+    {
+     "Ref": "DeployRds"
+    },
+    "Yes"
+   ]
+  },
   "DeployServices": {
    "Fn::Equals": [
     {
      "Ref": "DeployServices"
+    },
+    "Yes"
+   ]
+  },
+  "DeployStorage": {
+   "Fn::Equals": [
+    {
+     "Ref": "DeployStorage"
     },
     "Yes"
    ]
@@ -51,13 +67,13 @@
  },
  "Description": "Root stack that links all Lakerunner nested stacks. Set Deploy* parameters to control which components are launched.",
  "Parameters": {
-  "DeployCommon": {
+  "DeployEcs": {
    "AllowedValues": [
     "Yes",
     "No"
    ],
    "Default": "Yes",
-   "Description": "Deploy the Common Infrastructure stack",
+   "Description": "Deploy the ECS infrastructure stack",
    "Type": "String"
   },
   "DeployGrafanaService": {
@@ -87,6 +103,15 @@
    "Description": "Deploy the demo OTEL Collector stack",
    "Type": "String"
   },
+  "DeployRds": {
+   "AllowedValues": [
+    "Yes",
+    "No"
+   ],
+   "Default": "Yes",
+   "Description": "Deploy the RDS database stack",
+   "Type": "String"
+  },
   "DeployServices": {
    "AllowedValues": [
     "Yes",
@@ -94,6 +119,15 @@
    ],
    "Default": "Yes",
    "Description": "Deploy the Services stack",
+   "Type": "String"
+  },
+  "DeployStorage": {
+   "AllowedValues": [
+    "Yes",
+    "No"
+   ],
+   "Default": "Yes",
+   "Description": "Deploy the Storage (S3/SQS) stack",
    "Type": "String"
   },
   "DeployVpc": {
@@ -111,11 +145,11 @@
   }
  },
  "Resources": {
-  "CommonInfraStack": {
-   "Condition": "DeployCommon",
+  "EcsStack": {
+   "Condition": "DeployEcs",
    "Properties": {
     "TemplateURL": {
-     "Fn::Sub": "${TemplateBaseUrl}/lakerunner-common.yaml"
+     "Fn::Sub": "${TemplateBaseUrl}/lakerunner-ecs.yaml"
     }
    },
    "Type": "AWS::CloudFormation::Stack"
@@ -147,11 +181,29 @@
    },
    "Type": "AWS::CloudFormation::Stack"
   },
+  "RdsStack": {
+   "Condition": "DeployRds",
+   "Properties": {
+    "TemplateURL": {
+     "Fn::Sub": "${TemplateBaseUrl}/lakerunner-rds.yaml"
+    }
+   },
+   "Type": "AWS::CloudFormation::Stack"
+  },
   "ServicesStack": {
    "Condition": "DeployServices",
    "Properties": {
     "TemplateURL": {
      "Fn::Sub": "${TemplateBaseUrl}/lakerunner-services.yaml"
+    }
+   },
+   "Type": "AWS::CloudFormation::Stack"
+  },
+  "StorageStack": {
+   "Condition": "DeployStorage",
+   "Properties": {
+    "TemplateURL": {
+     "Fn::Sub": "${TemplateBaseUrl}/lakerunner-storage.yaml"
     }
    },
    "Type": "AWS::CloudFormation::Stack"

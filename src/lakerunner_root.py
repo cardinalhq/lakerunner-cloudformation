@@ -47,7 +47,9 @@ def deploy_param(name, description, default="Yes"):
 
 
 deploy_vpc = deploy_param("DeployVpc", "Deploy the VPC stack")
-deploy_common = deploy_param("DeployCommon", "Deploy the Common Infrastructure stack")
+deploy_ecs = deploy_param("DeployEcs", "Deploy the ECS infrastructure stack")
+deploy_rds = deploy_param("DeployRds", "Deploy the RDS database stack")
+deploy_storage = deploy_param("DeployStorage", "Deploy the Storage (S3/SQS) stack")
 deploy_migration = deploy_param("DeployMigration", "Deploy the Migration stack", default="No")
 deploy_services = deploy_param("DeployServices", "Deploy the Services stack")
 deploy_grafana = deploy_param("DeployGrafanaService", "Deploy the Grafana Service stack", default="No")
@@ -57,7 +59,9 @@ deploy_otel = deploy_param("DeployOtelCollector", "Deploy the demo OTEL Collecto
 # Nested stacks
 stack_urls = {
     "VpcStack": (deploy_vpc, "lakerunner-vpc.yaml"),
-    "CommonInfraStack": (deploy_common, "lakerunner-common.yaml"),
+    "EcsStack": (deploy_ecs, "lakerunner-ecs.yaml"),
+    "RdsStack": (deploy_rds, "lakerunner-rds.yaml"),
+    "StorageStack": (deploy_storage, "lakerunner-storage.yaml"),
     "MigrationStack": (deploy_migration, "lakerunner-migration.yaml"),
     "ServicesStack": (deploy_services, "lakerunner-services.yaml"),
     "GrafanaServiceStack": (deploy_grafana, "lakerunner-grafana-service.yaml"),

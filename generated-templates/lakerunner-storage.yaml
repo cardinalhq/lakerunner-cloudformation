@@ -1,0 +1,109 @@
+Conditions:
+  HasApiKeysOverride: !Not
+    - !Equals
+      - !Ref 'ApiKeysOverride'
+      - ''
+  HasStorageProfilesOverride: !Not
+    - !Equals
+      - !Ref 'StorageProfilesOverride'
+      - ''
+Description: Storage stack for Lakerunner (S3 ingest bucket and SQS queue).
+Outputs:
+  BucketArn:
+    Export:
+      Name: !Sub '${AWS::StackName}-BucketArn'
+    Value: !GetAtt 'IngestBucket.Arn'
+  BucketName:
+    Export:
+      Name: !Sub '${AWS::StackName}-BucketName'
+    Value: !Ref 'IngestBucket'
+Parameters:
+  ApiKeysOverride:
+    Default: ''
+    Description: 'OPTIONAL: Custom API keys configuration in YAML format. Leave blank to use defaults.'
+    Type: String
+  StorageProfilesOverride:
+    Default: ''
+    Description: 'OPTIONAL: Custom storage profiles configuration in YAML format. Leave blank to use defaults.'
+    Type: String
+Resources:
+  ApiKeysParam:
+    Properties:
+      Description: API keys configuration
+      Name: /lakerunner/api_keys
+      Type: String
+      Value: !If
+        - HasApiKeysOverride
+        - !Ref 'ApiKeysOverride'
+        - "- keys:\n  - f70603aa00e6f67999cc66e336134887\n  organization_id: 12340000-0000-4000-8000-000000000000\n"
+    Type: AWS::SSM::Parameter
+  IngestBucket:
+    DeletionPolicy: Delete
+    Properties:
+      LifecycleConfiguration:
+        Rules:
+          - ExpirationInDays: 10
+            Prefix: otel-raw/
+            Status: Enabled
+      NotificationConfiguration:
+        QueueConfigurations:
+          - Event: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: otel-raw/
+            Queue: !GetAtt 'IngestQueue.Arn'
+          - Event: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: logs-raw/
+            Queue: !GetAtt 'IngestQueue.Arn'
+          - Event: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: metrics-raw/
+            Queue: !GetAtt 'IngestQueue.Arn'
+    Type: AWS::S3::Bucket
+  IngestQueue:
+    Properties:
+      MessageRetentionPeriod: 345600
+      QueueName: lakerunner-ingest-queue
+    Type: AWS::SQS::Queue
+  IngestQueuePolicy:
+    Properties:
+      PolicyDocument:
+        Statement:
+          - Action:
+              - sqs:GetQueueAttributes
+              - sqs:GetQueueUrl
+              - sqs:SendMessage
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref 'AWS::AccountId'
+            Effect: Allow
+            Principal:
+              Service: s3.amazonaws.com
+            Resource: !GetAtt 'IngestQueue.Arn'
+        Version: '2012-10-17'
+      Queues:
+        - !Ref 'IngestQueue'
+    Type: AWS::SQS::QueuePolicy
+  StorageProfilesParam:
+    Properties:
+      Description: Storage profiles configuration
+      Name: /lakerunner/storage_profiles
+      Type: String
+      Value: !If
+        - HasStorageProfilesOverride
+        - !Ref 'StorageProfilesOverride'
+        - !Sub
+          - "- bucket: ${BucketName}\n  cloud_provider: aws\n  collector_name: lakerunner\n  insecure_tls: false\n  instance_num: 1\n  organization_id: 12340000-0000-4000-8000-000000000000\n  region: ${AWS::Region}\n\
+            \  use_path_style: true\n"
+          - BucketName: !Ref 'IngestBucket'
+    Type: AWS::SSM::Parameter
+
