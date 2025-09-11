@@ -30,43 +30,43 @@ if [ -d "generated-templates" ]; then
 fi
 mkdir generated-templates
 
-CFN_LINT="cfn-lint --ignore-checks W1020"
+  LINT_OPTS="--ignore-checks W1020"
 
 echo "1. Generating Lakerunner VPC..."
-python3 src/lakerunner_vpc.py > generated-templates/lakerunner-vpc.yaml
-$CFN_LINT generated-templates/lakerunner-vpc.yaml
+  python3 src/lakerunner_vpc.py > generated-templates/lakerunner-vpc.yaml
+  cfn-lint $LINT_OPTS -- generated-templates/lakerunner-vpc.yaml
 
 echo "2. Generating Lakerunner ECS Infrastructure..."
-python3 src/lakerunner_ecs.py > generated-templates/lakerunner-ecs.yaml
-$CFN_LINT generated-templates/lakerunner-ecs.yaml
+  python3 src/lakerunner_ecs.py > generated-templates/lakerunner-ecs.yaml
+  cfn-lint $LINT_OPTS -- generated-templates/lakerunner-ecs.yaml
 
 echo "3. Generating Lakerunner RDS..."
-python3 src/lakerunner_rds.py > generated-templates/lakerunner-rds.yaml
-$CFN_LINT generated-templates/lakerunner-rds.yaml
+  python3 src/lakerunner_rds.py > generated-templates/lakerunner-rds.yaml
+  cfn-lint $LINT_OPTS -- generated-templates/lakerunner-rds.yaml
 
 echo "4. Generating Lakerunner Storage..."
-python3 src/lakerunner_storage.py > generated-templates/lakerunner-storage.yaml
-$CFN_LINT generated-templates/lakerunner-storage.yaml
+  python3 src/lakerunner_storage.py > generated-templates/lakerunner-storage.yaml
+  cfn-lint $LINT_OPTS -- generated-templates/lakerunner-storage.yaml
 
 echo "5. Generating Lakerunner Migration Task..."
-python3 src/lakerunner_migration.py > generated-templates/lakerunner-migration.yaml
-$CFN_LINT generated-templates/lakerunner-migration.yaml
+  python3 src/lakerunner_migration.py > generated-templates/lakerunner-migration.yaml
+  cfn-lint $LINT_OPTS -- generated-templates/lakerunner-migration.yaml
 
 echo "6. Generating Lakerunner Services..."
-python3 src/lakerunner_services.py > generated-templates/lakerunner-services.yaml
-$CFN_LINT generated-templates/lakerunner-services.yaml
+  python3 src/lakerunner_services.py > generated-templates/lakerunner-services.yaml
+  cfn-lint $LINT_OPTS -- generated-templates/lakerunner-services.yaml
 
 echo "7. Generating Lakerunner Grafana Service..."
-python3 src/lakerunner_grafana_service.py > generated-templates/lakerunner-grafana-service.yaml
-$CFN_LINT generated-templates/lakerunner-grafana-service.yaml
+  python3 src/lakerunner_grafana_service.py > generated-templates/lakerunner-grafana-service.yaml
+  cfn-lint $LINT_OPTS -- generated-templates/lakerunner-grafana-service.yaml
 
 echo "8. Generating Demo OTEL Collector..."
-python3 src/demo_otel_collector.py > generated-templates/lakerunner-demo-otel-collector.yaml
-$CFN_LINT generated-templates/lakerunner-demo-otel-collector.yaml
+  python3 src/demo_otel_collector.py > generated-templates/lakerunner-demo-otel-collector.yaml
+  cfn-lint $LINT_OPTS -- generated-templates/lakerunner-demo-otel-collector.yaml
 
 echo "9. Generating Lakerunner Root Stack..."
-python3 src/lakerunner_root.py > generated-templates/lakerunner-root.yaml
-$CFN_LINT generated-templates/lakerunner-root.yaml
+  python3 src/lakerunner_root.py > generated-templates/lakerunner-root.yaml
+  cfn-lint $LINT_OPTS -- generated-templates/lakerunner-root.yaml
 
 echo -e "\nGenerated CloudFormation templates:"
 ls -la generated-templates/
