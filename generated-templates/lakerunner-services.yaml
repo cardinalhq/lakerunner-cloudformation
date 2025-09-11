@@ -13,7 +13,16 @@ Metadata:
       - Label:
           default: Infrastructure
         Parameters:
-          - CommonInfraStackName
+          - ClusterArn
+          - DbSecretArn
+          - DbHost
+          - DbPort
+          - TaskSecurityGroupId
+          - VpcId
+          - PrivateSubnets
+          - PublicSubnets
+          - BucketArn
+          - EfsId
           - AlbScheme
       - Label:
           default: Container Images
@@ -28,16 +37,34 @@ Metadata:
     ParameterLabels:
       AlbScheme:
         default: ALB Scheme
-      CommonInfraStackName:
-        default: Common Infra Stack Name
+      BucketArn:
+        default: Bucket ARN
+      ClusterArn:
+        default: ECS Cluster ARN
+      DbHost:
+        default: DB Host
+      DbPort:
+        default: DB Port
+      DbSecretArn:
+        default: DB Secret ARN
+      EfsId:
+        default: EFS File System ID
       GoServicesImage:
         default: Go Services Image
       OtelEndpoint:
         default: OTEL Collector Endpoint
+      PrivateSubnets:
+        default: Private Subnets
+      PublicSubnets:
+        default: Public Subnets
       QueryApiImage:
         default: Query API Image
       QueryWorkerImage:
         default: Query Worker Image
+      TaskSecurityGroupId:
+        default: Task Security Group
+      VpcId:
+        default: VPC ID
 Outputs:
   AlbArn:
     Export:
@@ -103,8 +130,24 @@ Parameters:
     Default: internal
     Description: 'Load balancer scheme: ''internet-facing'' for external access or ''internal'' for internal access only.'
     Type: String
-  CommonInfraStackName:
-    Description: 'REQUIRED: Name of the CommonInfra stack to import infrastructure values from.'
+  BucketArn:
+    Description: 'REQUIRED: ARN of the ingest bucket.'
+    Type: String
+  ClusterArn:
+    Description: 'REQUIRED: ARN of the ECS cluster hosting the services.'
+    Type: String
+  DbHost:
+    Description: 'REQUIRED: Database endpoint hostname.'
+    Type: String
+  DbPort:
+    Description: 'REQUIRED: Database port number.'
+    Type: String
+  DbSecretArn:
+    Description: 'REQUIRED: ARN of the database credentials secret.'
+    Type: String
+  EfsId:
+    Default: ''
+    Description: 'OPTIONAL: EFS file system ID for services requiring EFS.'
     Type: String
   GoServicesImage:
     Default: public.ecr.aws/cardinalhq.io/lakerunner:v1.2.2
@@ -114,6 +157,13 @@ Parameters:
     Default: ''
     Description: 'OPTIONAL: OTEL collector HTTP endpoint URL (e.g., http://collector-dns:4318). Leave blank to disable OTLP telemetry export.'
     Type: String
+  PrivateSubnets:
+    Description: 'REQUIRED: Private subnet IDs for tasks.'
+    Type: List<AWS::EC2::Subnet::Id>
+  PublicSubnets:
+    Default: ''
+    Description: 'OPTIONAL: Public subnets for ALB (required if AlbScheme is internet-facing).'
+    Type: List<AWS::EC2::Subnet::Id>
   QueryApiImage:
     Default: public.ecr.aws/cardinalhq.io/lakerunner/query-api:v1.2.1
     Description: Container image for query-api service
@@ -122,6 +172,12 @@ Parameters:
     Default: public.ecr.aws/cardinalhq.io/lakerunner/query-worker:v1.2.1
     Description: Container image for query-worker service
     Type: String
+  TaskSecurityGroupId:
+    Description: 'REQUIRED: Security group used by ECS tasks.'
+    Type: AWS::EC2::SecurityGroup::Id
+  VpcId:
+    Description: 'REQUIRED: VPC where services run.'
+    Type: AWS::EC2::VPC::Id
 Resources:
   Alb:
     Properties:
@@ -130,18 +186,8 @@ Resources:
         - !Ref 'AlbSecurityGroup'
       Subnets: !If
         - IsInternetFacing
-        - !Split
-          - ','
-          - !ImportValue
-            Fn::Sub:
-              - ${CommonInfraStackName}-PublicSubnets
-              - CommonInfraStackName: !Ref 'CommonInfraStackName'
-        - !Split
-          - ','
-          - !ImportValue
-            Fn::Sub:
-              - ${CommonInfraStackName}-PrivateSubnets
-              - CommonInfraStackName: !Ref 'CommonInfraStackName'
+        - !Ref 'PublicSubnets'
+        - !Ref 'PrivateSubnets'
       Type: application
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
   Alb7101Open:
@@ -160,10 +206,7 @@ Resources:
         - CidrIp: '0.0.0.0/0'
           Description: Allow all outbound
           IpProtocol: '-1'
-      VpcId: !ImportValue
-        Fn::Sub:
-          - ${CommonInfraStackName}-VpcId
-          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      VpcId: !Ref 'VpcId'
     Type: AWS::EC2::SecurityGroup
   ExecRole:
     Properties:
@@ -199,10 +242,7 @@ Resources:
                 Resource:
                   - !Sub
                     - ${SecretArn}*
-                    - SecretArn: !ImportValue
-                        Fn::Sub:
-                          - ${CommonInfraStackName}-DbSecretArn
-                          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                    - SecretArn: !Ref 'DbSecretArn'
                   - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*'
             Version: '2012-10-17'
           PolicyName: SSMParameterAccess
@@ -281,26 +321,17 @@ Resources:
                   - s3:ListBucket
                 Effect: Allow
                 Resource:
-                  - !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-BucketArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                  - !Ref 'BucketArn'
                   - !Sub
                     - ${BucketArn}/*
-                    - BucketArn: !ImportValue
-                        Fn::Sub:
-                          - ${CommonInfraStackName}-BucketArn
-                          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                    - BucketArn: !Ref 'BucketArn'
               - Action:
                   - secretsmanager:GetSecretValue
                 Effect: Allow
                 Resource:
                   - !Sub
                     - ${SecretArn}*
-                    - SecretArn: !ImportValue
-                        Fn::Sub:
-                          - ${CommonInfraStackName}-DbSecretArn
-                          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                    - SecretArn: !Ref 'DbSecretArn'
                   - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*'
               - Action:
                   - ecs:ListServices
@@ -341,26 +372,17 @@ Resources:
                   - s3:ListBucket
                 Effect: Allow
                 Resource:
-                  - !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-BucketArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                  - !Ref 'BucketArn'
                   - !Sub
                     - ${BucketArn}/*
-                    - BucketArn: !ImportValue
-                        Fn::Sub:
-                          - ${CommonInfraStackName}-BucketArn
-                          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                    - BucketArn: !Ref 'BucketArn'
               - Action:
                   - secretsmanager:GetSecretValue
                 Effect: Allow
                 Resource:
                   - !Sub
                     - ${SecretArn}*
-                    - SecretArn: !ImportValue
-                        Fn::Sub:
-                          - ${CommonInfraStackName}-DbSecretArn
-                          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                    - SecretArn: !Ref 'DbSecretArn'
                   - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*'
               - Action:
                   - elasticfilesystem:ClientMount
@@ -377,126 +399,71 @@ Resources:
     Type: AWS::IAM::Role
   ServiceLakerunnerCompactLogs:
     Properties:
-      Cluster: !ImportValue
-        Fn::Sub:
-          - ${CommonInfraStackName}-ClusterArn
-          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      Cluster: !Ref 'ClusterArn'
       DesiredCount: '4'
       EnableExecuteCommand: true
       LaunchType: FARGATE
       NetworkConfiguration:
         AwsvpcConfiguration:
           SecurityGroups:
-            - !ImportValue
-              Fn::Sub:
-                - ${CommonInfraStackName}-TaskSGId
-                - CommonInfraStackName: !Ref 'CommonInfraStackName'
-          Subnets: !Split
-            - ','
-            - !ImportValue
-              Fn::Sub:
-                - ${CommonInfraStackName}-PrivateSubnets
-                - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - !Ref 'TaskSecurityGroupId'
+          Subnets: !Ref 'PrivateSubnets'
       ServiceName: lakerunner-compact-logs
       TaskDefinition: !Ref 'TaskDefLakerunnerCompactLogs'
     Type: AWS::ECS::Service
   ServiceLakerunnerCompactMetrics:
     Properties:
-      Cluster: !ImportValue
-        Fn::Sub:
-          - ${CommonInfraStackName}-ClusterArn
-          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      Cluster: !Ref 'ClusterArn'
       DesiredCount: '1'
       EnableExecuteCommand: true
       LaunchType: FARGATE
       NetworkConfiguration:
         AwsvpcConfiguration:
           SecurityGroups:
-            - !ImportValue
-              Fn::Sub:
-                - ${CommonInfraStackName}-TaskSGId
-                - CommonInfraStackName: !Ref 'CommonInfraStackName'
-          Subnets: !Split
-            - ','
-            - !ImportValue
-              Fn::Sub:
-                - ${CommonInfraStackName}-PrivateSubnets
-                - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - !Ref 'TaskSecurityGroupId'
+          Subnets: !Ref 'PrivateSubnets'
       ServiceName: lakerunner-compact-metrics
       TaskDefinition: !Ref 'TaskDefLakerunnerCompactMetrics'
     Type: AWS::ECS::Service
   ServiceLakerunnerIngestLogs:
     Properties:
-      Cluster: !ImportValue
-        Fn::Sub:
-          - ${CommonInfraStackName}-ClusterArn
-          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      Cluster: !Ref 'ClusterArn'
       DesiredCount: '2'
       EnableExecuteCommand: true
       LaunchType: FARGATE
       NetworkConfiguration:
         AwsvpcConfiguration:
           SecurityGroups:
-            - !ImportValue
-              Fn::Sub:
-                - ${CommonInfraStackName}-TaskSGId
-                - CommonInfraStackName: !Ref 'CommonInfraStackName'
-          Subnets: !Split
-            - ','
-            - !ImportValue
-              Fn::Sub:
-                - ${CommonInfraStackName}-PrivateSubnets
-                - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - !Ref 'TaskSecurityGroupId'
+          Subnets: !Ref 'PrivateSubnets'
       ServiceName: lakerunner-ingest-logs
       TaskDefinition: !Ref 'TaskDefLakerunnerIngestLogs'
     Type: AWS::ECS::Service
   ServiceLakerunnerIngestMetrics:
     Properties:
-      Cluster: !ImportValue
-        Fn::Sub:
-          - ${CommonInfraStackName}-ClusterArn
-          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      Cluster: !Ref 'ClusterArn'
       DesiredCount: '1'
       EnableExecuteCommand: true
       LaunchType: FARGATE
       NetworkConfiguration:
         AwsvpcConfiguration:
           SecurityGroups:
-            - !ImportValue
-              Fn::Sub:
-                - ${CommonInfraStackName}-TaskSGId
-                - CommonInfraStackName: !Ref 'CommonInfraStackName'
-          Subnets: !Split
-            - ','
-            - !ImportValue
-              Fn::Sub:
-                - ${CommonInfraStackName}-PrivateSubnets
-                - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - !Ref 'TaskSecurityGroupId'
+          Subnets: !Ref 'PrivateSubnets'
       ServiceName: lakerunner-ingest-metrics
       TaskDefinition: !Ref 'TaskDefLakerunnerIngestMetrics'
     Type: AWS::ECS::Service
   ServiceLakerunnerPubsubSqs:
     Properties:
-      Cluster: !ImportValue
-        Fn::Sub:
-          - ${CommonInfraStackName}-ClusterArn
-          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      Cluster: !Ref 'ClusterArn'
       DesiredCount: '1'
       EnableExecuteCommand: true
       LaunchType: FARGATE
       NetworkConfiguration:
         AwsvpcConfiguration:
           SecurityGroups:
-            - !ImportValue
-              Fn::Sub:
-                - ${CommonInfraStackName}-TaskSGId
-                - CommonInfraStackName: !Ref 'CommonInfraStackName'
-          Subnets: !Split
-            - ','
-            - !ImportValue
-              Fn::Sub:
-                - ${CommonInfraStackName}-PrivateSubnets
-                - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - !Ref 'TaskSecurityGroupId'
+          Subnets: !Ref 'PrivateSubnets'
       ServiceName: lakerunner-pubsub-sqs
       TaskDefinition: !Ref 'TaskDefLakerunnerPubsubSqs'
     Type: AWS::ECS::Service
@@ -504,10 +471,7 @@ Resources:
     DependsOn:
       - Listener7101
     Properties:
-      Cluster: !ImportValue
-        Fn::Sub:
-          - ${CommonInfraStackName}-ClusterArn
-          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      Cluster: !Ref 'ClusterArn'
       DesiredCount: '1'
       EnableExecuteCommand: true
       LaunchType: FARGATE
@@ -518,91 +482,50 @@ Resources:
       NetworkConfiguration:
         AwsvpcConfiguration:
           SecurityGroups:
-            - !ImportValue
-              Fn::Sub:
-                - ${CommonInfraStackName}-TaskSGId
-                - CommonInfraStackName: !Ref 'CommonInfraStackName'
-          Subnets: !Split
-            - ','
-            - !ImportValue
-              Fn::Sub:
-                - ${CommonInfraStackName}-PrivateSubnets
-                - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - !Ref 'TaskSecurityGroupId'
+          Subnets: !Ref 'PrivateSubnets'
       ServiceName: lakerunner-query-api
       TaskDefinition: !Ref 'TaskDefLakerunnerQueryApi'
     Type: AWS::ECS::Service
   ServiceLakerunnerQueryWorker:
     Properties:
-      Cluster: !ImportValue
-        Fn::Sub:
-          - ${CommonInfraStackName}-ClusterArn
-          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      Cluster: !Ref 'ClusterArn'
       DesiredCount: '8'
       EnableExecuteCommand: true
       LaunchType: FARGATE
       NetworkConfiguration:
         AwsvpcConfiguration:
           SecurityGroups:
-            - !ImportValue
-              Fn::Sub:
-                - ${CommonInfraStackName}-TaskSGId
-                - CommonInfraStackName: !Ref 'CommonInfraStackName'
-          Subnets: !Split
-            - ','
-            - !ImportValue
-              Fn::Sub:
-                - ${CommonInfraStackName}-PrivateSubnets
-                - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - !Ref 'TaskSecurityGroupId'
+          Subnets: !Ref 'PrivateSubnets'
       ServiceName: lakerunner-query-worker
       TaskDefinition: !Ref 'TaskDefLakerunnerQueryWorker'
     Type: AWS::ECS::Service
   ServiceLakerunnerRollupMetrics:
     Properties:
-      Cluster: !ImportValue
-        Fn::Sub:
-          - ${CommonInfraStackName}-ClusterArn
-          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      Cluster: !Ref 'ClusterArn'
       DesiredCount: '1'
       EnableExecuteCommand: true
       LaunchType: FARGATE
       NetworkConfiguration:
         AwsvpcConfiguration:
           SecurityGroups:
-            - !ImportValue
-              Fn::Sub:
-                - ${CommonInfraStackName}-TaskSGId
-                - CommonInfraStackName: !Ref 'CommonInfraStackName'
-          Subnets: !Split
-            - ','
-            - !ImportValue
-              Fn::Sub:
-                - ${CommonInfraStackName}-PrivateSubnets
-                - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - !Ref 'TaskSecurityGroupId'
+          Subnets: !Ref 'PrivateSubnets'
       ServiceName: lakerunner-rollup-metrics
       TaskDefinition: !Ref 'TaskDefLakerunnerRollupMetrics'
     Type: AWS::ECS::Service
   ServiceLakerunnerSweeper:
     Properties:
-      Cluster: !ImportValue
-        Fn::Sub:
-          - ${CommonInfraStackName}-ClusterArn
-          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      Cluster: !Ref 'ClusterArn'
       DesiredCount: '1'
       EnableExecuteCommand: true
       LaunchType: FARGATE
       NetworkConfiguration:
         AwsvpcConfiguration:
           SecurityGroups:
-            - !ImportValue
-              Fn::Sub:
-                - ${CommonInfraStackName}-TaskSGId
-                - CommonInfraStackName: !Ref 'CommonInfraStackName'
-          Subnets: !Split
-            - ','
-            - !ImportValue
-              Fn::Sub:
-                - ${CommonInfraStackName}-PrivateSubnets
-                - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - !Ref 'TaskSecurityGroupId'
+          Subnets: !Ref 'PrivateSubnets'
       ServiceName: lakerunner-sweeper
       TaskDefinition: !Ref 'TaskDefLakerunnerSweeper'
     Type: AWS::ECS::Service
@@ -628,15 +551,9 @@ Resources:
             - Name: SQS_REGION
               Value: !Ref 'AWS::Region'
             - Name: LRDB_HOST
-              Value: !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-DbEndpoint
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+              Value: !Ref 'DbHost'
             - Name: LRDB_PORT
-              Value: !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-DbPort
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+              Value: !Ref 'DbPort'
             - Name: LRDB_DBNAME
               Value: lakerunner
             - Name: LRDB_USER
@@ -644,15 +561,9 @@ Resources:
             - Name: LRDB_SSLMODE
               Value: require
             - Name: CONFIGDB_HOST
-              Value: !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-DbEndpoint
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+              Value: !Ref 'DbHost'
             - Name: CONFIGDB_PORT
-              Value: !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-DbPort
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+              Value: !Ref 'DbPort'
             - Name: CONFIGDB_DBNAME
               Value: lakerunner
             - Name: CONFIGDB_USER
@@ -698,17 +609,11 @@ Resources:
             - Name: LRDB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-DbSecretArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                - SecretArn: !Ref 'DbSecretArn'
             - Name: CONFIGDB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-DbSecretArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                - SecretArn: !Ref 'DbSecretArn'
           User: '0'
       Cpu: '1024'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
@@ -746,15 +651,9 @@ Resources:
             - Name: SQS_REGION
               Value: !Ref 'AWS::Region'
             - Name: LRDB_HOST
-              Value: !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-DbEndpoint
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+              Value: !Ref 'DbHost'
             - Name: LRDB_PORT
-              Value: !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-DbPort
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+              Value: !Ref 'DbPort'
             - Name: LRDB_DBNAME
               Value: lakerunner
             - Name: LRDB_USER
@@ -762,15 +661,9 @@ Resources:
             - Name: LRDB_SSLMODE
               Value: require
             - Name: CONFIGDB_HOST
-              Value: !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-DbEndpoint
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+              Value: !Ref 'DbHost'
             - Name: CONFIGDB_PORT
-              Value: !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-DbPort
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+              Value: !Ref 'DbPort'
             - Name: CONFIGDB_DBNAME
               Value: lakerunner
             - Name: CONFIGDB_USER
@@ -816,17 +709,11 @@ Resources:
             - Name: LRDB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-DbSecretArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                - SecretArn: !Ref 'DbSecretArn'
             - Name: CONFIGDB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-DbSecretArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                - SecretArn: !Ref 'DbSecretArn'
           User: '0'
       Cpu: '1024'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
@@ -864,15 +751,9 @@ Resources:
             - Name: SQS_REGION
               Value: !Ref 'AWS::Region'
             - Name: LRDB_HOST
-              Value: !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-DbEndpoint
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+              Value: !Ref 'DbHost'
             - Name: LRDB_PORT
-              Value: !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-DbPort
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+              Value: !Ref 'DbPort'
             - Name: LRDB_DBNAME
               Value: lakerunner
             - Name: LRDB_USER
@@ -880,15 +761,9 @@ Resources:
             - Name: LRDB_SSLMODE
               Value: require
             - Name: CONFIGDB_HOST
-              Value: !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-DbEndpoint
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+              Value: !Ref 'DbHost'
             - Name: CONFIGDB_PORT
-              Value: !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-DbPort
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+              Value: !Ref 'DbPort'
             - Name: CONFIGDB_DBNAME
               Value: lakerunner
             - Name: CONFIGDB_USER
@@ -934,17 +809,11 @@ Resources:
             - Name: LRDB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-DbSecretArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                - SecretArn: !Ref 'DbSecretArn'
             - Name: CONFIGDB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-DbSecretArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                - SecretArn: !Ref 'DbSecretArn'
           User: '0'
       Cpu: '1024'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
@@ -982,15 +851,9 @@ Resources:
             - Name: SQS_REGION
               Value: !Ref 'AWS::Region'
             - Name: LRDB_HOST
-              Value: !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-DbEndpoint
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+              Value: !Ref 'DbHost'
             - Name: LRDB_PORT
-              Value: !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-DbPort
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+              Value: !Ref 'DbPort'
             - Name: LRDB_DBNAME
               Value: lakerunner
             - Name: LRDB_USER
@@ -998,15 +861,9 @@ Resources:
             - Name: LRDB_SSLMODE
               Value: require
             - Name: CONFIGDB_HOST
-              Value: !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-DbEndpoint
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+              Value: !Ref 'DbHost'
             - Name: CONFIGDB_PORT
-              Value: !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-DbPort
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+              Value: !Ref 'DbPort'
             - Name: CONFIGDB_DBNAME
               Value: lakerunner
             - Name: CONFIGDB_USER
@@ -1052,17 +909,11 @@ Resources:
             - Name: LRDB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-DbSecretArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                - SecretArn: !Ref 'DbSecretArn'
             - Name: CONFIGDB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-DbSecretArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                - SecretArn: !Ref 'DbSecretArn'
           User: '0'
       Cpu: '1024'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
@@ -1101,15 +952,9 @@ Resources:
             - Name: SQS_REGION
               Value: !Ref 'AWS::Region'
             - Name: LRDB_HOST
-              Value: !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-DbEndpoint
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+              Value: !Ref 'DbHost'
             - Name: LRDB_PORT
-              Value: !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-DbPort
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+              Value: !Ref 'DbPort'
             - Name: LRDB_DBNAME
               Value: lakerunner
             - Name: LRDB_USER
@@ -1117,15 +962,9 @@ Resources:
             - Name: LRDB_SSLMODE
               Value: require
             - Name: CONFIGDB_HOST
-              Value: !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-DbEndpoint
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+              Value: !Ref 'DbHost'
             - Name: CONFIGDB_PORT
-              Value: !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-DbPort
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+              Value: !Ref 'DbPort'
             - Name: CONFIGDB_DBNAME
               Value: lakerunner
             - Name: CONFIGDB_USER
@@ -1171,17 +1010,11 @@ Resources:
             - Name: LRDB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-DbSecretArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                - SecretArn: !Ref 'DbSecretArn'
             - Name: CONFIGDB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-DbSecretArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                - SecretArn: !Ref 'DbSecretArn'
           User: '0'
       Cpu: '1024'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
@@ -1217,15 +1050,9 @@ Resources:
             - Name: SQS_REGION
               Value: !Ref 'AWS::Region'
             - Name: LRDB_HOST
-              Value: !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-DbEndpoint
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+              Value: !Ref 'DbHost'
             - Name: LRDB_PORT
-              Value: !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-DbPort
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+              Value: !Ref 'DbPort'
             - Name: LRDB_DBNAME
               Value: lakerunner
             - Name: LRDB_USER
@@ -1233,15 +1060,9 @@ Resources:
             - Name: LRDB_SSLMODE
               Value: require
             - Name: CONFIGDB_HOST
-              Value: !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-DbEndpoint
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+              Value: !Ref 'DbHost'
             - Name: CONFIGDB_PORT
-              Value: !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-DbPort
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+              Value: !Ref 'DbPort'
             - Name: CONFIGDB_DBNAME
               Value: lakerunner
             - Name: CONFIGDB_USER
@@ -1255,10 +1076,7 @@ Resources:
                 - 1
                 - !Split
                   - /
-                  - !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-ClusterArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                  - !Ref 'ClusterArn'
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp
@@ -1316,17 +1134,11 @@ Resources:
             - Name: LRDB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-DbSecretArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                - SecretArn: !Ref 'DbSecretArn'
             - Name: CONFIGDB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-DbSecretArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                - SecretArn: !Ref 'DbSecretArn'
             - Name: TOKEN_HMAC256_KEY
               ValueFrom: !Sub
                 - '${SecretArn}:token_hmac256_key::'
@@ -1366,15 +1178,9 @@ Resources:
             - Name: SQS_REGION
               Value: !Ref 'AWS::Region'
             - Name: LRDB_HOST
-              Value: !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-DbEndpoint
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+              Value: !Ref 'DbHost'
             - Name: LRDB_PORT
-              Value: !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-DbPort
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+              Value: !Ref 'DbPort'
             - Name: LRDB_DBNAME
               Value: lakerunner
             - Name: LRDB_USER
@@ -1382,15 +1188,9 @@ Resources:
             - Name: LRDB_SSLMODE
               Value: require
             - Name: CONFIGDB_HOST
-              Value: !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-DbEndpoint
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+              Value: !Ref 'DbHost'
             - Name: CONFIGDB_PORT
-              Value: !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-DbPort
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+              Value: !Ref 'DbPort'
             - Name: CONFIGDB_DBNAME
               Value: lakerunner
             - Name: CONFIGDB_USER
@@ -1448,17 +1248,11 @@ Resources:
             - Name: LRDB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-DbSecretArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                - SecretArn: !Ref 'DbSecretArn'
             - Name: CONFIGDB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-DbSecretArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                - SecretArn: !Ref 'DbSecretArn'
             - Name: TOKEN_HMAC256_KEY
               ValueFrom: !Sub
                 - '${SecretArn}:token_hmac256_key::'
@@ -1500,15 +1294,9 @@ Resources:
             - Name: SQS_REGION
               Value: !Ref 'AWS::Region'
             - Name: LRDB_HOST
-              Value: !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-DbEndpoint
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+              Value: !Ref 'DbHost'
             - Name: LRDB_PORT
-              Value: !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-DbPort
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+              Value: !Ref 'DbPort'
             - Name: LRDB_DBNAME
               Value: lakerunner
             - Name: LRDB_USER
@@ -1516,15 +1304,9 @@ Resources:
             - Name: LRDB_SSLMODE
               Value: require
             - Name: CONFIGDB_HOST
-              Value: !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-DbEndpoint
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+              Value: !Ref 'DbHost'
             - Name: CONFIGDB_PORT
-              Value: !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-DbPort
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+              Value: !Ref 'DbPort'
             - Name: CONFIGDB_DBNAME
               Value: lakerunner
             - Name: CONFIGDB_USER
@@ -1570,17 +1352,11 @@ Resources:
             - Name: LRDB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-DbSecretArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                - SecretArn: !Ref 'DbSecretArn'
             - Name: CONFIGDB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-DbSecretArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                - SecretArn: !Ref 'DbSecretArn'
           User: '0'
       Cpu: '1024'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
@@ -1618,15 +1394,9 @@ Resources:
             - Name: SQS_REGION
               Value: !Ref 'AWS::Region'
             - Name: LRDB_HOST
-              Value: !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-DbEndpoint
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+              Value: !Ref 'DbHost'
             - Name: LRDB_PORT
-              Value: !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-DbPort
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+              Value: !Ref 'DbPort'
             - Name: LRDB_DBNAME
               Value: lakerunner
             - Name: LRDB_USER
@@ -1634,15 +1404,9 @@ Resources:
             - Name: LRDB_SSLMODE
               Value: require
             - Name: CONFIGDB_HOST
-              Value: !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-DbEndpoint
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+              Value: !Ref 'DbHost'
             - Name: CONFIGDB_PORT
-              Value: !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-DbPort
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+              Value: !Ref 'DbPort'
             - Name: CONFIGDB_DBNAME
               Value: lakerunner
             - Name: CONFIGDB_USER
@@ -1688,17 +1452,11 @@ Resources:
             - Name: LRDB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-DbSecretArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                - SecretArn: !Ref 'DbSecretArn'
             - Name: CONFIGDB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-DbSecretArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                - SecretArn: !Ref 'DbSecretArn'
           User: '0'
       Cpu: '256'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
@@ -1718,10 +1476,7 @@ Resources:
     Properties:
       Description: ALB to tasks 7101
       FromPort: 7101
-      GroupId: !ImportValue
-        Fn::Sub:
-          - ${CommonInfraStackName}-TaskSGId
-          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      GroupId: !Ref 'TaskSecurityGroupId'
       IpProtocol: tcp
       SourceSecurityGroupId: !Ref 'AlbSecurityGroup'
       ToPort: 7101
@@ -1745,16 +1500,10 @@ Resources:
                   - s3:ListBucket
                 Effect: Allow
                 Resource:
-                  - !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-BucketArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                  - !Ref 'BucketArn'
                   - !Sub
                     - ${BucketArn}/*
-                    - BucketArn: !ImportValue
-                        Fn::Sub:
-                          - ${CommonInfraStackName}-BucketArn
-                          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                    - BucketArn: !Ref 'BucketArn'
               - Action:
                   - sqs:ReceiveMessage
                   - sqs:DeleteMessage
@@ -1768,10 +1517,7 @@ Resources:
                 Resource:
                   - !Sub
                     - ${SecretArn}*
-                    - SecretArn: !ImportValue
-                        Fn::Sub:
-                          - ${CommonInfraStackName}-DbSecretArn
-                          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                    - SecretArn: !Ref 'DbSecretArn'
                   - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*'
               - Action:
                   - elasticfilesystem:ClientMount
@@ -1804,10 +1550,7 @@ Resources:
           Value: '5'
       TargetType: ip
       UnhealthyThresholdCount: 2
-      VpcId: !ImportValue
-        Fn::Sub:
-          - ${CommonInfraStackName}-VpcId
-          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      VpcId: !Ref 'VpcId'
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
   TokenSecret:
     Properties:

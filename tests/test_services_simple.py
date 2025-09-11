@@ -81,25 +81,29 @@ class TestServicesTemplateSimple:
         assert template_dict["Description"] == expected_desc
 
     @patch('lakerunner_services.load_service_config')
-    def test_commoninfra_parameter_exists(self, mock_load_config):
-        """Test that CommonInfraStackName parameter exists"""
+    def test_infrastructure_parameters_exist(self, mock_load_config):
+        """Test that infrastructure input parameters exist"""
         mock_load_config.return_value = {
             "services": {},
             "images": {
                 "go_services": "test:latest",
-                "query_api": "test:latest", 
+                "query_api": "test:latest",
                 "query_worker": "test:latest",
                 "grafana": "test:latest"
             }
         }
-        
+
         from lakerunner_services import create_services_template
-        
+
         template = create_services_template()
-        template_dict = json.loads(template.to_json())
-        
-        # Should have CommonInfraStackName parameter for imports
-        assert "CommonInfraStackName" in template_dict["Parameters"]
+        params = json.loads(template.to_json())["Parameters"]
+
+        required = {
+            "ClusterArn", "DbSecretArn", "DbHost", "DbPort",
+            "TaskSecurityGroupId", "VpcId", "PrivateSubnets",
+            "PublicSubnets", "BucketArn", "EfsId"
+        }
+        assert required.issubset(params.keys())
 
     @patch('lakerunner_services.load_service_config')
     def test_image_parameters_exist(self, mock_load_config):

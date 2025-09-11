@@ -148,6 +148,14 @@
   "EcsStack": {
    "Condition": "DeployEcs",
    "Properties": {
+    "Parameters": {
+     "VpcId": {
+      "Fn::GetAtt": [
+       "VpcStack",
+       "Outputs.VpcId"
+      ]
+     }
+    },
     "TemplateURL": {
      "Fn::Sub": "${TemplateBaseUrl}/lakerunner-ecs.yaml"
     }
@@ -184,6 +192,20 @@
   "RdsStack": {
    "Condition": "DeployRds",
    "Properties": {
+    "Parameters": {
+     "PrivateSubnets": {
+      "Fn::GetAtt": [
+       "VpcStack",
+       "Outputs.PrivateSubnets"
+      ]
+     },
+     "TaskSecurityGroupId": {
+      "Fn::GetAtt": [
+       "EcsStack",
+       "Outputs.TaskSGId"
+      ]
+     }
+    },
     "TemplateURL": {
      "Fn::Sub": "${TemplateBaseUrl}/lakerunner-rds.yaml"
     }
@@ -193,6 +215,62 @@
   "ServicesStack": {
    "Condition": "DeployServices",
    "Properties": {
+    "Parameters": {
+     "BucketArn": {
+      "Fn::GetAtt": [
+       "StorageStack",
+       "Outputs.BucketArn"
+      ]
+     },
+     "ClusterArn": {
+      "Fn::GetAtt": [
+       "EcsStack",
+       "Outputs.ClusterArn"
+      ]
+     },
+     "DbHost": {
+      "Fn::GetAtt": [
+       "RdsStack",
+       "Outputs.DbEndpoint"
+      ]
+     },
+     "DbPort": {
+      "Fn::GetAtt": [
+       "RdsStack",
+       "Outputs.DbPort"
+      ]
+     },
+     "DbSecretArn": {
+      "Fn::GetAtt": [
+       "RdsStack",
+       "Outputs.DbSecretArn"
+      ]
+     },
+     "PrivateSubnets": {
+      "Fn::GetAtt": [
+       "VpcStack",
+       "Outputs.PrivateSubnets"
+      ]
+     },
+     "PublicSubnets": {
+      "Fn::GetAtt": [
+       "VpcStack",
+       "Outputs.PublicSubnets"
+      ]
+     },
+     "TaskSecurityGroupId": {
+      "Fn::GetAtt": [
+       "EcsStack",
+       "Outputs.TaskSGId"
+      ]
+     },
+     "VpcId": {
+      "Fn::GetAtt": [
+       "VpcStack",
+       "Outputs.VpcId"
+      ]
+     }
+    },
     "TemplateURL": {
      "Fn::Sub": "${TemplateBaseUrl}/lakerunner-services.yaml"
     }
