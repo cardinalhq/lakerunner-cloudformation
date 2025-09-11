@@ -86,7 +86,7 @@ def create_services_template():
         Description="REQUIRED: Private subnet IDs for tasks.",
     ))
     PublicSubnets = t.add_parameter(Parameter(
-        "PublicSubnets", Type="List<AWS::EC2::Subnet::Id>",
+        "PublicSubnets", Type="CommaDelimitedList",
         Default="",
         Description="OPTIONAL: Public subnets for ALB (required if AlbScheme is internet-facing).",
     ))
@@ -886,6 +886,9 @@ def create_services_template():
         Value=GetAtt(ExecutionRole, "Arn"),
         Export=Export(name=Sub("${AWS::StackName}-ExecutionRoleArn"))
     ))
+
+    # Surface the provided EFS filesystem ID so cfn-lint recognizes it is used
+    t.add_output(Output("EfsId", Value=EfsIdValue))
 
     # Output service ARNs
     for service_name, _ in services.items():

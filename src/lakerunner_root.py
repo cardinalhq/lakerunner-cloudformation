@@ -6,7 +6,7 @@ stacks for each major component. Individual stacks are only deployed when the
 corresponding Deploy* parameter is set to "Yes".
 """
 
-from troposphere import Template, Parameter, Ref, Equals, Sub, GetAtt
+from troposphere import Template, Parameter, Ref, Equals, Sub, GetAtt, And, Condition
 from troposphere.cloudformation import Stack
 
 
@@ -56,6 +56,29 @@ deploy_grafana = deploy_param("DeployGrafanaService", "Deploy the Grafana Servic
 deploy_otel = deploy_param("DeployOtelCollector", "Deploy the demo OTEL Collector stack", default="No")
 
 
+# Composite conditions ensuring dependent stacks exist
+t.add_condition(
+    "DeployEcsStack",
+    And(Condition(deploy_ecs), Condition(deploy_vpc)),
+)
+
+t.add_condition(
+    "DeployRdsStack",
+    And(Condition(deploy_rds), Condition(deploy_vpc), Condition(deploy_ecs)),
+)
+
+t.add_condition(
+    "DeployServicesStack",
+    And(
+        Condition(deploy_services),
+        Condition(deploy_vpc),
+        Condition(deploy_ecs),
+        Condition(deploy_rds),
+        Condition(deploy_storage),
+    ),
+)
+
+
 # Nested stacks with parameter wiring
 vpc_stack = t.add_resource(
     Stack(
@@ -68,7 +91,7 @@ vpc_stack = t.add_resource(
 ecs_stack = t.add_resource(
     Stack(
         "EcsStack",
-        Condition=deploy_ecs,
+        Condition="DeployEcsStack",
         TemplateURL=Sub("${TemplateBaseUrl}/lakerunner-ecs.yaml"),
         Parameters={
             "VpcId": GetAtt(vpc_stack, "Outputs.VpcId"),
@@ -79,7 +102,7 @@ ecs_stack = t.add_resource(
 rds_stack = t.add_resource(
     Stack(
         "RdsStack",
-        Condition=deploy_rds,
+        Condition="DeployRdsStack",
         TemplateURL=Sub("${TemplateBaseUrl}/lakerunner-rds.yaml"),
         Parameters={
             "PrivateSubnets": GetAtt(vpc_stack, "Outputs.PrivateSubnets"),
@@ -107,7 +130,7 @@ t.add_resource(
 t.add_resource(
     Stack(
         "ServicesStack",
-        Condition=deploy_services,
+        Condition="DeployServicesStack",
         TemplateURL=Sub("${TemplateBaseUrl}/lakerunner-services.yaml"),
         Parameters={
             "ClusterArn": GetAtt(ecs_stack, "Outputs.ClusterArn"),

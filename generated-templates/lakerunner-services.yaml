@@ -74,6 +74,8 @@ Outputs:
     Export:
       Name: !Sub '${AWS::StackName}-AlbDNS'
     Value: !GetAtt 'Alb.DNSName'
+  EfsId:
+    Value: !Ref 'EfsId'
   ExecutionRoleArn:
     Export:
       Name: !Sub '${AWS::StackName}-ExecutionRoleArn'
@@ -163,7 +165,7 @@ Parameters:
   PublicSubnets:
     Default: ''
     Description: 'OPTIONAL: Public subnets for ALB (required if AlbScheme is internet-facing).'
-    Type: List<AWS::EC2::Subnet::Id>
+    Type: CommaDelimitedList
   QueryApiImage:
     Default: public.ecr.aws/cardinalhq.io/lakerunner/query-api:v1.2.1
     Description: Container image for query-api service

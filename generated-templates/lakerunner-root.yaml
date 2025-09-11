@@ -8,6 +8,16 @@
     "Yes"
    ]
   },
+  "DeployEcsStack": {
+   "Fn::And": [
+    {
+     "Condition": "DeployEcs"
+    },
+    {
+     "Condition": "DeployVpc"
+    }
+   ]
+  },
   "DeployGrafanaService": {
    "Fn::Equals": [
     {
@@ -40,12 +50,44 @@
     "Yes"
    ]
   },
+  "DeployRdsStack": {
+   "Fn::And": [
+    {
+     "Condition": "DeployRds"
+    },
+    {
+     "Condition": "DeployVpc"
+    },
+    {
+     "Condition": "DeployEcs"
+    }
+   ]
+  },
   "DeployServices": {
    "Fn::Equals": [
     {
      "Ref": "DeployServices"
     },
     "Yes"
+   ]
+  },
+  "DeployServicesStack": {
+   "Fn::And": [
+    {
+     "Condition": "DeployServices"
+    },
+    {
+     "Condition": "DeployVpc"
+    },
+    {
+     "Condition": "DeployEcs"
+    },
+    {
+     "Condition": "DeployRds"
+    },
+    {
+     "Condition": "DeployStorage"
+    }
    ]
   },
   "DeployStorage": {
@@ -146,7 +188,7 @@
  },
  "Resources": {
   "EcsStack": {
-   "Condition": "DeployEcs",
+   "Condition": "DeployEcsStack",
    "Properties": {
     "Parameters": {
      "VpcId": {
@@ -190,7 +232,7 @@
    "Type": "AWS::CloudFormation::Stack"
   },
   "RdsStack": {
-   "Condition": "DeployRds",
+   "Condition": "DeployRdsStack",
    "Properties": {
     "Parameters": {
      "PrivateSubnets": {
@@ -213,7 +255,7 @@
    "Type": "AWS::CloudFormation::Stack"
   },
   "ServicesStack": {
-   "Condition": "DeployServices",
+   "Condition": "DeployServicesStack",
    "Properties": {
     "Parameters": {
      "BucketArn": {
