@@ -1,663 +1,440 @@
-{
- "Conditions": {
-  "CreateNatGateway": {
-   "Fn::Equals": [
-    {
-     "Ref": "CreateNatGateway"
-    },
-    "Yes"
-   ]
-  }
- },
- "Description": "Lakerunner VPC: Cost-optimized VPC with essential VPC endpoints for private AWS service access",
- "Outputs": {
-  "InternetGatewayId": {
-   "Description": "Internet Gateway ID",
-   "Export": {
-    "Name": {
-     "Fn::Sub": "${AWS::StackName}-InternetGatewayId"
-    }
-   },
-   "Value": {
-    "Ref": "InternetGateway"
-   }
-  },
-  "NatGatewayId": {
-   "Description": "NAT Gateway ID (if created)",
-   "Export": {
-    "Name": {
-     "Fn::Sub": "${AWS::StackName}-NatGatewayId"
-    }
-   },
-   "Value": {
-    "Fn::If": [
-     "CreateNatGateway",
-     {
-      "Ref": "NatGateway"
-     },
-     "None"
-    ]
-   }
-  },
-  "PrivateSubnet1": {
-   "Description": "Private subnet 1 ID",
-   "Export": {
-    "Name": {
-     "Fn::Sub": "${AWS::StackName}-PrivateSubnet1"
-    }
-   },
-   "Value": {
-    "Ref": "PrivateSubnet1"
-   }
-  },
-  "PrivateSubnet2": {
-   "Description": "Private subnet 2 ID",
-   "Export": {
-    "Name": {
-     "Fn::Sub": "${AWS::StackName}-PrivateSubnet2"
-    }
-   },
-   "Value": {
-    "Ref": "PrivateSubnet2"
-   }
-  },
-  "PrivateSubnets": {
-   "Description": "Private subnet IDs (comma-separated)",
-   "Export": {
-    "Name": {
-     "Fn::Sub": "${AWS::StackName}-PrivateSubnets"
-    }
-   },
-   "Value": {
-    "Fn::Join": [
-     ",",
-     [
-      {
-       "Ref": "PrivateSubnet1"
-      },
-      {
-       "Ref": "PrivateSubnet2"
-      }
-     ]
-    ]
-   }
-  },
-  "PublicSubnet1": {
-   "Description": "Public subnet 1 ID",
-   "Export": {
-    "Name": {
-     "Fn::Sub": "${AWS::StackName}-PublicSubnet1"
-    }
-   },
-   "Value": {
-    "Ref": "PublicSubnet1"
-   }
-  },
-  "PublicSubnet2": {
-   "Description": "Public subnet 2 ID",
-   "Export": {
-    "Name": {
-     "Fn::Sub": "${AWS::StackName}-PublicSubnet2"
-    }
-   },
-   "Value": {
-    "Ref": "PublicSubnet2"
-   }
-  },
-  "PublicSubnets": {
-   "Description": "Public subnet IDs (comma-separated)",
-   "Export": {
-    "Name": {
-     "Fn::Sub": "${AWS::StackName}-PublicSubnets"
-    }
-   },
-   "Value": {
-    "Fn::Join": [
-     ",",
-     [
-      {
-       "Ref": "PublicSubnet1"
-      },
-      {
-       "Ref": "PublicSubnet2"
-      }
-     ]
-    ]
-   }
-  },
-  "VPCEndpointSecurityGroupId": {
-   "Description": "Security Group ID for VPC Endpoints",
-   "Export": {
-    "Name": {
-     "Fn::Sub": "${AWS::StackName}-VPCEndpointSGId"
-    }
-   },
-   "Value": {
-    "Ref": "VPCEndpointSecurityGroup"
-   }
-  },
-  "VpcCidr": {
-   "Description": "VPC CIDR block",
-   "Export": {
-    "Name": {
-     "Fn::Sub": "${AWS::StackName}-VpcCidr"
-    }
-   },
-   "Value": {
-    "Ref": "VpcCidr"
-   }
-  },
-  "VpcId": {
-   "Description": "VPC ID",
-   "Export": {
-    "Name": {
-     "Fn::Sub": "${AWS::StackName}-VpcId"
-    }
-   },
-   "Value": {
-    "Ref": "VPC"
-   }
-  }
- },
- "Parameters": {
-  "CreateNatGateway": {
-   "AllowedValues": [
-    "Yes",
-    "No"
-   ],
-   "Default": "Yes",
-   "Description": "Create NAT Gateway for private subnet internet access (No = isolated private subnets)",
-   "Type": "String"
-  },
-  "EnvironmentName": {
-   "AllowedPattern": "^[a-zA-Z][a-zA-Z0-9-]*$",
-   "Default": "lakerunner",
-   "Description": "Environment name for resource naming",
-   "Type": "String"
-  },
-  "VpcCidr": {
-   "AllowedPattern": "^(\\d{1,3}\\.){3}\\d{1,3}/\\d{1,2}$",
-   "Default": "10.0.0.0/16",
-   "Description": "CIDR block for the VPC",
-   "Type": "String"
-  }
- },
- "Resources": {
-  "EcrApiEndpoint": {
-   "Properties": {
-    "PrivateDnsEnabled": true,
-    "SecurityGroupIds": [
-     {
-      "Ref": "VPCEndpointSecurityGroup"
-     }
-    ],
-    "ServiceName": {
-     "Fn::Sub": "com.amazonaws.${AWS::Region}.ecr.api"
-    },
-    "SubnetIds": [
-     {
-      "Ref": "PrivateSubnet1"
-     },
-     {
-      "Ref": "PrivateSubnet2"
-     }
-    ],
-    "VpcEndpointType": "Interface",
-    "VpcId": {
-     "Ref": "VPC"
-    }
-   },
-   "Type": "AWS::EC2::VPCEndpoint"
-  },
-  "EcrDkrEndpoint": {
-   "Properties": {
-    "PrivateDnsEnabled": true,
-    "SecurityGroupIds": [
-     {
-      "Ref": "VPCEndpointSecurityGroup"
-     }
-    ],
-    "ServiceName": {
-     "Fn::Sub": "com.amazonaws.${AWS::Region}.ecr.dkr"
-    },
-    "SubnetIds": [
-     {
-      "Ref": "PrivateSubnet1"
-     },
-     {
-      "Ref": "PrivateSubnet2"
-     }
-    ],
-    "VpcEndpointType": "Interface",
-    "VpcId": {
-     "Ref": "VPC"
-    }
-   },
-   "Type": "AWS::EC2::VPCEndpoint"
-  },
-  "EcsEndpoint": {
-   "Properties": {
-    "PrivateDnsEnabled": true,
-    "SecurityGroupIds": [
-     {
-      "Ref": "VPCEndpointSecurityGroup"
-     }
-    ],
-    "ServiceName": {
-     "Fn::Sub": "com.amazonaws.${AWS::Region}.ecs"
-    },
-    "SubnetIds": [
-     {
-      "Ref": "PrivateSubnet1"
-     },
-     {
-      "Ref": "PrivateSubnet2"
-     }
-    ],
-    "VpcEndpointType": "Interface",
-    "VpcId": {
-     "Ref": "VPC"
-    }
-   },
-   "Type": "AWS::EC2::VPCEndpoint"
-  },
-  "InternetGateway": {
-   "Properties": {
-    "Tags": [
-     {
-      "Key": "Name",
-      "Value": {
-       "Fn::Sub": "${EnvironmentName}-igw"
-      }
-     }
-    ]
-   },
-   "Type": "AWS::EC2::InternetGateway"
-  },
-  "LogsEndpoint": {
-   "Properties": {
-    "PrivateDnsEnabled": true,
-    "SecurityGroupIds": [
-     {
-      "Ref": "VPCEndpointSecurityGroup"
-     }
-    ],
-    "ServiceName": {
-     "Fn::Sub": "com.amazonaws.${AWS::Region}.logs"
-    },
-    "SubnetIds": [
-     {
-      "Ref": "PrivateSubnet1"
-     },
-     {
-      "Ref": "PrivateSubnet2"
-     }
-    ],
-    "VpcEndpointType": "Interface",
-    "VpcId": {
-     "Ref": "VPC"
-    }
-   },
-   "Type": "AWS::EC2::VPCEndpoint"
-  },
-  "NatEIP": {
-   "Condition": "CreateNatGateway",
-   "Properties": {
-    "Domain": "vpc"
-   },
-   "Type": "AWS::EC2::EIP"
-  },
-  "NatGateway": {
-   "Condition": "CreateNatGateway",
-   "Properties": {
-    "AllocationId": {
-     "Fn::GetAtt": [
-      "NatEIP",
-      "AllocationId"
-     ]
-    },
-    "SubnetId": {
-     "Ref": "PublicSubnet1"
-    },
-    "Tags": [
-     {
-      "Key": "Name",
-      "Value": {
-       "Fn::Sub": "${EnvironmentName}-nat-gw"
-      }
-     }
-    ]
-   },
-   "Type": "AWS::EC2::NatGateway"
-  },
-  "PrivateRoute": {
-   "Condition": "CreateNatGateway",
-   "Properties": {
-    "DestinationCidrBlock": "0.0.0.0/0",
-    "NatGatewayId": {
-     "Ref": "NatGateway"
-    },
-    "RouteTableId": {
-     "Ref": "PrivateRouteTable"
-    }
-   },
-   "Type": "AWS::EC2::Route"
-  },
-  "PrivateRouteTable": {
-   "Properties": {
-    "Tags": [
-     {
-      "Key": "Name",
-      "Value": {
-       "Fn::Sub": "${EnvironmentName}-private-rt"
-      }
-     }
-    ],
-    "VpcId": {
-     "Ref": "VPC"
-    }
-   },
-   "Type": "AWS::EC2::RouteTable"
-  },
-  "PrivateSubnet1": {
-   "Properties": {
-    "AvailabilityZone": {
-     "Fn::Select": [
-      "0",
-      {
-       "Fn::GetAZs": ""
-      }
-     ]
-    },
-    "CidrBlock": "10.0.10.0/24",
-    "MapPublicIpOnLaunch": false,
-    "Tags": [
-     {
-      "Key": "Name",
-      "Value": {
-       "Fn::Sub": "${EnvironmentName}-private-1"
-      }
-     },
-     {
-      "Key": "Type",
-      "Value": "Private"
-     }
-    ],
-    "VpcId": {
-     "Ref": "VPC"
-    }
-   },
-   "Type": "AWS::EC2::Subnet"
-  },
-  "PrivateSubnet1RouteTableAssociation": {
-   "Properties": {
-    "RouteTableId": {
-     "Ref": "PrivateRouteTable"
-    },
-    "SubnetId": {
-     "Ref": "PrivateSubnet1"
-    }
-   },
-   "Type": "AWS::EC2::SubnetRouteTableAssociation"
-  },
-  "PrivateSubnet2": {
-   "Properties": {
-    "AvailabilityZone": {
-     "Fn::Select": [
-      "1",
-      {
-       "Fn::GetAZs": ""
-      }
-     ]
-    },
-    "CidrBlock": "10.0.11.0/24",
-    "MapPublicIpOnLaunch": false,
-    "Tags": [
-     {
-      "Key": "Name",
-      "Value": {
-       "Fn::Sub": "${EnvironmentName}-private-2"
-      }
-     },
-     {
-      "Key": "Type",
-      "Value": "Private"
-     }
-    ],
-    "VpcId": {
-     "Ref": "VPC"
-    }
-   },
-   "Type": "AWS::EC2::Subnet"
-  },
-  "PrivateSubnet2RouteTableAssociation": {
-   "Properties": {
-    "RouteTableId": {
-     "Ref": "PrivateRouteTable"
-    },
-    "SubnetId": {
-     "Ref": "PrivateSubnet2"
-    }
-   },
-   "Type": "AWS::EC2::SubnetRouteTableAssociation"
-  },
-  "PublicRoute": {
-   "DependsOn": "VPCGatewayAttachment",
-   "Properties": {
-    "DestinationCidrBlock": "0.0.0.0/0",
-    "GatewayId": {
-     "Ref": "InternetGateway"
-    },
-    "RouteTableId": {
-     "Ref": "PublicRouteTable"
-    }
-   },
-   "Type": "AWS::EC2::Route"
-  },
-  "PublicRouteTable": {
-   "Properties": {
-    "Tags": [
-     {
-      "Key": "Name",
-      "Value": {
-       "Fn::Sub": "${EnvironmentName}-public-rt"
-      }
-     }
-    ],
-    "VpcId": {
-     "Ref": "VPC"
-    }
-   },
-   "Type": "AWS::EC2::RouteTable"
-  },
-  "PublicSubnet1": {
-   "Properties": {
-    "AvailabilityZone": {
-     "Fn::Select": [
-      "0",
-      {
-       "Fn::GetAZs": ""
-      }
-     ]
-    },
-    "CidrBlock": "10.0.1.0/24",
-    "MapPublicIpOnLaunch": true,
-    "Tags": [
-     {
-      "Key": "Name",
-      "Value": {
-       "Fn::Sub": "${EnvironmentName}-public-1"
-      }
-     },
-     {
-      "Key": "Type",
-      "Value": "Public"
-     }
-    ],
-    "VpcId": {
-     "Ref": "VPC"
-    }
-   },
-   "Type": "AWS::EC2::Subnet"
-  },
-  "PublicSubnet1RouteTableAssociation": {
-   "Properties": {
-    "RouteTableId": {
-     "Ref": "PublicRouteTable"
-    },
-    "SubnetId": {
-     "Ref": "PublicSubnet1"
-    }
-   },
-   "Type": "AWS::EC2::SubnetRouteTableAssociation"
-  },
-  "PublicSubnet2": {
-   "Properties": {
-    "AvailabilityZone": {
-     "Fn::Select": [
-      "1",
-      {
-       "Fn::GetAZs": ""
-      }
-     ]
-    },
-    "CidrBlock": "10.0.2.0/24",
-    "MapPublicIpOnLaunch": true,
-    "Tags": [
-     {
-      "Key": "Name",
-      "Value": {
-       "Fn::Sub": "${EnvironmentName}-public-2"
-      }
-     },
-     {
-      "Key": "Type",
-      "Value": "Public"
-     }
-    ],
-    "VpcId": {
-     "Ref": "VPC"
-    }
-   },
-   "Type": "AWS::EC2::Subnet"
-  },
-  "PublicSubnet2RouteTableAssociation": {
-   "Properties": {
-    "RouteTableId": {
-     "Ref": "PublicRouteTable"
-    },
-    "SubnetId": {
-     "Ref": "PublicSubnet2"
-    }
-   },
-   "Type": "AWS::EC2::SubnetRouteTableAssociation"
-  },
-  "S3GatewayEndpoint": {
-   "Properties": {
-    "RouteTableIds": [
-     {
-      "Ref": "PrivateRouteTable"
-     }
-    ],
-    "ServiceName": {
-     "Fn::Sub": "com.amazonaws.${AWS::Region}.s3"
-    },
-    "VpcEndpointType": "Gateway",
-    "VpcId": {
-     "Ref": "VPC"
-    }
-   },
-   "Type": "AWS::EC2::VPCEndpoint"
-  },
-  "SecretsManagerEndpoint": {
-   "Properties": {
-    "PrivateDnsEnabled": true,
-    "SecurityGroupIds": [
-     {
-      "Ref": "VPCEndpointSecurityGroup"
-     }
-    ],
-    "ServiceName": {
-     "Fn::Sub": "com.amazonaws.${AWS::Region}.secretsmanager"
-    },
-    "SubnetIds": [
-     {
-      "Ref": "PrivateSubnet1"
-     },
-     {
-      "Ref": "PrivateSubnet2"
-     }
-    ],
-    "VpcEndpointType": "Interface",
-    "VpcId": {
-     "Ref": "VPC"
-    }
-   },
-   "Type": "AWS::EC2::VPCEndpoint"
-  },
-  "VPC": {
-   "Properties": {
-    "CidrBlock": {
-     "Ref": "VpcCidr"
-    },
-    "EnableDnsHostnames": true,
-    "EnableDnsSupport": true,
-    "Tags": [
-     {
-      "Key": "Name",
-      "Value": {
-       "Fn::Sub": "${EnvironmentName}-vpc"
-      }
-     }
-    ]
-   },
-   "Type": "AWS::EC2::VPC"
-  },
-  "VPCEndpointSecurityGroup": {
-   "Properties": {
-    "GroupDescription": "Security group for VPC endpoints",
-    "SecurityGroupEgress": [
-     {
-      "CidrIp": "0.0.0.0/0",
-      "Description": "All outbound traffic",
-      "IpProtocol": "-1"
-     }
-    ],
-    "SecurityGroupIngress": [
-     {
-      "CidrIp": {
-       "Ref": "VpcCidr"
-      },
-      "Description": "HTTPS from VPC",
-      "FromPort": 443,
-      "IpProtocol": "tcp",
-      "ToPort": 443
-     }
-    ],
-    "Tags": [
-     {
-      "Key": "Name",
-      "Value": {
-       "Fn::Sub": "${EnvironmentName}-vpce-sg"
-      }
-     }
-    ],
-    "VpcId": {
-     "Ref": "VPC"
-    }
-   },
-   "Type": "AWS::EC2::SecurityGroup"
-  },
-  "VPCGatewayAttachment": {
-   "Properties": {
-    "InternetGatewayId": {
-     "Ref": "InternetGateway"
-    },
-    "VpcId": {
-     "Ref": "VPC"
-    }
-   },
-   "Type": "AWS::EC2::VPCGatewayAttachment"
-  }
- }
-}
+Conditions:
+  CreateNatGateway: !And
+    - !Equals
+      - !Ref 'CreateNatGateway'
+      - 'Yes'
+    - !Equals
+      - !Ref 'CreatePublicSubnets'
+      - 'Yes'
+  CreatePublicSubnets: !Equals
+    - !Ref 'CreatePublicSubnets'
+    - 'Yes'
+Description: 'Lakerunner VPC: Cost-optimized VPC with essential VPC endpoints for private AWS service access'
+Outputs:
+  InternetGatewayId:
+    Condition: CreatePublicSubnets
+    Description: Internet Gateway ID
+    Export:
+      Name: !Sub '${AWS::StackName}-InternetGatewayId'
+    Value: !Ref 'InternetGateway'
+  NatGatewayId:
+    Description: NAT Gateway ID (if created)
+    Export:
+      Name: !Sub '${AWS::StackName}-NatGatewayId'
+    Value: !If
+      - CreateNatGateway
+      - !Ref 'NatGateway'
+      - None
+  PrivateSubnet1:
+    Description: Private subnet 1 ID
+    Export:
+      Name: !Sub '${AWS::StackName}-PrivateSubnet1'
+    Value: !Ref 'PrivateSubnet1'
+  PrivateSubnet2:
+    Description: Private subnet 2 ID
+    Export:
+      Name: !Sub '${AWS::StackName}-PrivateSubnet2'
+    Value: !Ref 'PrivateSubnet2'
+  PrivateSubnets:
+    Description: Private subnet IDs (comma-separated)
+    Export:
+      Name: !Sub '${AWS::StackName}-PrivateSubnets'
+    Value: !Join
+      - ','
+      - - !Ref 'PrivateSubnet1'
+        - !Ref 'PrivateSubnet2'
+  PublicSubnet1:
+    Condition: CreatePublicSubnets
+    Description: Public subnet 1 ID
+    Export:
+      Name: !Sub '${AWS::StackName}-PublicSubnet1'
+    Value: !Ref 'PublicSubnet1'
+  PublicSubnet2:
+    Condition: CreatePublicSubnets
+    Description: Public subnet 2 ID
+    Export:
+      Name: !Sub '${AWS::StackName}-PublicSubnet2'
+    Value: !Ref 'PublicSubnet2'
+  PublicSubnets:
+    Condition: CreatePublicSubnets
+    Description: Public subnet IDs (comma-separated)
+    Export:
+      Name: !Sub '${AWS::StackName}-PublicSubnets'
+    Value: !Join
+      - ','
+      - - !Ref 'PublicSubnet1'
+        - !Ref 'PublicSubnet2'
+  VPCEndpointSecurityGroupId:
+    Description: Security Group ID for VPC Endpoints
+    Export:
+      Name: !Sub '${AWS::StackName}-VPCEndpointSGId'
+    Value: !Ref 'VPCEndpointSecurityGroup'
+  VpcCidr:
+    Description: VPC CIDR block
+    Export:
+      Name: !Sub '${AWS::StackName}-VpcCidr'
+    Value: !Ref 'VPCCidr'
+  VpcId:
+    Description: VPC ID
+    Export:
+      Name: !Sub '${AWS::StackName}-VpcId'
+    Value: !Ref 'VPC'
+Parameters:
+  CreateNatGateway:
+    AllowedValues:
+      - 'Yes'
+      - 'No'
+    Default: 'Yes'
+    Description: Create NAT Gateway for private subnet internet access (No = isolated private subnets, requires CreatePublicSubnets=Yes)
+    Type: String
+  CreatePublicSubnets:
+    AllowedValues:
+      - 'Yes'
+      - 'No'
+    Default: 'Yes'
+    Description: Create public subnets and internet gateway (No = private subnets only)
+    Type: String
+  EnvironmentName:
+    AllowedPattern: ^[a-zA-Z][a-zA-Z0-9-]*$
+    Default: lakerunner
+    Description: Environment name for resource naming (typically the root stack name)
+    Type: String
+  VPCCidr:
+    AllowedPattern: ^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$
+    Default: 10.0.0.0/16
+    Description: CIDR block for the VPC
+    Type: String
+Resources:
+  EcrApiEndpoint:
+    Properties:
+      PrivateDnsEnabled: true
+      SecurityGroupIds:
+        - !Ref 'VPCEndpointSecurityGroup'
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ecr.api'
+      SubnetIds:
+        - !Ref 'PrivateSubnet1'
+        - !Ref 'PrivateSubnet2'
+      VpcEndpointType: Interface
+      VpcId: !Ref 'VPC'
+    Type: AWS::EC2::VPCEndpoint
+  EcrDkrEndpoint:
+    Properties:
+      PrivateDnsEnabled: true
+      SecurityGroupIds:
+        - !Ref 'VPCEndpointSecurityGroup'
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ecr.dkr'
+      SubnetIds:
+        - !Ref 'PrivateSubnet1'
+        - !Ref 'PrivateSubnet2'
+      VpcEndpointType: Interface
+      VpcId: !Ref 'VPC'
+    Type: AWS::EC2::VPCEndpoint
+  EcsEndpoint:
+    Properties:
+      PrivateDnsEnabled: true
+      SecurityGroupIds:
+        - !Ref 'VPCEndpointSecurityGroup'
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ecs'
+      SubnetIds:
+        - !Ref 'PrivateSubnet1'
+        - !Ref 'PrivateSubnet2'
+      VpcEndpointType: Interface
+      VpcId: !Ref 'VPC'
+    Type: AWS::EC2::VPCEndpoint
+  InternetGateway:
+    Condition: CreatePublicSubnets
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-igw'
+        - Key: Component
+          Value: VPC
+        - Key: ResourceType
+          Value: InternetGateway
+        - Key: ManagedBy
+          Value: Lakerunner
+        - Key: Environment
+          Value: !Ref 'EnvironmentName'
+    Type: AWS::EC2::InternetGateway
+  LogsEndpoint:
+    Properties:
+      PrivateDnsEnabled: true
+      SecurityGroupIds:
+        - !Ref 'VPCEndpointSecurityGroup'
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.logs'
+      SubnetIds:
+        - !Ref 'PrivateSubnet1'
+        - !Ref 'PrivateSubnet2'
+      VpcEndpointType: Interface
+      VpcId: !Ref 'VPC'
+    Type: AWS::EC2::VPCEndpoint
+  NatEIP:
+    Condition: CreateNatGateway
+    Properties:
+      Domain: vpc
+    Type: AWS::EC2::EIP
+  NatGateway:
+    Condition: CreateNatGateway
+    Properties:
+      AllocationId: !GetAtt 'NatEIP.AllocationId'
+      SubnetId: !Ref 'PublicSubnet1'
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-nat-gw'
+        - Key: Component
+          Value: VPC
+        - Key: ResourceType
+          Value: NatGateway
+        - Key: ManagedBy
+          Value: Lakerunner
+        - Key: Environment
+          Value: !Ref 'EnvironmentName'
+    Type: AWS::EC2::NatGateway
+  PrivateRoute:
+    Condition: CreateNatGateway
+    Properties:
+      DestinationCidrBlock: '0.0.0.0/0'
+      NatGatewayId: !Ref 'NatGateway'
+      RouteTableId: !Ref 'PrivateRouteTable'
+    Type: AWS::EC2::Route
+  PrivateRouteTable:
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-private-rt'
+        - Key: Component
+          Value: VPC
+        - Key: ResourceType
+          Value: RouteTable
+        - Key: ManagedBy
+          Value: Lakerunner
+        - Key: Environment
+          Value: !Ref 'EnvironmentName'
+      VpcId: !Ref 'VPC'
+    Type: AWS::EC2::RouteTable
+  PrivateSubnet1:
+    Properties:
+      AvailabilityZone: !Select
+        - '0'
+        - !GetAZs ''
+      CidrBlock: !Select
+        - '2'
+        - !Cidr
+          - !Ref 'VPCCidr'
+          - '4'
+          - '8'
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-private-1'
+        - Key: Component
+          Value: VPC
+        - Key: ResourceType
+          Value: Subnet
+        - Key: ManagedBy
+          Value: Lakerunner
+        - Key: Environment
+          Value: !Ref 'EnvironmentName'
+        - Key: Type
+          Value: Private
+      VpcId: !Ref 'VPC'
+    Type: AWS::EC2::Subnet
+  PrivateSubnet1RouteTableAssociation:
+    Properties:
+      RouteTableId: !Ref 'PrivateRouteTable'
+      SubnetId: !Ref 'PrivateSubnet1'
+    Type: AWS::EC2::SubnetRouteTableAssociation
+  PrivateSubnet2:
+    Properties:
+      AvailabilityZone: !Select
+        - '1'
+        - !GetAZs ''
+      CidrBlock: !Select
+        - '3'
+        - !Cidr
+          - !Ref 'VPCCidr'
+          - '4'
+          - '8'
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-private-2'
+        - Key: Component
+          Value: VPC
+        - Key: ResourceType
+          Value: Subnet
+        - Key: ManagedBy
+          Value: Lakerunner
+        - Key: Environment
+          Value: !Ref 'EnvironmentName'
+        - Key: Type
+          Value: Private
+      VpcId: !Ref 'VPC'
+    Type: AWS::EC2::Subnet
+  PrivateSubnet2RouteTableAssociation:
+    Properties:
+      RouteTableId: !Ref 'PrivateRouteTable'
+      SubnetId: !Ref 'PrivateSubnet2'
+    Type: AWS::EC2::SubnetRouteTableAssociation
+  PublicRoute:
+    Condition: CreatePublicSubnets
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      DestinationCidrBlock: '0.0.0.0/0'
+      GatewayId: !Ref 'InternetGateway'
+      RouteTableId: !Ref 'PublicRouteTable'
+    Type: AWS::EC2::Route
+  PublicRouteTable:
+    Condition: CreatePublicSubnets
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-public-rt'
+        - Key: Component
+          Value: VPC
+        - Key: ResourceType
+          Value: RouteTable
+        - Key: ManagedBy
+          Value: Lakerunner
+        - Key: Environment
+          Value: !Ref 'EnvironmentName'
+      VpcId: !Ref 'VPC'
+    Type: AWS::EC2::RouteTable
+  PublicSubnet1:
+    Condition: CreatePublicSubnets
+    Properties:
+      AvailabilityZone: !Select
+        - '0'
+        - !GetAZs ''
+      CidrBlock: !Select
+        - '0'
+        - !Cidr
+          - !Ref 'VPCCidr'
+          - '4'
+          - '8'
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-public-1'
+        - Key: Component
+          Value: VPC
+        - Key: ResourceType
+          Value: Subnet
+        - Key: ManagedBy
+          Value: Lakerunner
+        - Key: Environment
+          Value: !Ref 'EnvironmentName'
+        - Key: Type
+          Value: Public
+      VpcId: !Ref 'VPC'
+    Type: AWS::EC2::Subnet
+  PublicSubnet1RouteTableAssociation:
+    Condition: CreatePublicSubnets
+    Properties:
+      RouteTableId: !Ref 'PublicRouteTable'
+      SubnetId: !Ref 'PublicSubnet1'
+    Type: AWS::EC2::SubnetRouteTableAssociation
+  PublicSubnet2:
+    Condition: CreatePublicSubnets
+    Properties:
+      AvailabilityZone: !Select
+        - '1'
+        - !GetAZs ''
+      CidrBlock: !Select
+        - '1'
+        - !Cidr
+          - !Ref 'VPCCidr'
+          - '4'
+          - '8'
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-public-2'
+        - Key: Component
+          Value: VPC
+        - Key: ResourceType
+          Value: Subnet
+        - Key: ManagedBy
+          Value: Lakerunner
+        - Key: Environment
+          Value: !Ref 'EnvironmentName'
+        - Key: Type
+          Value: Public
+      VpcId: !Ref 'VPC'
+    Type: AWS::EC2::Subnet
+  PublicSubnet2RouteTableAssociation:
+    Condition: CreatePublicSubnets
+    Properties:
+      RouteTableId: !Ref 'PublicRouteTable'
+      SubnetId: !Ref 'PublicSubnet2'
+    Type: AWS::EC2::SubnetRouteTableAssociation
+  S3GatewayEndpoint:
+    Properties:
+      RouteTableIds:
+        - !Ref 'PrivateRouteTable'
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.s3'
+      VpcEndpointType: Gateway
+      VpcId: !Ref 'VPC'
+    Type: AWS::EC2::VPCEndpoint
+  SecretsManagerEndpoint:
+    Properties:
+      PrivateDnsEnabled: true
+      SecurityGroupIds:
+        - !Ref 'VPCEndpointSecurityGroup'
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.secretsmanager'
+      SubnetIds:
+        - !Ref 'PrivateSubnet1'
+        - !Ref 'PrivateSubnet2'
+      VpcEndpointType: Interface
+      VpcId: !Ref 'VPC'
+    Type: AWS::EC2::VPCEndpoint
+  VPC:
+    Properties:
+      CidrBlock: !Ref 'VPCCidr'
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-vpc'
+        - Key: Component
+          Value: VPC
+        - Key: ResourceType
+          Value: VPC
+        - Key: ManagedBy
+          Value: Lakerunner
+        - Key: Environment
+          Value: !Ref 'EnvironmentName'
+    Type: AWS::EC2::VPC
+  VPCEndpointSecurityGroup:
+    Properties:
+      GroupDescription: Security group for VPC endpoints
+      SecurityGroupEgress:
+        - CidrIp: '0.0.0.0/0'
+          Description: All outbound traffic
+          IpProtocol: '-1'
+      SecurityGroupIngress:
+        - CidrIp: !Ref 'VPCCidr'
+          Description: HTTPS from VPC
+          FromPort: 443
+          IpProtocol: tcp
+          ToPort: 443
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-vpce-sg'
+        - Key: Component
+          Value: VPC
+        - Key: ResourceType
+          Value: SecurityGroup
+        - Key: ManagedBy
+          Value: Lakerunner
+        - Key: Environment
+          Value: !Ref 'EnvironmentName'
+      VpcId: !Ref 'VPC'
+    Type: AWS::EC2::SecurityGroup
+  VPCGatewayAttachment:
+    Condition: CreatePublicSubnets
+    Properties:
+      InternetGatewayId: !Ref 'InternetGateway'
+      VpcId: !Ref 'VPC'
+    Type: AWS::EC2::VPCGatewayAttachment
+

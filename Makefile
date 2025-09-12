@@ -17,11 +17,14 @@ help:	## Show this help
 install:	## Install dependencies in virtual environment
 	source $(VENV_DIR)/bin/activate && pip install -r requirements.txt
 
-build:		## Generate CloudFormation templates and validate
+build:		## Generate CloudFormation templates and validate (includes root stack)
 	source $(VENV_DIR)/bin/activate && ./build.sh
 
+build-root:	## Generate only the Lakerunner root template
+	source $(VENV_DIR)/bin/activate && python src/lakerunner_root.py > generated-templates/lakerunner-root.yaml && cfn-lint --ignore-checks W1020 generated-templates/lakerunner-root.yaml
+
 test:		## Run unit tests (working tests only)
-	source $(VENV_DIR)/bin/activate && $(PYTEST) tests/test_common_infra.py tests/test_*_simple.py tests/test_demo_otel_collector.py tests/test_parameter_validation.py tests/test_condition_validation.py -v
+	source $(VENV_DIR)/bin/activate && $(PYTEST) tests/test_*_stack.py tests/test_stack_handoffs.py tests/test_root_template.py tests/test_*_simple.py tests/test_demo_otel_collector.py -v
 
 test-all:	## Run all tests including complex ones (may have failures)
 	source $(VENV_DIR)/bin/activate && $(PYTEST) tests/ -v
@@ -48,7 +51,7 @@ test-params:	## Run parameter and condition validation tests
 	source $(VENV_DIR)/bin/activate && $(PYTEST) tests/test_parameter_validation.py tests/test_condition_validation.py -v
 
 lint:		## Run CloudFormation linting (warnings are acceptable)
-	source $(VENV_DIR)/bin/activate && cfn-lint generated-templates/*.yaml || echo "cfn-lint completed with warnings (warnings are acceptable per CLAUDE.md)"
+	source $(VENV_DIR)/bin/activate && cfn-lint --ignore-checks W1020 -- generated-templates/*.yaml || echo "cfn-lint completed with warnings (warnings are acceptable per CLAUDE.md)"
 
 clean:		## Clean generated files and test cache
 	rm -rf generated-templates/*.yaml .pytest_cache tests/__pycache__ src/__pycache__

@@ -1,335 +1,542 @@
 #!/usr/bin/env python3
-# Copyright (C) 2025 CardinalHQ, Inc
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU Affero General Public License as
-# published by the Free Software Foundation, version 3.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU Affero General Public License for more details.
-#
-# You should have received a copy of the GNU Affero General Public License
-# along with this program. If not, see <http://www.gnu.org/licenses/>.
+"""Lakerunner Common Infrastructure CloudFormation Template - Part 2
+
+Creates shared infrastructure components needed by both ECS and EKS deployments:
+- Uses VPC from Part 1 (Landscape) or existing VPC via dropdown selection  
+- RDS database cluster (create or bring-your-own)
+- S3 bucket and SQS queue for data processing (create or bring-your-own)
+- MSK cluster for streaming (create or bring-your-own)
+- Shared security groups and IAM roles
+- Application secrets and configuration
+
+Deploy this after Part 1 (Landscape), then choose Part 3a (ECS) or Part 3b (EKS).
+"""
 
 import yaml
 import os
 from troposphere import (
-    Template, Parameter, Ref, Sub, GetAtt, If, Equals, NoValue, Export, Output,
-    Select, Not, Tags, Join
+    Template, Parameter, Ref, Equals, Sub, GetAtt, If, Not, And, Or,
+    Condition, Output, Export, Tags, Base64, Join
 )
-from troposphere.ec2 import SecurityGroup, SecurityGroupIngress
-from troposphere.ecs import Cluster
-from troposphere.s3 import (
-    Bucket, LifecycleRule, LifecycleConfiguration,
-    NotificationConfiguration, QueueConfigurations,
-    S3Key, Filter, Rules
+from troposphere.rds import (
+    DBCluster, DBSubnetGroup, DBClusterParameterGroup
 )
+from troposphere.s3 import Bucket, BucketPolicy
 from troposphere.sqs import Queue, QueuePolicy
+from troposphere.ec2 import SecurityGroup, SecurityGroupRule
+from troposphere.iam import Role, PolicyType, InstanceProfile
 from troposphere.secretsmanager import Secret, GenerateSecretString
-from troposphere.rds import DBInstance, DBSubnetGroup
-from troposphere.ssm import Parameter as SsmParameter
+from troposphere.ssm import Parameter as SSMParameter
 
+
+def load_defaults():
+    """Load default configuration from YAML file."""
+    config_path = os.path.join(os.path.dirname(__file__), '..', 'lakerunner-stack-defaults.yaml')
+    with open(config_path, 'r') as f:
+        return yaml.safe_load(f)
+
+
+def standard_tags(resource_name, resource_type):
+    """Generate standard tags for all resources."""
+    return [
+        {"Key": "Name", "Value": Sub(f"${{EnvironmentName}}-{resource_name}")},
+        {"Key": "Component", "Value": "CommonInfra"},
+        {"Key": "ResourceType", "Value": resource_type},
+        {"Key": "ManagedBy", "Value": "Lakerunner"},
+        {"Key": "Environment", "Value": Ref("EnvironmentName")},
+    ]
+
+
+# Initialize template
 t = Template()
-t.set_description("CommonInfra stack for Lakerunner.")
+t.set_description("Lakerunner Common Infrastructure: Shared services for ECS and EKS deployments")
 
-# -----------------------
-# Parameters (with helpful descriptions)
-# -----------------------
-VpcId = t.add_parameter(Parameter(
-    "VpcId",
-    Type="AWS::EC2::VPC::Id",
-    Description="REQUIRED: VPC where resources will be created."
-))
+# Load defaults
+defaults = load_defaults()
 
-PublicSubnets = t.add_parameter(Parameter(
-    "PublicSubnets",
-    Type="List<AWS::EC2::Subnet::Id>",
-    Default="",
-    Description="Public subnet IDs (for internet-facing ALB). Required when ALB uses internet-facing scheme. Provide at least two in different AZs."
-))
+# =============================================================================
+# VPC Selection Parameters (Dropdowns for better UX)
+# =============================================================================
 
-PrivateSubnets = t.add_parameter(Parameter(
-    "PrivateSubnets",
-    Type="List<AWS::EC2::Subnet::Id>",
-    Description="REQUIRED: Private subnet IDs (for RDS/ECS). Provide at least two in different AZs."
-))
+vpc_id = t.add_parameter(
+    Parameter(
+        "VPCId",
+        Type="AWS::EC2::VPC::Id",
+        Description="Select VPC for Lakerunner infrastructure (from Landscape or existing)",
+    )
+)
 
-# Configuration overrides (optional multi-line parameters)
-ApiKeysOverride = t.add_parameter(Parameter(
-    "ApiKeysOverride",
-    Type="String",
-    Default="",
-    Description="OPTIONAL: Custom API keys configuration in YAML format. Leave blank to use defaults from defaults.yaml. Example: - organization_id: xxx\\n  keys:\\n    - keyvalue"
-))
+private_subnet1 = t.add_parameter(
+    Parameter(
+        "PrivateSubnet1Id",
+        Type="AWS::EC2::Subnet::Id",
+        Description="Select first private subnet for databases and compute",
+    )
+)
 
-StorageProfilesOverride = t.add_parameter(Parameter(
-    "StorageProfilesOverride",
-    Type="String",
-    Default="",
-    Description="OPTIONAL: Custom storage profiles configuration in YAML format. Leave blank to use defaults from defaults.yaml. Bucket name and region will be auto-filled."
-))
+private_subnet2 = t.add_parameter(
+    Parameter(
+        "PrivateSubnet2Id",
+        Type="AWS::EC2::Subnet::Id",
+        Description="Select second private subnet (must be in different AZ)",
+    )
+)
 
-# -----------------------
-# UI Hints in Console (Parameter Groups & Labels)
-# -----------------------
+has_public_subnets = t.add_parameter(
+    Parameter(
+        "HasPublicSubnets",
+        Type="String",
+        Default="Yes",
+        AllowedValues=["Yes", "No"],
+        Description="Will you deploy load balancers that need public subnets?",
+    )
+)
+
+public_subnet1 = t.add_parameter(
+    Parameter(
+        "PublicSubnet1Id",
+        Type="AWS::EC2::Subnet::Id",
+        Description="Select first public subnet (required if HasPublicSubnets=Yes)",
+    )
+)
+
+public_subnet2 = t.add_parameter(
+    Parameter(
+        "PublicSubnet2Id",
+        Type="AWS::EC2::Subnet::Id", 
+        Description="Select second public subnet (required if HasPublicSubnets=Yes)",
+    )
+)
+
+environment_name = t.add_parameter(
+    Parameter(
+        "EnvironmentName",
+        Type="String",
+        Default="lakerunner",
+        Description="Environment name for resource naming and tagging",
+        AllowedPattern=r"^[a-zA-Z][a-zA-Z0-9-]*$"
+    )
+)
+
+# =============================================================================
+# RDS Configuration
+# =============================================================================
+
+create_rds = t.add_parameter(
+    Parameter(
+        "CreateRDS",
+        Type="String",
+        Default="Yes",
+        AllowedValues=["Yes", "No"],
+        Description="Create RDS PostgreSQL cluster or use existing database?",
+    )
+)
+
+db_instance_class = t.add_parameter(
+    Parameter(
+        "DBInstanceClass",
+        Type="String",
+        Default="db.r5.large",
+        AllowedValues=["db.t3.medium", "db.r5.large", "db.r5.xlarge", "db.r5.2xlarge"],
+        Description="RDS instance class (only used when CreateRDS=Yes)",
+    )
+)
+
+# BYO RDS parameters
+existing_db_endpoint = t.add_parameter(
+    Parameter(
+        "ExistingDBEndpoint",
+        Type="String",
+        Default="",
+        Description="Existing database endpoint (required when CreateRDS=No)",
+    )
+)
+
+existing_db_port = t.add_parameter(
+    Parameter(
+        "ExistingDBPort",
+        Type="Number",
+        Default=5432,
+        Description="Existing database port (required when CreateRDS=No)",
+    )
+)
+
+existing_db_name = t.add_parameter(
+    Parameter(
+        "ExistingDBName",
+        Type="String",
+        Default="lakerunner",
+        Description="Existing database name (required when CreateRDS=No)",
+    )
+)
+
+# =============================================================================
+# S3 + SQS Storage Configuration
+# =============================================================================
+
+create_storage = t.add_parameter(
+    Parameter(
+        "CreateStorage",
+        Type="String",
+        Default="Yes",
+        AllowedValues=["Yes", "No"],
+        Description="Create S3 bucket and SQS queue or use existing storage?",
+    )
+)
+
+# BYO Storage parameters
+existing_s3_bucket = t.add_parameter(
+    Parameter(
+        "ExistingS3BucketName",
+        Type="String",
+        Default="",
+        Description="Existing S3 bucket name (required when CreateStorage=No)",
+    )
+)
+
+existing_sqs_queue = t.add_parameter(
+    Parameter(
+        "ExistingSQSQueueUrl",
+        Type="String",
+        Default="",
+        Description="Existing SQS queue URL (required when CreateStorage=No)",
+    )
+)
+
+# =============================================================================
+# MSK Configuration  
+# =============================================================================
+
+create_msk = t.add_parameter(
+    Parameter(
+        "CreateMSK",
+        Type="String",
+        Default="No",
+        AllowedValues=["Yes", "No"],
+        Description="Create MSK (Managed Kafka) cluster?",
+    )
+)
+
+# BYO MSK parameters
+existing_msk_cluster = t.add_parameter(
+    Parameter(
+        "ExistingMSKClusterArn",
+        Type="String",
+        Default="",
+        Description="Existing MSK cluster ARN (required when CreateMSK=No but MSK is needed)",
+    )
+)
+
+# =============================================================================
+# Conditions
+# =============================================================================
+
+t.add_condition("CreateRDSCondition", Equals(Ref(create_rds), "Yes"))
+t.add_condition("CreateStorageCondition", Equals(Ref(create_storage), "Yes"))
+t.add_condition("CreateMSKCondition", Equals(Ref(create_msk), "Yes"))
+t.add_condition("HasPublicSubnetsCondition", Equals(Ref(has_public_subnets), "Yes"))
+
+# =============================================================================
+# Parameter Groups for CloudFormation Console
+# =============================================================================
+
 t.set_metadata({
     "AWS::CloudFormation::Interface": {
         "ParameterGroups": [
             {
-                "Label": {"default": "Networking"},
-                "Parameters": ["VpcId", "PublicSubnets", "PrivateSubnets"]
+                "Label": {"default": "Environment Configuration"},
+                "Parameters": ["EnvironmentName"]
             },
             {
-                "Label": {"default": "Configuration Overrides (Advanced)"},
-                "Parameters": ["ApiKeysOverride", "StorageProfilesOverride"]
+                "Label": {"default": "VPC Selection (Choose from your existing VPCs/Subnets)"},
+                "Parameters": [
+                    "VPCId",
+                    "PrivateSubnet1Id",
+                    "PrivateSubnet2Id",
+                    "HasPublicSubnets",
+                    "PublicSubnet1Id",
+                    "PublicSubnet2Id"
+                ]
+            },
+            {
+                "Label": {"default": "Database Configuration"},
+                "Parameters": [
+                    "CreateRDS",
+                    "DBInstanceClass",
+                    "ExistingDBEndpoint",
+                    "ExistingDBPort",
+                    "ExistingDBName"
+                ]
+            },
+            {
+                "Label": {"default": "Storage Configuration (S3 + SQS)"},
+                "Parameters": [
+                    "CreateStorage",
+                    "ExistingS3BucketName",
+                    "ExistingSQSQueueUrl"
+                ]
+            },
+            {
+                "Label": {"default": "Streaming Configuration (MSK)"},
+                "Parameters": [
+                    "CreateMSK",
+                    "ExistingMSKClusterArn"
+                ]
             }
         ],
         "ParameterLabels": {
-            "VpcId": {"default": "VPC Id"},
-            "PublicSubnets": {"default": "Public Subnets (for ALB internet-facing)"},
-            "PrivateSubnets": {"default": "Private Subnets (for ECS/RDS)"},
-            "ApiKeysOverride": {"default": "Custom API Keys (YAML)"},
-            "StorageProfilesOverride": {"default": "Custom Storage Profiles (YAML)"}
+            "VPCId": {"default": "VPC"},
+            "PrivateSubnet1Id": {"default": "Private Subnet 1"},
+            "PrivateSubnet2Id": {"default": "Private Subnet 2"},
+            "HasPublicSubnets": {"default": "Use public subnets for load balancers?"},
+            "PublicSubnet1Id": {"default": "Public Subnet 1"},
+            "PublicSubnet2Id": {"default": "Public Subnet 2"},
+            "CreateRDS": {"default": "Create RDS database?"},
+            "DBInstanceClass": {"default": "Database instance size"},
+            "CreateStorage": {"default": "Create S3 + SQS storage?"},
+            "CreateMSK": {"default": "Create MSK cluster?"}
         }
     }
 })
 
-# -----------------------
-# Conditions
-# -----------------------
-t.add_condition("HasApiKeysOverride", Not(Equals(Ref(ApiKeysOverride), "")))
-t.add_condition("HasStorageProfilesOverride", Not(Equals(Ref(StorageProfilesOverride), "")))
-t.add_condition("HasPublicSubnets", Not(Equals(Join(",", Ref(PublicSubnets)), "")))
-
-# Helper function to load defaults
-def load_defaults():
-    """Load default configuration from lakerunner-stack-defaults.yaml"""
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    config_path = os.path.join(script_dir, "..", "lakerunner-stack-defaults.yaml")
-
-    with open(config_path, 'r') as f:
-        return yaml.safe_load(f)
-
-# -----------------------
+# =============================================================================
 # Security Groups
-# -----------------------
-TaskSG = t.add_resource(SecurityGroup(
-    "TaskSG",
-    GroupDescription="Security group for ECS tasks",
-    VpcId=Ref(VpcId),
-    SecurityGroupEgress=[{
-        "IpProtocol": "-1",
-        "CidrIp": "0.0.0.0/0",
-        "Description": "Allow all outbound"
-    }]
+# =============================================================================
+
+# Database Security Group
+db_security_group = t.add_resource(SecurityGroup(
+    "DatabaseSecurityGroup",
+    GroupDescription="Security group for RDS database",
+    VpcId=Ref(vpc_id),
+    SecurityGroupIngress=[
+        SecurityGroupRule(
+            IpProtocol="tcp",
+            FromPort=5432,
+            ToPort=5432,
+            SourceSecurityGroupId=Ref("ComputeSecurityGroup"),
+            Description="PostgreSQL access from compute resources"
+        )
+    ],
+    Tags=standard_tags("db-sg", "SecurityGroup")
 ))
 
-# task-to-task 7101 (adjust/remove as needed)
-t.add_resource(SecurityGroupIngress(
-    "TaskSG7101Self",
-    GroupId=Ref(TaskSG),
-    IpProtocol="tcp",
-    FromPort=7101,
-    ToPort=7101,
-    SourceSecurityGroupId=Ref(TaskSG),
-    Description="task-to-task 7101",
+# Compute Security Group (for ECS/EKS)
+compute_security_group = t.add_resource(SecurityGroup(
+    "ComputeSecurityGroup", 
+    GroupDescription="Security group for compute resources (ECS tasks, EKS nodes)",
+    VpcId=Ref(vpc_id),
+    SecurityGroupIngress=[
+        SecurityGroupRule(
+            IpProtocol="tcp",
+            FromPort=80,
+            ToPort=80,
+            CidrIp="10.0.0.0/8",
+            Description="HTTP from private networks"
+        ),
+        SecurityGroupRule(
+            IpProtocol="tcp",
+            FromPort=443,
+            ToPort=443,
+            CidrIp="10.0.0.0/8", 
+            Description="HTTPS from private networks"
+        )
+    ],
+    SecurityGroupEgress=[
+        SecurityGroupRule(
+            IpProtocol="-1",
+            CidrIp="0.0.0.0/0",
+            Description="All outbound traffic"
+        )
+    ],
+    Tags=standard_tags("compute-sg", "SecurityGroup")
 ))
 
-# Allow tasks to connect to PostgreSQL database
-t.add_resource(SecurityGroupIngress(
-    "TaskSGDbSelf",
-    GroupId=Ref(TaskSG),
-    IpProtocol="tcp",
-    FromPort=5432,
-    ToPort=5432,
-    SourceSecurityGroupId=Ref(TaskSG),
-    Description="task-to-database PostgreSQL",
+# =============================================================================
+# RDS Database (Conditional)
+# =============================================================================
+
+# DB Subnet Group
+db_subnet_group = t.add_resource(DBSubnetGroup(
+    "DBSubnetGroup",
+    Condition="CreateRDSCondition",
+    DBSubnetGroupDescription="Subnet group for RDS database",
+    SubnetIds=[Ref(private_subnet1), Ref(private_subnet2)],
+    Tags=standard_tags("db-subnet-group", "DBSubnetGroup")
 ))
 
-# -----------------------
-# ECS cluster (always create)
-# -----------------------
-ClusterRes = t.add_resource(Cluster(
-    "Cluster",
-    ClusterName=Sub("${AWS::StackName}-cluster"),
-))
-t.add_output(Output(
-    "ClusterArn",
-    Value=GetAtt(ClusterRes, "Arn"),
-    Export=Export(name=Sub("${AWS::StackName}-ClusterArn"))
-))
-
-# -----------------------
-# SQS + S3 (with lifecycle + notifications)
-# -----------------------
-QueueRes = t.add_resource(Queue(
-    "IngestQueue",
-    QueueName="lakerunner-ingest-queue",
-    MessageRetentionPeriod=60 * 60 * 24 * 4,  # seconds
-))
-
-BucketRes = t.add_resource(Bucket(
-    "IngestBucket",
-    DeletionPolicy="Delete",
-    LifecycleConfiguration=LifecycleConfiguration(
-        Rules=[LifecycleRule(Prefix="otel-raw/", Status="Enabled", ExpirationInDays=10)]
-    ),
-    NotificationConfiguration=NotificationConfiguration(
-        QueueConfigurations=[
-            QueueConfigurations(
-                Event="s3:ObjectCreated:*",
-                Queue=GetAtt(QueueRes, "Arn"),
-                Filter=Filter(
-                    S3Key=S3Key(
-                        Rules=[Rules(Name="prefix", Value=p)]
-                    )
-                )
-            ) for p in ["otel-raw/", "logs-raw/", "metrics-raw/"]
-        ]
-    ),
-))
-
-t.add_resource(QueuePolicy(
-    "IngestQueuePolicy",
-    Queues=[Ref(QueueRes)],
-    PolicyDocument={
-        "Version": "2012-10-17",
-        "Statement": [{
-            "Effect": "Allow",
-            "Principal": {"Service": "s3.amazonaws.com"},
-            "Action": ["sqs:GetQueueAttributes", "sqs:GetQueueUrl", "sqs:SendMessage"],
-            "Resource": GetAtt(QueueRes, "Arn"),
-            "Condition": {
-                "StringEquals": {"aws:SourceAccount": Ref("AWS::AccountId")}
-            }
-        }]
-    }
-))
-
-# -----------------------
-# Secrets for DB (always create; random name)
-# -----------------------
-DbSecret = t.add_resource(Secret(
-    "DbSecret",
+# Database master password secret
+db_secret = t.add_resource(Secret(
+    "DatabaseSecret",
+    Condition="CreateRDSCondition",
+    Description="RDS master password",
     GenerateSecretString=GenerateSecretString(
-        SecretStringTemplate='{"username":"lakerunner"}',
+        SecretStringTemplate='{"username": "postgres"}',
         GenerateStringKey="password",
-        ExcludePunctuation=True,
-    ),
-))
-DbSecretArnValue = Ref(DbSecret)
-
-# -----------------------
-# RDS Postgres (always create)
-# -----------------------
-DbSubnets = t.add_resource(DBSubnetGroup(
-    "DbSubnetGroup",
-    DBSubnetGroupDescription="DB subnets",
-    SubnetIds=Ref(PrivateSubnets)
-))
-DbRes = t.add_resource(DBInstance(
-    "LakerunnerDb",
-    Engine="postgres",
-    EngineVersion="17",
-    DBName="lakerunner",
-    DBInstanceClass="db.t3.medium",
-    PubliclyAccessible=False,
-    MultiAZ=False,
-    CopyTagsToSnapshot=True,
-    StorageType="gp3",
-    AllocatedStorage="100",
-    VPCSecurityGroups=[Ref(TaskSG)],  # for tighter control, add a dedicated DB SG and allow from TaskSG
-    DBSubnetGroupName=Ref(DbSubnets),
-    MasterUsername=Sub("{{resolve:secretsmanager:${S}:SecretString:username}}", S=DbSecretArnValue),
-    MasterUserPassword=Sub("{{resolve:secretsmanager:${S}:SecretString:password}}", S=DbSecretArnValue),
-    DeletionProtection=False
+        PasswordLength=32,
+        ExcludeCharacters='"@/\\'
+    )
 ))
 
-DbEndpoint = GetAtt(DbRes, "Endpoint.Address")
-DbPort = GetAtt(DbRes, "Endpoint.Port")
+# RDS Cluster (Aurora Serverless v2)
+rds_cluster = t.add_resource(DBCluster(
+    "RDSCluster",
+    Condition="CreateRDSCondition",
+    Engine="aurora-postgresql",
+    EngineMode="provisioned",
+    EngineVersion="15.4",
+    DatabaseName="lakerunner",
+    MasterUsername=Sub("{{resolve:secretsmanager:${DatabaseSecret}:SecretString:username}}"),
+    MasterUserPassword=Sub("{{resolve:secretsmanager:${DatabaseSecret}:SecretString:password}}"),
+    DBSubnetGroupName=Ref(db_subnet_group),
+    VpcSecurityGroupIds=[Ref(db_security_group)],
+    BackupRetentionPeriod=7,
+    PreferredBackupWindow="03:00-04:00",
+    PreferredMaintenanceWindow="sun:04:00-sun:05:00",
+    StorageEncrypted=True
+))
 
-t.add_output(Output("DbEndpoint", Value=DbEndpoint, Export=Export(name=Sub("${AWS::StackName}-DbEndpoint"))))
-t.add_output(Output("DbPort", Value=DbPort, Export=Export(name=Sub("${AWS::StackName}-DbPort"))))
-t.add_output(Output("DbSecretArnOut", Value=DbSecretArnValue, Export=Export(name=Sub("${AWS::StackName}-DbSecretArn"))))
+# =============================================================================
+# S3 + SQS Storage (Conditional)
+# =============================================================================
 
-# Export S3 bucket name for IAM policies in other stacks
-t.add_output(Output("BucketName", Value=Ref(BucketRes), Export=Export(name=Sub("${AWS::StackName}-BucketName"))))
-t.add_output(Output("BucketArn", Value=GetAtt(BucketRes, "Arn"), Export=Export(name=Sub("${AWS::StackName}-BucketArn"))))
+# S3 Bucket for data processing (simplified for now)
+s3_bucket = t.add_resource(Bucket(
+    "S3Bucket",
+    Condition="CreateStorageCondition",
+    BucketName=Sub("${EnvironmentName}-lakerunner-${AWS::AccountId}-${AWS::Region}")
+))
 
-# Load defaults for SSM parameters
-defaults = load_defaults()
+# SQS Queue for S3 event notifications
+sqs_queue = t.add_resource(Queue(
+    "SQSQueue",
+    Condition="CreateStorageCondition",
+    QueueName=Sub("${EnvironmentName}-lakerunner-queue"),
+    VisibilityTimeout=300,
+    MessageRetentionPeriod=1209600  # 14 days
+))
 
-# -----------------------
-# SSM params with defaults and overrides
-# -----------------------
-# API Keys parameter - use override if provided, otherwise use defaults
-api_keys_yaml = yaml.dump(defaults['api_keys'], default_flow_style=False)
-t.add_resource(SsmParameter(
-    "ApiKeysParam",
-    Name="/lakerunner/api_keys",
-    Type="String",
+# =============================================================================
+# Outputs for Part 3 (ECS/EKS)
+# =============================================================================
+
+# VPC Information
+t.add_output(Output(
+    "VPCId",
+    Description="Selected VPC ID",
+    Value=Ref(vpc_id),
+    Export=Export(Sub("${AWS::StackName}-VPCId"))
+))
+
+t.add_output(Output(
+    "PrivateSubnets",
+    Description="Private subnet IDs",
+    Value=Sub("${PrivateSubnet1Id},${PrivateSubnet2Id}"),
+    Export=Export(Sub("${AWS::StackName}-PrivateSubnets"))
+))
+
+t.add_output(Output(
+    "PublicSubnets",
+    Condition="HasPublicSubnetsCondition",
+    Description="Public subnet IDs",
+    Value=Sub("${PublicSubnet1Id},${PublicSubnet2Id}"),
+    Export=Export(Sub("${AWS::StackName}-PublicSubnets"))
+))
+
+# Security Groups
+t.add_output(Output(
+    "ComputeSecurityGroupId",
+    Description="Security group for compute resources",
+    Value=Ref(compute_security_group),
+    Export=Export(Sub("${AWS::StackName}-ComputeSecurityGroupId"))
+))
+
+t.add_output(Output(
+    "DatabaseSecurityGroupId",
+    Description="Security group for database access",
+    Value=Ref(db_security_group),
+    Export=Export(Sub("${AWS::StackName}-DatabaseSecurityGroupId"))
+))
+
+# Database Information
+t.add_output(Output(
+    "DatabaseEndpoint",
+    Description="Database endpoint (created or existing)",
     Value=If(
-        "HasApiKeysOverride",
-        Ref(ApiKeysOverride),
-        api_keys_yaml
+        "CreateRDSCondition",
+        GetAtt(rds_cluster, "Endpoint.Address"),
+        Ref(existing_db_endpoint)
     ),
-    Description="API keys configuration",
+    Export=Export(Sub("${AWS::StackName}-DatabaseEndpoint"))
 ))
 
-# Storage Profiles parameter - use override if provided, otherwise use defaults with substitutions
-storage_profiles_default = yaml.dump(defaults['storage_profiles'], default_flow_style=False)
-# Replace placeholders with CloudFormation substitutions
-storage_profiles_default_cf = storage_profiles_default.replace("${BUCKET_NAME}", "${Bucket}").replace("${AWS_REGION}", "${AWS::Region}")
-
-t.add_resource(SsmParameter(
-    "StorageProfilesParam",
-    Name="/lakerunner/storage_profiles",
-    Type="String",
+t.add_output(Output(
+    "DatabasePort",
+    Description="Database port",
     Value=If(
-        "HasStorageProfilesOverride",
-        Ref(StorageProfilesOverride),
-        Sub(storage_profiles_default_cf, Bucket=Ref(BucketRes))
+        "CreateRDSCondition",
+        GetAtt(rds_cluster, "Endpoint.Port"),
+        Ref(existing_db_port)
     ),
-    Description="Storage profiles configuration",
+    Export=Export(Sub("${AWS::StackName}-DatabasePort"))
 ))
 
-
-# -----------------------
-# Outputs (for access in other stacks)
-# -----------------------
 t.add_output(Output(
-    "TaskSecurityGroupId",
-    Value=Ref(TaskSG),
-    Export=Export(name=Sub("${AWS::StackName}-TaskSGId"))
-))
-t.add_output(Output(
-    "PrivateSubnetsOut",
-    Value=Sub("${Subnet1},${Subnet2}", Subnet1=Select(0, Ref(PrivateSubnets)), Subnet2=Select(1, Ref(PrivateSubnets))),
-    Export=Export(name=Sub("${AWS::StackName}-PrivateSubnets"))
-))
-t.add_output(Output(
-    "PublicSubnetsOut",
+    "DatabaseName",
+    Description="Database name",
     Value=If(
-        "HasPublicSubnets",
-        Join(",", Ref(PublicSubnets)),
-        ""
+        "CreateRDSCondition",
+        "lakerunner",
+        Ref(existing_db_name)
     ),
-    Export=Export(name=Sub("${AWS::StackName}-PublicSubnets"))
-))
-t.add_output(Output(
-    "VpcIdOut",
-    Value=Ref(VpcId),
-    Export=Export(name=Sub("${AWS::StackName}-VpcId"))
+    Export=Export(Sub("${AWS::StackName}-DatabaseName"))
 ))
 
-# Export whether internet-facing ALB is supported
 t.add_output(Output(
-    "SupportsInternetFacingAlb",
-    Value=If("HasPublicSubnets", "Yes", "No"),
-    Export=Export(name=Sub("${AWS::StackName}-SupportsInternetFacingAlb")),
-    Description="Whether this CommonInfra stack supports internet-facing ALBs (requires PublicSubnets)"
+    "DatabaseSecretArn",
+    Condition="CreateRDSCondition",
+    Description="Database credentials secret ARN",
+    Value=Ref(db_secret),
+    Export=Export(Sub("${AWS::StackName}-DatabaseSecretArn"))
 ))
 
-print(t.to_yaml())
+# Storage Information
+t.add_output(Output(
+    "S3BucketName",
+    Description="S3 bucket name (created or existing)",
+    Value=If(
+        "CreateStorageCondition",
+        Ref(s3_bucket),
+        Ref(existing_s3_bucket)
+    ),
+    Export=Export(Sub("${AWS::StackName}-S3BucketName"))
+))
+
+t.add_output(Output(
+    "S3BucketArn",
+    Condition="CreateStorageCondition",
+    Description="S3 bucket ARN",
+    Value=GetAtt(s3_bucket, "Arn"),
+    Export=Export(Sub("${AWS::StackName}-S3BucketArn"))
+))
+
+t.add_output(Output(
+    "SQSQueueUrl",
+    Description="SQS queue URL (created or existing)",
+    Value=If(
+        "CreateStorageCondition",
+        Ref(sqs_queue),
+        Ref(existing_sqs_queue)
+    ),
+    Export=Export(Sub("${AWS::StackName}-SQSQueueUrl"))
+))
+
+t.add_output(Output(
+    "EnvironmentName",
+    Description="Environment name for resource naming",
+    Value=Ref(environment_name),
+    Export=Export(Sub("${AWS::StackName}-EnvironmentName"))
+))
+
+
+if __name__ == "__main__":
+    print(t.to_yaml())

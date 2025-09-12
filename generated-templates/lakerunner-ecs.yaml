@@ -1,0 +1,49 @@
+Description: ECS infrastructure stack for Lakerunner.
+Outputs:
+  ClusterArn:
+    Export:
+      Name: !Sub '${AWS::StackName}-ClusterArn'
+    Value: !Sub
+      - arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:cluster/${Cluster}
+      - Cluster: !Ref 'Cluster'
+  TaskSGId:
+    Export:
+      Name: !Sub '${AWS::StackName}-TaskSGId'
+    Value: !Ref 'TaskSG'
+Parameters:
+  VpcId:
+    Description: 'REQUIRED: VPC where the ECS cluster and security group will be created.'
+    Type: AWS::EC2::VPC::Id
+Resources:
+  Cluster:
+    Properties:
+      ClusterName: !Sub '${AWS::StackName}-cluster'
+    Type: AWS::ECS::Cluster
+  TaskSG:
+    Properties:
+      GroupDescription: Security group for ECS tasks and database
+      SecurityGroupEgress:
+        - CidrIp: '0.0.0.0/0'
+          Description: Allow all outbound
+          IpProtocol: '-1'
+      VpcId: !Ref 'VpcId'
+    Type: AWS::EC2::SecurityGroup
+  TaskSG7101Self:
+    Properties:
+      Description: task-to-task 7101
+      FromPort: 7101
+      GroupId: !Ref 'TaskSG'
+      IpProtocol: tcp
+      SourceSecurityGroupId: !Ref 'TaskSG'
+      ToPort: 7101
+    Type: AWS::EC2::SecurityGroupIngress
+  TaskSGDbSelf:
+    Properties:
+      Description: task-to-database PostgreSQL
+      FromPort: 5432
+      GroupId: !Ref 'TaskSG'
+      IpProtocol: tcp
+      SourceSecurityGroupId: !Ref 'TaskSG'
+      ToPort: 5432
+    Type: AWS::EC2::SecurityGroupIngress
+

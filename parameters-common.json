@@ -1,0 +1,70 @@
+[
+  {
+    "ParameterKey": "VPCId",
+    "ParameterValue": "vpc-1234567890abcdef0"
+  },
+  {
+    "ParameterKey": "PrivateSubnet1Id",
+    "ParameterValue": "subnet-1234567890abcdef0"
+  },
+  {
+    "ParameterKey": "PrivateSubnet2Id", 
+    "ParameterValue": "subnet-0987654321fedcba0"
+  },
+  {
+    "ParameterKey": "HasPublicSubnets",
+    "ParameterValue": "Yes"
+  },
+  {
+    "ParameterKey": "PublicSubnet1Id",
+    "ParameterValue": "subnet-abcdef1234567890a"
+  },
+  {
+    "ParameterKey": "PublicSubnet2Id",
+    "ParameterValue": "subnet-fedcba0987654321f"
+  },
+  {
+    "ParameterKey": "EnvironmentName",
+    "ParameterValue": "lakerunner"
+  },
+  {
+    "ParameterKey": "CreateRDS",
+    "ParameterValue": "Yes"
+  },
+  {
+    "ParameterKey": "DBInstanceClass",
+    "ParameterValue": "db.t3.medium"
+  },
+  {
+    "ParameterKey": "ExistingDBEndpoint",
+    "ParameterValue": ""
+  },
+  {
+    "ParameterKey": "ExistingDBPort",
+    "ParameterValue": 5432
+  },
+  {
+    "ParameterKey": "ExistingDBName",
+    "ParameterValue": "lakerunner"
+  },
+  {
+    "ParameterKey": "CreateStorage",
+    "ParameterValue": "Yes"
+  },
+  {
+    "ParameterKey": "ExistingS3BucketName",
+    "ParameterValue": ""
+  },
+  {
+    "ParameterKey": "ExistingSQSQueueUrl",
+    "ParameterValue": ""
+  },
+  {
+    "ParameterKey": "CreateMSK",
+    "ParameterValue": "No"
+  },
+  {
+    "ParameterKey": "ExistingMSKClusterArn",
+    "ParameterValue": ""
+  }
+]

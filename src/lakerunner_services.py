@@ -17,7 +17,7 @@ import yaml
 import os
 from troposphere import (
     Template, Parameter, Ref, Sub, GetAtt, If, Equals, Export, Output,
-    Select, Not, Tags, ImportValue, Join, And, Split, Condition
+    Select, Not, Tags, Split
 )
 from troposphere.ecs import (
     Service, TaskDefinition, ContainerDefinition, Environment,
@@ -55,32 +55,68 @@ def create_services_template():
     images = config.get('images', {})
 
     # -----------------------
-    # Parameters (imports from CommonInfra)
+    # Parameters (infrastructure inputs)
     # -----------------------
-    CommonInfraStackName = t.add_parameter(Parameter(
-        "CommonInfraStackName", Type="String",
-        Description="REQUIRED: Name of the CommonInfra stack to import infrastructure values from."
+    ClusterArn = t.add_parameter(Parameter(
+        "ClusterArn", Type="String",
+        Description="REQUIRED: ARN of the ECS cluster hosting the services.",
+    ))
+    DbSecretArn = t.add_parameter(Parameter(
+        "DbSecretArn", Type="String",
+        Description="REQUIRED: ARN of the database credentials secret.",
+    ))
+    DbHost = t.add_parameter(Parameter(
+        "DbHost", Type="String",
+        Description="REQUIRED: Database endpoint hostname.",
+    ))
+    DbPort = t.add_parameter(Parameter(
+        "DbPort", Type="String",
+        Description="REQUIRED: Database port number.",
+    ))
+    TaskSecurityGroupId = t.add_parameter(Parameter(
+        "TaskSecurityGroupId", Type="AWS::EC2::SecurityGroup::Id",
+        Description="REQUIRED: Security group used by ECS tasks.",
+    ))
+    VpcId = t.add_parameter(Parameter(
+        "VpcId", Type="AWS::EC2::VPC::Id",
+        Description="REQUIRED: VPC where services run.",
+    ))
+    PrivateSubnets = t.add_parameter(Parameter(
+        "PrivateSubnets", Type="List<AWS::EC2::Subnet::Id>",
+        Description="REQUIRED: Private subnet IDs for tasks.",
+    ))
+    PublicSubnets = t.add_parameter(Parameter(
+        "PublicSubnets", Type="CommaDelimitedList",
+        Default="",
+        Description="OPTIONAL: Public subnets for ALB (required if AlbScheme is internet-facing).",
+    ))
+    BucketArn = t.add_parameter(Parameter(
+        "BucketArn", Type="String",
+        Description="REQUIRED: ARN of the ingest bucket.",
+    ))
+    EfsId = t.add_parameter(Parameter(
+        "EfsId", Type="String", Default="",
+        Description="OPTIONAL: EFS file system ID for services requiring EFS.",
     ))
 
     # Container image overrides for air-gapped deployments
     GoServicesImage = t.add_parameter(Parameter(
         "GoServicesImage", Type="String",
         Default=images.get('go_services', 'public.ecr.aws/cardinalhq.io/lakerunner:latest'),
-        Description="Container image for Go services (pubsub, ingest, compact, etc.)"
+        Description="Container image for Go services (pubsub, ingest, compact, etc.)",
     ))
 
     QueryApiImage = t.add_parameter(Parameter(
         "QueryApiImage", Type="String",
         Default=images.get('query_api', 'public.ecr.aws/cardinalhq.io/lakerunner/query-api:latest'),
-        Description="Container image for query-api service"
+        Description="Container image for query-api service",
     ))
 
     QueryWorkerImage = t.add_parameter(Parameter(
         "QueryWorkerImage", Type="String",
         Default=images.get('query_worker', 'public.ecr.aws/cardinalhq.io/lakerunner/query-worker:latest'),
-        Description="Container image for query-worker service"
+        Description="Container image for query-worker service",
     ))
-
 
     # OTLP Telemetry configuration
     OtelEndpoint = t.add_parameter(Parameter(
@@ -89,7 +125,20 @@ def create_services_template():
         Description="OPTIONAL: OTEL collector HTTP endpoint URL (e.g., http://collector-dns:4318). Leave blank to disable OTLP telemetry export."
     ))
 
+    # API keys configuration
+    ApiKeysOverride = t.add_parameter(Parameter(
+        "ApiKeysOverride",
+        Type="String",
+        Default="",
+        Description="OPTIONAL: Custom API keys configuration in YAML format. Leave blank to use defaults."
+    ))
 
+    # Storage stack name for parameter references
+    StorageStackName = t.add_parameter(Parameter(
+        "StorageStackName",
+        Type="String",
+        Description="REQUIRED: Name of the storage stack for parameter references."
+    ))
 
     # ALB Configuration parameters
 
@@ -107,31 +156,41 @@ def create_services_template():
             "ParameterGroups": [
                 {
                     "Label": {"default": "Infrastructure"},
-                    "Parameters": ["CommonInfraStackName", "AlbScheme"]
+                    "Parameters": ["ClusterArn", "DbSecretArn", "DbHost", "DbPort",
+                                   "TaskSecurityGroupId", "VpcId", "PrivateSubnets",
+                                   "PublicSubnets", "BucketArn", "EfsId", "AlbScheme", 
+                                   "StorageStackName"]
                 },
                 {
                     "Label": {"default": "Container Images"},
                     "Parameters": ["GoServicesImage", "QueryApiImage", "QueryWorkerImage"]
                 },
                 {
-                    "Label": {"default": "Telemetry"},
-                    "Parameters": ["OtelEndpoint"]
+                    "Label": {"default": "Configuration"},
+                    "Parameters": ["OtelEndpoint", "ApiKeysOverride"]
                 }
             ],
             "ParameterLabels": {
-                "CommonInfraStackName": {"default": "Common Infra Stack Name"},
+                "ClusterArn": {"default": "ECS Cluster ARN"},
+                "DbSecretArn": {"default": "DB Secret ARN"},
+                "DbHost": {"default": "DB Host"},
+                "DbPort": {"default": "DB Port"},
+                "TaskSecurityGroupId": {"default": "Task Security Group"},
+                "VpcId": {"default": "VPC ID"},
+                "PrivateSubnets": {"default": "Private Subnets"},
+                "PublicSubnets": {"default": "Public Subnets"},
+                "BucketArn": {"default": "Bucket ARN"},
+                "EfsId": {"default": "EFS File System ID"},
                 "AlbScheme": {"default": "ALB Scheme"},
                 "GoServicesImage": {"default": "Go Services Image"},
                 "QueryApiImage": {"default": "Query API Image"},
                 "QueryWorkerImage": {"default": "Query Worker Image"},
-                "OtelEndpoint": {"default": "OTEL Collector Endpoint"}
+                "OtelEndpoint": {"default": "OTEL Collector Endpoint"},
+                "ApiKeysOverride": {"default": "API Keys Override"},
+                "StorageStackName": {"default": "Storage Stack Name"}
             }
         }
     })
-
-    # Helper function for imports
-    def ci_export(suffix):
-        return Sub("${CommonInfraStackName}-%s" % suffix, CommonInfraStackName=Ref(CommonInfraStackName))
 
     # Helper function to shorten service names for ALB target groups (32 char limit)
     def short_service_name(service_name):
@@ -146,24 +205,22 @@ def create_services_template():
         short = short.replace('pubsub', 'pub')
         return short
 
-    # Resolved values (always import from CommonInfra)
-    ClusterArnValue = ImportValue(ci_export("ClusterArn"))
-    DbSecretArnValue = ImportValue(ci_export("DbSecretArn"))
-    DbHostValue = ImportValue(ci_export("DbEndpoint"))
-    DbPortValue = ImportValue(ci_export("DbPort"))
-    EfsIdValue = ImportValue(ci_export("EfsId"))
-    TaskSecurityGroupIdValue = ImportValue(ci_export("TaskSGId"))
-    VpcIdValue = ImportValue(ci_export("VpcId"))
-    PrivateSubnetsValue = Split(",", ImportValue(ci_export("PrivateSubnets")))
-    BucketArnValue = ImportValue(ci_export("BucketArn"))
-
-    # Import PublicSubnets - CommonInfra always exports this, but may be empty string if not provided
-    PublicSubnetsImport = ImportValue(ci_export("PublicSubnets"))
-    PublicSubnetsValue = Split(",", PublicSubnetsImport)
+    # Resolved values
+    ClusterArnValue = Ref(ClusterArn)
+    DbSecretArnValue = Ref(DbSecretArn)
+    DbHostValue = Ref(DbHost)
+    DbPortValue = Ref(DbPort)
+    EfsIdValue = Ref(EfsId)
+    TaskSecurityGroupIdValue = Ref(TaskSecurityGroupId)
+    VpcIdValue = Ref(VpcId)
+    PrivateSubnetsValue = Ref(PrivateSubnets)
+    BucketArnValue = Ref(BucketArn)
+    PublicSubnetsValue = Ref(PublicSubnets)
 
     # Conditions
     t.add_condition("EnableOtlp", Not(Equals(Ref(OtelEndpoint), "")))
     t.add_condition("IsInternetFacing", Equals(Ref(AlbScheme), "internet-facing"))
+    t.add_condition("HasApiKeysOverride", Not(Equals(Ref(ApiKeysOverride), "")))
 
 
     # -----------------------
@@ -519,6 +576,16 @@ def create_services_template():
         )
     ))
 
+    # API keys configuration parameter
+    api_keys_default = yaml.dump(config.get('api_keys', {}), default_flow_style=False)
+    t.add_resource(SSMParameter(
+        "ApiKeysParam",
+        Name=Sub("/lakerunner/${AWS::StackName}/api_keys"),
+        Type="String",
+        Value=If("HasApiKeysOverride", Ref(ApiKeysOverride), api_keys_default),
+        Description="API keys configuration for Lakerunner services",
+    ))
+
 
     # Collect services that need EFS access points
     services_needing_efs = {}
@@ -635,8 +702,8 @@ def create_services_template():
 
         # Build secrets
         secrets = [
-            EcsSecret(Name="STORAGE_PROFILES_ENV", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles")),
-            EcsSecret(Name="API_KEYS_ENV", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys")),
+            EcsSecret(Name="STORAGE_PROFILES_ENV", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${StorageStackName}/storage_profiles", StorageStackName=Ref(StorageStackName))),
+            EcsSecret(Name="API_KEYS_ENV", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${AWS::StackName}/api_keys")),
             EcsSecret(Name="LRDB_PASSWORD", ValueFrom=Sub("${SecretArn}:password::", SecretArn=DbSecretArnValue)),
             EcsSecret(Name="CONFIGDB_PASSWORD", ValueFrom=Sub("${SecretArn}:password::", SecretArn=DbSecretArnValue))
         ]
@@ -846,6 +913,9 @@ def create_services_template():
         Value=GetAtt(ExecutionRole, "Arn"),
         Export=Export(name=Sub("${AWS::StackName}-ExecutionRoleArn"))
     ))
+
+    # Surface the provided EFS filesystem ID so cfn-lint recognizes it is used
+    t.add_output(Output("EfsId", Value=EfsIdValue))
 
     # Output service ARNs
     for service_name, _ in services.items():
