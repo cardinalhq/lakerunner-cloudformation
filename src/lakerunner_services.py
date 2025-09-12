@@ -125,7 +125,20 @@ def create_services_template():
         Description="OPTIONAL: OTEL collector HTTP endpoint URL (e.g., http://collector-dns:4318). Leave blank to disable OTLP telemetry export."
     ))
 
+    # API keys configuration
+    ApiKeysOverride = t.add_parameter(Parameter(
+        "ApiKeysOverride",
+        Type="String",
+        Default="",
+        Description="OPTIONAL: Custom API keys configuration in YAML format. Leave blank to use defaults."
+    ))
 
+    # Storage stack name for parameter references
+    StorageStackName = t.add_parameter(Parameter(
+        "StorageStackName",
+        Type="String",
+        Description="REQUIRED: Name of the storage stack for parameter references."
+    ))
 
     # ALB Configuration parameters
 
@@ -145,15 +158,16 @@ def create_services_template():
                     "Label": {"default": "Infrastructure"},
                     "Parameters": ["ClusterArn", "DbSecretArn", "DbHost", "DbPort",
                                    "TaskSecurityGroupId", "VpcId", "PrivateSubnets",
-                                   "PublicSubnets", "BucketArn", "EfsId", "AlbScheme"]
+                                   "PublicSubnets", "BucketArn", "EfsId", "AlbScheme", 
+                                   "StorageStackName"]
                 },
                 {
                     "Label": {"default": "Container Images"},
                     "Parameters": ["GoServicesImage", "QueryApiImage", "QueryWorkerImage"]
                 },
                 {
-                    "Label": {"default": "Telemetry"},
-                    "Parameters": ["OtelEndpoint"]
+                    "Label": {"default": "Configuration"},
+                    "Parameters": ["OtelEndpoint", "ApiKeysOverride"]
                 }
             ],
             "ParameterLabels": {
@@ -171,7 +185,9 @@ def create_services_template():
                 "GoServicesImage": {"default": "Go Services Image"},
                 "QueryApiImage": {"default": "Query API Image"},
                 "QueryWorkerImage": {"default": "Query Worker Image"},
-                "OtelEndpoint": {"default": "OTEL Collector Endpoint"}
+                "OtelEndpoint": {"default": "OTEL Collector Endpoint"},
+                "ApiKeysOverride": {"default": "API Keys Override"},
+                "StorageStackName": {"default": "Storage Stack Name"}
             }
         }
     })
@@ -204,6 +220,7 @@ def create_services_template():
     # Conditions
     t.add_condition("EnableOtlp", Not(Equals(Ref(OtelEndpoint), "")))
     t.add_condition("IsInternetFacing", Equals(Ref(AlbScheme), "internet-facing"))
+    t.add_condition("HasApiKeysOverride", Not(Equals(Ref(ApiKeysOverride), "")))
 
 
     # -----------------------
@@ -559,6 +576,16 @@ def create_services_template():
         )
     ))
 
+    # API keys configuration parameter
+    api_keys_default = yaml.dump(config.get('api_keys', {}), default_flow_style=False)
+    t.add_resource(SSMParameter(
+        "ApiKeysParam",
+        Name=Sub("/lakerunner/${AWS::StackName}/api_keys"),
+        Type="String",
+        Value=If("HasApiKeysOverride", Ref(ApiKeysOverride), api_keys_default),
+        Description="API keys configuration for Lakerunner services",
+    ))
+
 
     # Collect services that need EFS access points
     services_needing_efs = {}
@@ -675,8 +702,8 @@ def create_services_template():
 
         # Build secrets
         secrets = [
-            EcsSecret(Name="STORAGE_PROFILES_ENV", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles")),
-            EcsSecret(Name="API_KEYS_ENV", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys")),
+            EcsSecret(Name="STORAGE_PROFILES_ENV", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${StorageStackName}/storage_profiles", StorageStackName=Ref(StorageStackName))),
+            EcsSecret(Name="API_KEYS_ENV", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${AWS::StackName}/api_keys")),
             EcsSecret(Name="LRDB_PASSWORD", ValueFrom=Sub("${SecretArn}:password::", SecretArn=DbSecretArnValue)),
             EcsSecret(Name="CONFIGDB_PASSWORD", ValueFrom=Sub("${SecretArn}:password::", SecretArn=DbSecretArnValue))
         ]

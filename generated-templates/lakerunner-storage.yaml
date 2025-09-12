@@ -2,10 +2,6 @@ Conditions:
   CreateTaskRole: !Equals
     - !Ref 'ExistingTaskRoleArn'
     - ''
-  HasApiKeysOverride: !Not
-    - !Equals
-      - !Ref 'ApiKeysOverride'
-      - ''
   HasStorageProfilesOverride: !Not
     - !Equals
       - !Ref 'StorageProfilesOverride'
@@ -33,10 +29,6 @@ Outputs:
       - !Ref 'ExistingTaskRoleArn'
       - !GetAtt 'StorageTaskRole.Arn'
 Parameters:
-  ApiKeysOverride:
-    Default: ''
-    Description: 'OPTIONAL: Custom API keys configuration in YAML format. Leave blank to use defaults.'
-    Type: String
   ExistingTaskRoleArn:
     Default: ''
     Description: 'OPTIONAL: Existing task role ARN to attach S3/SQS permissions to. Leave blank to create a new role.'
@@ -46,16 +38,6 @@ Parameters:
     Description: 'OPTIONAL: Custom storage profiles configuration in YAML format. Leave blank to use defaults.'
     Type: String
 Resources:
-  ApiKeysParam:
-    Properties:
-      Description: API keys configuration
-      Name: /lakerunner/api_keys
-      Type: String
-      Value: !If
-        - HasApiKeysOverride
-        - !Ref 'ApiKeysOverride'
-        - "- keys:\n  - f70603aa00e6f67999cc66e336134887\n  organization_id: 12340000-0000-4000-8000-000000000000\n"
-    Type: AWS::SSM::Parameter
   IngestBucket:
     DeletionPolicy: Delete
     Properties:
@@ -148,7 +130,7 @@ Resources:
   StorageProfilesParam:
     Properties:
       Description: Storage profiles configuration
-      Name: /lakerunner/storage_profiles
+      Name: !Sub '/lakerunner/${AWS::StackName}/storage_profiles'
       Type: String
       Value: !If
         - HasStorageProfilesOverride

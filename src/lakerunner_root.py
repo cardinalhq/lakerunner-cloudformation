@@ -367,8 +367,8 @@ services_stack = t.add_resource(
         Condition="CreateECSServicesCondition",
         TemplateURL=Sub("${TemplateBaseUrl}/lakerunner-services.yaml"),
         Parameters={
-            # Services stack will import values from CommonInfra stack exports
-            # No parameters needed as it uses cross-stack imports
+            # Pass storage stack name for parameter references
+            "StorageStackName": If("CreateS3StorageCondition", Ref(storage_stack), "")
         },
         Tags=Tags(
             Component="Services",

@@ -22,12 +22,7 @@ t.set_description("Storage stack for Lakerunner (S3 ingest bucket and SQS queue)
 # -----------------------
 # Parameters
 # -----------------------
-ApiKeysOverride = t.add_parameter(Parameter(
-    "ApiKeysOverride",
-    Type="String",
-    Default="",
-    Description="OPTIONAL: Custom API keys configuration in YAML format. Leave blank to use defaults.",
-))
+# Note: API keys parameter moved to ECS services stack where it's actually needed
 
 StorageProfilesOverride = t.add_parameter(Parameter(
     "StorageProfilesOverride",
@@ -43,7 +38,6 @@ ExistingTaskRoleArn = t.add_parameter(Parameter(
     Description="OPTIONAL: Existing task role ARN to attach S3/SQS permissions to. Leave blank to create a new role.",
 ))
 
-t.add_condition("HasApiKeysOverride", Not(Equals(Ref(ApiKeysOverride), "")))
 t.add_condition("HasStorageProfilesOverride", Not(Equals(Ref(StorageProfilesOverride), "")))
 t.add_condition("CreateTaskRole", Equals(Ref(ExistingTaskRoleArn), ""))
 t.add_condition("UseExistingTaskRole", Not(Equals(Ref(ExistingTaskRoleArn), "")))
@@ -146,21 +140,12 @@ t.add_resource(QueuePolicy(
 # -----------------------
 defaults = load_defaults()
 
-api_keys_yaml = yaml.dump(defaults['api_keys'], default_flow_style=False)
-t.add_resource(SsmParameter(
-    "ApiKeysParam",
-    Name="/lakerunner/api_keys",
-    Type="String",
-    Value=If("HasApiKeysOverride", Ref(ApiKeysOverride), api_keys_yaml),
-    Description="API keys configuration",
-))
-
 storage_profiles_default = yaml.dump(defaults['storage_profiles'], default_flow_style=False)
 storage_profiles_default_cf = storage_profiles_default.replace("${BUCKET_NAME}", "${BucketName}").replace("${AWS_REGION}", "${AWS::Region}")
 
 t.add_resource(SsmParameter(
     "StorageProfilesParam",
-    Name="/lakerunner/storage_profiles",
+    Name=Sub("/lakerunner/${AWS::StackName}/storage_profiles"),
     Type="String",
     Value=If(
         "HasStorageProfilesOverride",

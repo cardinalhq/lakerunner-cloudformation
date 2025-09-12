@@ -3,6 +3,10 @@ Conditions:
     - !Equals
       - !Ref 'OtelEndpoint'
       - ''
+  HasApiKeysOverride: !Not
+    - !Equals
+      - !Ref 'ApiKeysOverride'
+      - ''
   IsInternetFacing: !Equals
     - !Ref 'AlbScheme'
     - internet-facing
@@ -24,6 +28,7 @@ Metadata:
           - BucketArn
           - EfsId
           - AlbScheme
+          - StorageStackName
       - Label:
           default: Container Images
         Parameters:
@@ -31,12 +36,15 @@ Metadata:
           - QueryApiImage
           - QueryWorkerImage
       - Label:
-          default: Telemetry
+          default: Configuration
         Parameters:
           - OtelEndpoint
+          - ApiKeysOverride
     ParameterLabels:
       AlbScheme:
         default: ALB Scheme
+      ApiKeysOverride:
+        default: API Keys Override
       BucketArn:
         default: Bucket ARN
       ClusterArn:
@@ -61,6 +69,8 @@ Metadata:
         default: Query API Image
       QueryWorkerImage:
         default: Query Worker Image
+      StorageStackName:
+        default: Storage Stack Name
       TaskSecurityGroupId:
         default: Task Security Group
       VpcId:
@@ -132,6 +142,10 @@ Parameters:
     Default: internal
     Description: 'Load balancer scheme: ''internet-facing'' for external access or ''internal'' for internal access only.'
     Type: String
+  ApiKeysOverride:
+    Default: ''
+    Description: 'OPTIONAL: Custom API keys configuration in YAML format. Leave blank to use defaults.'
+    Type: String
   BucketArn:
     Description: 'REQUIRED: ARN of the ingest bucket.'
     Type: String
@@ -174,6 +188,9 @@ Parameters:
     Default: public.ecr.aws/cardinalhq.io/lakerunner/query-worker:v1.2.1
     Description: Container image for query-worker service
     Type: String
+  StorageStackName:
+    Description: 'REQUIRED: Name of the storage stack for parameter references.'
+    Type: String
   TaskSecurityGroupId:
     Description: 'REQUIRED: Security group used by ECS tasks.'
     Type: AWS::EC2::SecurityGroup::Id
@@ -210,6 +227,16 @@ Resources:
           IpProtocol: '-1'
       VpcId: !Ref 'VpcId'
     Type: AWS::EC2::SecurityGroup
+  ApiKeysParam:
+    Properties:
+      Description: API keys configuration for Lakerunner services
+      Name: !Sub '/lakerunner/${AWS::StackName}/api_keys'
+      Type: String
+      Value: !If
+        - HasApiKeysOverride
+        - !Ref 'ApiKeysOverride'
+        - "- keys:\n  - f70603aa00e6f67999cc66e336134887\n  organization_id: 12340000-0000-4000-8000-000000000000\n"
+    Type: AWS::SSM::Parameter
   ExecRole:
     Properties:
       AssumeRolePolicyDocument:
@@ -605,9 +632,11 @@ Resources:
           PortMappings: []
           Secrets:
             - Name: STORAGE_PROFILES_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${StorageStackName}/storage_profiles
+                - StorageStackName: !Ref 'StorageStackName'
             - Name: API_KEYS_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${AWS::StackName}/api_keys'
             - Name: LRDB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
@@ -705,9 +734,11 @@ Resources:
           PortMappings: []
           Secrets:
             - Name: STORAGE_PROFILES_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${StorageStackName}/storage_profiles
+                - StorageStackName: !Ref 'StorageStackName'
             - Name: API_KEYS_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${AWS::StackName}/api_keys'
             - Name: LRDB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
@@ -805,9 +836,11 @@ Resources:
           PortMappings: []
           Secrets:
             - Name: STORAGE_PROFILES_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${StorageStackName}/storage_profiles
+                - StorageStackName: !Ref 'StorageStackName'
             - Name: API_KEYS_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${AWS::StackName}/api_keys'
             - Name: LRDB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
@@ -905,9 +938,11 @@ Resources:
           PortMappings: []
           Secrets:
             - Name: STORAGE_PROFILES_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${StorageStackName}/storage_profiles
+                - StorageStackName: !Ref 'StorageStackName'
             - Name: API_KEYS_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${AWS::StackName}/api_keys'
             - Name: LRDB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
@@ -1006,9 +1041,11 @@ Resources:
           PortMappings: []
           Secrets:
             - Name: STORAGE_PROFILES_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${StorageStackName}/storage_profiles
+                - StorageStackName: !Ref 'StorageStackName'
             - Name: API_KEYS_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${AWS::StackName}/api_keys'
             - Name: LRDB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
@@ -1130,9 +1167,11 @@ Resources:
               Protocol: tcp
           Secrets:
             - Name: STORAGE_PROFILES_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${StorageStackName}/storage_profiles
+                - StorageStackName: !Ref 'StorageStackName'
             - Name: API_KEYS_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${AWS::StackName}/api_keys'
             - Name: LRDB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
@@ -1244,9 +1283,11 @@ Resources:
               Protocol: tcp
           Secrets:
             - Name: STORAGE_PROFILES_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${StorageStackName}/storage_profiles
+                - StorageStackName: !Ref 'StorageStackName'
             - Name: API_KEYS_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${AWS::StackName}/api_keys'
             - Name: LRDB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
@@ -1348,9 +1389,11 @@ Resources:
           PortMappings: []
           Secrets:
             - Name: STORAGE_PROFILES_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${StorageStackName}/storage_profiles
+                - StorageStackName: !Ref 'StorageStackName'
             - Name: API_KEYS_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${AWS::StackName}/api_keys'
             - Name: LRDB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
@@ -1448,9 +1491,11 @@ Resources:
           PortMappings: []
           Secrets:
             - Name: STORAGE_PROFILES_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${StorageStackName}/storage_profiles
+                - StorageStackName: !Ref 'StorageStackName'
             - Name: API_KEYS_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${AWS::StackName}/api_keys'
             - Name: LRDB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
