@@ -28,14 +28,16 @@ Metadata:
           - VPCId
           - PrivateSubnet1Id
           - PrivateSubnet2Id
-          - PublicSubnet1Id
-          - PublicSubnet2Id
+          - PublicSubnets
       - Label:
           default: Infrastructure Creation Options
         Parameters:
           - CreateS3Storage
           - CreateRDS
+          - DbInstanceClass
           - CreateMSK
+          - MSKInstanceType
+          - MSKBrokerNodes
       - Label:
           default: Service Deployment Options
         Parameters:
@@ -60,6 +62,8 @@ Metadata:
         default: Create RDS Database?
       CreateS3Storage:
         default: Create S3 Storage?
+      DbInstanceClass:
+        default: RDS Instance Class
       ExistingBucketArn:
         default: Existing Bucket ARN
       ExistingDatabaseEndpoint:
@@ -70,14 +74,16 @@ Metadata:
         default: Existing MSK Cluster ARN
       ExistingTaskRoleArn:
         default: Existing Task Role ARN
+      MSKBrokerNodes:
+        default: MSK Broker Nodes
+      MSKInstanceType:
+        default: MSK Instance Type
       PrivateSubnet1Id:
         default: Private Subnet 1 ID
       PrivateSubnet2Id:
         default: Private Subnet 2 ID
-      PublicSubnet1Id:
-        default: Public Subnet 1 ID (optional)
-      PublicSubnet2Id:
-        default: Public Subnet 2 ID (optional)
+      PublicSubnets:
+        default: Public Subnets (optional)
       VPCId:
         default: VPC ID
 Outputs:
@@ -148,7 +154,9 @@ Outputs:
     Description: Selected public subnet IDs
     Export:
       Name: !Sub '${AWS::StackName}-PublicSubnets'
-    Value: !Sub '${PublicSubnet1Id},${PublicSubnet2Id}'
+    Value: !Join
+      - ','
+      - !Ref 'PublicSubnets'
   TaskSecurityGroupId:
     Condition: CreateECSInfraCondition
     Description: ECS task security group ID (only available when ECS infrastructure is created)
@@ -196,6 +204,18 @@ Parameters:
     Default: 'Yes'
     Description: Create S3 bucket and SQS queue for data ingestion?
     Type: String
+  DbInstanceClass:
+    AllowedValues:
+      - db.r6g.large
+      - db.r6g.xlarge
+      - db.r6g.2xlarge
+      - db.r6g.4xlarge
+      - db.r6g.8xlarge
+      - db.r6g.12xlarge
+      - db.r6g.16xlarge
+    Default: db.r6g.large
+    Description: RDS instance class.
+    Type: String
   ExistingBucketArn:
     Default: ''
     Description: Existing S3 bucket ARN. Required when CreateS3Storage=No.
@@ -216,18 +236,43 @@ Parameters:
     Default: ''
     Description: Existing task role ARN with permissions for BYO resources. Required when using any existing resources.
     Type: String
+  MSKBrokerNodes:
+    Default: 2
+    Description: Number of MSK broker nodes. Must be between 2 and 15.
+    MaxValue: 15
+    MinValue: 2
+    Type: Number
+  MSKInstanceType:
+    AllowedValues:
+      - kafka.t3.small
+      - kafka.m5.large
+      - kafka.m5.xlarge
+      - kafka.m5.2xlarge
+      - kafka.m5.4xlarge
+      - kafka.m5.8xlarge
+      - kafka.m5.12xlarge
+      - kafka.m5.16xlarge
+      - kafka.m5.24xlarge
+      - kafka.m7g.large
+      - kafka.m7g.xlarge
+      - kafka.m7g.2xlarge
+      - kafka.m7g.4xlarge
+      - kafka.m7g.8xlarge
+      - kafka.m7g.12xlarge
+      - kafka.m7g.16xlarge
+    Default: kafka.t3.small
+    Description: MSK broker instance type.
+    Type: String
   PrivateSubnet1Id:
     Description: First private subnet ID (from Part 1 Landscape stack or existing subnet).
     Type: AWS::EC2::Subnet::Id
   PrivateSubnet2Id:
     Description: Second private subnet ID (from Part 1 Landscape stack or existing subnet).
     Type: AWS::EC2::Subnet::Id
-  PublicSubnet1Id:
-    Description: First public subnet ID (from Part 1 Landscape stack or existing subnet). Optional.
-    Type: AWS::EC2::Subnet::Id
-  PublicSubnet2Id:
-    Description: Second public subnet ID (from Part 1 Landscape stack or existing subnet). Optional.
-    Type: AWS::EC2::Subnet::Id
+  PublicSubnets:
+    Default: ''
+    Description: Public subnet IDs (from Part 1 Landscape stack or existing subnets). Optional - leave empty if not needed.
+    Type: CommaDelimitedList
   TemplateBaseUrl:
     Description: Base URL where nested templates are stored (e.g., https://s3.amazonaws.com/bucket/templates/)
     Type: String
@@ -254,6 +299,8 @@ Resources:
     Properties:
       Parameters:
         ExistingTaskRoleArn: !Ref 'ExistingTaskRoleArn'
+        MSKBrokerNodes: !Ref 'MSKBrokerNodes'
+        MSKInstanceType: !Ref 'MSKInstanceType'
         PrivateSubnets: !Sub '${PrivateSubnet1Id},${PrivateSubnet2Id}'
         VpcId: !Ref 'VPCId'
       Tags:
@@ -269,6 +316,7 @@ Resources:
     Condition: CreateRDSCondition
     Properties:
       Parameters:
+        DbInstanceClass: !Ref 'DbInstanceClass'
         ExistingTaskRoleArn: !Ref 'ExistingTaskRoleArn'
         PrivateSubnets: !Sub '${PrivateSubnet1Id},${PrivateSubnet2Id}'
         VpcId: !Ref 'VPCId'

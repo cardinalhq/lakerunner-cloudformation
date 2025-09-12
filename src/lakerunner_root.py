@@ -9,7 +9,7 @@ import yaml
 import os
 from troposphere import (
     Template, Parameter, Ref, Equals, Sub, GetAtt, If, Not, And, Or,
-    Condition, Output, Export, Tags, Select, Split
+    Condition, Output, Export, Tags, Select, Split, Join
 )
 from troposphere.cloudformation import Stack, WaitConditionHandle
 from troposphere.iam import Role, Policy
@@ -81,19 +81,12 @@ private_subnet2 = t.add_parameter(
     )
 )
 
-public_subnet1 = t.add_parameter(
+public_subnets = t.add_parameter(
     Parameter(
-        "PublicSubnet1Id",
-        Type="AWS::EC2::Subnet::Id",
-        Description="First public subnet ID (from Part 1 Landscape stack or existing subnet). Optional.",
-    )
-)
-
-public_subnet2 = t.add_parameter(
-    Parameter(
-        "PublicSubnet2Id",
-        Type="AWS::EC2::Subnet::Id",
-        Description="Second public subnet ID (from Part 1 Landscape stack or existing subnet). Optional.",
+        "PublicSubnets",
+        Type="CommaDelimitedList",
+        Default="",
+        Description="Public subnet IDs (from Part 1 Landscape stack or existing subnets). Optional - leave empty if not needed.",
     )
 )
 
@@ -198,6 +191,46 @@ existing_msk_arn = t.add_parameter(
     )
 )
 
+msk_instance_type = t.add_parameter(
+    Parameter(
+        "MSKInstanceType",
+        Type="String",
+        Default="kafka.t3.small",
+        AllowedValues=[
+            "kafka.t3.small",
+            "kafka.m5.large", "kafka.m5.xlarge", "kafka.m5.2xlarge", "kafka.m5.4xlarge",
+            "kafka.m5.8xlarge", "kafka.m5.12xlarge", "kafka.m5.16xlarge", "kafka.m5.24xlarge",
+            "kafka.m7g.large", "kafka.m7g.xlarge", "kafka.m7g.2xlarge", "kafka.m7g.4xlarge",
+            "kafka.m7g.8xlarge", "kafka.m7g.12xlarge", "kafka.m7g.16xlarge"
+        ],
+        Description="MSK broker instance type.",
+    )
+)
+
+msk_broker_nodes = t.add_parameter(
+    Parameter(
+        "MSKBrokerNodes",
+        Type="Number",
+        Default=2,
+        MinValue=2,
+        MaxValue=15,
+        Description="Number of MSK broker nodes. Must be between 2 and 15.",
+    )
+)
+
+db_instance_class = t.add_parameter(
+    Parameter(
+        "DbInstanceClass",
+        Type="String",
+        Default="db.r6g.large",
+        AllowedValues=[
+            "db.r6g.large", "db.r6g.xlarge", "db.r6g.2xlarge", "db.r6g.4xlarge",
+            "db.r6g.8xlarge", "db.r6g.12xlarge", "db.r6g.16xlarge"
+        ],
+        Description="RDS instance class.",
+    )
+)
+
 # =============================================================================
 # Conditions
 # =============================================================================
@@ -226,9 +259,8 @@ t.set_metadata({
                 "Parameters": [
                     "VPCId",
                     "PrivateSubnet1Id",
-                    "PrivateSubnet2Id", 
-                    "PublicSubnet1Id",
-                    "PublicSubnet2Id"
+                    "PrivateSubnet2Id",
+                    "PublicSubnets"
                 ]
             },
             {
@@ -236,7 +268,10 @@ t.set_metadata({
                 "Parameters": [
                     "CreateS3Storage",
                     "CreateRDS",
-                    "CreateMSK"
+                    "DbInstanceClass",
+                    "CreateMSK",
+                    "MSKInstanceType",
+                    "MSKBrokerNodes"
                 ]
             },
             {
@@ -262,13 +297,15 @@ t.set_metadata({
             "VPCId": {"default": "VPC ID"},
             "PrivateSubnet1Id": {"default": "Private Subnet 1 ID"},
             "PrivateSubnet2Id": {"default": "Private Subnet 2 ID"},
-            "PublicSubnet1Id": {"default": "Public Subnet 1 ID (optional)"},
-            "PublicSubnet2Id": {"default": "Public Subnet 2 ID (optional)"},
+            "PublicSubnets": {"default": "Public Subnets (optional)"},
             "CreateS3Storage": {"default": "Create S3 Storage?"},
             "CreateRDS": {"default": "Create RDS Database?"},
             "CreateECSInfrastructure": {"default": "Create ECS Infrastructure?"},
             "CreateECSServices": {"default": "Deploy ECS Services?"},
             "CreateMSK": {"default": "Create MSK Kafka?"},
+            "MSKInstanceType": {"default": "MSK Instance Type"},
+            "MSKBrokerNodes": {"default": "MSK Broker Nodes"},
+            "DbInstanceClass": {"default": "RDS Instance Class"},
             # "CreateEKS": {"default": "Deploy EKS Services?"},
             "ExistingBucketArn": {"default": "Existing Bucket ARN"},
             "ExistingDatabaseEndpoint": {"default": "Existing DB Endpoint"},
@@ -331,7 +368,8 @@ rds_stack = t.add_resource(
         Parameters={
             "VpcId": Ref(vpc_id),
             "PrivateSubnets": Sub("${PrivateSubnet1Id},${PrivateSubnet2Id}"),
-            "ExistingTaskRoleArn": Ref(existing_task_role_arn)
+            "ExistingTaskRoleArn": Ref(existing_task_role_arn),
+            "DbInstanceClass": Ref(db_instance_class)
         },
         Tags=Tags(
             Component="Database", 
@@ -350,7 +388,9 @@ msk_stack = t.add_resource(
         Parameters={
             "VpcId": Ref(vpc_id),
             "PrivateSubnets": Sub("${PrivateSubnet1Id},${PrivateSubnet2Id}"),
-            "ExistingTaskRoleArn": Ref(existing_task_role_arn)
+            "ExistingTaskRoleArn": Ref(existing_task_role_arn),
+            "MSKInstanceType": Ref(msk_instance_type),
+            "MSKBrokerNodes": Ref(msk_broker_nodes)
         },
         Tags=Tags(
             Component="MSK",
@@ -407,7 +447,7 @@ t.add_output(
     Output(
         "PublicSubnets",
         Description="Selected public subnet IDs",
-        Value=Sub("${PublicSubnet1Id},${PublicSubnet2Id}"),
+        Value=Join(",", Ref(public_subnets)),
         Export=Export(Sub("${AWS::StackName}-PublicSubnets"))
     )
 )

@@ -6,9 +6,10 @@ import os
 from troposphere import (
     Template, Parameter, Ref, Sub, If, Equals, Not, Export, Output, GetAtt, Select, Split
 )
-from troposphere.msk import Cluster, BrokerNodeGroupInfo, EBSStorageInfo, StorageInfo, ClientAuthentication, Tls, EncryptionInfo, EncryptionAtRest, EncryptionInTransit
+from troposphere.msk import Cluster, BrokerNodeGroupInfo, EBSStorageInfo, StorageInfo, ClientAuthentication, Tls, Sasl, Scram, EncryptionInfo, EncryptionAtRest, EncryptionInTransit
 from troposphere.ec2 import SecurityGroup, SecurityGroupRule
 from troposphere.iam import PolicyType, Role, Policy
+from troposphere.secretsmanager import Secret, GenerateSecretString
 
 
 t = Template()
@@ -34,6 +35,29 @@ ExistingTaskRoleArn = t.add_parameter(Parameter(
     Type="String",
     Default="",
     Description="OPTIONAL: Existing task role ARN to attach MSK permissions to. Leave blank to create a new role.",
+))
+
+MSKInstanceType = t.add_parameter(Parameter(
+    "MSKInstanceType",
+    Type="String",
+    Default="kafka.t3.small",
+    AllowedValues=[
+        "kafka.t3.small",
+        "kafka.m5.large", "kafka.m5.xlarge", "kafka.m5.2xlarge", "kafka.m5.4xlarge",
+        "kafka.m5.8xlarge", "kafka.m5.12xlarge", "kafka.m5.16xlarge", "kafka.m5.24xlarge",
+        "kafka.m7g.large", "kafka.m7g.xlarge", "kafka.m7g.2xlarge", "kafka.m7g.4xlarge",
+        "kafka.m7g.8xlarge", "kafka.m7g.12xlarge", "kafka.m7g.16xlarge"
+    ],
+    Description="MSK broker instance type.",
+))
+
+MSKBrokerNodes = t.add_parameter(Parameter(
+    "MSKBrokerNodes",
+    Type="Number",
+    Default=2,
+    MinValue=2,
+    MaxValue=15,
+    Description="Number of MSK broker nodes. Must be between 2 and 15.",
 ))
 
 # -----------------------
@@ -102,7 +126,13 @@ MskSecurityGroup = t.add_resource(SecurityGroup(
             CidrIp="10.0.0.0/8",  # Allow from private networks
             Description="Kafka TLS"
         ),
-        # Note: ZooKeeper port not needed for KRaft mode
+        SecurityGroupRule(
+            IpProtocol="tcp",
+            FromPort=2181,
+            ToPort=2181,
+            CidrIp="10.0.0.0/8",  # Allow from private networks
+            Description="ZooKeeper"
+        )
     ],
     Tags=[
         {"Key": "Name", "Value": Sub("${AWS::StackName}-msk-sg")},
@@ -116,10 +146,10 @@ MskSecurityGroup = t.add_resource(SecurityGroup(
 MSKCluster = t.add_resource(Cluster(
     "MSKCluster",
     ClusterName=Sub("${AWS::StackName}-msk-cluster"),
-    KafkaVersion="3.9.x.kraft",
-    NumberOfBrokerNodes=2,  # Start small, can be scaled up
+    KafkaVersion="3.9.x",
+    NumberOfBrokerNodes=Ref(MSKBrokerNodes),
     BrokerNodeGroupInfo=BrokerNodeGroupInfo(
-        InstanceType="kafka.t3.small",  # Cost-effective for development
+        InstanceType=Ref(MSKInstanceType),
         ClientSubnets=Ref(PrivateSubnets),
         SecurityGroups=[Ref(MskSecurityGroup)],
         StorageInfo=StorageInfo(
@@ -129,16 +159,15 @@ MSKCluster = t.add_resource(Cluster(
         )
     ),
     ClientAuthentication=ClientAuthentication(
-        Tls=Tls(
-            Enabled=False  # Start with plaintext for simplicity
+        Sasl=Sasl(
+            Scram=Scram(
+                Enabled=True
+            )
         )
     ),
     EncryptionInfo=EncryptionInfo(
-        EncryptionAtRest=EncryptionAtRest(
-            DataVolumeKMSKeyId="alias/aws/msk"
-        ),
         EncryptionInTransit=EncryptionInTransit(
-            ClientBroker="PLAINTEXT",  # Start with plaintext
+            ClientBroker="TLS",  # TLS encryption for client connections
             InCluster=True
         )
     ),
@@ -147,6 +176,25 @@ MSKCluster = t.add_resource(Cluster(
         "ManagedBy": "Lakerunner",
         "Environment": Ref("AWS::StackName")
     }
+))
+
+# -----------------------
+# MSK SASL/SCRAM Credentials Secret
+# -----------------------
+MSKCredentials = t.add_resource(Secret(
+    "MSKCredentials",
+    Description="MSK SASL/SCRAM credentials for Kafka authentication",
+    GenerateSecretString=GenerateSecretString(
+        SecretStringTemplate='{"username": "lakerunner"}',
+        GenerateStringKey="password",
+        PasswordLength=32,
+        ExcludeCharacters='"@/\\'
+    ),
+    Tags=[
+        {"Key": "Name", "Value": Sub("${AWS::StackName}-msk-credentials")},
+        {"Key": "ManagedBy", "Value": "Lakerunner"},
+        {"Key": "Component", "Value": "MSK"}
+    ]
 ))
 
 # -----------------------
@@ -224,7 +272,20 @@ t.add_output(Output(
     Export=Export(name=Sub("${AWS::StackName}-TaskRoleArn"))
 ))
 
+t.add_output(Output(
+    "MSKCredentialsArn",
+    Description="MSK SASL/SCRAM credentials secret ARN",
+    Value=Ref(MSKCredentials),
+    Export=Export(name=Sub("${AWS::StackName}-MSKCredentialsArn"))
+))
+
 # Note: Bootstrap servers are not available as CloudFormation attributes
 # They need to be retrieved using AWS CLI or SDK after cluster creation
+
+# IMPORTANT: After cluster creation, you must create the SASL/SCRAM user manually:
+# 1. Get the cluster ARN and credentials from AWS Console or CLI
+# 2. Run: aws kafka put-cluster-policy --cluster-arn <cluster-arn> --current-version <version> --policy <policy>
+# 3. Create user: aws kafka create-scram-secret --cluster-arn <cluster-arn> --secret-arn <secret-arn>
+# 4. The secret contains username "lakerunner" and auto-generated password
 
 print(t.to_yaml())

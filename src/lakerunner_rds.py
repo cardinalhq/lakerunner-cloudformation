@@ -34,6 +34,17 @@ ExistingTaskRoleArn = t.add_parameter(Parameter(
     Description="OPTIONAL: Existing task role ARN to attach database permissions to. Leave blank to create a new role.",
 ))
 
+DbInstanceClass = t.add_parameter(Parameter(
+    "DbInstanceClass",
+    Type="String",
+    Default="db.r6g.large",
+    AllowedValues=[
+        "db.r6g.large", "db.r6g.xlarge", "db.r6g.2xlarge", "db.r6g.4xlarge",
+        "db.r6g.8xlarge", "db.r6g.12xlarge", "db.r6g.16xlarge"
+    ],
+    Description="RDS instance class.",
+))
+
 # -----------------------
 # Conditions
 # -----------------------
@@ -128,7 +139,7 @@ DbRes = t.add_resource(DBInstance(
     Engine="postgres",
     EngineVersion="17",
     DBName="lakerunner",
-    DBInstanceClass="db.t3.medium",
+    DBInstanceClass=Ref(DbInstanceClass),
     PubliclyAccessible=False,
     MultiAZ=False,
     CopyTagsToSnapshot=True,

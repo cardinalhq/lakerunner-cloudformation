@@ -18,6 +18,11 @@ Outputs:
     Export:
       Name: !Sub '${AWS::StackName}-MSKClusterName'
     Value: !Ref 'MSKCluster'
+  MSKCredentialsArn:
+    Description: MSK SASL/SCRAM credentials secret ARN
+    Export:
+      Name: !Sub '${AWS::StackName}-MSKCredentialsArn'
+    Value: !Ref 'MSKCredentials'
   TaskRoleArn:
     Description: Task role ARN for MSK access (created or existing)
     Export:
@@ -31,6 +36,33 @@ Parameters:
     Default: ''
     Description: 'OPTIONAL: Existing task role ARN to attach MSK permissions to. Leave blank to create a new role.'
     Type: String
+  MSKBrokerNodes:
+    Default: 2
+    Description: Number of MSK broker nodes. Must be between 2 and 15.
+    MaxValue: 15
+    MinValue: 2
+    Type: Number
+  MSKInstanceType:
+    AllowedValues:
+      - kafka.t3.small
+      - kafka.m5.large
+      - kafka.m5.xlarge
+      - kafka.m5.2xlarge
+      - kafka.m5.4xlarge
+      - kafka.m5.8xlarge
+      - kafka.m5.12xlarge
+      - kafka.m5.16xlarge
+      - kafka.m5.24xlarge
+      - kafka.m7g.large
+      - kafka.m7g.xlarge
+      - kafka.m7g.2xlarge
+      - kafka.m7g.4xlarge
+      - kafka.m7g.8xlarge
+      - kafka.m7g.12xlarge
+      - kafka.m7g.16xlarge
+    Default: kafka.t3.small
+    Description: MSK broker instance type.
+    Type: String
   PrivateSubnets:
     Description: 'REQUIRED: Private subnet IDs for the MSK cluster (minimum 2, maximum 3).'
     Type: List<AWS::EC2::Subnet::Id>
@@ -42,29 +74,44 @@ Resources:
     Properties:
       BrokerNodeGroupInfo:
         ClientSubnets: !Ref 'PrivateSubnets'
-        InstanceType: kafka.t3.small
+        InstanceType: !Ref 'MSKInstanceType'
         SecurityGroups:
           - !Ref 'MSKSecurityGroup'
         StorageInfo:
           EBSStorageInfo:
             VolumeSize: 100
       ClientAuthentication:
-        Tls:
-          Enabled: false
+        Sasl:
+          Scram:
+            Enabled: true
       ClusterName: !Sub '${AWS::StackName}-msk-cluster'
       EncryptionInfo:
-        EncryptionAtRest:
-          DataVolumeKMSKeyId: alias/aws/msk
         EncryptionInTransit:
-          ClientBroker: PLAINTEXT
+          ClientBroker: TLS
           InCluster: true
-      KafkaVersion: 3.9.x.kraft
-      NumberOfBrokerNodes: 2
+      KafkaVersion: 3.9.x
+      NumberOfBrokerNodes: !Ref 'MSKBrokerNodes'
       Tags:
         Environment: !Ref 'AWS::StackName'
         ManagedBy: Lakerunner
         Name: !Sub '${AWS::StackName}-msk-cluster'
     Type: AWS::MSK::Cluster
+  MSKCredentials:
+    Properties:
+      Description: MSK SASL/SCRAM credentials for Kafka authentication
+      GenerateSecretString:
+        ExcludeCharacters: '"@/\'
+        GenerateStringKey: password
+        PasswordLength: 32
+        SecretStringTemplate: '{"username": "lakerunner"}'
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-msk-credentials'
+        - Key: ManagedBy
+          Value: Lakerunner
+        - Key: Component
+          Value: MSK
+    Type: AWS::SecretsManager::Secret
   MSKSecurityGroup:
     Properties:
       GroupDescription: Security group for MSK cluster
@@ -79,6 +126,11 @@ Resources:
           FromPort: 9094
           IpProtocol: tcp
           ToPort: 9094
+        - CidrIp: 10.0.0.0/8
+          Description: ZooKeeper
+          FromPort: 2181
+          IpProtocol: tcp
+          ToPort: 2181
       Tags:
         - Key: Name
           Value: !Sub '${AWS::StackName}-msk-sg'

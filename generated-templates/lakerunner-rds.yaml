@@ -37,6 +37,18 @@ Outputs:
       - !Ref 'ExistingTaskRoleArn'
       - !GetAtt 'DatabaseTaskRole.Arn'
 Parameters:
+  DbInstanceClass:
+    AllowedValues:
+      - db.r6g.large
+      - db.r6g.xlarge
+      - db.r6g.2xlarge
+      - db.r6g.4xlarge
+      - db.r6g.8xlarge
+      - db.r6g.12xlarge
+      - db.r6g.16xlarge
+    Default: db.r6g.large
+    Description: RDS instance class.
+    Type: String
   ExistingTaskRoleArn:
     Default: ''
     Description: 'OPTIONAL: Existing task role ARN to attach database permissions to. Leave blank to create a new role.'
@@ -106,7 +118,7 @@ Resources:
     Properties:
       AllocatedStorage: '100'
       CopyTagsToSnapshot: true
-      DBInstanceClass: db.t3.medium
+      DBInstanceClass: !Ref 'DbInstanceClass'
       DBName: lakerunner
       DBSubnetGroupName: !Ref 'DbSubnetGroup'
       DeletionProtection: false
