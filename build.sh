@@ -44,27 +44,31 @@ echo "3. Generating Lakerunner RDS..."
   python3 src/lakerunner_rds.py > generated-templates/lakerunner-rds.yaml
   cfn-lint $LINT_OPTS -- generated-templates/lakerunner-rds.yaml
 
-echo "4. Generating Lakerunner Storage..."
-  python3 src/lakerunner_storage.py > generated-templates/lakerunner-storage.yaml
+echo "4. Generating Lakerunner MSK..."
+  python3 src/lakerunner_msk.py > generated-templates/lakerunner-msk.yaml
+  cfn-lint $LINT_OPTS -- generated-templates/lakerunner-msk.yaml
+
+echo "5. Generating Lakerunner Storage..."
+  python3 src/lakerunner_s3.py > generated-templates/lakerunner-storage.yaml
   cfn-lint $LINT_OPTS -- generated-templates/lakerunner-storage.yaml
 
-echo "5. Generating Lakerunner Migration Task..."
+echo "6. Generating Lakerunner Migration Task..."
   python3 src/lakerunner_migration.py > generated-templates/lakerunner-migration.yaml
   cfn-lint $LINT_OPTS -- generated-templates/lakerunner-migration.yaml
 
-echo "6. Generating Lakerunner Services..."
+echo "7. Generating Lakerunner Services..."
   python3 src/lakerunner_services.py > generated-templates/lakerunner-services.yaml
   cfn-lint $LINT_OPTS -- generated-templates/lakerunner-services.yaml
 
-echo "7. Generating Lakerunner Grafana Service..."
+echo "8. Generating Lakerunner Grafana Service..."
   python3 src/lakerunner_grafana_service.py > generated-templates/lakerunner-grafana-service.yaml
   cfn-lint $LINT_OPTS -- generated-templates/lakerunner-grafana-service.yaml
 
-echo "8. Generating Demo OTEL Collector..."
+echo "9. Generating Demo OTEL Collector..."
   python3 src/demo_otel_collector.py > generated-templates/lakerunner-demo-otel-collector.yaml
   cfn-lint $LINT_OPTS -- generated-templates/lakerunner-demo-otel-collector.yaml
 
-echo "9. Generating Lakerunner Root Stack..."
+echo "10. Generating Lakerunner Root Stack..."
   python3 src/lakerunner_root.py > generated-templates/lakerunner-root.yaml
   cfn-lint $LINT_OPTS -- generated-templates/lakerunner-root.yaml
 

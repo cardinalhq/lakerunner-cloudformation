@@ -1,6 +1,6 @@
 import json
 
-from lakerunner_storage import t as storage_template
+from lakerunner_s3 import t as storage_template
 from lakerunner_root import t as root_template
 
 

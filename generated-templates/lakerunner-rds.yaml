@@ -1,25 +1,95 @@
+Conditions:
+  CreateTaskRole: !Equals
+    - !Ref 'ExistingTaskRoleArn'
+    - ''
+  UseExistingTaskRole: !Not
+    - !Equals
+      - !Ref 'ExistingTaskRoleArn'
+      - ''
 Description: RDS PostgreSQL database stack for Lakerunner.
 Outputs:
+  DatabaseSecurityGroupId:
+    Description: Database security group ID
+    Export:
+      Name: !Sub '${AWS::StackName}-DatabaseSecurityGroupId'
+    Value: !Ref 'DatabaseSecurityGroup'
   DbEndpoint:
+    Description: Database endpoint
     Export:
       Name: !Sub '${AWS::StackName}-DbEndpoint'
     Value: !GetAtt 'LakerunnerDb.Endpoint.Address'
   DbPort:
+    Description: Database port
     Export:
       Name: !Sub '${AWS::StackName}-DbPort'
     Value: !GetAtt 'LakerunnerDb.Endpoint.Port'
   DbSecretArn:
+    Description: Database secret ARN
     Export:
       Name: !Sub '${AWS::StackName}-DbSecretArn'
     Value: !Ref 'DbSecret'
+  TaskRoleArn:
+    Description: Task role ARN for database access (created or existing)
+    Export:
+      Name: !Sub '${AWS::StackName}-TaskRoleArn'
+    Value: !If
+      - UseExistingTaskRole
+      - !Ref 'ExistingTaskRoleArn'
+      - !GetAtt 'DatabaseTaskRole.Arn'
 Parameters:
+  ExistingTaskRoleArn:
+    Default: ''
+    Description: 'OPTIONAL: Existing task role ARN to attach database permissions to. Leave blank to create a new role.'
+    Type: String
   PrivateSubnets:
     Description: 'REQUIRED: Private subnet IDs for the database'
     Type: List<AWS::EC2::Subnet::Id>
-  TaskSecurityGroupId:
-    Description: 'REQUIRED: Security group used by ECS tasks (allows DB access)'
-    Type: AWS::EC2::SecurityGroup::Id
+  VpcId:
+    Description: 'REQUIRED: VPC ID where the database will be deployed'
+    Type: AWS::EC2::VPC::Id
 Resources:
+  DatabaseSecurityGroup:
+    Properties:
+      GroupDescription: Security group for RDS PostgreSQL database
+      SecurityGroupIngress:
+        - CidrIp: 10.0.0.0/8
+          Description: PostgreSQL access from private networks
+          FromPort: 5432
+          IpProtocol: tcp
+          ToPort: 5432
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-db-sg'
+        - Key: Component
+          Value: Database
+        - Key: ManagedBy
+          Value: Lakerunner
+      VpcId: !Ref 'VpcId'
+    Type: AWS::EC2::SecurityGroup
+  DatabaseTaskRole:
+    Condition: CreateTaskRole
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+        Version: '2012-10-17'
+      Policies:
+        - PolicyDocument:
+            Statement:
+              - Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                Effect: Allow
+                Resource:
+                  - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/*'
+                  - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}-*'
+            Version: '2012-10-17'
+          PolicyName: BaseECSTaskPolicy
+      RoleName: !Sub '${AWS::StackName}-database-task-role'
+    Type: AWS::IAM::Role
   DbSecret:
     Properties:
       GenerateSecretString:
@@ -52,6 +122,30 @@ Resources:
       PubliclyAccessible: false
       StorageType: gp3
       VPCSecurityGroups:
-        - !Ref 'TaskSecurityGroupId'
+        - !Ref 'DatabaseSecurityGroup'
     Type: AWS::RDS::DBInstance
+  SecretsManagerTaskPolicy:
+    Properties:
+      PolicyDocument:
+        Statement:
+          - Action:
+              - secretsmanager:GetSecretValue
+            Effect: Allow
+            Resource:
+              - !Ref 'DbSecret'
+              - !Sub
+                - ${DbSecretArn}*
+                - DbSecretArn: !Ref 'DbSecret'
+        Version: '2012-10-17'
+      PolicyName: SecretsManagerAccess
+      Roles:
+        - !If
+          - UseExistingTaskRole
+          - !Select
+            - 1
+            - !Split
+              - /
+              - !Ref 'ExistingTaskRoleArn'
+          - !Ref 'DatabaseTaskRole'
+    Type: AWS::IAM::Policy
 

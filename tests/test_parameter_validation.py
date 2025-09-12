@@ -2,7 +2,7 @@ import json
 
 from lakerunner_ecs import t as ecs_template
 from lakerunner_rds import t as rds_template
-from lakerunner_storage import t as storage_template
+from lakerunner_s3 import t as storage_template
 
 
 def test_ecs_vpc_parameter_type():

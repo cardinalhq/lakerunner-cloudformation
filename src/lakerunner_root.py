@@ -1,168 +1,522 @@
 #!/usr/bin/env python3
 """Lakerunner root CloudFormation template.
 
-This template orchestrates the deployment of Lakerunner by creating nested
-stacks for each major component. Individual stacks are only deployed when the
-corresponding Deploy* parameter is set to "Yes".
+This template provides a single-stack deployment experience with modular
+create-or-bring-your-own options for each major component.
 """
 
-from troposphere import Template, Parameter, Ref, Equals, Sub, GetAtt, And, Condition
-from troposphere.cloudformation import Stack
+import yaml
+import os
+from troposphere import (
+    Template, Parameter, Ref, Equals, Sub, GetAtt, If, Not, And, Or,
+    Condition, Output, Export, Tags, Select, Split
+)
+from troposphere.cloudformation import Stack, WaitConditionHandle
+from troposphere.iam import Role, Policy
+
+
+def load_defaults():
+    """Load default configuration from YAML file."""
+    config_path = os.path.join(os.path.dirname(__file__), '..', 'lakerunner-stack-defaults.yaml')
+    with open(config_path, 'r') as f:
+        return yaml.safe_load(f)
+
+
+def create_byo_template():
+    """Create a version of the template optimized for BYO VPC with dropdown lists."""
+    # For BYO-focused template, use dropdown parameter types
+    # This would be a separate template file: lakerunner-root-byo.py
+    pass
 
 
 # Initialize template
 TEMPLATE_DESCRIPTION = (
-    "Root stack that links all Lakerunner nested stacks. Set Deploy* parameters "
-    "to control which components are launched."
+    "Lakerunner infrastructure deployment with modular create-or-bring-your-own options"
 )
 
 t = Template()
 t.set_description(TEMPLATE_DESCRIPTION)
 
+# Load defaults
+defaults = load_defaults()
 
-# Base URL for nested templates
+# Template base URL parameter (required for nested stacks)
 base_url = t.add_parameter(
     Parameter(
         "TemplateBaseUrl",
         Type="String",
-        Description="Base URL where nested templates are stored",
+        Description="Base URL where nested templates are stored (e.g., https://s3.amazonaws.com/bucket/templates/)",
     )
 )
 
+# =============================================================================
+# Infrastructure Selection
+# The root template orchestrates deployment using existing infrastructure
+# (either from Part 1 Landscape stack or BYO resources)
+# =============================================================================
 
-# Deploy parameters and conditions
-
-def deploy_param(name, description, default="Yes"):
-    param = t.add_parameter(
-        Parameter(
-            name,
-            Type="String",
-            Default=default,
-            AllowedValues=["Yes", "No"],
-            Description=description,
-        )
-    )
-    t.add_condition(name, Equals(Ref(param), "Yes"))
-    return name
-
-
-deploy_vpc = deploy_param("DeployVpc", "Deploy the VPC stack")
-deploy_ecs = deploy_param("DeployEcs", "Deploy the ECS infrastructure stack")
-deploy_rds = deploy_param("DeployRds", "Deploy the RDS database stack")
-deploy_storage = deploy_param("DeployStorage", "Deploy the Storage (S3/SQS) stack")
-deploy_migration = deploy_param("DeployMigration", "Deploy the Migration stack", default="No")
-deploy_services = deploy_param("DeployServices", "Deploy the Services stack")
-deploy_grafana = deploy_param("DeployGrafanaService", "Deploy the Grafana Service stack", default="No")
-deploy_otel = deploy_param("DeployOtelCollector", "Deploy the demo OTEL Collector stack", default="No")
-
-
-# Composite conditions ensuring dependent stacks exist
-t.add_condition(
-    "DeployEcsStack",
-    And(Condition(deploy_ecs), Condition(deploy_vpc)),
-)
-
-t.add_condition(
-    "DeployRdsStack",
-    And(Condition(deploy_rds), Condition(deploy_vpc), Condition(deploy_ecs)),
-)
-
-t.add_condition(
-    "DeployServicesStack",
-    And(
-        Condition(deploy_services),
-        Condition(deploy_vpc),
-        Condition(deploy_ecs),
-        Condition(deploy_rds),
-        Condition(deploy_storage),
-    ),
-)
-
-
-# Nested stacks with parameter wiring
-vpc_stack = t.add_resource(
-    Stack(
-        "VpcStack",
-        Condition=deploy_vpc,
-        TemplateURL=Sub("${TemplateBaseUrl}/lakerunner-vpc.yaml"),
+# VPC Selection Parameters (always required)
+# These are used whether VPC was created by Part 1 or is BYO
+vpc_id = t.add_parameter(
+    Parameter(
+        "VPCId",
+        Type="AWS::EC2::VPC::Id",
+        Description="VPC ID to use for deployment (from Part 1 Landscape stack or existing VPC).",
     )
 )
 
+private_subnet1 = t.add_parameter(
+    Parameter(
+        "PrivateSubnet1Id",
+        Type="AWS::EC2::Subnet::Id",
+        Description="First private subnet ID (from Part 1 Landscape stack or existing subnet).",
+    )
+)
+
+private_subnet2 = t.add_parameter(
+    Parameter(
+        "PrivateSubnet2Id",
+        Type="AWS::EC2::Subnet::Id",
+        Description="Second private subnet ID (from Part 1 Landscape stack or existing subnet).",
+    )
+)
+
+public_subnet1 = t.add_parameter(
+    Parameter(
+        "PublicSubnet1Id",
+        Type="AWS::EC2::Subnet::Id",
+        Description="First public subnet ID (from Part 1 Landscape stack or existing subnet). Optional.",
+    )
+)
+
+public_subnet2 = t.add_parameter(
+    Parameter(
+        "PublicSubnet2Id",
+        Type="AWS::EC2::Subnet::Id",
+        Description="Second public subnet ID (from Part 1 Landscape stack or existing subnet). Optional.",
+    )
+)
+
+# =============================================================================
+# Infrastructure Creation Options
+# =============================================================================
+
+create_s3 = t.add_parameter(
+    Parameter(
+        "CreateS3Storage",
+        Type="String",
+        Default="Yes",
+        AllowedValues=["Yes", "No"],
+        Description="Create S3 bucket and SQS queue for data ingestion?",
+    )
+)
+
+create_rds = t.add_parameter(
+    Parameter(
+        "CreateRDS", 
+        Type="String",
+        Default="Yes",
+        AllowedValues=["Yes", "No"],
+        Description="Create Aurora PostgreSQL database?",
+    )
+)
+
+create_ecs_infra = t.add_parameter(
+    Parameter(
+        "CreateECSInfrastructure",
+        Type="String",
+        Default="No",
+        AllowedValues=["Yes", "No"],
+        Description="Create ECS cluster and infrastructure?",
+    )
+)
+
+create_ecs_services = t.add_parameter(
+    Parameter(
+        "CreateECSServices",
+        Type="String",
+        Default="No",
+        AllowedValues=["Yes", "No"],
+        Description="Deploy ECS services for Lakerunner?",
+    )
+)
+
+create_msk = t.add_parameter(
+    Parameter(
+        "CreateMSK",
+        Type="String", 
+        Default="Yes",
+        AllowedValues=["Yes", "No"],
+        Description="Create Amazon MSK (Kafka) cluster?",
+    )
+)
+
+# BYO Resource Parameters (when Create=No)
+existing_bucket_arn = t.add_parameter(
+    Parameter(
+        "ExistingBucketArn",
+        Type="String",
+        Default="",
+        Description="Existing S3 bucket ARN. Required when CreateS3Storage=No.",
+    )
+)
+
+existing_db_endpoint = t.add_parameter(
+    Parameter(
+        "ExistingDatabaseEndpoint",
+        Type="String",
+        Default="", 
+        Description="Existing database endpoint. Required when CreateRDS=No.",
+    )
+)
+
+existing_db_secret_arn = t.add_parameter(
+    Parameter(
+        "ExistingDatabaseSecretArn",
+        Type="String",
+        Default="",
+        Description="Existing database secret ARN. Required when CreateRDS=No.",
+    )
+)
+
+# BYO Task Role (when any component is BYO)
+existing_task_role_arn = t.add_parameter(
+    Parameter(
+        "ExistingTaskRoleArn",
+        Type="String",
+        Default="",
+        Description="Existing task role ARN with permissions for BYO resources. Required when using any existing resources.",
+    )
+)
+
+existing_msk_arn = t.add_parameter(
+    Parameter(
+        "ExistingMSKClusterArn",
+        Type="String",
+        Default="",
+        Description="Existing MSK cluster ARN. Required when CreateMSK=No.",
+    )
+)
+
+# =============================================================================
+# Conditions
+# =============================================================================
+
+t.add_condition("CreateS3StorageCondition", Equals(Ref(create_s3), "Yes"))
+t.add_condition("CreateRDSCondition", Equals(Ref(create_rds), "Yes"))
+t.add_condition("CreateECSInfraCondition", Equals(Ref(create_ecs_infra), "Yes"))
+t.add_condition("CreateECSServicesCondition", Equals(Ref(create_ecs_services), "Yes"))
+t.add_condition("CreateMSKCondition", Equals(Ref(create_msk), "Yes"))
+
+# Note: Task role conditions are now handled individually by each component stack
+
+# =============================================================================
+# Parameter Groups (for CloudFormation console organization)
+# =============================================================================
+
+t.set_metadata({
+    "AWS::CloudFormation::Interface": {
+        "ParameterGroups": [
+            {
+                "Label": {"default": "Template Configuration"},
+                "Parameters": ["TemplateBaseUrl"]
+            },
+            {
+                "Label": {"default": "Infrastructure Selection"},
+                "Parameters": [
+                    "VPCId",
+                    "PrivateSubnet1Id",
+                    "PrivateSubnet2Id", 
+                    "PublicSubnet1Id",
+                    "PublicSubnet2Id"
+                ]
+            },
+            {
+                "Label": {"default": "Infrastructure Creation Options"},
+                "Parameters": [
+                    "CreateS3Storage",
+                    "CreateRDS",
+                    "CreateMSK"
+                ]
+            },
+            {
+                "Label": {"default": "Service Deployment Options"},
+                "Parameters": [
+                    "CreateECSInfrastructure",
+                    "CreateECSServices"
+                    # TODO: Add "CreateEKS" when EKS template is created
+                ]
+            },
+            {
+                "Label": {"default": "Existing Resources (BYO)"},
+                "Parameters": [
+                    "ExistingBucketArn",
+                    "ExistingDatabaseEndpoint",
+                    "ExistingDatabaseSecretArn",
+                    "ExistingTaskRoleArn",
+                    "ExistingMSKClusterArn"
+                ]
+            }
+        ],
+        "ParameterLabels": {
+            "VPCId": {"default": "VPC ID"},
+            "PrivateSubnet1Id": {"default": "Private Subnet 1 ID"},
+            "PrivateSubnet2Id": {"default": "Private Subnet 2 ID"},
+            "PublicSubnet1Id": {"default": "Public Subnet 1 ID (optional)"},
+            "PublicSubnet2Id": {"default": "Public Subnet 2 ID (optional)"},
+            "CreateS3Storage": {"default": "Create S3 Storage?"},
+            "CreateRDS": {"default": "Create RDS Database?"},
+            "CreateECSInfrastructure": {"default": "Create ECS Infrastructure?"},
+            "CreateECSServices": {"default": "Deploy ECS Services?"},
+            "CreateMSK": {"default": "Create MSK Kafka?"},
+            # "CreateEKS": {"default": "Deploy EKS Services?"},
+            "ExistingBucketArn": {"default": "Existing Bucket ARN"},
+            "ExistingDatabaseEndpoint": {"default": "Existing DB Endpoint"},
+            "ExistingDatabaseSecretArn": {"default": "Existing DB Secret ARN"},
+            "ExistingTaskRoleArn": {"default": "Existing Task Role ARN"},
+            "ExistingMSKClusterArn": {"default": "Existing MSK Cluster ARN"}
+        }
+    }
+})
+
+# =============================================================================
+# Note: Individual stacks now create their own IAM roles and security groups
+# This makes each stack standalone and composable
+# =============================================================================
+
+# =============================================================================
+# Nested Stacks 
+# =============================================================================
+
+# ECS Infrastructure Stack (conditional)
 ecs_stack = t.add_resource(
     Stack(
-        "EcsStack",
-        Condition="DeployEcsStack",
+        "ECSStack",
+        Condition="CreateECSInfraCondition",
         TemplateURL=Sub("${TemplateBaseUrl}/lakerunner-ecs.yaml"),
         Parameters={
-            "VpcId": GetAtt(vpc_stack, "Outputs.VpcId"),
+            "VpcId": Ref(vpc_id),
         },
+        Tags=Tags(
+            Component="ECS",
+            ManagedBy="Lakerunner", 
+            Environment=Ref("AWS::StackName")
+        )
     )
 )
 
-rds_stack = t.add_resource(
-    Stack(
-        "RdsStack",
-        Condition="DeployRdsStack",
-        TemplateURL=Sub("${TemplateBaseUrl}/lakerunner-rds.yaml"),
-        Parameters={
-            "PrivateSubnets": GetAtt(vpc_stack, "Outputs.PrivateSubnets"),
-            "TaskSecurityGroupId": GetAtt(ecs_stack, "Outputs.TaskSGId"),
-        },
-    )
-)
-
+# S3 + SQS Storage Stack (conditional)
 storage_stack = t.add_resource(
     Stack(
         "StorageStack",
-        Condition=deploy_storage,
+        Condition="CreateS3StorageCondition",
         TemplateURL=Sub("${TemplateBaseUrl}/lakerunner-storage.yaml"),
+        Parameters={
+            "ExistingTaskRoleArn": Ref(existing_task_role_arn)
+        },
+        Tags=Tags(
+            Component="Storage",
+            ManagedBy="Lakerunner",
+            Environment=Ref("AWS::StackName")
+        )
     )
 )
 
-t.add_resource(
+# RDS Stack (conditional) - now standalone
+rds_stack = t.add_resource(
     Stack(
-        "MigrationStack",
-        Condition=deploy_migration,
-        TemplateURL=Sub("${TemplateBaseUrl}/lakerunner-migration.yaml"),
+        "RDSStack",
+        Condition="CreateRDSCondition",
+        TemplateURL=Sub("${TemplateBaseUrl}/lakerunner-rds.yaml"),
+        Parameters={
+            "VpcId": Ref(vpc_id),
+            "PrivateSubnets": Sub("${PrivateSubnet1Id},${PrivateSubnet2Id}"),
+            "ExistingTaskRoleArn": Ref(existing_task_role_arn)
+        },
+        Tags=Tags(
+            Component="Database", 
+            ManagedBy="Lakerunner",
+            Environment=Ref("AWS::StackName")
+        )
     )
 )
 
-t.add_resource(
+# MSK Stack (conditional)
+msk_stack = t.add_resource(
+    Stack(
+        "MSKStack",
+        Condition="CreateMSKCondition",
+        TemplateURL=Sub("${TemplateBaseUrl}/lakerunner-msk.yaml"),
+        Parameters={
+            "VpcId": Ref(vpc_id),
+            "PrivateSubnets": Sub("${PrivateSubnet1Id},${PrivateSubnet2Id}"),
+            "ExistingTaskRoleArn": Ref(existing_task_role_arn)
+        },
+        Tags=Tags(
+            Component="MSK",
+            ManagedBy="Lakerunner",
+            Environment=Ref("AWS::StackName")
+        )
+    )
+)
+
+# Services Stack (conditional) - Part 3a: ECS deployment
+services_stack = t.add_resource(
     Stack(
         "ServicesStack",
-        Condition="DeployServicesStack",
+        Condition="CreateECSServicesCondition",
         TemplateURL=Sub("${TemplateBaseUrl}/lakerunner-services.yaml"),
         Parameters={
-            "ClusterArn": GetAtt(ecs_stack, "Outputs.ClusterArn"),
-            "DbSecretArn": GetAtt(rds_stack, "Outputs.DbSecretArn"),
-            "DbHost": GetAtt(rds_stack, "Outputs.DbEndpoint"),
-            "DbPort": GetAtt(rds_stack, "Outputs.DbPort"),
-            "TaskSecurityGroupId": GetAtt(ecs_stack, "Outputs.TaskSGId"),
-            "VpcId": GetAtt(vpc_stack, "Outputs.VpcId"),
-            "PrivateSubnets": GetAtt(vpc_stack, "Outputs.PrivateSubnets"),
-            "PublicSubnets": GetAtt(vpc_stack, "Outputs.PublicSubnets"),
-            "BucketArn": GetAtt(storage_stack, "Outputs.BucketArn"),
+            # Services stack will import values from CommonInfra stack exports
+            # No parameters needed as it uses cross-stack imports
         },
+        Tags=Tags(
+            Component="Services",
+            ManagedBy="Lakerunner",
+            Environment=Ref("AWS::StackName")
+        )
     )
 )
 
-t.add_resource(
-    Stack(
-        "GrafanaServiceStack",
-        Condition=deploy_grafana,
-        TemplateURL=Sub("${TemplateBaseUrl}/lakerunner-grafana-service.yaml"),
+# =============================================================================
+# Outputs (consolidated values from created or BYO resources)
+# =============================================================================
+
+# VPC ID - from user selection
+t.add_output(
+    Output(
+        "VPCId",
+        Description="Selected VPC ID",
+        Value=Ref(vpc_id),
+        Export=Export(Sub("${AWS::StackName}-VPCId"))
     )
 )
 
-t.add_resource(
-    Stack(
-        "OtelCollectorStack",
-        Condition=deploy_otel,
-        TemplateURL=Sub("${TemplateBaseUrl}/lakerunner-demo-otel-collector.yaml"),
+# Private Subnets - from user selection
+t.add_output(
+    Output(
+        "PrivateSubnets",
+        Description="Selected private subnet IDs",
+        Value=Sub("${PrivateSubnet1Id},${PrivateSubnet2Id}"),
+        Export=Export(Sub("${AWS::StackName}-PrivateSubnets"))
+    )
+)
+
+# Public Subnets - from user selection
+t.add_output(
+    Output(
+        "PublicSubnets",
+        Description="Selected public subnet IDs",
+        Value=Sub("${PublicSubnet1Id},${PublicSubnet2Id}"),
+        Export=Export(Sub("${AWS::StackName}-PublicSubnets"))
+    )
+)
+
+# Storage Stack Outputs (conditional)
+t.add_output(
+    Output(
+        "BucketName",
+        Description="S3 bucket name for ingest (created or existing)",
+        Value=If(
+            "CreateS3StorageCondition",
+            GetAtt(storage_stack, "Outputs.BucketName"),
+            Select(5, Split("/", Ref(existing_bucket_arn)))  # Extract bucket name from ARN
+        ),
+        Export=Export(Sub("${AWS::StackName}-BucketName"))
+    )
+)
+
+t.add_output(
+    Output(
+        "BucketArn",
+        Description="S3 bucket ARN for ingest (created or existing)", 
+        Value=If(
+            "CreateS3StorageCondition",
+            GetAtt(storage_stack, "Outputs.BucketArn"),
+            Ref(existing_bucket_arn)
+        ),
+        Export=Export(Sub("${AWS::StackName}-BucketArn"))
+    )
+)
+
+# RDS Stack Outputs (conditional)
+t.add_output(
+    Output(
+        "DatabaseEndpoint",
+        Description="RDS database endpoint (created or existing)",
+        Value=If(
+            "CreateRDSCondition",
+            GetAtt(rds_stack, "Outputs.DbEndpoint"),
+            Ref(existing_db_endpoint)
+        ),
+        Export=Export(Sub("${AWS::StackName}-DatabaseEndpoint"))
+    )
+)
+
+t.add_output(
+    Output(
+        "DatabasePort",
+        Description="RDS database port",
+        Value=If(
+            "CreateRDSCondition",
+            GetAtt(rds_stack, "Outputs.DbPort"),
+            "5432"  # Default PostgreSQL port for existing databases
+        ),
+        Export=Export(Sub("${AWS::StackName}-DatabasePort"))
+    )
+)
+
+t.add_output(
+    Output(
+        "DatabaseSecretArn",
+        Description="RDS database secret ARN (created or existing)",
+        Value=If(
+            "CreateRDSCondition",
+            GetAtt(rds_stack, "Outputs.DbSecretArn"),
+            Ref(existing_db_secret_arn)
+        ),
+        Export=Export(Sub("${AWS::StackName}-DatabaseSecretArn"))
+    )
+)
+
+# ECS Stack Outputs (conditional)
+t.add_output(
+    Output(
+        "ClusterArn",
+        Description="ECS cluster ARN (only available when ECS infrastructure is created)",
+        Condition="CreateECSInfraCondition",
+        Value=GetAtt(ecs_stack, "Outputs.ClusterArn"),
+        Export=Export(Sub("${AWS::StackName}-ClusterArn"))
+    )
+)
+
+t.add_output(
+    Output(
+        "TaskSecurityGroupId",
+        Description="ECS task security group ID (only available when ECS infrastructure is created)",
+        Condition="CreateECSInfraCondition",
+        Value=GetAtt(ecs_stack, "Outputs.TaskSGId"),
+        Export=Export(Sub("${AWS::StackName}-TaskSGId"))
+    )
+)
+
+# Note: Task roles are now created individually by each component stack
+# This provides better isolation and makes each stack more standalone
+
+# MSK Stack Outputs (conditional)
+t.add_output(
+    Output(
+        "MSKClusterArn",
+        Description="MSK cluster ARN (created or existing)",
+        Value=If(
+            "CreateMSKCondition",
+            GetAtt(msk_stack, "Outputs.MSKClusterArn"),
+            Ref(existing_msk_arn)
+        ),
+        Export=Export(Sub("${AWS::StackName}-MSKClusterArn"))
     )
 )
 
 
 if __name__ == "__main__":
-    print(t.to_json())
-
+    print(t.to_yaml())

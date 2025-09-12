@@ -1,0 +1,30 @@
+[
+  {
+    "ParameterKey": "TemplateBaseUrl",
+    "ParameterValue": "https://your-s3-bucket.s3.amazonaws.com/templates"
+  },
+  {
+    "ParameterKey": "ExistingVPCId",
+    "ParameterValue": "vpc-1234567890abcdef0"
+  },
+  {
+    "ParameterKey": "ExistingPrivateSubnet1Id",
+    "ParameterValue": "subnet-1234567890abcdef0"
+  },
+  {
+    "ParameterKey": "ExistingPrivateSubnet2Id",
+    "ParameterValue": "subnet-0987654321fedcba0"
+  },
+  {
+    "ParameterKey": "HasPublicSubnets",
+    "ParameterValue": "Yes"
+  },
+  {
+    "ParameterKey": "ExistingPublicSubnet1Id",
+    "ParameterValue": "subnet-abcdef1234567890a"
+  },
+  {
+    "ParameterKey": "ExistingPublicSubnet2Id",
+    "ParameterValue": "subnet-fedcba0987654321f"
+  }
+]

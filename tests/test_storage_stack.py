@@ -1,5 +1,5 @@
 import json
-from lakerunner_storage import t as template
+from lakerunner_s3 import t as template
 
 
 def test_template_is_valid_json():

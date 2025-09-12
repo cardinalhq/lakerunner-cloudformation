@@ -1,341 +1,311 @@
-{
- "Conditions": {
-  "DeployEcs": {
-   "Fn::Equals": [
-    {
-     "Ref": "DeployEcs"
-    },
-    "Yes"
-   ]
-  },
-  "DeployEcsStack": {
-   "Fn::And": [
-    {
-     "Condition": "DeployEcs"
-    },
-    {
-     "Condition": "DeployVpc"
-    }
-   ]
-  },
-  "DeployGrafanaService": {
-   "Fn::Equals": [
-    {
-     "Ref": "DeployGrafanaService"
-    },
-    "Yes"
-   ]
-  },
-  "DeployMigration": {
-   "Fn::Equals": [
-    {
-     "Ref": "DeployMigration"
-    },
-    "Yes"
-   ]
-  },
-  "DeployOtelCollector": {
-   "Fn::Equals": [
-    {
-     "Ref": "DeployOtelCollector"
-    },
-    "Yes"
-   ]
-  },
-  "DeployRds": {
-   "Fn::Equals": [
-    {
-     "Ref": "DeployRds"
-    },
-    "Yes"
-   ]
-  },
-  "DeployRdsStack": {
-   "Fn::And": [
-    {
-     "Condition": "DeployRds"
-    },
-    {
-     "Condition": "DeployVpc"
-    },
-    {
-     "Condition": "DeployEcs"
-    }
-   ]
-  },
-  "DeployServices": {
-   "Fn::Equals": [
-    {
-     "Ref": "DeployServices"
-    },
-    "Yes"
-   ]
-  },
-  "DeployServicesStack": {
-   "Fn::And": [
-    {
-     "Condition": "DeployServices"
-    },
-    {
-     "Condition": "DeployVpc"
-    },
-    {
-     "Condition": "DeployEcs"
-    },
-    {
-     "Condition": "DeployRds"
-    },
-    {
-     "Condition": "DeployStorage"
-    }
-   ]
-  },
-  "DeployStorage": {
-   "Fn::Equals": [
-    {
-     "Ref": "DeployStorage"
-    },
-    "Yes"
-   ]
-  },
-  "DeployVpc": {
-   "Fn::Equals": [
-    {
-     "Ref": "DeployVpc"
-    },
-    "Yes"
-   ]
-  }
- },
- "Description": "Root stack that links all Lakerunner nested stacks. Set Deploy* parameters to control which components are launched.",
- "Parameters": {
-  "DeployEcs": {
-   "AllowedValues": [
-    "Yes",
-    "No"
-   ],
-   "Default": "Yes",
-   "Description": "Deploy the ECS infrastructure stack",
-   "Type": "String"
-  },
-  "DeployGrafanaService": {
-   "AllowedValues": [
-    "Yes",
-    "No"
-   ],
-   "Default": "No",
-   "Description": "Deploy the Grafana Service stack",
-   "Type": "String"
-  },
-  "DeployMigration": {
-   "AllowedValues": [
-    "Yes",
-    "No"
-   ],
-   "Default": "No",
-   "Description": "Deploy the Migration stack",
-   "Type": "String"
-  },
-  "DeployOtelCollector": {
-   "AllowedValues": [
-    "Yes",
-    "No"
-   ],
-   "Default": "No",
-   "Description": "Deploy the demo OTEL Collector stack",
-   "Type": "String"
-  },
-  "DeployRds": {
-   "AllowedValues": [
-    "Yes",
-    "No"
-   ],
-   "Default": "Yes",
-   "Description": "Deploy the RDS database stack",
-   "Type": "String"
-  },
-  "DeployServices": {
-   "AllowedValues": [
-    "Yes",
-    "No"
-   ],
-   "Default": "Yes",
-   "Description": "Deploy the Services stack",
-   "Type": "String"
-  },
-  "DeployStorage": {
-   "AllowedValues": [
-    "Yes",
-    "No"
-   ],
-   "Default": "Yes",
-   "Description": "Deploy the Storage (S3/SQS) stack",
-   "Type": "String"
-  },
-  "DeployVpc": {
-   "AllowedValues": [
-    "Yes",
-    "No"
-   ],
-   "Default": "Yes",
-   "Description": "Deploy the VPC stack",
-   "Type": "String"
-  },
-  "TemplateBaseUrl": {
-   "Description": "Base URL where nested templates are stored",
-   "Type": "String"
-  }
- },
- "Resources": {
-  "EcsStack": {
-   "Condition": "DeployEcsStack",
-   "Properties": {
-    "Parameters": {
-     "VpcId": {
-      "Fn::GetAtt": [
-       "VpcStack",
-       "Outputs.VpcId"
-      ]
-     }
-    },
-    "TemplateURL": {
-     "Fn::Sub": "${TemplateBaseUrl}/lakerunner-ecs.yaml"
-    }
-   },
-   "Type": "AWS::CloudFormation::Stack"
-  },
-  "GrafanaServiceStack": {
-   "Condition": "DeployGrafanaService",
-   "Properties": {
-    "TemplateURL": {
-     "Fn::Sub": "${TemplateBaseUrl}/lakerunner-grafana-service.yaml"
-    }
-   },
-   "Type": "AWS::CloudFormation::Stack"
-  },
-  "MigrationStack": {
-   "Condition": "DeployMigration",
-   "Properties": {
-    "TemplateURL": {
-     "Fn::Sub": "${TemplateBaseUrl}/lakerunner-migration.yaml"
-    }
-   },
-   "Type": "AWS::CloudFormation::Stack"
-  },
-  "OtelCollectorStack": {
-   "Condition": "DeployOtelCollector",
-   "Properties": {
-    "TemplateURL": {
-     "Fn::Sub": "${TemplateBaseUrl}/lakerunner-demo-otel-collector.yaml"
-    }
-   },
-   "Type": "AWS::CloudFormation::Stack"
-  },
-  "RdsStack": {
-   "Condition": "DeployRdsStack",
-   "Properties": {
-    "Parameters": {
-     "PrivateSubnets": {
-      "Fn::GetAtt": [
-       "VpcStack",
-       "Outputs.PrivateSubnets"
-      ]
-     },
-     "TaskSecurityGroupId": {
-      "Fn::GetAtt": [
-       "EcsStack",
-       "Outputs.TaskSGId"
-      ]
-     }
-    },
-    "TemplateURL": {
-     "Fn::Sub": "${TemplateBaseUrl}/lakerunner-rds.yaml"
-    }
-   },
-   "Type": "AWS::CloudFormation::Stack"
-  },
-  "ServicesStack": {
-   "Condition": "DeployServicesStack",
-   "Properties": {
-    "Parameters": {
-     "BucketArn": {
-      "Fn::GetAtt": [
-       "StorageStack",
-       "Outputs.BucketArn"
-      ]
-     },
-     "ClusterArn": {
-      "Fn::GetAtt": [
-       "EcsStack",
-       "Outputs.ClusterArn"
-      ]
-     },
-     "DbHost": {
-      "Fn::GetAtt": [
-       "RdsStack",
-       "Outputs.DbEndpoint"
-      ]
-     },
-     "DbPort": {
-      "Fn::GetAtt": [
-       "RdsStack",
-       "Outputs.DbPort"
-      ]
-     },
-     "DbSecretArn": {
-      "Fn::GetAtt": [
-       "RdsStack",
-       "Outputs.DbSecretArn"
-      ]
-     },
-     "PrivateSubnets": {
-      "Fn::GetAtt": [
-       "VpcStack",
-       "Outputs.PrivateSubnets"
-      ]
-     },
-     "PublicSubnets": {
-      "Fn::GetAtt": [
-       "VpcStack",
-       "Outputs.PublicSubnets"
-      ]
-     },
-     "TaskSecurityGroupId": {
-      "Fn::GetAtt": [
-       "EcsStack",
-       "Outputs.TaskSGId"
-      ]
-     },
-     "VpcId": {
-      "Fn::GetAtt": [
-       "VpcStack",
-       "Outputs.VpcId"
-      ]
-     }
-    },
-    "TemplateURL": {
-     "Fn::Sub": "${TemplateBaseUrl}/lakerunner-services.yaml"
-    }
-   },
-   "Type": "AWS::CloudFormation::Stack"
-  },
-  "StorageStack": {
-   "Condition": "DeployStorage",
-   "Properties": {
-    "TemplateURL": {
-     "Fn::Sub": "${TemplateBaseUrl}/lakerunner-storage.yaml"
-    }
-   },
-   "Type": "AWS::CloudFormation::Stack"
-  },
-  "VpcStack": {
-   "Condition": "DeployVpc",
-   "Properties": {
-    "TemplateURL": {
-     "Fn::Sub": "${TemplateBaseUrl}/lakerunner-vpc.yaml"
-    }
-   },
-   "Type": "AWS::CloudFormation::Stack"
-  }
- }
-}
+Conditions:
+  CreateECSInfraCondition: !Equals
+    - !Ref 'CreateECSInfrastructure'
+    - 'Yes'
+  CreateECSServicesCondition: !Equals
+    - !Ref 'CreateECSServices'
+    - 'Yes'
+  CreateMSKCondition: !Equals
+    - !Ref 'CreateMSK'
+    - 'Yes'
+  CreateRDSCondition: !Equals
+    - !Ref 'CreateRDS'
+    - 'Yes'
+  CreateS3StorageCondition: !Equals
+    - !Ref 'CreateS3Storage'
+    - 'Yes'
+Description: Lakerunner infrastructure deployment with modular create-or-bring-your-own options
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Template Configuration
+        Parameters:
+          - TemplateBaseUrl
+      - Label:
+          default: Infrastructure Selection
+        Parameters:
+          - VPCId
+          - PrivateSubnet1Id
+          - PrivateSubnet2Id
+          - PublicSubnet1Id
+          - PublicSubnet2Id
+      - Label:
+          default: Infrastructure Creation Options
+        Parameters:
+          - CreateS3Storage
+          - CreateRDS
+          - CreateMSK
+      - Label:
+          default: Service Deployment Options
+        Parameters:
+          - CreateECSInfrastructure
+          - CreateECSServices
+      - Label:
+          default: Existing Resources (BYO)
+        Parameters:
+          - ExistingBucketArn
+          - ExistingDatabaseEndpoint
+          - ExistingDatabaseSecretArn
+          - ExistingTaskRoleArn
+          - ExistingMSKClusterArn
+    ParameterLabels:
+      CreateECSInfrastructure:
+        default: Create ECS Infrastructure?
+      CreateECSServices:
+        default: Deploy ECS Services?
+      CreateMSK:
+        default: Create MSK Kafka?
+      CreateRDS:
+        default: Create RDS Database?
+      CreateS3Storage:
+        default: Create S3 Storage?
+      ExistingBucketArn:
+        default: Existing Bucket ARN
+      ExistingDatabaseEndpoint:
+        default: Existing DB Endpoint
+      ExistingDatabaseSecretArn:
+        default: Existing DB Secret ARN
+      ExistingMSKClusterArn:
+        default: Existing MSK Cluster ARN
+      ExistingTaskRoleArn:
+        default: Existing Task Role ARN
+      PrivateSubnet1Id:
+        default: Private Subnet 1 ID
+      PrivateSubnet2Id:
+        default: Private Subnet 2 ID
+      PublicSubnet1Id:
+        default: Public Subnet 1 ID (optional)
+      PublicSubnet2Id:
+        default: Public Subnet 2 ID (optional)
+      VPCId:
+        default: VPC ID
+Outputs:
+  BucketArn:
+    Description: S3 bucket ARN for ingest (created or existing)
+    Export:
+      Name: !Sub '${AWS::StackName}-BucketArn'
+    Value: !If
+      - CreateS3StorageCondition
+      - !GetAtt 'StorageStack.Outputs.BucketArn'
+      - !Ref 'ExistingBucketArn'
+  BucketName:
+    Description: S3 bucket name for ingest (created or existing)
+    Export:
+      Name: !Sub '${AWS::StackName}-BucketName'
+    Value: !If
+      - CreateS3StorageCondition
+      - !GetAtt 'StorageStack.Outputs.BucketName'
+      - !Select
+        - 5
+        - !Split
+          - /
+          - !Ref 'ExistingBucketArn'
+  ClusterArn:
+    Condition: CreateECSInfraCondition
+    Description: ECS cluster ARN (only available when ECS infrastructure is created)
+    Export:
+      Name: !Sub '${AWS::StackName}-ClusterArn'
+    Value: !GetAtt 'ECSStack.Outputs.ClusterArn'
+  DatabaseEndpoint:
+    Description: RDS database endpoint (created or existing)
+    Export:
+      Name: !Sub '${AWS::StackName}-DatabaseEndpoint'
+    Value: !If
+      - CreateRDSCondition
+      - !GetAtt 'RDSStack.Outputs.DbEndpoint'
+      - !Ref 'ExistingDatabaseEndpoint'
+  DatabasePort:
+    Description: RDS database port
+    Export:
+      Name: !Sub '${AWS::StackName}-DatabasePort'
+    Value: !If
+      - CreateRDSCondition
+      - !GetAtt 'RDSStack.Outputs.DbPort'
+      - '5432'
+  DatabaseSecretArn:
+    Description: RDS database secret ARN (created or existing)
+    Export:
+      Name: !Sub '${AWS::StackName}-DatabaseSecretArn'
+    Value: !If
+      - CreateRDSCondition
+      - !GetAtt 'RDSStack.Outputs.DbSecretArn'
+      - !Ref 'ExistingDatabaseSecretArn'
+  MSKClusterArn:
+    Description: MSK cluster ARN (created or existing)
+    Export:
+      Name: !Sub '${AWS::StackName}-MSKClusterArn'
+    Value: !If
+      - CreateMSKCondition
+      - !GetAtt 'MSKStack.Outputs.MSKClusterArn'
+      - !Ref 'ExistingMSKClusterArn'
+  PrivateSubnets:
+    Description: Selected private subnet IDs
+    Export:
+      Name: !Sub '${AWS::StackName}-PrivateSubnets'
+    Value: !Sub '${PrivateSubnet1Id},${PrivateSubnet2Id}'
+  PublicSubnets:
+    Description: Selected public subnet IDs
+    Export:
+      Name: !Sub '${AWS::StackName}-PublicSubnets'
+    Value: !Sub '${PublicSubnet1Id},${PublicSubnet2Id}'
+  TaskSecurityGroupId:
+    Condition: CreateECSInfraCondition
+    Description: ECS task security group ID (only available when ECS infrastructure is created)
+    Export:
+      Name: !Sub '${AWS::StackName}-TaskSGId'
+    Value: !GetAtt 'ECSStack.Outputs.TaskSGId'
+  VPCId:
+    Description: Selected VPC ID
+    Export:
+      Name: !Sub '${AWS::StackName}-VPCId'
+    Value: !Ref 'VPCId'
+Parameters:
+  CreateECSInfrastructure:
+    AllowedValues:
+      - 'Yes'
+      - 'No'
+    Default: 'No'
+    Description: Create ECS cluster and infrastructure?
+    Type: String
+  CreateECSServices:
+    AllowedValues:
+      - 'Yes'
+      - 'No'
+    Default: 'No'
+    Description: Deploy ECS services for Lakerunner?
+    Type: String
+  CreateMSK:
+    AllowedValues:
+      - 'Yes'
+      - 'No'
+    Default: 'Yes'
+    Description: Create Amazon MSK (Kafka) cluster?
+    Type: String
+  CreateRDS:
+    AllowedValues:
+      - 'Yes'
+      - 'No'
+    Default: 'Yes'
+    Description: Create Aurora PostgreSQL database?
+    Type: String
+  CreateS3Storage:
+    AllowedValues:
+      - 'Yes'
+      - 'No'
+    Default: 'Yes'
+    Description: Create S3 bucket and SQS queue for data ingestion?
+    Type: String
+  ExistingBucketArn:
+    Default: ''
+    Description: Existing S3 bucket ARN. Required when CreateS3Storage=No.
+    Type: String
+  ExistingDatabaseEndpoint:
+    Default: ''
+    Description: Existing database endpoint. Required when CreateRDS=No.
+    Type: String
+  ExistingDatabaseSecretArn:
+    Default: ''
+    Description: Existing database secret ARN. Required when CreateRDS=No.
+    Type: String
+  ExistingMSKClusterArn:
+    Default: ''
+    Description: Existing MSK cluster ARN. Required when CreateMSK=No.
+    Type: String
+  ExistingTaskRoleArn:
+    Default: ''
+    Description: Existing task role ARN with permissions for BYO resources. Required when using any existing resources.
+    Type: String
+  PrivateSubnet1Id:
+    Description: First private subnet ID (from Part 1 Landscape stack or existing subnet).
+    Type: AWS::EC2::Subnet::Id
+  PrivateSubnet2Id:
+    Description: Second private subnet ID (from Part 1 Landscape stack or existing subnet).
+    Type: AWS::EC2::Subnet::Id
+  PublicSubnet1Id:
+    Description: First public subnet ID (from Part 1 Landscape stack or existing subnet). Optional.
+    Type: AWS::EC2::Subnet::Id
+  PublicSubnet2Id:
+    Description: Second public subnet ID (from Part 1 Landscape stack or existing subnet). Optional.
+    Type: AWS::EC2::Subnet::Id
+  TemplateBaseUrl:
+    Description: Base URL where nested templates are stored (e.g., https://s3.amazonaws.com/bucket/templates/)
+    Type: String
+  VPCId:
+    Description: VPC ID to use for deployment (from Part 1 Landscape stack or existing VPC).
+    Type: AWS::EC2::VPC::Id
+Resources:
+  ECSStack:
+    Condition: CreateECSInfraCondition
+    Properties:
+      Parameters:
+        VpcId: !Ref 'VPCId'
+      Tags:
+        - Key: Component
+          Value: ECS
+        - Key: Environment
+          Value: !Ref 'AWS::StackName'
+        - Key: ManagedBy
+          Value: Lakerunner
+      TemplateURL: !Sub '${TemplateBaseUrl}/lakerunner-ecs.yaml'
+    Type: AWS::CloudFormation::Stack
+  MSKStack:
+    Condition: CreateMSKCondition
+    Properties:
+      Parameters:
+        ExistingTaskRoleArn: !Ref 'ExistingTaskRoleArn'
+        PrivateSubnets: !Sub '${PrivateSubnet1Id},${PrivateSubnet2Id}'
+        VpcId: !Ref 'VPCId'
+      Tags:
+        - Key: Component
+          Value: MSK
+        - Key: Environment
+          Value: !Ref 'AWS::StackName'
+        - Key: ManagedBy
+          Value: Lakerunner
+      TemplateURL: !Sub '${TemplateBaseUrl}/lakerunner-msk.yaml'
+    Type: AWS::CloudFormation::Stack
+  RDSStack:
+    Condition: CreateRDSCondition
+    Properties:
+      Parameters:
+        ExistingTaskRoleArn: !Ref 'ExistingTaskRoleArn'
+        PrivateSubnets: !Sub '${PrivateSubnet1Id},${PrivateSubnet2Id}'
+        VpcId: !Ref 'VPCId'
+      Tags:
+        - Key: Component
+          Value: Database
+        - Key: Environment
+          Value: !Ref 'AWS::StackName'
+        - Key: ManagedBy
+          Value: Lakerunner
+      TemplateURL: !Sub '${TemplateBaseUrl}/lakerunner-rds.yaml'
+    Type: AWS::CloudFormation::Stack
+  ServicesStack:
+    Condition: CreateECSServicesCondition
+    Properties:
+      Parameters: {}
+      Tags:
+        - Key: Component
+          Value: Services
+        - Key: Environment
+          Value: !Ref 'AWS::StackName'
+        - Key: ManagedBy
+          Value: Lakerunner
+      TemplateURL: !Sub '${TemplateBaseUrl}/lakerunner-services.yaml'
+    Type: AWS::CloudFormation::Stack
+  StorageStack:
+    Condition: CreateS3StorageCondition
+    Properties:
+      Parameters:
+        ExistingTaskRoleArn: !Ref 'ExistingTaskRoleArn'
+      Tags:
+        - Key: Component
+          Value: Storage
+        - Key: Environment
+          Value: !Ref 'AWS::StackName'
+        - Key: ManagedBy
+          Value: Lakerunner
+      TemplateURL: !Sub '${TemplateBaseUrl}/lakerunner-storage.yaml'
+    Type: AWS::CloudFormation::Stack
+

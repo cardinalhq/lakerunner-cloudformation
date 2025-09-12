@@ -1,4 +1,7 @@
 Conditions:
+  CreateTaskRole: !Equals
+    - !Ref 'ExistingTaskRoleArn'
+    - ''
   HasApiKeysOverride: !Not
     - !Equals
       - !Ref 'ApiKeysOverride'
@@ -6,6 +9,10 @@ Conditions:
   HasStorageProfilesOverride: !Not
     - !Equals
       - !Ref 'StorageProfilesOverride'
+      - ''
+  UseExistingTaskRole: !Not
+    - !Equals
+      - !Ref 'ExistingTaskRoleArn'
       - ''
 Description: Storage stack for Lakerunner (S3 ingest bucket and SQS queue).
 Outputs:
@@ -17,10 +24,22 @@ Outputs:
     Export:
       Name: !Sub '${AWS::StackName}-BucketName'
     Value: !Ref 'IngestBucket'
+  TaskRoleArn:
+    Description: Task role ARN for storage access (created or existing)
+    Export:
+      Name: !Sub '${AWS::StackName}-TaskRoleArn'
+    Value: !If
+      - UseExistingTaskRole
+      - !Ref 'ExistingTaskRoleArn'
+      - !GetAtt 'StorageTaskRole.Arn'
 Parameters:
   ApiKeysOverride:
     Default: ''
     Description: 'OPTIONAL: Custom API keys configuration in YAML format. Leave blank to use defaults.'
+    Type: String
+  ExistingTaskRoleArn:
+    Default: ''
+    Description: 'OPTIONAL: Existing task role ARN to attach S3/SQS permissions to. Leave blank to create a new role.'
     Type: String
   StorageProfilesOverride:
     Default: ''
@@ -72,7 +91,7 @@ Resources:
   IngestQueue:
     Properties:
       MessageRetentionPeriod: 345600
-      QueueName: lakerunner-ingest-queue
+      QueueName: !Sub '${AWS::StackName}-ingest-queue'
     Type: AWS::SQS::Queue
   IngestQueuePolicy:
     Properties:
@@ -93,6 +112,39 @@ Resources:
       Queues:
         - !Ref 'IngestQueue'
     Type: AWS::SQS::QueuePolicy
+  S3SQSTaskPolicy:
+    Properties:
+      PolicyDocument:
+        Statement:
+          - Action:
+              - s3:GetObject
+              - s3:PutObject
+              - s3:DeleteObject
+              - s3:ListBucket
+            Effect: Allow
+            Resource:
+              - !GetAtt 'IngestBucket.Arn'
+              - !Sub
+                - ${BucketArn}/*
+                - BucketArn: !GetAtt 'IngestBucket.Arn'
+          - Action:
+              - sqs:ReceiveMessage
+              - sqs:DeleteMessage
+              - sqs:GetQueueAttributes
+            Effect: Allow
+            Resource: !GetAtt 'IngestQueue.Arn'
+        Version: '2012-10-17'
+      PolicyName: S3SQSAccess
+      Roles:
+        - !If
+          - UseExistingTaskRole
+          - !Select
+            - 1
+            - !Split
+              - /
+              - !Ref 'ExistingTaskRoleArn'
+          - !Ref 'StorageTaskRole'
+    Type: AWS::IAM::Policy
   StorageProfilesParam:
     Properties:
       Description: Storage profiles configuration
@@ -106,4 +158,28 @@ Resources:
             \  use_path_style: true\n"
           - BucketName: !Ref 'IngestBucket'
     Type: AWS::SSM::Parameter
+  StorageTaskRole:
+    Condition: CreateTaskRole
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+        Version: '2012-10-17'
+      Policies:
+        - PolicyDocument:
+            Statement:
+              - Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                Effect: Allow
+                Resource:
+                  - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/*'
+                  - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}-*'
+            Version: '2012-10-17'
+          PolicyName: BaseECSTaskPolicy
+      RoleName: !Sub '${AWS::StackName}-storage-task-role'
+    Type: AWS::IAM::Role
 

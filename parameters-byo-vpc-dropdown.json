@@ -1,0 +1,14 @@
+[
+  {
+    "ParameterKey": "TemplateBaseUrl",
+    "ParameterValue": "https://your-s3-bucket.s3.amazonaws.com/templates"
+  },
+  {
+    "ParameterKey": "CreateVPC",
+    "ParameterValue": "No"
+  },
+  {
+    "ParameterKey": "VPCCidr",
+    "ParameterValue": ""
+  }
+]
