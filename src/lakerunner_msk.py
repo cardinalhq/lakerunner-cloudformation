@@ -102,13 +102,7 @@ MskSecurityGroup = t.add_resource(SecurityGroup(
             CidrIp="10.0.0.0/8",  # Allow from private networks
             Description="Kafka TLS"
         ),
-        SecurityGroupRule(
-            IpProtocol="tcp",
-            FromPort=2181,
-            ToPort=2181,
-            CidrIp="10.0.0.0/8",  # Allow from private networks
-            Description="Zookeeper"
-        )
+        # Note: ZooKeeper port not needed for KRaft mode
     ],
     Tags=[
         {"Key": "Name", "Value": Sub("${AWS::StackName}-msk-sg")},
@@ -122,7 +116,7 @@ MskSecurityGroup = t.add_resource(SecurityGroup(
 MSKCluster = t.add_resource(Cluster(
     "MSKCluster",
     ClusterName=Sub("${AWS::StackName}-msk-cluster"),
-    KafkaVersion="2.8.1",
+    KafkaVersion="3.9.x.kraft",
     NumberOfBrokerNodes=2,  # Start small, can be scaled up
     BrokerNodeGroupInfo=BrokerNodeGroupInfo(
         InstanceType="kafka.t3.small",  # Cost-effective for development

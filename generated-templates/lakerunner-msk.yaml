@@ -58,7 +58,7 @@ Resources:
         EncryptionInTransit:
           ClientBroker: PLAINTEXT
           InCluster: true
-      KafkaVersion: 2.8.1
+      KafkaVersion: 3.9.x.kraft
       NumberOfBrokerNodes: 2
       Tags:
         Environment: !Ref 'AWS::StackName'
@@ -79,11 +79,6 @@ Resources:
           FromPort: 9094
           IpProtocol: tcp
           ToPort: 9094
-        - CidrIp: 10.0.0.0/8
-          Description: Zookeeper
-          FromPort: 2181
-          IpProtocol: tcp
-          ToPort: 2181
       Tags:
         - Key: Name
           Value: !Sub '${AWS::StackName}-msk-sg'
