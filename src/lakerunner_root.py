@@ -9,7 +9,7 @@ import yaml
 import os
 from troposphere import (
     Template, Parameter, Ref, Equals, Sub, GetAtt, If, Not, And, Or,
-    Condition, Output, Export, Tags, Select, Split, Join
+    Condition, Output, Export, Tags, Select, Split
 )
 from troposphere.cloudformation import Stack, WaitConditionHandle
 from troposphere.iam import Role, Policy
@@ -81,12 +81,19 @@ private_subnet2 = t.add_parameter(
     )
 )
 
-public_subnets = t.add_parameter(
+public_subnet1 = t.add_parameter(
     Parameter(
-        "PublicSubnets",
-        Type="CommaDelimitedList",
-        Default="",
-        Description="Public subnet IDs (from Part 1 Landscape stack or existing subnets). Optional - leave empty if not needed.",
+        "PublicSubnet1Id",
+        Type="AWS::EC2::Subnet::Id",
+        Description="First public subnet ID (from Part 1 Landscape stack or existing subnet). Optional.",
+    )
+)
+
+public_subnet2 = t.add_parameter(
+    Parameter(
+        "PublicSubnet2Id", 
+        Type="AWS::EC2::Subnet::Id",
+        Description="Second public subnet ID (from Part 1 Landscape stack or existing subnet). Optional.",
     )
 )
 
@@ -260,7 +267,8 @@ t.set_metadata({
                     "VPCId",
                     "PrivateSubnet1Id",
                     "PrivateSubnet2Id",
-                    "PublicSubnets"
+                    "PublicSubnet1Id",
+                    "PublicSubnet2Id"
                 ]
             },
             {
@@ -297,7 +305,8 @@ t.set_metadata({
             "VPCId": {"default": "VPC ID"},
             "PrivateSubnet1Id": {"default": "Private Subnet 1 ID"},
             "PrivateSubnet2Id": {"default": "Private Subnet 2 ID"},
-            "PublicSubnets": {"default": "Public Subnets (optional)"},
+            "PublicSubnet1Id": {"default": "Public Subnet 1 ID (optional)"},
+            "PublicSubnet2Id": {"default": "Public Subnet 2 ID (optional)"},
             "CreateS3Storage": {"default": "Create S3 Storage?"},
             "CreateRDS": {"default": "Create RDS Database?"},
             "CreateECSInfrastructure": {"default": "Create ECS Infrastructure?"},
@@ -442,12 +451,12 @@ t.add_output(
     )
 )
 
-# Public Subnets - from user selection
+# Public Subnets - from user selection  
 t.add_output(
     Output(
         "PublicSubnets",
         Description="Selected public subnet IDs",
-        Value=Join(",", Ref(public_subnets)),
+        Value=Sub("${PublicSubnet1Id},${PublicSubnet2Id}"),
         Export=Export(Sub("${AWS::StackName}-PublicSubnets"))
     )
 )

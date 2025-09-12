@@ -28,7 +28,8 @@ Metadata:
           - VPCId
           - PrivateSubnet1Id
           - PrivateSubnet2Id
-          - PublicSubnets
+          - PublicSubnet1Id
+          - PublicSubnet2Id
       - Label:
           default: Infrastructure Creation Options
         Parameters:
@@ -82,8 +83,10 @@ Metadata:
         default: Private Subnet 1 ID
       PrivateSubnet2Id:
         default: Private Subnet 2 ID
-      PublicSubnets:
-        default: Public Subnets (optional)
+      PublicSubnet1Id:
+        default: Public Subnet 1 ID (optional)
+      PublicSubnet2Id:
+        default: Public Subnet 2 ID (optional)
       VPCId:
         default: VPC ID
 Outputs:
@@ -154,9 +157,7 @@ Outputs:
     Description: Selected public subnet IDs
     Export:
       Name: !Sub '${AWS::StackName}-PublicSubnets'
-    Value: !Join
-      - ','
-      - !Ref 'PublicSubnets'
+    Value: !Sub '${PublicSubnet1Id},${PublicSubnet2Id}'
   TaskSecurityGroupId:
     Condition: CreateECSInfraCondition
     Description: ECS task security group ID (only available when ECS infrastructure is created)
@@ -269,10 +270,12 @@ Parameters:
   PrivateSubnet2Id:
     Description: Second private subnet ID (from Part 1 Landscape stack or existing subnet).
     Type: AWS::EC2::Subnet::Id
-  PublicSubnets:
-    Default: ''
-    Description: Public subnet IDs (from Part 1 Landscape stack or existing subnets). Optional - leave empty if not needed.
-    Type: CommaDelimitedList
+  PublicSubnet1Id:
+    Description: First public subnet ID (from Part 1 Landscape stack or existing subnet). Optional.
+    Type: AWS::EC2::Subnet::Id
+  PublicSubnet2Id:
+    Description: Second public subnet ID (from Part 1 Landscape stack or existing subnet). Optional.
+    Type: AWS::EC2::Subnet::Id
   TemplateBaseUrl:
     Description: Base URL where nested templates are stored (e.g., https://s3.amazonaws.com/bucket/templates/)
     Type: String
