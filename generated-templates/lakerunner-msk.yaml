@@ -104,6 +104,7 @@ Resources:
         GenerateStringKey: password
         PasswordLength: 32
         SecretStringTemplate: '{"username": "lakerunner"}'
+      Name: !Sub 'AmazonMSK_${AWS::StackName}'
       Tags:
         - Key: Name
           Value: !Sub '${AWS::StackName}-msk-credentials'
@@ -112,6 +113,12 @@ Resources:
         - Key: Component
           Value: MSK
     Type: AWS::SecretsManager::Secret
+  MSKScramSecretAssociation:
+    Properties:
+      ClusterArn: !GetAtt 'MSKCluster.Arn'
+      SecretArnList:
+        - !Ref 'MSKCredentials'
+    Type: AWS::MSK::BatchScramSecret
   MSKSecurityGroup:
     Properties:
       GroupDescription: Security group for MSK cluster
@@ -138,6 +145,27 @@ Resources:
           Value: Lakerunner
       VpcId: !Ref 'VpcId'
     Type: AWS::EC2::SecurityGroup
+  MSKServiceRole:
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: kafka.amazonaws.com
+        Version: '2012-10-17'
+      Policies:
+        - PolicyDocument:
+            Statement:
+              - Action:
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:DescribeSecret
+                Effect: Allow
+                Resource: !Ref 'MSKCredentials'
+            Version: '2012-10-17'
+          PolicyName: MSKSecretsManagerAccess
+      RoleName: !Sub '${AWS::StackName}-msk-service-role'
+    Type: AWS::IAM::Role
   MSKTaskPolicy:
     Properties:
       PolicyDocument:
@@ -166,6 +194,11 @@ Resources:
             Resource: !Sub
               - ${MSKClusterArn}/*
               - MSKClusterArn: !GetAtt 'MSKCluster.Arn'
+          - Action:
+              - secretsmanager:GetSecretValue
+              - secretsmanager:DescribeSecret
+            Effect: Allow
+            Resource: !Ref 'MSKCredentials'
         Version: '2012-10-17'
       PolicyName: MSKAccess
       Roles:

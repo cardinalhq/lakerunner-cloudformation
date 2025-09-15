@@ -6,7 +6,7 @@ import os
 from troposphere import (
     Template, Parameter, Ref, Sub, If, Equals, Not, Export, Output, GetAtt, Select, Split
 )
-from troposphere.msk import Cluster, BrokerNodeGroupInfo, EBSStorageInfo, StorageInfo, ClientAuthentication, Tls, Sasl, Scram, EncryptionInfo, EncryptionAtRest, EncryptionInTransit
+from troposphere.msk import Cluster, BrokerNodeGroupInfo, EBSStorageInfo, StorageInfo, ClientAuthentication, Tls, Sasl, Scram, EncryptionInfo, EncryptionAtRest, EncryptionInTransit, BatchScramSecret
 from troposphere.ec2 import SecurityGroup, SecurityGroupRule
 from troposphere.iam import PolicyType, Role, Policy
 from troposphere.secretsmanager import Secret, GenerateSecretString
@@ -183,6 +183,7 @@ MSKCluster = t.add_resource(Cluster(
 # -----------------------
 MSKCredentials = t.add_resource(Secret(
     "MSKCredentials",
+    Name=Sub("AmazonMSK_${AWS::StackName}"),
     Description="MSK SASL/SCRAM credentials for Kafka authentication",
     GenerateSecretString=GenerateSecretString(
         SecretStringTemplate='{"username": "lakerunner"}',
@@ -195,6 +196,49 @@ MSKCredentials = t.add_resource(Secret(
         {"Key": "ManagedBy", "Value": "Lakerunner"},
         {"Key": "Component", "Value": "MSK"}
     ]
+))
+
+# -----------------------
+# MSK Service Role for Secrets Manager Access
+# -----------------------
+MSKServiceRole = t.add_resource(Role(
+    "MSKServiceRole",
+    RoleName=Sub("${AWS::StackName}-msk-service-role"),
+    AssumeRolePolicyDocument={
+        "Version": "2012-10-17",
+        "Statement": [{
+            "Effect": "Allow",
+            "Principal": {"Service": "kafka.amazonaws.com"},
+            "Action": "sts:AssumeRole"
+        }]
+    },
+    Policies=[
+        Policy(
+            PolicyName="MSKSecretsManagerAccess",
+            PolicyDocument={
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Effect": "Allow",
+                        "Action": [
+                            "secretsmanager:GetSecretValue",
+                            "secretsmanager:DescribeSecret"
+                        ],
+                        "Resource": Ref(MSKCredentials)
+                    }
+                ]
+            }
+        )
+    ]
+))
+
+# -----------------------
+# Associate SCRAM Secret with MSK Cluster
+# -----------------------
+MSKScramSecretAssociation = t.add_resource(BatchScramSecret(
+    "MSKScramSecretAssociation",
+    ClusterArn=GetAtt(MSKCluster, "Arn"),
+    SecretArnList=[Ref(MSKCredentials)]
 ))
 
 # -----------------------
@@ -233,12 +277,20 @@ t.add_resource(PolicyType(
                 "Resource": Sub("${MSKClusterArn}/*", MSKClusterArn=GetAtt(MSKCluster, "Arn"))
             },
             {
-                "Effect": "Allow", 
+                "Effect": "Allow",
                 "Action": [
                     "kafka-cluster:AlterGroup",
                     "kafka-cluster:DescribeGroup"
                 ],
                 "Resource": Sub("${MSKClusterArn}/*", MSKClusterArn=GetAtt(MSKCluster, "Arn"))
+            },
+            {
+                "Effect": "Allow",
+                "Action": [
+                    "secretsmanager:GetSecretValue",
+                    "secretsmanager:DescribeSecret"
+                ],
+                "Resource": Ref(MSKCredentials)
             }
         ]
     }
@@ -282,10 +334,9 @@ t.add_output(Output(
 # Note: Bootstrap servers are not available as CloudFormation attributes
 # They need to be retrieved using AWS CLI or SDK after cluster creation
 
-# IMPORTANT: After cluster creation, you must create the SASL/SCRAM user manually:
-# 1. Get the cluster ARN and credentials from AWS Console or CLI
-# 2. Run: aws kafka put-cluster-policy --cluster-arn <cluster-arn> --current-version <version> --policy <policy>
-# 3. Create user: aws kafka create-scram-secret --cluster-arn <cluster-arn> --secret-arn <secret-arn>
-# 4. The secret contains username "lakerunner" and auto-generated password
+# SASL/SCRAM authentication is automatically configured:
+# - Secret contains username "lakerunner" and auto-generated password
+# - Secret is automatically associated with the MSK cluster
+# - Use GetBootstrapBrokers API to get connection endpoints
 
 print(t.to_yaml())
