@@ -20,7 +20,7 @@ from troposphere import (
     Select, Not, Tags, Join
 )
 from troposphere.ec2 import SecurityGroup, SecurityGroupIngress
-from troposphere.ecs import Cluster
+from troposphere.ecs import Cluster as ECSCluster
 from troposphere.s3 import (
     Bucket, LifecycleRule, LifecycleConfiguration,
     NotificationConfiguration, QueueConfigurations,
@@ -30,6 +30,10 @@ from troposphere.sqs import Queue, QueuePolicy
 from troposphere.secretsmanager import Secret, GenerateSecretString
 from troposphere.rds import DBInstance, DBSubnetGroup
 from troposphere.ssm import Parameter as SsmParameter
+from troposphere.msk import Cluster, BrokerNodeGroupInfo, EBSStorageInfo, StorageInfo, ClientAuthentication, Tls, Sasl, Scram, EncryptionInfo, EncryptionAtRest, EncryptionInTransit, BatchScramSecret
+from troposphere.iam import PolicyType, Role, Policy
+from troposphere.awslambda import Function, Code
+from troposphere.cloudformation import CustomResource
 
 t = Template()
 t.set_description("CommonInfra stack for Lakerunner.")
@@ -71,6 +75,30 @@ StorageProfilesOverride = t.add_parameter(Parameter(
     Description="OPTIONAL: Custom storage profiles configuration in YAML format. Leave blank to use defaults from defaults.yaml. Bucket name and region will be auto-filled."
 ))
 
+# MSK parameters
+MSKInstanceType = t.add_parameter(Parameter(
+    "MSKInstanceType",
+    Type="String",
+    Default="kafka.t3.small",
+    AllowedValues=[
+        "kafka.t3.small",
+        "kafka.m5.large", "kafka.m5.xlarge", "kafka.m5.2xlarge", "kafka.m5.4xlarge",
+        "kafka.m5.8xlarge", "kafka.m5.12xlarge", "kafka.m5.16xlarge", "kafka.m5.24xlarge",
+        "kafka.m7g.large", "kafka.m7g.xlarge", "kafka.m7g.2xlarge", "kafka.m7g.4xlarge",
+        "kafka.m7g.8xlarge", "kafka.m7g.12xlarge", "kafka.m7g.16xlarge"
+    ],
+    Description="MSK broker instance type."
+))
+
+MSKBrokerNodes = t.add_parameter(Parameter(
+    "MSKBrokerNodes",
+    Type="Number",
+    Default=2,
+    MinValue=2,
+    MaxValue=15,
+    Description="Number of MSK broker nodes. Must be between 2 and 15."
+))
+
 # -----------------------
 # UI Hints in Console (Parameter Groups & Labels)
 # -----------------------
@@ -82,6 +110,10 @@ t.set_metadata({
                 "Parameters": ["VpcId", "PublicSubnets", "PrivateSubnets"]
             },
             {
+                "Label": {"default": "MSK Configuration"},
+                "Parameters": ["MSKInstanceType", "MSKBrokerNodes"]
+            },
+            {
                 "Label": {"default": "Configuration Overrides (Advanced)"},
                 "Parameters": ["ApiKeysOverride", "StorageProfilesOverride"]
             }
@@ -90,6 +122,8 @@ t.set_metadata({
             "VpcId": {"default": "VPC Id"},
             "PublicSubnets": {"default": "Public Subnets (for ALB internet-facing)"},
             "PrivateSubnets": {"default": "Private Subnets (for ECS/RDS)"},
+            "MSKInstanceType": {"default": "MSK Instance Type"},
+            "MSKBrokerNodes": {"default": "Number of MSK Broker Nodes"},
             "ApiKeysOverride": {"default": "Custom API Keys (YAML)"},
             "StorageProfilesOverride": {"default": "Custom Storage Profiles (YAML)"}
         }
@@ -123,7 +157,13 @@ TaskSG = t.add_resource(SecurityGroup(
         "IpProtocol": "-1",
         "CidrIp": "0.0.0.0/0",
         "Description": "Allow all outbound"
-    }]
+    }],
+    Tags=[
+        {"Key": "Name", "Value": Sub("${AWS::StackName}-task-sg")},
+        {"Key": "ManagedBy", "Value": "Lakerunner"},
+        {"Key": "Environment", "Value": Ref("AWS::StackName")},
+        {"Key": "Component", "Value": "Compute"}
+    ]
 ))
 
 # task-to-task 7101 (adjust/remove as needed)
@@ -148,12 +188,42 @@ t.add_resource(SecurityGroupIngress(
     Description="task-to-database PostgreSQL",
 ))
 
+# Security group for MSK cluster
+MskSecurityGroup = t.add_resource(SecurityGroup(
+    "MSKSecurityGroup",
+    GroupDescription="Security group for MSK cluster - grant access by referencing this SG ID",
+    VpcId=Ref(VpcId),
+    Tags=[
+        {"Key": "Name", "Value": Sub("${AWS::StackName}-msk-sg")},
+        {"Key": "ManagedBy", "Value": "Lakerunner"},
+        {"Key": "Environment", "Value": Ref("AWS::StackName")},
+        {"Key": "Component", "Value": "Messaging"}
+    ]
+))
+
+# Allow ECS tasks to connect to MSK on port 9094 (TLS)
+t.add_resource(SecurityGroupIngress(
+    "MSKFromTasksSG",
+    GroupId=Ref(MskSecurityGroup),
+    IpProtocol="tcp",
+    FromPort=9094,
+    ToPort=9094,
+    SourceSecurityGroupId=Ref(TaskSG),
+    Description="Kafka TLS from ECS tasks",
+))
+
 # -----------------------
 # ECS cluster (always create)
 # -----------------------
-ClusterRes = t.add_resource(Cluster(
+ClusterRes = t.add_resource(ECSCluster(
     "Cluster",
     ClusterName=Sub("${AWS::StackName}-cluster"),
+    Tags=Tags(
+        Name=Sub("${AWS::StackName}-cluster"),
+        ManagedBy="Lakerunner",
+        Environment=Ref("AWS::StackName"),
+        Component="Compute"
+    )
 ))
 t.add_output(Output(
     "ClusterArn",
@@ -168,6 +238,12 @@ QueueRes = t.add_resource(Queue(
     "IngestQueue",
     QueueName="lakerunner-ingest-queue",
     MessageRetentionPeriod=60 * 60 * 24 * 4,  # seconds
+    Tags=Tags(
+        Name=Sub("${AWS::StackName}-ingest-queue"),
+        ManagedBy="Lakerunner",
+        Environment=Ref("AWS::StackName"),
+        Component="Messaging"
+    )
 ))
 
 BucketRes = t.add_resource(Bucket(
@@ -189,6 +265,12 @@ BucketRes = t.add_resource(Bucket(
             ) for p in ["otel-raw/", "logs-raw/", "metrics-raw/"]
         ]
     ),
+    Tags=Tags(
+        Name=Sub("${AWS::StackName}-ingest-bucket"),
+        ManagedBy="Lakerunner",
+        Environment=Ref("AWS::StackName"),
+        Component="Storage"
+    )
 ))
 
 t.add_resource(QueuePolicy(
@@ -244,7 +326,13 @@ DbRes = t.add_resource(DBInstance(
     DBSubnetGroupName=Ref(DbSubnets),
     MasterUsername=Sub("{{resolve:secretsmanager:${S}:SecretString:username}}", S=DbSecretArnValue),
     MasterUserPassword=Sub("{{resolve:secretsmanager:${S}:SecretString:password}}", S=DbSecretArnValue),
-    DeletionProtection=False
+    DeletionProtection=False,
+    Tags=[
+        {"Key": "Name", "Value": Sub("${AWS::StackName}-database")},
+        {"Key": "ManagedBy", "Value": "Lakerunner"},
+        {"Key": "Environment", "Value": Ref("AWS::StackName")},
+        {"Key": "Component", "Value": "Database"}
+    ]
 ))
 
 DbEndpoint = GetAtt(DbRes, "Endpoint.Address")
@@ -253,6 +341,243 @@ DbPort = GetAtt(DbRes, "Endpoint.Port")
 t.add_output(Output("DbEndpoint", Value=DbEndpoint, Export=Export(name=Sub("${AWS::StackName}-DbEndpoint"))))
 t.add_output(Output("DbPort", Value=DbPort, Export=Export(name=Sub("${AWS::StackName}-DbPort"))))
 t.add_output(Output("DbSecretArnOut", Value=DbSecretArnValue, Export=Export(name=Sub("${AWS::StackName}-DbSecretArn"))))
+
+# -----------------------
+# MSK Cluster and associated resources
+# -----------------------
+
+# MSK SASL/SCRAM Credentials Secret
+MSKCredentials = t.add_resource(Secret(
+    "MSKCredentials",
+    Name=Sub("AmazonMSK_${AWS::StackName}"),
+    Description="MSK SASL/SCRAM credentials for Kafka authentication",
+    GenerateSecretString=GenerateSecretString(
+        SecretStringTemplate='{"username": "lakerunner"}',
+        GenerateStringKey="password",
+        PasswordLength=32,
+        ExcludeCharacters='"@/\\'
+    ),
+    Tags=[
+        {"Key": "Name", "Value": Sub("${AWS::StackName}-msk-credentials")},
+        {"Key": "ManagedBy", "Value": "Lakerunner"},
+        {"Key": "Environment", "Value": Ref("AWS::StackName")},
+        {"Key": "Component", "Value": "Messaging"}
+    ]
+))
+
+# MSK Cluster
+MSKCluster = t.add_resource(Cluster(
+    "MSKCluster",
+    ClusterName=Sub("${AWS::StackName}-msk-cluster"),
+    KafkaVersion="3.9.x",
+    NumberOfBrokerNodes=Ref(MSKBrokerNodes),
+    BrokerNodeGroupInfo=BrokerNodeGroupInfo(
+        InstanceType=Ref(MSKInstanceType),
+        ClientSubnets=Ref(PrivateSubnets),
+        SecurityGroups=[Ref(MskSecurityGroup)],
+        StorageInfo=StorageInfo(
+            EBSStorageInfo=EBSStorageInfo(
+                VolumeSize=100  # Will make this configurable if needed
+            )
+        )
+    ),
+    ClientAuthentication=ClientAuthentication(
+        Sasl=Sasl(
+            Scram=Scram(
+                Enabled=True
+            )
+        )
+    ),
+    EncryptionInfo=EncryptionInfo(
+        EncryptionInTransit=EncryptionInTransit(
+            ClientBroker="TLS",
+            InCluster=True
+        )
+    ),
+    Tags={
+        "Name": Sub("${AWS::StackName}-msk-cluster"),
+        "ManagedBy": "Lakerunner",
+        "Environment": Ref("AWS::StackName"),
+        "Component": "Messaging"
+    }
+))
+
+# Custom resource to handle MSK SCRAM secret association timing
+MSKScramAssociationFunction = t.add_resource(Function(
+    "MSKScramAssociationFunction",
+    FunctionName=Sub("${AWS::StackName}-msk-scram-association"),
+    Runtime="python3.13",
+    Handler="index.handler",
+    Role=GetAtt("MSKScramAssociationRole", "Arn"),
+    Timeout=300,
+    Code=Code(
+        ZipFile="""
+import json
+import boto3
+import urllib.request
+import time
+
+def send_response(event, context, status, data=None, reason=""):
+    response = {
+        "Status": status,
+        "Reason": f"{reason} See CloudWatch Logs: {context.log_stream_name}",
+        "PhysicalResourceId": event.get("PhysicalResourceId") or "MSKScramAssociation",
+        "StackId": event["StackId"],
+        "RequestId": event["RequestId"],
+        "LogicalResourceId": event["LogicalResourceId"],
+        "Data": data or {}
+    }
+
+    body = json.dumps(response).encode()
+    req = urllib.request.Request(event["ResponseURL"], data=body, method="PUT")
+    req.add_header("content-type", "")
+    req.add_header("content-length", str(len(body)))
+
+    try:
+        with urllib.request.urlopen(req) as r:
+            r.read()
+    except Exception as e:
+        print(f"Failed to send response: {e}")
+
+def handler(event, context):
+    print(f"Event: {json.dumps(event)}")
+
+    try:
+        props = event.get("ResourceProperties", {})
+        cluster_arn = props["ClusterArn"]
+        secret_arns = props["SecretArnList"]
+
+        kafka = boto3.client("kafka")
+
+        if event["RequestType"] == "Delete":
+            # Try to disassociate secrets on delete
+            try:
+                kafka.batch_disassociate_scram_secret(
+                    ClusterArn=cluster_arn,
+                    SecretArnList=secret_arns
+                )
+                print("Successfully disassociated SCRAM secrets")
+            except Exception as e:
+                print(f"Error disassociating SCRAM secrets (ignoring): {e}")
+
+            send_response(event, context, "SUCCESS", {"Message": "Delete completed"})
+            return
+
+        # Wait for MSK cluster to be ACTIVE
+        max_wait = 20 * 60  # 20 minutes
+        start_time = time.time()
+
+        while time.time() - start_time < max_wait:
+            try:
+                response = kafka.describe_cluster(ClusterArn=cluster_arn)
+                state = response["ClusterInfo"]["State"]
+                print(f"MSK cluster state: {state}")
+
+                if state == "ACTIVE":
+                    break
+                elif state in ["FAILED", "DELETING"]:
+                    send_response(event, context, "FAILED",
+                                reason=f"MSK cluster in failed state: {state}")
+                    return
+
+                time.sleep(30)
+            except Exception as e:
+                print(f"Error checking cluster state: {e}")
+                time.sleep(30)
+        else:
+            send_response(event, context, "FAILED",
+                        reason="Timeout waiting for MSK cluster to become ACTIVE")
+            return
+
+        # Associate SCRAM secrets
+        kafka.batch_associate_scram_secret(
+            ClusterArn=cluster_arn,
+            SecretArnList=secret_arns
+        )
+
+        print("Successfully associated SCRAM secrets")
+        send_response(event, context, "SUCCESS", {"Message": "SCRAM secrets associated"})
+
+    except Exception as e:
+        print(f"Error: {e}")
+        send_response(event, context, "FAILED", reason=str(e))
+"""
+    )
+))
+
+# IAM role for the MSK SCRAM association function
+MSKScramAssociationRole = t.add_resource(Role(
+    "MSKScramAssociationRole",
+    AssumeRolePolicyDocument={
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Effect": "Allow",
+                "Principal": {"Service": "lambda.amazonaws.com"},
+                "Action": "sts:AssumeRole"
+            }
+        ]
+    },
+    ManagedPolicyArns=[
+        "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+    ],
+    Policies=[
+        Policy(
+            PolicyName="MSKScramAssociationPolicy",
+            PolicyDocument={
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Effect": "Allow",
+                        "Action": [
+                            "kafka:DescribeCluster",
+                            "kafka:BatchAssociateScramSecret",
+                            "kafka:BatchDisassociateScramSecret"
+                        ],
+                        "Resource": GetAtt(MSKCluster, "Arn")
+                    }
+                ]
+            }
+        )
+    ]
+))
+
+# Custom resource to associate SCRAM secret with MSK cluster
+MSKScramSecretAssociation = t.add_resource(CustomResource(
+    "MSKScramSecretAssociation",
+    ServiceToken=GetAtt(MSKScramAssociationFunction, "Arn"),
+    ClusterArn=GetAtt(MSKCluster, "Arn"),
+    SecretArnList=[Ref(MSKCredentials)]
+))
+
+# MSK outputs
+t.add_output(Output(
+    "MSKClusterArn",
+    Description="MSK cluster ARN",
+    Value=GetAtt(MSKCluster, "Arn"),
+    Export=Export(name=Sub("${AWS::StackName}-MSKClusterArn"))
+))
+
+t.add_output(Output(
+    "MSKClusterName",
+    Description="MSK cluster name",
+    Value=Ref(MSKCluster),
+    Export=Export(name=Sub("${AWS::StackName}-MSKClusterName"))
+))
+
+t.add_output(Output(
+    "MSKCredentialsArn",
+    Description="MSK SASL/SCRAM credentials secret ARN",
+    Value=Ref(MSKCredentials),
+    Export=Export(name=Sub("${AWS::StackName}-MSKCredentialsArn"))
+))
+
+t.add_output(Output(
+    "MSKSecurityGroupId",
+    Description="MSK security group ID for granting access from ECS/EKS",
+    Value=Ref(MskSecurityGroup),
+    Export=Export(name=Sub("${AWS::StackName}-MSKSecurityGroupId"))
+))
 
 # Export S3 bucket name for IAM policies in other stacks
 t.add_output(Output("BucketName", Value=Ref(BucketRes), Export=Export(name=Sub("${AWS::StackName}-BucketName"))))

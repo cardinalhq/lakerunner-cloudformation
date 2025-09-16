@@ -16,11 +16,13 @@ Metadata:
           - CommonInfraStackName
           - AlbScheme
       - Label:
+          default: MSK Configuration
+        Parameters:
+          - MSKBrokers
+      - Label:
           default: Container Images
         Parameters:
           - GoServicesImage
-          - QueryApiImage
-          - QueryWorkerImage
       - Label:
           default: Telemetry
         Parameters:
@@ -32,12 +34,10 @@ Metadata:
         default: Common Infra Stack Name
       GoServicesImage:
         default: Go Services Image
+      MSKBrokers:
+        default: MSK Broker Endpoints
       OtelEndpoint:
         default: OTEL Collector Endpoint
-      QueryApiImage:
-        default: Query API Image
-      QueryWorkerImage:
-        default: Query Worker Image
 Outputs:
   AlbArn:
     Export:
@@ -107,20 +107,16 @@ Parameters:
     Description: 'REQUIRED: Name of the CommonInfra stack to import infrastructure values from.'
     Type: String
   GoServicesImage:
-    Default: public.ecr.aws/cardinalhq.io/lakerunner:v1.2.2
-    Description: Container image for Go services (pubsub, ingest, compact, etc.)
+    Default: public.ecr.aws/cardinalhq.io/lakerunner:v1.3.6-rc1
+    Description: Container image for all Go services (pubsub, ingest, compact, query-api, query-worker, etc.)
+    Type: String
+  MSKBrokers:
+    Default: ''
+    Description: 'REQUIRED: Comma-separated list of MSK broker endpoints (hostname:port)'
     Type: String
   OtelEndpoint:
     Default: ''
     Description: 'OPTIONAL: OTEL collector HTTP endpoint URL (e.g., http://collector-dns:4318). Leave blank to disable OTLP telemetry export.'
-    Type: String
-  QueryApiImage:
-    Default: public.ecr.aws/cardinalhq.io/lakerunner/query-api:v1.2.1
-    Description: Container image for query-api service
-    Type: String
-  QueryWorkerImage:
-    Default: public.ecr.aws/cardinalhq.io/lakerunner/query-worker:v1.2.1
-    Description: Container image for query-worker service
     Type: String
 Resources:
   Alb:
@@ -202,6 +198,12 @@ Resources:
                     - SecretArn: !ImportValue
                         Fn::Sub:
                           - ${CommonInfraStackName}-DbSecretArn
+                          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                  - !Sub
+                    - ${SecretArn}*
+                    - SecretArn: !ImportValue
+                        Fn::Sub:
+                          - ${CommonInfraStackName}-MSKCredentialsArn
                           - CommonInfraStackName: !Ref 'CommonInfraStackName'
                   - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*'
             Version: '2012-10-17'
@@ -301,6 +303,12 @@ Resources:
                         Fn::Sub:
                           - ${CommonInfraStackName}-DbSecretArn
                           - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                  - !Sub
+                    - ${SecretArn}*
+                    - SecretArn: !ImportValue
+                        Fn::Sub:
+                          - ${CommonInfraStackName}-MSKCredentialsArn
+                          - CommonInfraStackName: !Ref 'CommonInfraStackName'
                   - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*'
               - Action:
                   - ecs:ListServices
@@ -360,6 +368,12 @@ Resources:
                     - SecretArn: !ImportValue
                         Fn::Sub:
                           - ${CommonInfraStackName}-DbSecretArn
+                          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                  - !Sub
+                    - ${SecretArn}*
+                    - SecretArn: !ImportValue
+                        Fn::Sub:
+                          - ${CommonInfraStackName}-MSKCredentialsArn
                           - CommonInfraStackName: !Ref 'CommonInfraStackName'
                   - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*'
               - Action:
@@ -513,7 +527,7 @@ Resources:
       LaunchType: FARGATE
       LoadBalancers:
         - ContainerName: AppContainer
-          ContainerPort: 7101
+          ContainerPort: 8080
           TargetGroupArn: !Ref 'Tg7101'
       NetworkConfiguration:
         AwsvpcConfiguration:
@@ -659,6 +673,14 @@ Resources:
               Value: lakerunner
             - Name: CONFIGDB_SSLMODE
               Value: require
+            - Name: LAKERUNNER_KAFKA_BROKERS
+              Value: !Ref 'MSKBrokers'
+            - Name: LAKERUNNER_KAFKA_TLS
+              Value: 'true'
+            - Name: LAKERUNNER_KAFKA_SASL_ENABLED
+              Value: 'true'
+            - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
+              Value: SCRAM-SHA-512
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp
@@ -708,6 +730,20 @@ Resources:
                 - SecretArn: !ImportValue
                     Fn::Sub:
                       - ${CommonInfraStackName}-DbSecretArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LAKERUNNER_KAFKA_SASL_USERNAME
+              ValueFrom: !Sub
+                - '${SecretArn}:username::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-MSKCredentialsArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LAKERUNNER_KAFKA_SASL_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-MSKCredentialsArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
           User: '0'
       Cpu: '1024'
@@ -777,6 +813,14 @@ Resources:
               Value: lakerunner
             - Name: CONFIGDB_SSLMODE
               Value: require
+            - Name: LAKERUNNER_KAFKA_BROKERS
+              Value: !Ref 'MSKBrokers'
+            - Name: LAKERUNNER_KAFKA_TLS
+              Value: 'true'
+            - Name: LAKERUNNER_KAFKA_SASL_ENABLED
+              Value: 'true'
+            - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
+              Value: SCRAM-SHA-512
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp
@@ -826,6 +870,20 @@ Resources:
                 - SecretArn: !ImportValue
                     Fn::Sub:
                       - ${CommonInfraStackName}-DbSecretArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LAKERUNNER_KAFKA_SASL_USERNAME
+              ValueFrom: !Sub
+                - '${SecretArn}:username::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-MSKCredentialsArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LAKERUNNER_KAFKA_SASL_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-MSKCredentialsArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
           User: '0'
       Cpu: '1024'
@@ -895,6 +953,14 @@ Resources:
               Value: lakerunner
             - Name: CONFIGDB_SSLMODE
               Value: require
+            - Name: LAKERUNNER_KAFKA_BROKERS
+              Value: !Ref 'MSKBrokers'
+            - Name: LAKERUNNER_KAFKA_TLS
+              Value: 'true'
+            - Name: LAKERUNNER_KAFKA_SASL_ENABLED
+              Value: 'true'
+            - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
+              Value: SCRAM-SHA-512
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp
@@ -944,6 +1010,20 @@ Resources:
                 - SecretArn: !ImportValue
                     Fn::Sub:
                       - ${CommonInfraStackName}-DbSecretArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LAKERUNNER_KAFKA_SASL_USERNAME
+              ValueFrom: !Sub
+                - '${SecretArn}:username::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-MSKCredentialsArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LAKERUNNER_KAFKA_SASL_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-MSKCredentialsArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
           User: '0'
       Cpu: '1024'
@@ -1013,6 +1093,14 @@ Resources:
               Value: lakerunner
             - Name: CONFIGDB_SSLMODE
               Value: require
+            - Name: LAKERUNNER_KAFKA_BROKERS
+              Value: !Ref 'MSKBrokers'
+            - Name: LAKERUNNER_KAFKA_TLS
+              Value: 'true'
+            - Name: LAKERUNNER_KAFKA_SASL_ENABLED
+              Value: 'true'
+            - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
+              Value: SCRAM-SHA-512
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp
@@ -1062,6 +1150,20 @@ Resources:
                 - SecretArn: !ImportValue
                     Fn::Sub:
                       - ${CommonInfraStackName}-DbSecretArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LAKERUNNER_KAFKA_SASL_USERNAME
+              ValueFrom: !Sub
+                - '${SecretArn}:username::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-MSKCredentialsArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LAKERUNNER_KAFKA_SASL_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-MSKCredentialsArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
           User: '0'
       Cpu: '1024'
@@ -1132,6 +1234,14 @@ Resources:
               Value: lakerunner
             - Name: CONFIGDB_SSLMODE
               Value: require
+            - Name: LAKERUNNER_KAFKA_BROKERS
+              Value: !Ref 'MSKBrokers'
+            - Name: LAKERUNNER_KAFKA_TLS
+              Value: 'true'
+            - Name: LAKERUNNER_KAFKA_SASL_ENABLED
+              Value: 'true'
+            - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
+              Value: SCRAM-SHA-512
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp
@@ -1182,6 +1292,20 @@ Resources:
                     Fn::Sub:
                       - ${CommonInfraStackName}-DbSecretArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LAKERUNNER_KAFKA_SASL_USERNAME
+              ValueFrom: !Sub
+                - '${SecretArn}:username::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-MSKCredentialsArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LAKERUNNER_KAFKA_SASL_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-MSKCredentialsArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
           User: '0'
       Cpu: '1024'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
@@ -1200,7 +1324,9 @@ Resources:
   TaskDefLakerunnerQueryApi:
     Properties:
       ContainerDefinitions:
-        - Command: []
+        - Command:
+            - /app/bin/lakerunner
+            - query-api
           Environment:
             - Name: OTEL_SERVICE_NAME
               Value: lakerunner-query-api
@@ -1248,17 +1374,14 @@ Resources:
               Value: lakerunner
             - Name: CONFIGDB_SSLMODE
               Value: require
-            - Name: ECS_WORKER_SERVICE_NAME
-              Value: lakerunner-query-worker
-            - Name: QUERY_WORKER_CLUSTER_NAME
-              Value: !Select
-                - 1
-                - !Split
-                  - /
-                  - !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-ClusterArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LAKERUNNER_KAFKA_BROKERS
+              Value: !Ref 'MSKBrokers'
+            - Name: LAKERUNNER_KAFKA_TLS
+              Value: 'true'
+            - Name: LAKERUNNER_KAFKA_SASL_ENABLED
+              Value: 'true'
+            - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
+              Value: SCRAM-SHA-512
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp
@@ -1269,28 +1392,15 @@ Resources:
                 - EnableOtlp
                 - 'true'
                 - !Ref 'AWS::NoValue'
-            - Name: EXECUTION_ENVIRONMENT
-              Value: ecs
-            - Name: QUERY_STACK
-              Value: local
-            - Name: METRIC_PREFIX
-              Value: lakerunner-query-api
-            - Name: NUM_MIN_QUERY_WORKERS
-              Value: '8'
-            - Name: NUM_MAX_QUERY_WORKERS
-              Value: '8'
-            - Name: SPRING_PROFILES_ACTIVE
-              Value: aws
           HealthCheck:
             Command:
-              - curl
-              - -f
-              - http://localhost:7101/ready
+              - /app/bin/lakerunner
+              - sysinfo
             Interval: 30
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: !Ref 'QueryApiImage'
+          Image: !Ref 'GoServicesImage'
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -1301,12 +1411,9 @@ Resources:
             - ContainerPath: /scratch
               ReadOnly: false
               SourceVolume: scratch
-            - ContainerPath: /db
-              ReadOnly: false
-              SourceVolume: scratch
           Name: AppContainer
           PortMappings:
-            - ContainerPort: 7101
+            - ContainerPort: 8080
               Protocol: tcp
           Secrets:
             - Name: STORAGE_PROFILES_ENV
@@ -1327,10 +1434,20 @@ Resources:
                     Fn::Sub:
                       - ${CommonInfraStackName}-DbSecretArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: TOKEN_HMAC256_KEY
+            - Name: LAKERUNNER_KAFKA_SASL_USERNAME
               ValueFrom: !Sub
-                - '${SecretArn}:token_hmac256_key::'
-                - SecretArn: !Ref 'TokenSecret'
+                - '${SecretArn}:username::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-MSKCredentialsArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LAKERUNNER_KAFKA_SASL_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-MSKCredentialsArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
           User: '0'
       Cpu: '2048'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
@@ -1349,7 +1466,9 @@ Resources:
   TaskDefLakerunnerQueryWorker:
     Properties:
       ContainerDefinitions:
-        - Command: []
+        - Command:
+            - /app/bin/lakerunner
+            - query-worker
           Environment:
             - Name: OTEL_SERVICE_NAME
               Value: lakerunner-query-worker
@@ -1397,6 +1516,14 @@ Resources:
               Value: lakerunner
             - Name: CONFIGDB_SSLMODE
               Value: require
+            - Name: LAKERUNNER_KAFKA_BROKERS
+              Value: !Ref 'MSKBrokers'
+            - Name: LAKERUNNER_KAFKA_TLS
+              Value: 'true'
+            - Name: LAKERUNNER_KAFKA_SASL_ENABLED
+              Value: 'true'
+            - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
+              Value: SCRAM-SHA-512
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp
@@ -1407,22 +1534,15 @@ Resources:
                 - EnableOtlp
                 - 'true'
                 - !Ref 'AWS::NoValue'
-            - Name: EXECUTION_ENVIRONMENT
-              Value: ecs
-            - Name: METRIC_PREFIX
-              Value: lakerunner-query-worker
-            - Name: SPRING_PROFILES_ACTIVE
-              Value: aws
           HealthCheck:
             Command:
-              - curl
-              - -f
-              - http://localhost:7101/ready
+              - /app/bin/lakerunner
+              - sysinfo
             Interval: 30
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: !Ref 'QueryWorkerImage'
+          Image: !Ref 'GoServicesImage'
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -1431,9 +1551,6 @@ Resources:
               awslogs-stream-prefix: lakerunner-query-worker
           MountPoints:
             - ContainerPath: /scratch
-              ReadOnly: false
-              SourceVolume: scratch
-            - ContainerPath: /db
               ReadOnly: false
               SourceVolume: scratch
           Name: AppContainer
@@ -1459,10 +1576,20 @@ Resources:
                     Fn::Sub:
                       - ${CommonInfraStackName}-DbSecretArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: TOKEN_HMAC256_KEY
+            - Name: LAKERUNNER_KAFKA_SASL_USERNAME
               ValueFrom: !Sub
-                - '${SecretArn}:token_hmac256_key::'
-                - SecretArn: !Ref 'TokenSecret'
+                - '${SecretArn}:username::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-MSKCredentialsArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LAKERUNNER_KAFKA_SASL_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-MSKCredentialsArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
           User: '0'
       Cpu: '2048'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
@@ -1531,6 +1658,14 @@ Resources:
               Value: lakerunner
             - Name: CONFIGDB_SSLMODE
               Value: require
+            - Name: LAKERUNNER_KAFKA_BROKERS
+              Value: !Ref 'MSKBrokers'
+            - Name: LAKERUNNER_KAFKA_TLS
+              Value: 'true'
+            - Name: LAKERUNNER_KAFKA_SASL_ENABLED
+              Value: 'true'
+            - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
+              Value: SCRAM-SHA-512
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp
@@ -1580,6 +1715,20 @@ Resources:
                 - SecretArn: !ImportValue
                     Fn::Sub:
                       - ${CommonInfraStackName}-DbSecretArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LAKERUNNER_KAFKA_SASL_USERNAME
+              ValueFrom: !Sub
+                - '${SecretArn}:username::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-MSKCredentialsArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LAKERUNNER_KAFKA_SASL_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-MSKCredentialsArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
           User: '0'
       Cpu: '1024'
@@ -1649,6 +1798,14 @@ Resources:
               Value: lakerunner
             - Name: CONFIGDB_SSLMODE
               Value: require
+            - Name: LAKERUNNER_KAFKA_BROKERS
+              Value: !Ref 'MSKBrokers'
+            - Name: LAKERUNNER_KAFKA_TLS
+              Value: 'true'
+            - Name: LAKERUNNER_KAFKA_SASL_ENABLED
+              Value: 'true'
+            - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
+              Value: SCRAM-SHA-512
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp
@@ -1698,6 +1855,20 @@ Resources:
                 - SecretArn: !ImportValue
                     Fn::Sub:
                       - ${CommonInfraStackName}-DbSecretArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LAKERUNNER_KAFKA_SASL_USERNAME
+              ValueFrom: !Sub
+                - '${SecretArn}:username::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-MSKCredentialsArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LAKERUNNER_KAFKA_SASL_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-MSKCredentialsArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
           User: '0'
       Cpu: '256'
@@ -1772,6 +1943,12 @@ Resources:
                         Fn::Sub:
                           - ${CommonInfraStackName}-DbSecretArn
                           - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                  - !Sub
+                    - ${SecretArn}*
+                    - SecretArn: !ImportValue
+                        Fn::Sub:
+                          - ${CommonInfraStackName}-MSKCredentialsArn
+                          - CommonInfraStackName: !Ref 'CommonInfraStackName'
                   - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*'
               - Action:
                   - elasticfilesystem:ClientMount
@@ -1789,7 +1966,8 @@ Resources:
   Tg7101:
     Properties:
       HealthCheckIntervalSeconds: 5
-      HealthCheckPath: /ready
+      HealthCheckPath: /healthz
+      HealthCheckPort: '8090'
       HealthCheckProtocol: HTTP
       HealthCheckTimeoutSeconds: 2
       HealthyThresholdCount: 2
@@ -1809,14 +1987,4 @@ Resources:
           - ${CommonInfraStackName}-VpcId
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
-  TokenSecret:
-    Properties:
-      Description: HMAC256 key for token signing/verification
-      GenerateSecretString:
-        ExcludeCharacters: ' "\@/'
-        GenerateStringKey: token_hmac256_key
-        PasswordLength: 64
-        SecretStringTemplate: '{}'
-      Name: !Sub '${AWS::StackName}-token-key'
-    Type: AWS::SecretsManager::Secret
 

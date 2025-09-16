@@ -66,19 +66,7 @@ def create_services_template():
     GoServicesImage = t.add_parameter(Parameter(
         "GoServicesImage", Type="String",
         Default=images.get('go_services', 'public.ecr.aws/cardinalhq.io/lakerunner:latest'),
-        Description="Container image for Go services (pubsub, ingest, compact, etc.)"
-    ))
-
-    QueryApiImage = t.add_parameter(Parameter(
-        "QueryApiImage", Type="String",
-        Default=images.get('query_api', 'public.ecr.aws/cardinalhq.io/lakerunner/query-api:latest'),
-        Description="Container image for query-api service"
-    ))
-
-    QueryWorkerImage = t.add_parameter(Parameter(
-        "QueryWorkerImage", Type="String",
-        Default=images.get('query_worker', 'public.ecr.aws/cardinalhq.io/lakerunner/query-worker:latest'),
-        Description="Container image for query-worker service"
+        Description="Container image for all Go services (pubsub, ingest, compact, query-api, query-worker, etc.)"
     ))
 
 
@@ -87,6 +75,12 @@ def create_services_template():
         "OtelEndpoint", Type="String",
         Default="",
         Description="OPTIONAL: OTEL collector HTTP endpoint URL (e.g., http://collector-dns:4318). Leave blank to disable OTLP telemetry export."
+    ))
+
+    # MSK Configuration
+    MSKBrokers = t.add_parameter(Parameter(
+        "MSKBrokers", Type="String", Default="",
+        Description="REQUIRED: Comma-separated list of MSK broker endpoints (hostname:port)"
     ))
 
 
@@ -110,8 +104,12 @@ def create_services_template():
                     "Parameters": ["CommonInfraStackName", "AlbScheme"]
                 },
                 {
+                    "Label": {"default": "MSK Configuration"},
+                    "Parameters": ["MSKBrokers"]
+                },
+                {
                     "Label": {"default": "Container Images"},
-                    "Parameters": ["GoServicesImage", "QueryApiImage", "QueryWorkerImage"]
+                    "Parameters": ["GoServicesImage"]
                 },
                 {
                     "Label": {"default": "Telemetry"},
@@ -121,9 +119,8 @@ def create_services_template():
             "ParameterLabels": {
                 "CommonInfraStackName": {"default": "Common Infra Stack Name"},
                 "AlbScheme": {"default": "ALB Scheme"},
+                "MSKBrokers": {"default": "MSK Broker Endpoints"},
                 "GoServicesImage": {"default": "Go Services Image"},
-                "QueryApiImage": {"default": "Query API Image"},
-                "QueryWorkerImage": {"default": "Query Worker Image"},
                 "OtelEndpoint": {"default": "OTEL Collector Endpoint"}
             }
         }
@@ -151,6 +148,7 @@ def create_services_template():
     DbSecretArnValue = ImportValue(ci_export("DbSecretArn"))
     DbHostValue = ImportValue(ci_export("DbEndpoint"))
     DbPortValue = ImportValue(ci_export("DbPort"))
+    MSKCredentialsArnValue = ImportValue(ci_export("MSKCredentialsArn"))
     EfsIdValue = ImportValue(ci_export("EfsId"))
     TaskSecurityGroupIdValue = ImportValue(ci_export("TaskSGId"))
     VpcIdValue = ImportValue(ci_export("VpcId"))
@@ -219,7 +217,8 @@ def create_services_template():
         Port=7101, Protocol="HTTP",
         VpcId=VpcIdValue,
         TargetType="ip",
-        HealthCheckPath="/ready",
+        HealthCheckPath="/healthz",
+        HealthCheckPort="8090",
         HealthCheckProtocol="HTTP",
         HealthCheckIntervalSeconds=5,
         HealthCheckTimeoutSeconds=2,
@@ -292,6 +291,7 @@ def create_services_template():
                             ],
                             "Resource": [
                                 Sub("${SecretArn}*", SecretArn=DbSecretArnValue),
+                                Sub("${SecretArn}*", SecretArn=MSKCredentialsArnValue),
                                 Sub("arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*")
                             ]
                         }
@@ -354,6 +354,7 @@ def create_services_template():
                             ],
                             "Resource": [
                                 Sub("${SecretArn}*", SecretArn=DbSecretArnValue),
+                                Sub("${SecretArn}*", SecretArn=MSKCredentialsArnValue),
                                 Sub("arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*")
                             ]
                         },
@@ -413,6 +414,7 @@ def create_services_template():
                             ],
                             "Resource": [
                                 Sub("${SecretArn}*", SecretArn=DbSecretArnValue),
+                                Sub("${SecretArn}*", SecretArn=MSKCredentialsArnValue),
                                 Sub("arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*")
                             ]
                         },
@@ -482,6 +484,7 @@ def create_services_template():
                             ],
                             "Resource": [
                                 Sub("${SecretArn}*", SecretArn=DbSecretArnValue),
+                                Sub("${SecretArn}*", SecretArn=MSKCredentialsArnValue),
                                 Sub("arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*")
                             ]
                         },
@@ -506,18 +509,6 @@ def create_services_template():
     # -----------------------
     # Application Secrets
     # -----------------------
-    # TOKEN_HMAC256_KEY secret for query API and worker
-    token_secret = t.add_resource(Secret(
-        "TokenSecret",
-        Name=Sub("${AWS::StackName}-token-key"),
-        Description="HMAC256 key for token signing/verification",
-        GenerateSecretString=GenerateSecretString(
-            SecretStringTemplate='{}',
-            GenerateStringKey='token_hmac256_key',
-            ExcludeCharacters=' "\\@/',
-            PasswordLength=64
-        )
-    ))
 
 
     # Collect services that need EFS access points
@@ -599,18 +590,13 @@ def create_services_template():
             Environment(Name="CONFIGDB_DBNAME", Value="lakerunner"),
             Environment(Name="CONFIGDB_USER", Value="lakerunner"),
             Environment(Name="CONFIGDB_SSLMODE", Value="require"),
+            # MSK Kafka Configuration
+            Environment(Name="LAKERUNNER_KAFKA_BROKERS", Value=Ref(MSKBrokers)),
+            Environment(Name="LAKERUNNER_KAFKA_TLS", Value="true"),
+            Environment(Name="LAKERUNNER_KAFKA_SASL_ENABLED", Value="true"),
+            Environment(Name="LAKERUNNER_KAFKA_SASL_MECHANISM", Value="SCRAM-SHA-512"),
         ]
 
-        # Add service-specific discovery environment variables
-        if service_name == 'lakerunner-query-api':
-            # Query API needs to discover query worker instances
-            base_env.extend([
-                Environment(Name="ECS_WORKER_SERVICE_NAME", Value="lakerunner-query-worker"),
-                Environment(Name="QUERY_WORKER_CLUSTER_NAME", Value=Select(1, Split("/", ClusterArnValue)))
-            ])
-        elif service_name == 'lakerunner-query-worker':
-            # Query workers will receive API registrations (no discovery env vars needed)
-            pass
 
         # Add OTLP telemetry environment variables (conditionally)
         # Note: We add these individually with If() conditions since CloudFormation
@@ -626,27 +612,22 @@ def create_services_template():
             )
         ])
 
-        # Add service-specific environment variables (excluding sensitive ones)
+        # Add service-specific environment variables
         service_env = service_config.get('environment', {})
-        sensitive_keys = {'TOKEN_HMAC256_KEY'}
         for key, value in service_env.items():
-            if key not in sensitive_keys:
-                base_env.append(Environment(Name=key, Value=value))
+            base_env.append(Environment(Name=key, Value=value))
 
         # Build secrets
         secrets = [
             EcsSecret(Name="STORAGE_PROFILES_ENV", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles")),
             EcsSecret(Name="API_KEYS_ENV", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys")),
             EcsSecret(Name="LRDB_PASSWORD", ValueFrom=Sub("${SecretArn}:password::", SecretArn=DbSecretArnValue)),
-            EcsSecret(Name="CONFIGDB_PASSWORD", ValueFrom=Sub("${SecretArn}:password::", SecretArn=DbSecretArnValue))
+            EcsSecret(Name="CONFIGDB_PASSWORD", ValueFrom=Sub("${SecretArn}:password::", SecretArn=DbSecretArnValue)),
+            # MSK SASL/SCRAM Credentials
+            EcsSecret(Name="LAKERUNNER_KAFKA_SASL_USERNAME", ValueFrom=Sub("${SecretArn}:username::", SecretArn=MSKCredentialsArnValue)),
+            EcsSecret(Name="LAKERUNNER_KAFKA_SASL_PASSWORD", ValueFrom=Sub("${SecretArn}:password::", SecretArn=MSKCredentialsArnValue))
         ]
 
-        # Add service-specific secrets for sensitive environment variables
-        if service_name in ['lakerunner-query-api', 'lakerunner-query-worker']:
-            secrets.append(EcsSecret(
-                Name="TOKEN_HMAC256_KEY",
-                ValueFrom=Sub("${SecretArn}:token_hmac256_key::", SecretArn=Ref(token_secret))
-            ))
 
         # Build mount points
         mount_points = [MountPoint(
@@ -689,19 +670,15 @@ def create_services_template():
         port_mappings = []
         ingress = service_config.get('ingress')
         if ingress:
+            # Use container_port if specified, otherwise use port
+            container_port = ingress.get('container_port', ingress['port'])
             port_mappings.append(PortMapping(
-                ContainerPort=ingress['port'],
+                ContainerPort=container_port,
                 Protocol="tcp"
             ))
 
-        # Select container image based on service type
-        if service_name == 'lakerunner-query-api':
-            container_image = Ref(QueryApiImage)
-        elif service_name == 'lakerunner-query-worker':
-            container_image = Ref(QueryWorkerImage)
-        else:
-            # All other services use Go services image (pubsub, ingest, compact, etc.)
-            container_image = Ref(GoServicesImage)
+        # All services now use Go services image
+        container_image = Ref(GoServicesImage)
 
         # Get base container command from service config
         container_command = service_config.get('command', [])
@@ -803,10 +780,12 @@ def create_services_template():
 
         # Add LoadBalancer configuration for services with ALB ingress
         if ingress and ingress.get('attach_alb') and service_name in target_groups:
+            # Use container_port if specified, otherwise use port
+            container_port = ingress.get('container_port', ingress['port'])
             # LoadBalancers property - ALB is always created
             ecs_service.LoadBalancers = [EcsLoadBalancer(
                 ContainerName="AppContainer",
-                ContainerPort=ingress['port'],
+                ContainerPort=container_port,
                 TargetGroupArn=target_groups[service_name]['target_group_arn']
             )]
             # Add dependency on the corresponding listener to ensure target group is attached to ALB

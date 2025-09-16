@@ -86,15 +86,22 @@ MemoryMiB = t.add_parameter(Parameter(
     Description="Fargate Memory MiB (e.g., 512/1024/2048)."
 ))
 
+MSKBrokers = t.add_parameter(Parameter(
+    "MSKBrokers", Type="String", Default="",
+    Description="REQUIRED: Comma-separated list of MSK broker endpoints (hostname:port)"
+))
+
 t.set_metadata({
     "AWS::CloudFormation::Interface": {
         "ParameterGroups": [
             {"Label": {"default": "CommonInfra Stack"}, "Parameters": ["CommonInfraStackName"]},
+            {"Label": {"default": "MSK Configuration"}, "Parameters": ["MSKBrokers"]},
             {"Label": {"default": "Task Sizing"}, "Parameters": ["Cpu", "MemoryMiB"]},
             {"Label": {"default": "Container Image"}, "Parameters": ["ContainerImage"]},
         ],
         "ParameterLabels": {
             "CommonInfraStackName": {"default": "CommonInfra Stack Name"},
+            "MSKBrokers": {"default": "MSK Broker Endpoints"},
             "Cpu": {"default": "Fargate CPU"},
             "MemoryMiB": {"default": "Fargate Memory (MiB)"},
             "ContainerImage": {"default": "Migration Image"},
@@ -111,6 +118,7 @@ def ci_export(suffix):
 ClusterArnValue = ImportValue(ci_export("ClusterArn"))
 DbHostValue = ImportValue(ci_export("DbEndpoint"))
 DbSecretArnValue = ImportValue(ci_export("DbSecretArn"))
+MSKCredentialsArnValue = ImportValue(ci_export("MSKCredentialsArn"))
 SecurityGroupsValue = ImportValue(ci_export("TaskSGId"))
 PrivateSubnetsValue = Split(",", ImportValue(ci_export("PrivateSubnets")))
 
@@ -146,7 +154,7 @@ TaskRole = t.add_resource(Role(
                     {
                         "Effect": "Allow",
                         "Action": ["secretsmanager:GetSecretValue"],
-                        "Resource": [DbSecretArnValue]
+                        "Resource": [DbSecretArnValue, MSKCredentialsArnValue]
                     }
                 ]
             }
@@ -180,7 +188,10 @@ ExecutionRole = t.add_resource(Role(
                     {
                         "Effect": "Allow",
                         "Action": ["secretsmanager:GetSecretValue"],
-                        "Resource": [Sub("${SecretArn}*", SecretArn=DbSecretArnValue)]
+                        "Resource": [
+                            Sub("${SecretArn}*", SecretArn=DbSecretArnValue),
+                            Sub("${SecretArn}*", SecretArn=MSKCredentialsArnValue)
+                        ]
                     },
                     {
                         "Effect": "Allow",
@@ -234,12 +245,20 @@ TaskDef = t.add_resource(TaskDefinition(
                 Environment(Name="CONFIGDB_SSLMODE", Value="require"),
                 Environment(Name="API_KEYS_FILE", Value="env:API_KEYS_ENV"),
                 Environment(Name="STORAGE_PROFILE_FILE", Value="env:STORAGE_PROFILES_ENV"),
+                # MSK Kafka Configuration
+                Environment(Name="LAKERUNNER_KAFKA_BROKERS", Value=Ref(MSKBrokers)),
+                Environment(Name="LAKERUNNER_KAFKA_TLS", Value="true"),
+                Environment(Name="LAKERUNNER_KAFKA_SASL_ENABLED", Value="true"),
+                Environment(Name="LAKERUNNER_KAFKA_SASL_MECHANISM", Value="SCRAM-SHA-512"),
             ],
             Secrets=[
                 EcsSecret(Name="LRDB_PASSWORD", ValueFrom=Sub("${S}:password::", S=DbSecretArnValue)),
                 EcsSecret(Name="CONFIGDB_PASSWORD", ValueFrom=Sub("${S}:password::", S=DbSecretArnValue)),
                 EcsSecret(Name="API_KEYS_ENV", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys")),
-                EcsSecret(Name="STORAGE_PROFILES_ENV", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles"))
+                EcsSecret(Name="STORAGE_PROFILES_ENV", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles")),
+                # MSK SASL/SCRAM Credentials
+                EcsSecret(Name="LAKERUNNER_KAFKA_SASL_USERNAME", ValueFrom=Sub("${S}:username::", S=MSKCredentialsArnValue)),
+                EcsSecret(Name="LAKERUNNER_KAFKA_SASL_PASSWORD", ValueFrom=Sub("${S}:password::", S=MSKCredentialsArnValue))
             ]
         )
     ]

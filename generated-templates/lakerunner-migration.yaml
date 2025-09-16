@@ -7,6 +7,10 @@ Metadata:
         Parameters:
           - CommonInfraStackName
       - Label:
+          default: MSK Configuration
+        Parameters:
+          - MSKBrokers
+      - Label:
           default: Task Sizing
         Parameters:
           - Cpu
@@ -22,6 +26,8 @@ Metadata:
         default: Migration Image
       Cpu:
         default: Fargate CPU
+      MSKBrokers:
+        default: MSK Broker Endpoints
       MemoryMiB:
         default: Fargate Memory (MiB)
 Outputs:
@@ -47,12 +53,16 @@ Parameters:
     Description: 'REQUIRED: Name of the CommonInfra stack to import values from.'
     Type: String
   ContainerImage:
-    Default: public.ecr.aws/cardinalhq.io/lakerunner:v1.2.2
+    Default: public.ecr.aws/cardinalhq.io/lakerunner:v1.3.6-rc1
     Description: Migration container image.
     Type: String
   Cpu:
     Default: '512'
     Description: Fargate CPU units (e.g., 256/512/1024).
+    Type: String
+  MSKBrokers:
+    Default: ''
+    Description: 'REQUIRED: Comma-separated list of MSK broker endpoints (hostname:port)'
     Type: String
   MemoryMiB:
     Default: '1024'
@@ -97,6 +107,14 @@ Resources:
               Value: env:API_KEYS_ENV
             - Name: STORAGE_PROFILE_FILE
               Value: env:STORAGE_PROFILES_ENV
+            - Name: LAKERUNNER_KAFKA_BROKERS
+              Value: !Ref 'MSKBrokers'
+            - Name: LAKERUNNER_KAFKA_TLS
+              Value: 'true'
+            - Name: LAKERUNNER_KAFKA_SASL_ENABLED
+              Value: 'true'
+            - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
+              Value: SCRAM-SHA-512
           Image: !Ref 'ContainerImage'
           LogConfiguration:
             LogDriver: awslogs
@@ -120,6 +138,16 @@ Resources:
               ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
             - Name: STORAGE_PROFILES_ENV
               ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
+            - Name: LAKERUNNER_KAFKA_SASL_USERNAME
+              ValueFrom: !Sub
+                - '${S}:username::'
+                - S: !ImportValue
+                    Fn::Sub: ${CommonInfraStackName}-MSKCredentialsArn
+            - Name: LAKERUNNER_KAFKA_SASL_PASSWORD
+              ValueFrom: !Sub
+                - '${S}:password::'
+                - S: !ImportValue
+                    Fn::Sub: ${CommonInfraStackName}-MSKCredentialsArn
       Cpu: !Ref 'Cpu'
       ExecutionRoleArn: !GetAtt 'TaskExecutionRole.Arn'
       Family: lakerunner-migration
@@ -147,6 +175,8 @@ Resources:
                 Resource:
                   - !ImportValue
                     Fn::Sub: ${CommonInfraStackName}-DbSecretArn
+                  - !ImportValue
+                    Fn::Sub: ${CommonInfraStackName}-MSKCredentialsArn
             Version: '2012-10-17'
           PolicyName: MigrationTaskPolicy
     Type: AWS::IAM::Role
@@ -331,6 +361,10 @@ Resources:
                     - ${SecretArn}*
                     - SecretArn: !ImportValue
                         Fn::Sub: ${CommonInfraStackName}-DbSecretArn
+                  - !Sub
+                    - ${SecretArn}*
+                    - SecretArn: !ImportValue
+                        Fn::Sub: ${CommonInfraStackName}-MSKCredentialsArn
               - Action:
                   - ssm:GetParameters
                   - ssm:GetParameter

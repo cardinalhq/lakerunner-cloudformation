@@ -189,15 +189,6 @@ Resources:
   Cluster:
     Properties:
       ClusterName: !Sub '${AWS::StackName}-cluster'
-      Tags:
-        - Key: Component
-          Value: Compute
-        - Key: Environment
-          Value: !Ref 'AWS::StackName'
-        - Key: ManagedBy
-          Value: Lakerunner
-        - Key: Name
-          Value: !Sub '${AWS::StackName}-cluster'
     Type: AWS::ECS::Cluster
   DbSecret:
     Properties:
@@ -242,29 +233,11 @@ Resources:
                   - Name: prefix
                     Value: metrics-raw/
             Queue: !GetAtt 'IngestQueue.Arn'
-      Tags:
-        - Key: Component
-          Value: Storage
-        - Key: Environment
-          Value: !Ref 'AWS::StackName'
-        - Key: ManagedBy
-          Value: Lakerunner
-        - Key: Name
-          Value: !Sub '${AWS::StackName}-ingest-bucket'
     Type: AWS::S3::Bucket
   IngestQueue:
     Properties:
       MessageRetentionPeriod: 345600
       QueueName: lakerunner-ingest-queue
-      Tags:
-        - Key: Component
-          Value: Messaging
-        - Key: Environment
-          Value: !Ref 'AWS::StackName'
-        - Key: ManagedBy
-          Value: Lakerunner
-        - Key: Name
-          Value: !Sub '${AWS::StackName}-ingest-queue'
     Type: AWS::SQS::Queue
   IngestQueuePolicy:
     Properties:
@@ -304,15 +277,6 @@ Resources:
       MultiAZ: false
       PubliclyAccessible: false
       StorageType: gp3
-      Tags:
-        - Key: Name
-          Value: !Sub '${AWS::StackName}-database'
-        - Key: ManagedBy
-          Value: Lakerunner
-        - Key: Environment
-          Value: !Ref 'AWS::StackName'
-        - Key: Component
-          Value: Database
       VPCSecurityGroups:
         - !Ref 'TaskSG'
     Type: AWS::RDS::DBInstance
@@ -338,7 +302,6 @@ Resources:
       KafkaVersion: 3.9.x
       NumberOfBrokerNodes: !Ref 'MSKBrokerNodes'
       Tags:
-        Component: Messaging
         Environment: !Ref 'AWS::StackName'
         ManagedBy: Lakerunner
         Name: !Sub '${AWS::StackName}-msk-cluster'
@@ -357,10 +320,8 @@ Resources:
           Value: !Sub '${AWS::StackName}-msk-credentials'
         - Key: ManagedBy
           Value: Lakerunner
-        - Key: Environment
-          Value: !Ref 'AWS::StackName'
         - Key: Component
-          Value: Messaging
+          Value: MSK
     Type: AWS::SecretsManager::Secret
   MSKFromTasksSG:
     Properties:
@@ -371,136 +332,12 @@ Resources:
       SourceSecurityGroupId: !Ref 'TaskSG'
       ToPort: 9094
     Type: AWS::EC2::SecurityGroupIngress
-  MSKScramAssociationFunction:
-    Properties:
-      Code:
-        ZipFile: |2
-
-          import json
-          import boto3
-          import urllib.request
-          import time
-
-          def send_response(event, context, status, data=None, reason=""):
-              response = {
-                  "Status": status,
-                  "Reason": f"{reason} See CloudWatch Logs: {context.log_stream_name}",
-                  "PhysicalResourceId": event.get("PhysicalResourceId") or "MSKScramAssociation",
-                  "StackId": event["StackId"],
-                  "RequestId": event["RequestId"],
-                  "LogicalResourceId": event["LogicalResourceId"],
-                  "Data": data or {}
-              }
-
-              body = json.dumps(response).encode()
-              req = urllib.request.Request(event["ResponseURL"], data=body, method="PUT")
-              req.add_header("content-type", "")
-              req.add_header("content-length", str(len(body)))
-
-              try:
-                  with urllib.request.urlopen(req) as r:
-                      r.read()
-              except Exception as e:
-                  print(f"Failed to send response: {e}")
-
-          def handler(event, context):
-              print(f"Event: {json.dumps(event)}")
-
-              try:
-                  props = event.get("ResourceProperties", {})
-                  cluster_arn = props["ClusterArn"]
-                  secret_arns = props["SecretArnList"]
-
-                  kafka = boto3.client("kafka")
-
-                  if event["RequestType"] == "Delete":
-                      # Try to disassociate secrets on delete
-                      try:
-                          kafka.batch_disassociate_scram_secret(
-                              ClusterArn=cluster_arn,
-                              SecretArnList=secret_arns
-                          )
-                          print("Successfully disassociated SCRAM secrets")
-                      except Exception as e:
-                          print(f"Error disassociating SCRAM secrets (ignoring): {e}")
-
-                      send_response(event, context, "SUCCESS", {"Message": "Delete completed"})
-                      return
-
-                  # Wait for MSK cluster to be ACTIVE
-                  max_wait = 20 * 60  # 20 minutes
-                  start_time = time.time()
-
-                  while time.time() - start_time < max_wait:
-                      try:
-                          response = kafka.describe_cluster(ClusterArn=cluster_arn)
-                          state = response["ClusterInfo"]["State"]
-                          print(f"MSK cluster state: {state}")
-
-                          if state == "ACTIVE":
-                              break
-                          elif state in ["FAILED", "DELETING"]:
-                              send_response(event, context, "FAILED",
-                                          reason=f"MSK cluster in failed state: {state}")
-                              return
-
-                          time.sleep(30)
-                      except Exception as e:
-                          print(f"Error checking cluster state: {e}")
-                          time.sleep(30)
-                  else:
-                      send_response(event, context, "FAILED",
-                                  reason="Timeout waiting for MSK cluster to become ACTIVE")
-                      return
-
-                  # Associate SCRAM secrets
-                  kafka.batch_associate_scram_secret(
-                      ClusterArn=cluster_arn,
-                      SecretArnList=secret_arns
-                  )
-
-                  print("Successfully associated SCRAM secrets")
-                  send_response(event, context, "SUCCESS", {"Message": "SCRAM secrets associated"})
-
-              except Exception as e:
-                  print(f"Error: {e}")
-                  send_response(event, context, "FAILED", reason=str(e))
-      FunctionName: !Sub '${AWS::StackName}-msk-scram-association'
-      Handler: index.handler
-      Role: !GetAtt 'MSKScramAssociationRole.Arn'
-      Runtime: python3.13
-      Timeout: 300
-    Type: AWS::Lambda::Function
-  MSKScramAssociationRole:
-    Properties:
-      AssumeRolePolicyDocument:
-        Statement:
-          - Action: sts:AssumeRole
-            Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-        Version: '2012-10-17'
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-      Policies:
-        - PolicyDocument:
-            Statement:
-              - Action:
-                  - kafka:DescribeCluster
-                  - kafka:BatchAssociateScramSecret
-                  - kafka:BatchDisassociateScramSecret
-                Effect: Allow
-                Resource: !GetAtt 'MSKCluster.Arn'
-            Version: '2012-10-17'
-          PolicyName: MSKScramAssociationPolicy
-    Type: AWS::IAM::Role
   MSKScramSecretAssociation:
     Properties:
       ClusterArn: !GetAtt 'MSKCluster.Arn'
       SecretArnList:
         - !Ref 'MSKCredentials'
-      ServiceToken: !GetAtt 'MSKScramAssociationFunction.Arn'
-    Type: AWS::CloudFormation::CustomResource
+    Type: AWS::MSK::BatchScramSecret
   MSKSecurityGroup:
     Properties:
       GroupDescription: Security group for MSK cluster - grant access by referencing this SG ID
@@ -509,10 +346,6 @@ Resources:
           Value: !Sub '${AWS::StackName}-msk-sg'
         - Key: ManagedBy
           Value: Lakerunner
-        - Key: Environment
-          Value: !Ref 'AWS::StackName'
-        - Key: Component
-          Value: Messaging
       VpcId: !Ref 'VpcId'
     Type: AWS::EC2::SecurityGroup
   StorageProfilesParam:
@@ -535,15 +368,6 @@ Resources:
         - CidrIp: '0.0.0.0/0'
           Description: Allow all outbound
           IpProtocol: '-1'
-      Tags:
-        - Key: Name
-          Value: !Sub '${AWS::StackName}-task-sg'
-        - Key: ManagedBy
-          Value: Lakerunner
-        - Key: Environment
-          Value: !Ref 'AWS::StackName'
-        - Key: Component
-          Value: Compute
       VpcId: !Ref 'VpcId'
     Type: AWS::EC2::SecurityGroup
   TaskSG7101Self:
