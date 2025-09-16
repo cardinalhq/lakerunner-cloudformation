@@ -68,7 +68,7 @@ services:
     command: ["/app/bin/lakerunner", "compact-logs"]
     cpu: 1024
     memory_mib: 2048
-    replicas: 4
+    replicas: 2
     health_check:
       type: "go"
       command: ["/app/bin/lakerunner", "sysinfo"]
@@ -78,7 +78,7 @@ services:
     command: ["/app/bin/lakerunner", "compact-metrics"]
     cpu: 1024
     memory_mib: 2048
-    replicas: 1
+    replicas: 2
     health_check:
       type: "go"
       command: ["/app/bin/lakerunner", "sysinfo"]
@@ -88,7 +88,7 @@ services:
     command: ["/app/bin/lakerunner", "rollup-metrics"]
     cpu: 1024
     memory_mib: 2048
-    replicas: 1
+    replicas: 2
     health_check:
       type: "go"
       command: ["/app/bin/lakerunner", "sysinfo"]
@@ -106,8 +106,8 @@ services:
 
   lakerunner-query-api:
     command: ["/app/bin/lakerunner", "query-api"]
-    cpu: 2048
-    memory_mib: 8192
+    cpu: 1024
+    memory_mib: 2048
     replicas: 1
     ingress:
       port: 7101
@@ -124,9 +124,9 @@ services:
     command: ["/app/bin/lakerunner", "query-worker"]
     cpu: 2048
     memory_mib: 8192
-    replicas: 8
+    replicas: 2
     ingress:
-      port: 7101
+      port: 8081
       description: "From Query API"
     health_check:
       type: "go"
