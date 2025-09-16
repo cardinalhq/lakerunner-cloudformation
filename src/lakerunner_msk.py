@@ -107,32 +107,22 @@ MSKTaskRole = t.add_resource(Role(
 # -----------------------
 # Security Group for MSK
 # -----------------------
+# Note: This security group initially has no ingress rules for better security.
+# ECS/EKS clusters should reference this security group ID and add specific
+# ingress rules only for the ports they need (typically 9094 for TLS).
 MskSecurityGroup = t.add_resource(SecurityGroup(
     "MSKSecurityGroup",
-    GroupDescription="Security group for MSK cluster",
+    GroupDescription="Security group for MSK cluster - grant access by referencing this SG ID",
     VpcId=Ref(VpcId),
     SecurityGroupIngress=[
-        SecurityGroupRule(
-            IpProtocol="tcp",
-            FromPort=9092,
-            ToPort=9092,
-            CidrIp="10.0.0.0/8",  # Allow from private networks
-            Description="Kafka plaintext"
-        ),
-        SecurityGroupRule(
-            IpProtocol="tcp", 
-            FromPort=9094,
-            ToPort=9094,
-            CidrIp="10.0.0.0/8",  # Allow from private networks
-            Description="Kafka TLS"
-        ),
-        SecurityGroupRule(
-            IpProtocol="tcp",
-            FromPort=2181,
-            ToPort=2181,
-            CidrIp="10.0.0.0/8",  # Allow from private networks
-            Description="ZooKeeper"
-        )
+        # Commented out broad CIDR rules - use security group references instead
+        # SecurityGroupRule(
+        #     IpProtocol="tcp",
+        #     FromPort=9094,
+        #     ToPort=9094,
+        #     CidrIp="10.0.0.0/8",  # Too broad - use SourceSecurityGroupId instead
+        #     Description="Kafka TLS"
+        # )
     ],
     Tags=[
         {"Key": "Name", "Value": Sub("${AWS::StackName}-msk-sg")},
@@ -329,6 +319,13 @@ t.add_output(Output(
     Description="MSK SASL/SCRAM credentials secret ARN",
     Value=Ref(MSKCredentials),
     Export=Export(name=Sub("${AWS::StackName}-MSKCredentialsArn"))
+))
+
+t.add_output(Output(
+    "MSKSecurityGroupId",
+    Description="MSK security group ID for granting access from ECS/EKS",
+    Value=Ref(MskSecurityGroup),
+    Export=Export(name=Sub("${AWS::StackName}-MSKSecurityGroupId"))
 ))
 
 # Note: Bootstrap servers are not available as CloudFormation attributes

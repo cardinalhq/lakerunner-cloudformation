@@ -23,6 +23,11 @@ Outputs:
     Export:
       Name: !Sub '${AWS::StackName}-MSKCredentialsArn'
     Value: !Ref 'MSKCredentials'
+  MSKSecurityGroupId:
+    Description: MSK security group ID for granting access from ECS/EKS
+    Export:
+      Name: !Sub '${AWS::StackName}-MSKSecurityGroupId'
+    Value: !Ref 'MSKSecurityGroup'
   TaskRoleArn:
     Description: Task role ARN for MSK access (created or existing)
     Export:
@@ -121,23 +126,8 @@ Resources:
     Type: AWS::MSK::BatchScramSecret
   MSKSecurityGroup:
     Properties:
-      GroupDescription: Security group for MSK cluster
-      SecurityGroupIngress:
-        - CidrIp: 10.0.0.0/8
-          Description: Kafka plaintext
-          FromPort: 9092
-          IpProtocol: tcp
-          ToPort: 9092
-        - CidrIp: 10.0.0.0/8
-          Description: Kafka TLS
-          FromPort: 9094
-          IpProtocol: tcp
-          ToPort: 9094
-        - CidrIp: 10.0.0.0/8
-          Description: ZooKeeper
-          FromPort: 2181
-          IpProtocol: tcp
-          ToPort: 2181
+      GroupDescription: Security group for MSK cluster - grant access by referencing this SG ID
+      SecurityGroupIngress: []
       Tags:
         - Key: Name
           Value: !Sub '${AWS::StackName}-msk-sg'
