@@ -20,14 +20,14 @@ storage_profiles:
 
 # Container Images configuration
 images:
-  migration: "public.ecr.aws/cardinalhq.io/lakerunner:v0.0.0-pr223-94e30fc3"
-  go_services: "public.ecr.aws/cardinalhq.io/lakerunner:v0.0.0-pr223-94e30fc3"
+  migration: "public.ecr.aws/cardinalhq.io/lakerunner:v1.3.6"
+  go_services: "public.ecr.aws/cardinalhq.io/lakerunner:v1.3.6"
 
 # MSK configuration
 msk:
   instance_type: "kafka.t3.small"
   broker_nodes: 2
-  storage_size_gb: 100
+  storage_size_gb: 50
   enable_sasl_scram: true
 
 # Service configurations for core Lakerunner services
