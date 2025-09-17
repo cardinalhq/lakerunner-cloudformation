@@ -178,6 +178,17 @@ t.add_resource(SecurityGroupIngress(
     Description="task-to-task 7101",
 ))
 
+# Allow tasks to communicate with each other on port 8081 (query-api to query-worker)
+t.add_resource(SecurityGroupIngress(
+    "TaskSG8081Self",
+    GroupId=Ref(TaskSG),
+    IpProtocol="tcp",
+    FromPort=8081,
+    ToPort=8081,
+    SourceSecurityGroupId=Ref(TaskSG),
+    Description="task-to-task 8081 (query-api to query-worker)",
+))
+
 # Allow tasks to connect to PostgreSQL database
 t.add_resource(SecurityGroupIngress(
     "TaskSGDbSelf",
@@ -241,6 +252,11 @@ t.add_output(Output(
     "ClusterArn",
     Value=GetAtt(ClusterRes, "Arn"),
     Export=Export(name=Sub("${AWS::StackName}-ClusterArn"))
+))
+t.add_output(Output(
+    "ClusterName",
+    Value=Ref(ClusterRes),
+    Export=Export(name=Sub("${AWS::StackName}-ClusterName"))
 ))
 
 # -----------------------

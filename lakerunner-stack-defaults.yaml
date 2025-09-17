@@ -119,7 +119,7 @@ services:
     environment:
       EXECUTION_ENVIRONMENT: "ecs"
       QUERY_WORKER_SERVICE_NAME: "lakerunner-query-worker"
-      QUERY_WORKER_CLUSTER_NAME: "${ECS_CLUSTER_NAME}"
+      # Note: QUERY_WORKER_CLUSTER_NAME is set dynamically in the template
 
   lakerunner-query-worker:
     command: ["/app/bin/lakerunner", "query-worker"]
@@ -129,6 +129,47 @@ services:
     ingress:
       port: 8081
       description: "From Query API"
+    health_check:
+      type: "go"
+      command: ["/app/bin/lakerunner", "sysinfo"]
+    environment: {}
+
+  # Boxer services for compaction and rollup
+  lakerunner-boxer-compact-logs:
+    command: ["/app/bin/lakerunner", "boxer-compact-logs"]
+    cpu: 256
+    memory_mib: 512
+    replicas: 1
+    health_check:
+      type: "go"
+      command: ["/app/bin/lakerunner", "sysinfo"]
+    environment: {}
+
+  lakerunner-boxer-compact-metrics:
+    command: ["/app/bin/lakerunner", "boxer-compact-metrics"]
+    cpu: 256
+    memory_mib: 512
+    replicas: 1
+    health_check:
+      type: "go"
+      command: ["/app/bin/lakerunner", "sysinfo"]
+    environment: {}
+
+  # lakerunner-boxer-compact-traces: (disabled for now)
+  #   command: ["/app/bin/lakerunner", "boxer-compact-traces"]
+  #   cpu: 256
+  #   memory_mib: 512
+  #   replicas: 1
+  #   health_check:
+  #     type: "go"
+  #     command: ["/app/bin/lakerunner", "sysinfo"]
+  #   environment: {}
+
+  lakerunner-boxer-rollup-metrics:
+    command: ["/app/bin/lakerunner", "boxer-rollup-metrics"]
+    cpu: 256
+    memory_mib: 512
+    replicas: 1
     health_check:
       type: "go"
       command: ["/app/bin/lakerunner", "sysinfo"]

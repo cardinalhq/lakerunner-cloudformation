@@ -61,6 +61,10 @@ Outputs:
     Export:
       Name: !Sub '${AWS::StackName}-ClusterArn'
     Value: !GetAtt 'Cluster.Arn'
+  ClusterName:
+    Export:
+      Name: !Sub '${AWS::StackName}-ClusterName'
+    Value: !Ref 'Cluster'
   DbEndpoint:
     Export:
       Name: !Sub '${AWS::StackName}-DbEndpoint'
@@ -643,6 +647,15 @@ Resources:
       IpProtocol: tcp
       SourceSecurityGroupId: !Ref 'TaskSG'
       ToPort: 7101
+    Type: AWS::EC2::SecurityGroupIngress
+  TaskSG8081Self:
+    Properties:
+      Description: task-to-task 8081 (query-api to query-worker)
+      FromPort: 8081
+      GroupId: !Ref 'TaskSG'
+      IpProtocol: tcp
+      SourceSecurityGroupId: !Ref 'TaskSG'
+      ToPort: 8081
     Type: AWS::EC2::SecurityGroupIngress
   TaskSGDbSelf:
     Properties:

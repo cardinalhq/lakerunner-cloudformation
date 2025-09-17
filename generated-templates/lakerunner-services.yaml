@@ -51,6 +51,18 @@ Outputs:
     Export:
       Name: !Sub '${AWS::StackName}-ExecutionRoleArn'
     Value: !GetAtt 'ExecRole.Arn'
+  ServiceLakerunnerBoxerCompactLogsArn:
+    Export:
+      Name: !Sub '${AWS::StackName}-lakerunner-boxer-compact-logs-ServiceArn'
+    Value: !Ref 'ServiceLakerunnerBoxerCompactLogs'
+  ServiceLakerunnerBoxerCompactMetricsArn:
+    Export:
+      Name: !Sub '${AWS::StackName}-lakerunner-boxer-compact-metrics-ServiceArn'
+    Value: !Ref 'ServiceLakerunnerBoxerCompactMetrics'
+  ServiceLakerunnerBoxerRollupMetricsArn:
+    Export:
+      Name: !Sub '${AWS::StackName}-lakerunner-boxer-rollup-metrics-ServiceArn'
+    Value: !Ref 'ServiceLakerunnerBoxerRollupMetrics'
   ServiceLakerunnerCompactLogsArn:
     Export:
       Name: !Sub '${AWS::StackName}-lakerunner-compact-logs-ServiceArn'
@@ -219,6 +231,21 @@ Resources:
       Port: '7101'
       Protocol: HTTP
     Type: AWS::ElasticLoadBalancingV2::Listener
+  LogGroupLakerunnerBoxerCompactLogs:
+    Properties:
+      LogGroupName: !Sub '/ecs/lakerunner-boxer-compact-logs'
+      RetentionInDays: 14
+    Type: AWS::Logs::LogGroup
+  LogGroupLakerunnerBoxerCompactMetrics:
+    Properties:
+      LogGroupName: !Sub '/ecs/lakerunner-boxer-compact-metrics'
+      RetentionInDays: 14
+    Type: AWS::Logs::LogGroup
+  LogGroupLakerunnerBoxerRollupMetrics:
+    Properties:
+      LogGroupName: !Sub '/ecs/lakerunner-boxer-rollup-metrics'
+      RetentionInDays: 14
+    Type: AWS::Logs::LogGroup
   LogGroupLakerunnerCompactLogs:
     Properties:
       LogGroupName: !Sub '/ecs/lakerunner-compact-logs'
@@ -389,6 +416,81 @@ Resources:
           PolicyName: QueryWorkerAccess
       RoleName: !Sub '${AWS::StackName}-query-worker-task-role'
     Type: AWS::IAM::Role
+  ServiceLakerunnerBoxerCompactLogs:
+    Properties:
+      Cluster: !ImportValue
+        Fn::Sub:
+          - ${CommonInfraStackName}-ClusterArn
+          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      DesiredCount: '1'
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          SecurityGroups:
+            - !ImportValue
+              Fn::Sub:
+                - ${CommonInfraStackName}-TaskSGId
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
+          Subnets: !Split
+            - ','
+            - !ImportValue
+              Fn::Sub:
+                - ${CommonInfraStackName}-PrivateSubnets
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      ServiceName: lakerunner-boxer-compact-logs
+      TaskDefinition: !Ref 'TaskDefLakerunnerBoxerCompactLogs'
+    Type: AWS::ECS::Service
+  ServiceLakerunnerBoxerCompactMetrics:
+    Properties:
+      Cluster: !ImportValue
+        Fn::Sub:
+          - ${CommonInfraStackName}-ClusterArn
+          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      DesiredCount: '1'
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          SecurityGroups:
+            - !ImportValue
+              Fn::Sub:
+                - ${CommonInfraStackName}-TaskSGId
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
+          Subnets: !Split
+            - ','
+            - !ImportValue
+              Fn::Sub:
+                - ${CommonInfraStackName}-PrivateSubnets
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      ServiceName: lakerunner-boxer-compact-metrics
+      TaskDefinition: !Ref 'TaskDefLakerunnerBoxerCompactMetrics'
+    Type: AWS::ECS::Service
+  ServiceLakerunnerBoxerRollupMetrics:
+    Properties:
+      Cluster: !ImportValue
+        Fn::Sub:
+          - ${CommonInfraStackName}-ClusterArn
+          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      DesiredCount: '1'
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          SecurityGroups:
+            - !ImportValue
+              Fn::Sub:
+                - ${CommonInfraStackName}-TaskSGId
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
+          Subnets: !Split
+            - ','
+            - !ImportValue
+              Fn::Sub:
+                - ${CommonInfraStackName}-PrivateSubnets
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      ServiceName: lakerunner-boxer-rollup-metrics
+      TaskDefinition: !Ref 'TaskDefLakerunnerBoxerRollupMetrics'
+    Type: AWS::ECS::Service
   ServiceLakerunnerCompactLogs:
     Properties:
       Cluster: !ImportValue
@@ -620,6 +722,426 @@ Resources:
       ServiceName: lakerunner-sweeper
       TaskDefinition: !Ref 'TaskDefLakerunnerSweeper'
     Type: AWS::ECS::Service
+  TaskDefLakerunnerBoxerCompactLogs:
+    Properties:
+      ContainerDefinitions:
+        - Command:
+            - /app/bin/lakerunner
+            - boxer-compact-logs
+          Environment:
+            - Name: OTEL_SERVICE_NAME
+              Value: lakerunner-boxer-compact-logs
+            - Name: TMPDIR
+              Value: /scratch
+            - Name: HOME
+              Value: /scratch
+            - Name: STORAGE_PROFILE_FILE
+              Value: env:STORAGE_PROFILES_ENV
+            - Name: API_KEYS_FILE
+              Value: env:API_KEYS_ENV
+            - Name: SQS_QUEUE_URL
+              Value: !Sub 'https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/lakerunner-ingest-queue'
+            - Name: SQS_REGION
+              Value: !Ref 'AWS::Region'
+            - Name: LRDB_HOST
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbEndpoint
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LRDB_PORT
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbPort
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LRDB_DBNAME
+              Value: lakerunner
+            - Name: LRDB_USER
+              Value: lakerunner
+            - Name: LRDB_SSLMODE
+              Value: require
+            - Name: CONFIGDB_HOST
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbEndpoint
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: CONFIGDB_PORT
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbPort
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: CONFIGDB_DBNAME
+              Value: lakerunner
+            - Name: CONFIGDB_USER
+              Value: lakerunner
+            - Name: CONFIGDB_SSLMODE
+              Value: require
+            - Name: LAKERUNNER_KAFKA_BROKERS
+              Value: !Ref 'MSKBrokers'
+            - Name: LAKERUNNER_KAFKA_TLS_ENABLED
+              Value: 'true'
+            - Name: LAKERUNNER_KAFKA_SASL_ENABLED
+              Value: 'true'
+            - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
+              Value: SCRAM-SHA-512
+            - Name: OTEL_EXPORTER_OTLP_ENDPOINT
+              Value: !If
+                - EnableOtlp
+                - !Ref 'OtelEndpoint'
+                - !Ref 'AWS::NoValue'
+            - Name: ENABLE_OTLP_TELEMETRY
+              Value: !If
+                - EnableOtlp
+                - 'true'
+                - !Ref 'AWS::NoValue'
+          HealthCheck:
+            Command:
+              - /app/bin/lakerunner
+              - sysinfo
+            Interval: 30
+            Retries: 3
+            StartPeriod: 60
+            Timeout: 5
+          Image: !Ref 'GoServicesImage'
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref 'LogGroupLakerunnerBoxerCompactLogs'
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: lakerunner-boxer-compact-logs
+          MountPoints:
+            - ContainerPath: /scratch
+              ReadOnly: false
+              SourceVolume: scratch
+          Name: AppContainer
+          PortMappings: []
+          Secrets:
+            - Name: STORAGE_PROFILES_ENV
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
+            - Name: API_KEYS_ENV
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
+            - Name: LRDB_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-DbSecretArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: CONFIGDB_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-DbSecretArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LAKERUNNER_KAFKA_SASL_USERNAME
+              ValueFrom: !Sub
+                - '${SecretArn}:username::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-MSKCredentialsArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LAKERUNNER_KAFKA_SASL_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-MSKCredentialsArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+          User: '0'
+      Cpu: '256'
+      ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
+      Family: lakerunner-boxer-compact-logs-task
+      Memory: '512'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      RuntimePlatform:
+        CpuArchitecture: ARM64
+        OperatingSystemFamily: LINUX
+      TaskRoleArn: !GetAtt 'TaskRole.Arn'
+      Volumes:
+        - Name: scratch
+    Type: AWS::ECS::TaskDefinition
+  TaskDefLakerunnerBoxerCompactMetrics:
+    Properties:
+      ContainerDefinitions:
+        - Command:
+            - /app/bin/lakerunner
+            - boxer-compact-metrics
+          Environment:
+            - Name: OTEL_SERVICE_NAME
+              Value: lakerunner-boxer-compact-metrics
+            - Name: TMPDIR
+              Value: /scratch
+            - Name: HOME
+              Value: /scratch
+            - Name: STORAGE_PROFILE_FILE
+              Value: env:STORAGE_PROFILES_ENV
+            - Name: API_KEYS_FILE
+              Value: env:API_KEYS_ENV
+            - Name: SQS_QUEUE_URL
+              Value: !Sub 'https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/lakerunner-ingest-queue'
+            - Name: SQS_REGION
+              Value: !Ref 'AWS::Region'
+            - Name: LRDB_HOST
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbEndpoint
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LRDB_PORT
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbPort
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LRDB_DBNAME
+              Value: lakerunner
+            - Name: LRDB_USER
+              Value: lakerunner
+            - Name: LRDB_SSLMODE
+              Value: require
+            - Name: CONFIGDB_HOST
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbEndpoint
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: CONFIGDB_PORT
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbPort
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: CONFIGDB_DBNAME
+              Value: lakerunner
+            - Name: CONFIGDB_USER
+              Value: lakerunner
+            - Name: CONFIGDB_SSLMODE
+              Value: require
+            - Name: LAKERUNNER_KAFKA_BROKERS
+              Value: !Ref 'MSKBrokers'
+            - Name: LAKERUNNER_KAFKA_TLS_ENABLED
+              Value: 'true'
+            - Name: LAKERUNNER_KAFKA_SASL_ENABLED
+              Value: 'true'
+            - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
+              Value: SCRAM-SHA-512
+            - Name: OTEL_EXPORTER_OTLP_ENDPOINT
+              Value: !If
+                - EnableOtlp
+                - !Ref 'OtelEndpoint'
+                - !Ref 'AWS::NoValue'
+            - Name: ENABLE_OTLP_TELEMETRY
+              Value: !If
+                - EnableOtlp
+                - 'true'
+                - !Ref 'AWS::NoValue'
+          HealthCheck:
+            Command:
+              - /app/bin/lakerunner
+              - sysinfo
+            Interval: 30
+            Retries: 3
+            StartPeriod: 60
+            Timeout: 5
+          Image: !Ref 'GoServicesImage'
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref 'LogGroupLakerunnerBoxerCompactMetrics'
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: lakerunner-boxer-compact-metrics
+          MountPoints:
+            - ContainerPath: /scratch
+              ReadOnly: false
+              SourceVolume: scratch
+          Name: AppContainer
+          PortMappings: []
+          Secrets:
+            - Name: STORAGE_PROFILES_ENV
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
+            - Name: API_KEYS_ENV
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
+            - Name: LRDB_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-DbSecretArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: CONFIGDB_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-DbSecretArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LAKERUNNER_KAFKA_SASL_USERNAME
+              ValueFrom: !Sub
+                - '${SecretArn}:username::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-MSKCredentialsArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LAKERUNNER_KAFKA_SASL_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-MSKCredentialsArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+          User: '0'
+      Cpu: '256'
+      ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
+      Family: lakerunner-boxer-compact-metrics-task
+      Memory: '512'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      RuntimePlatform:
+        CpuArchitecture: ARM64
+        OperatingSystemFamily: LINUX
+      TaskRoleArn: !GetAtt 'TaskRole.Arn'
+      Volumes:
+        - Name: scratch
+    Type: AWS::ECS::TaskDefinition
+  TaskDefLakerunnerBoxerRollupMetrics:
+    Properties:
+      ContainerDefinitions:
+        - Command:
+            - /app/bin/lakerunner
+            - boxer-rollup-metrics
+          Environment:
+            - Name: OTEL_SERVICE_NAME
+              Value: lakerunner-boxer-rollup-metrics
+            - Name: TMPDIR
+              Value: /scratch
+            - Name: HOME
+              Value: /scratch
+            - Name: STORAGE_PROFILE_FILE
+              Value: env:STORAGE_PROFILES_ENV
+            - Name: API_KEYS_FILE
+              Value: env:API_KEYS_ENV
+            - Name: SQS_QUEUE_URL
+              Value: !Sub 'https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/lakerunner-ingest-queue'
+            - Name: SQS_REGION
+              Value: !Ref 'AWS::Region'
+            - Name: LRDB_HOST
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbEndpoint
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LRDB_PORT
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbPort
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LRDB_DBNAME
+              Value: lakerunner
+            - Name: LRDB_USER
+              Value: lakerunner
+            - Name: LRDB_SSLMODE
+              Value: require
+            - Name: CONFIGDB_HOST
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbEndpoint
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: CONFIGDB_PORT
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbPort
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: CONFIGDB_DBNAME
+              Value: lakerunner
+            - Name: CONFIGDB_USER
+              Value: lakerunner
+            - Name: CONFIGDB_SSLMODE
+              Value: require
+            - Name: LAKERUNNER_KAFKA_BROKERS
+              Value: !Ref 'MSKBrokers'
+            - Name: LAKERUNNER_KAFKA_TLS_ENABLED
+              Value: 'true'
+            - Name: LAKERUNNER_KAFKA_SASL_ENABLED
+              Value: 'true'
+            - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
+              Value: SCRAM-SHA-512
+            - Name: OTEL_EXPORTER_OTLP_ENDPOINT
+              Value: !If
+                - EnableOtlp
+                - !Ref 'OtelEndpoint'
+                - !Ref 'AWS::NoValue'
+            - Name: ENABLE_OTLP_TELEMETRY
+              Value: !If
+                - EnableOtlp
+                - 'true'
+                - !Ref 'AWS::NoValue'
+          HealthCheck:
+            Command:
+              - /app/bin/lakerunner
+              - sysinfo
+            Interval: 30
+            Retries: 3
+            StartPeriod: 60
+            Timeout: 5
+          Image: !Ref 'GoServicesImage'
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref 'LogGroupLakerunnerBoxerRollupMetrics'
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: lakerunner-boxer-rollup-metrics
+          MountPoints:
+            - ContainerPath: /scratch
+              ReadOnly: false
+              SourceVolume: scratch
+          Name: AppContainer
+          PortMappings: []
+          Secrets:
+            - Name: STORAGE_PROFILES_ENV
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
+            - Name: API_KEYS_ENV
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
+            - Name: LRDB_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-DbSecretArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: CONFIGDB_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-DbSecretArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LAKERUNNER_KAFKA_SASL_USERNAME
+              ValueFrom: !Sub
+                - '${SecretArn}:username::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-MSKCredentialsArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LAKERUNNER_KAFKA_SASL_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-MSKCredentialsArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+          User: '0'
+      Cpu: '256'
+      ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
+      Family: lakerunner-boxer-rollup-metrics-task
+      Memory: '512'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      RuntimePlatform:
+        CpuArchitecture: ARM64
+        OperatingSystemFamily: LINUX
+      TaskRoleArn: !GetAtt 'TaskRole.Arn'
+      Volumes:
+        - Name: scratch
+    Type: AWS::ECS::TaskDefinition
   TaskDefLakerunnerCompactLogs:
     Properties:
       ContainerDefinitions:
@@ -1397,7 +1919,10 @@ Resources:
             - Name: QUERY_WORKER_SERVICE_NAME
               Value: lakerunner-query-worker
             - Name: QUERY_WORKER_CLUSTER_NAME
-              Value: ${ECS_CLUSTER_NAME}
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-ClusterName
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
           HealthCheck:
             Command:
               - /app/bin/lakerunner

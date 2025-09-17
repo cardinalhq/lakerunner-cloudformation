@@ -223,7 +223,7 @@ TaskDef = t.add_resource(TaskDefinition(
         ContainerDefinition(
             Name="Migrator",
             Image=Ref(ContainerImage),
-            Command=["/app/bin/lakerunner", "migrate"],
+            Command=["/app/bin/lakerunner", "setup"],
             LogConfiguration=LogConfiguration(
                 LogDriver="awslogs",
                 Options={
@@ -250,6 +250,7 @@ TaskDef = t.add_resource(TaskDefinition(
                 Environment(Name="LAKERUNNER_KAFKA_TLS_ENABLED", Value="true"),
                 Environment(Name="LAKERUNNER_KAFKA_SASL_ENABLED", Value="true"),
                 Environment(Name="LAKERUNNER_KAFKA_SASL_MECHANISM", Value="SCRAM-SHA-512"),
+                Environment(Name="LAKERUNNER_KAFKA_TOPICS_DEFAULTS_REPLICATIONFACTOR", Value="2"),
             ],
             Secrets=[
                 EcsSecret(Name="LRDB_PASSWORD", ValueFrom=Sub("${S}:password::", S=DbSecretArnValue)),

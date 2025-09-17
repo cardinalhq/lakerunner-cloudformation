@@ -79,7 +79,7 @@ Resources:
       ContainerDefinitions:
         - Command:
             - /app/bin/lakerunner
-            - migrate
+            - setup
           Environment:
             - Name: LRDB_HOST
               Value: !ImportValue
@@ -115,6 +115,8 @@ Resources:
               Value: 'true'
             - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
               Value: SCRAM-SHA-512
+            - Name: LAKERUNNER_KAFKA_TOPICS_DEFAULTS_REPLICATIONFACTOR
+              Value: '2'
           Image: !Ref 'ContainerImage'
           LogConfiguration:
             LogDriver: awslogs

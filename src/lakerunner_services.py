@@ -628,6 +628,10 @@ def create_services_template():
         for key, value in service_env.items():
             base_env.append(Environment(Name=key, Value=value))
 
+        # Add QUERY_WORKER_CLUSTER_NAME for query-api service
+        if service_name == "lakerunner-query-api":
+            base_env.append(Environment(Name="QUERY_WORKER_CLUSTER_NAME", Value=ImportValue(ci_export("ClusterName"))))
+
         # Build secrets
         secrets = [
             EcsSecret(Name="STORAGE_PROFILES_ENV", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles")),
