@@ -8,7 +8,7 @@ images:
 # OTEL Collector services configuration
 otel_services:
   otel-gateway:
-    image: "public.ecr.aws/cardinalhq.io/cardinalhq-otel-collector:latest"
+    image: "public.ecr.aws/cardinalhq.io/cardinalhq-otel-collector:v1.3.8"
     command: ["/app/bin/cardinalhq-otel-collector", "--config=/etc/otel/config.yaml"]
     cpu: 1024
     memory_mib: 2048
