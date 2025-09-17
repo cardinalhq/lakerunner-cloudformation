@@ -188,13 +188,24 @@ def create_services_template():
     ))
 
     # Add ingress rules to task security group to allow ALB traffic
+    # Allow ALB to reach query-api on port 8080 (application port)
     t.add_resource(SecurityGroupIngress(
-        "TaskFromAlb7101",
+        "TaskFromAlb8080",
         GroupId=TaskSecurityGroupIdValue,
         IpProtocol="tcp",
-        FromPort=7101, ToPort=7101,
+        FromPort=8080, ToPort=8080,
         SourceSecurityGroupId=Ref(AlbSG),
-        Description="ALB to tasks 7101",
+        Description="ALB to query-api app port",
+    ))
+
+    # Allow ALB to reach query-api on port 8090 (health check port)
+    t.add_resource(SecurityGroupIngress(
+        "TaskFromAlb8090",
+        GroupId=TaskSecurityGroupIdValue,
+        IpProtocol="tcp",
+        FromPort=8090, ToPort=8090,
+        SourceSecurityGroupId=Ref(AlbSG),
+        Description="ALB health checks",
     ))
 
     # -----------------------
@@ -214,7 +225,7 @@ def create_services_template():
 
     Tg7101 = t.add_resource(TargetGroup(
         "Tg7101",
-        Port=7101, Protocol="HTTP",
+        Port=8080, Protocol="HTTP",  # Changed to container port 8080
         VpcId=VpcIdValue,
         TargetType="ip",
         HealthCheckPath="/healthz",
@@ -592,7 +603,7 @@ def create_services_template():
             Environment(Name="CONFIGDB_SSLMODE", Value="require"),
             # MSK Kafka Configuration
             Environment(Name="LAKERUNNER_KAFKA_BROKERS", Value=Ref(MSKBrokers)),
-            Environment(Name="LAKERUNNER_KAFKA_TLS", Value="true"),
+            Environment(Name="LAKERUNNER_KAFKA_TLS_ENABLED", Value="true"),
             Environment(Name="LAKERUNNER_KAFKA_SASL_ENABLED", Value="true"),
             Environment(Name="LAKERUNNER_KAFKA_SASL_MECHANISM", Value="SCRAM-SHA-512"),
         ]

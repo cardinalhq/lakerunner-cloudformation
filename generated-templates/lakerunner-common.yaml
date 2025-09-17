@@ -377,6 +377,15 @@ Resources:
       SourceSecurityGroupId: !Ref 'TaskSG'
       ToPort: 9094
     Type: AWS::EC2::SecurityGroupIngress
+  MSKFromTasksSGSASL:
+    Properties:
+      Description: Kafka SASL_SSL from ECS tasks
+      FromPort: 9096
+      GroupId: !Ref 'MSKSecurityGroup'
+      IpProtocol: tcp
+      SourceSecurityGroupId: !Ref 'TaskSG'
+      ToPort: 9096
+    Type: AWS::EC2::SecurityGroupIngress
   MSKScramAssociationFunction:
     Properties:
       Code:

@@ -20,10 +20,8 @@ storage_profiles:
 
 # Container Images configuration
 images:
-  migration: "public.ecr.aws/cardinalhq.io/lakerunner:v1.3.6-rc1"
-  go_services: "public.ecr.aws/cardinalhq.io/lakerunner:v1.3.6-rc1"
-  query_api: "public.ecr.aws/cardinalhq.io/lakerunner/query-api:v1.2.1"
-  query_worker: "public.ecr.aws/cardinalhq.io/lakerunner/query-worker:v1.2.1"
+  migration: "public.ecr.aws/cardinalhq.io/lakerunner:v0.0.0-pr223-94e30fc3"
+  go_services: "public.ecr.aws/cardinalhq.io/lakerunner:v0.0.0-pr223-94e30fc3"
 
 # MSK configuration
 msk:
@@ -118,7 +116,10 @@ services:
     health_check:
       type: "go"
       command: ["/app/bin/lakerunner", "sysinfo"]
-    environment: {}
+    environment:
+      EXECUTION_ENVIRONMENT: "ecs"
+      QUERY_WORKER_SERVICE_NAME: "lakerunner-query-worker"
+      QUERY_WORKER_CLUSTER_NAME: "${ECS_CLUSTER_NAME}"
 
   lakerunner-query-worker:
     command: ["/app/bin/lakerunner", "query-worker"]

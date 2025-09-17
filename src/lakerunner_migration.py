@@ -247,7 +247,7 @@ TaskDef = t.add_resource(TaskDefinition(
                 Environment(Name="STORAGE_PROFILE_FILE", Value="env:STORAGE_PROFILES_ENV"),
                 # MSK Kafka Configuration
                 Environment(Name="LAKERUNNER_KAFKA_BROKERS", Value=Ref(MSKBrokers)),
-                Environment(Name="LAKERUNNER_KAFKA_TLS", Value="true"),
+                Environment(Name="LAKERUNNER_KAFKA_TLS_ENABLED", Value="true"),
                 Environment(Name="LAKERUNNER_KAFKA_SASL_ENABLED", Value="true"),
                 Environment(Name="LAKERUNNER_KAFKA_SASL_MECHANISM", Value="SCRAM-SHA-512"),
             ],

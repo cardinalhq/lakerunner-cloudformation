@@ -107,7 +107,7 @@ Parameters:
     Description: 'REQUIRED: Name of the CommonInfra stack to import infrastructure values from.'
     Type: String
   GoServicesImage:
-    Default: public.ecr.aws/cardinalhq.io/lakerunner:v1.3.6-rc1
+    Default: public.ecr.aws/cardinalhq.io/lakerunner:v0.0.0-pr223-94e30fc3
     Description: Container image for all Go services (pubsub, ingest, compact, query-api, query-worker, etc.)
     Type: String
   MSKBrokers:
@@ -395,7 +395,7 @@ Resources:
         Fn::Sub:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
-      DesiredCount: '4'
+      DesiredCount: '2'
       EnableExecuteCommand: true
       LaunchType: FARGATE
       NetworkConfiguration:
@@ -420,7 +420,7 @@ Resources:
         Fn::Sub:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
-      DesiredCount: '1'
+      DesiredCount: '2'
       EnableExecuteCommand: true
       LaunchType: FARGATE
       NetworkConfiguration:
@@ -551,7 +551,7 @@ Resources:
         Fn::Sub:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
-      DesiredCount: '8'
+      DesiredCount: '2'
       EnableExecuteCommand: true
       LaunchType: FARGATE
       NetworkConfiguration:
@@ -576,7 +576,7 @@ Resources:
         Fn::Sub:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
-      DesiredCount: '1'
+      DesiredCount: '2'
       EnableExecuteCommand: true
       LaunchType: FARGATE
       NetworkConfiguration:
@@ -675,7 +675,7 @@ Resources:
               Value: require
             - Name: LAKERUNNER_KAFKA_BROKERS
               Value: !Ref 'MSKBrokers'
-            - Name: LAKERUNNER_KAFKA_TLS
+            - Name: LAKERUNNER_KAFKA_TLS_ENABLED
               Value: 'true'
             - Name: LAKERUNNER_KAFKA_SASL_ENABLED
               Value: 'true'
@@ -815,7 +815,7 @@ Resources:
               Value: require
             - Name: LAKERUNNER_KAFKA_BROKERS
               Value: !Ref 'MSKBrokers'
-            - Name: LAKERUNNER_KAFKA_TLS
+            - Name: LAKERUNNER_KAFKA_TLS_ENABLED
               Value: 'true'
             - Name: LAKERUNNER_KAFKA_SASL_ENABLED
               Value: 'true'
@@ -955,7 +955,7 @@ Resources:
               Value: require
             - Name: LAKERUNNER_KAFKA_BROKERS
               Value: !Ref 'MSKBrokers'
-            - Name: LAKERUNNER_KAFKA_TLS
+            - Name: LAKERUNNER_KAFKA_TLS_ENABLED
               Value: 'true'
             - Name: LAKERUNNER_KAFKA_SASL_ENABLED
               Value: 'true'
@@ -1095,7 +1095,7 @@ Resources:
               Value: require
             - Name: LAKERUNNER_KAFKA_BROKERS
               Value: !Ref 'MSKBrokers'
-            - Name: LAKERUNNER_KAFKA_TLS
+            - Name: LAKERUNNER_KAFKA_TLS_ENABLED
               Value: 'true'
             - Name: LAKERUNNER_KAFKA_SASL_ENABLED
               Value: 'true'
@@ -1236,7 +1236,7 @@ Resources:
               Value: require
             - Name: LAKERUNNER_KAFKA_BROKERS
               Value: !Ref 'MSKBrokers'
-            - Name: LAKERUNNER_KAFKA_TLS
+            - Name: LAKERUNNER_KAFKA_TLS_ENABLED
               Value: 'true'
             - Name: LAKERUNNER_KAFKA_SASL_ENABLED
               Value: 'true'
@@ -1376,7 +1376,7 @@ Resources:
               Value: require
             - Name: LAKERUNNER_KAFKA_BROKERS
               Value: !Ref 'MSKBrokers'
-            - Name: LAKERUNNER_KAFKA_TLS
+            - Name: LAKERUNNER_KAFKA_TLS_ENABLED
               Value: 'true'
             - Name: LAKERUNNER_KAFKA_SASL_ENABLED
               Value: 'true'
@@ -1392,6 +1392,12 @@ Resources:
                 - EnableOtlp
                 - 'true'
                 - !Ref 'AWS::NoValue'
+            - Name: EXECUTION_ENVIRONMENT
+              Value: ecs
+            - Name: QUERY_WORKER_SERVICE_NAME
+              Value: lakerunner-query-worker
+            - Name: QUERY_WORKER_CLUSTER_NAME
+              Value: ${ECS_CLUSTER_NAME}
           HealthCheck:
             Command:
               - /app/bin/lakerunner
@@ -1449,10 +1455,10 @@ Resources:
                       - ${CommonInfraStackName}-MSKCredentialsArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
           User: '0'
-      Cpu: '2048'
+      Cpu: '1024'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
       Family: lakerunner-query-api-task
-      Memory: '8192'
+      Memory: '2048'
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE
@@ -1518,7 +1524,7 @@ Resources:
               Value: require
             - Name: LAKERUNNER_KAFKA_BROKERS
               Value: !Ref 'MSKBrokers'
-            - Name: LAKERUNNER_KAFKA_TLS
+            - Name: LAKERUNNER_KAFKA_TLS_ENABLED
               Value: 'true'
             - Name: LAKERUNNER_KAFKA_SASL_ENABLED
               Value: 'true'
@@ -1555,7 +1561,7 @@ Resources:
               SourceVolume: scratch
           Name: AppContainer
           PortMappings:
-            - ContainerPort: 7101
+            - ContainerPort: 8081
               Protocol: tcp
           Secrets:
             - Name: STORAGE_PROFILES_ENV
@@ -1660,7 +1666,7 @@ Resources:
               Value: require
             - Name: LAKERUNNER_KAFKA_BROKERS
               Value: !Ref 'MSKBrokers'
-            - Name: LAKERUNNER_KAFKA_TLS
+            - Name: LAKERUNNER_KAFKA_TLS_ENABLED
               Value: 'true'
             - Name: LAKERUNNER_KAFKA_SASL_ENABLED
               Value: 'true'
@@ -1800,7 +1806,7 @@ Resources:
               Value: require
             - Name: LAKERUNNER_KAFKA_BROKERS
               Value: !Ref 'MSKBrokers'
-            - Name: LAKERUNNER_KAFKA_TLS
+            - Name: LAKERUNNER_KAFKA_TLS_ENABLED
               Value: 'true'
             - Name: LAKERUNNER_KAFKA_SASL_ENABLED
               Value: 'true'
@@ -1885,17 +1891,29 @@ Resources:
       Volumes:
         - Name: scratch
     Type: AWS::ECS::TaskDefinition
-  TaskFromAlb7101:
+  TaskFromAlb8080:
     Properties:
-      Description: ALB to tasks 7101
-      FromPort: 7101
+      Description: ALB to query-api app port
+      FromPort: 8080
       GroupId: !ImportValue
         Fn::Sub:
           - ${CommonInfraStackName}-TaskSGId
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
       IpProtocol: tcp
       SourceSecurityGroupId: !Ref 'AlbSecurityGroup'
-      ToPort: 7101
+      ToPort: 8080
+    Type: AWS::EC2::SecurityGroupIngress
+  TaskFromAlb8090:
+    Properties:
+      Description: ALB health checks
+      FromPort: 8090
+      GroupId: !ImportValue
+        Fn::Sub:
+          - ${CommonInfraStackName}-TaskSGId
+          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      IpProtocol: tcp
+      SourceSecurityGroupId: !Ref 'AlbSecurityGroup'
+      ToPort: 8090
     Type: AWS::EC2::SecurityGroupIngress
   TaskRole:
     Properties:
@@ -1973,7 +1991,7 @@ Resources:
       HealthyThresholdCount: 2
       Matcher:
         HttpCode: '200'
-      Port: 7101
+      Port: 8080
       Protocol: HTTP
       TargetGroupAttributes:
         - Key: stickiness.enabled

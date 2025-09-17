@@ -213,6 +213,17 @@ t.add_resource(SecurityGroupIngress(
     Description="Kafka TLS from ECS tasks",
 ))
 
+# Allow ECS tasks to connect to MSK on port 9096 (SASL_SSL)
+t.add_resource(SecurityGroupIngress(
+    "MSKFromTasksSGSASL",
+    GroupId=Ref(MskSecurityGroup),
+    IpProtocol="tcp",
+    FromPort=9096,
+    ToPort=9096,
+    SourceSecurityGroupId=Ref(TaskSG),
+    Description="Kafka SASL_SSL from ECS tasks",
+))
+
 # -----------------------
 # ECS cluster (always create)
 # -----------------------
