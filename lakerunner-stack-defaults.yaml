@@ -155,16 +155,6 @@ services:
       command: ["/app/bin/lakerunner", "sysinfo"]
     environment: {}
 
-  # lakerunner-boxer-compact-traces: (disabled for now)
-  #   command: ["/app/bin/lakerunner", "boxer-compact-traces"]
-  #   cpu: 256
-  #   memory_mib: 512
-  #   replicas: 1
-  #   health_check:
-  #     type: "go"
-  #     command: ["/app/bin/lakerunner", "sysinfo"]
-  #   environment: {}
-
   lakerunner-boxer-rollup-metrics:
     command: ["/app/bin/lakerunner", "boxer-rollup-metrics"]
     cpu: 256
