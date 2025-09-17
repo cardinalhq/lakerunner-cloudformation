@@ -80,7 +80,12 @@ def create_grafana_template():
         Description="Container image for Grafana init container (datasource provisioning and database setup)"
     ))
 
-
+    # Grafana Reset Token Configuration
+    GrafanaResetToken = t.add_parameter(Parameter(
+        "GrafanaResetToken", Type="String",
+        Default="change-to-reset-grafana",
+        Description="Reset token for Grafana data wipe. Changing this value will wipe all Grafana data on next deployment."
+    ))
 
     # ALB Configuration parameters
     AlbScheme = t.add_parameter(Parameter(
@@ -101,7 +106,7 @@ def create_grafana_template():
                 },
                 {
                     "Label": {"default": "Container Images"},
-                    "Parameters": ["GrafanaImage", "GrafanaInitImage"]
+                    "Parameters": ["GrafanaImage", "GrafanaInitImage", "GrafanaResetToken"]
                 }
             ],
             "ParameterLabels": {
@@ -110,6 +115,7 @@ def create_grafana_template():
                 "AlbScheme": {"default": "ALB Scheme"},
                 "GrafanaImage": {"default": "Grafana Image"},
                 "GrafanaInitImage": {"default": "Grafana Init Image"},
+                "GrafanaResetToken": {"default": "Grafana Reset Token"},
             }
         }
     })
@@ -474,7 +480,9 @@ def create_grafana_template():
             Environment(Name="PGHOST", Value=ImportValue(Sub("${CommonInfraStackName}-DbEndpoint", CommonInfraStackName=Ref(CommonInfraStackName)))),
             Environment(Name="PGPORT", Value=ImportValue(Sub("${CommonInfraStackName}-DbPort", CommonInfraStackName=Ref(CommonInfraStackName)))),
             Environment(Name="PGDATABASE", Value="postgres"),  # Connect to default postgres db first
-            Environment(Name="PGSSLMODE", Value="require")
+            Environment(Name="PGSSLMODE", Value="require"),
+            Environment(Name="RESET_TOKEN", Value=Ref(GrafanaResetToken)),
+            Environment(Name="GF_SECURITY_ADMIN_USER", Value="lakerunner")  # Needed for password reset
         ],
         Secrets=[
             EcsSecret(
@@ -493,6 +501,11 @@ def create_grafana_template():
                 Name="GRAFANA_DB_PASSWORD",
                 ValueFrom=Sub("${SecretArn}:password::",
                              SecretArn=Ref(grafana_db_secret))
+            ),
+            EcsSecret(
+                Name="GF_SECURITY_ADMIN_PASSWORD",
+                ValueFrom=Sub("${SecretArn}:password::",
+                             SecretArn=Ref(grafana_secret))
             )
         ],
         LogConfiguration=LogConfiguration(

@@ -17,6 +17,7 @@ Metadata:
         Parameters:
           - GrafanaImage
           - GrafanaInitImage
+          - GrafanaResetToken
     ParameterLabels:
       AlbScheme:
         default: ALB Scheme
@@ -26,6 +27,8 @@ Metadata:
         default: Grafana Image
       GrafanaInitImage:
         default: Grafana Init Image
+      GrafanaResetToken:
+        default: Grafana Reset Token
       ServicesStackName:
         default: Services Stack Name
 Outputs:
@@ -69,6 +72,10 @@ Parameters:
   GrafanaInitImage:
     Default: public.ecr.aws/cardinalhq.io/lakerunner/initcontainer-grafana:latest
     Description: Container image for Grafana init container (datasource provisioning and database setup)
+    Type: String
+  GrafanaResetToken:
+    Default: change-to-reset-grafana
+    Description: Reset token for Grafana data wipe. Changing this value will wipe all Grafana data on next deployment.
     Type: String
   ServicesStackName:
     Description: 'REQUIRED: Name of the Services stack to import Query API ALB DNS and port from.'
@@ -268,6 +275,10 @@ Resources:
               Value: postgres
             - Name: PGSSLMODE
               Value: require
+            - Name: RESET_TOKEN
+              Value: !Ref 'GrafanaResetToken'
+            - Name: GF_SECURITY_ADMIN_USER
+              Value: lakerunner
           Essential: false
           Image: !Ref 'GrafanaInitImage'
           LogConfiguration:
@@ -296,6 +307,10 @@ Resources:
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
                 - SecretArn: !Ref 'GrafanaDbSecret'
+            - Name: GF_SECURITY_ADMIN_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !Ref 'GrafanaSecret'
         - DependsOn:
             - Condition: SUCCESS
               ContainerName: GrafanaInit

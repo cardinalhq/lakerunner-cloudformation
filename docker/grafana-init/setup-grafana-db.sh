@@ -89,3 +89,13 @@ PGDATABASE=$GRAFANA_DB_NAME psql -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public G
 
 echo "Grafana database setup completed successfully!"
 echo "Database '$GRAFANA_DB_NAME' is ready for Grafana with user '$GRAFANA_DB_USER'"
+
+# Check if we need to reset the admin password
+if [ -f "/app/scripts/reset-grafana-admin.sh" ]; then
+    echo ""
+    echo "Checking for admin password reset..."
+    # Export variables needed by reset script
+    export GF_SECURITY_ADMIN_USER="${GF_SECURITY_ADMIN_USER:-admin}"
+    export GF_SECURITY_ADMIN_PASSWORD="${GF_SECURITY_ADMIN_PASSWORD}"
+    /app/scripts/reset-grafana-admin.sh
+fi
