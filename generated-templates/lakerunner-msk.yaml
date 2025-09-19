@@ -23,6 +23,11 @@ Outputs:
     Export:
       Name: !Sub '${AWS::StackName}-MSKCredentialsArn'
     Value: !Ref 'MSKCredentials'
+  MSKSecretsKeyArn:
+    Description: KMS key ARN for MSK secrets encryption
+    Export:
+      Name: !Sub '${AWS::StackName}-MSKSecretsKeyArn'
+    Value: !GetAtt 'MSKSecretsKey.Arn'
   MSKSecurityGroupId:
     Description: MSK security group ID for granting access from ECS/EKS
     Export:
@@ -109,21 +114,222 @@ Resources:
         GenerateStringKey: password
         PasswordLength: 32
         SecretStringTemplate: '{"username": "lakerunner"}'
+      KmsKeyId: !Ref 'MSKSecretsKey'
       Name: !Sub 'AmazonMSK_${AWS::StackName}'
       Tags:
         - Key: Name
           Value: !Sub '${AWS::StackName}-msk-credentials'
         - Key: ManagedBy
           Value: Lakerunner
+        - Key: Environment
+          Value: !Ref 'AWS::StackName'
         - Key: Component
           Value: MSK
     Type: AWS::SecretsManager::Secret
+  MSKScramAssociationFunction:
+    Properties:
+      Code:
+        ZipFile: |2
+
+          import json
+          import boto3
+          import urllib.request
+          import time
+
+          def send_response(event, context, status, data=None, reason=""):
+              response = {
+                  "Status": status,
+                  "Reason": f"{reason} See CloudWatch Logs: {context.log_stream_name}",
+                  "PhysicalResourceId": event.get("PhysicalResourceId") or "MSKScramAssociation",
+                  "StackId": event["StackId"],
+                  "RequestId": event["RequestId"],
+                  "LogicalResourceId": event["LogicalResourceId"],
+                  "Data": data or {}
+              }
+
+              body = json.dumps(response).encode()
+              req = urllib.request.Request(event["ResponseURL"], data=body, method="PUT")
+              req.add_header("content-type", "")
+              req.add_header("content-length", str(len(body)))
+
+              try:
+                  with urllib.request.urlopen(req) as r:
+                      r.read()
+              except Exception as e:
+                  print(f"Failed to send response: {e}")
+
+          def handler(event, context):
+              print(f"Event: {json.dumps(event)}")
+
+              try:
+                  props = event.get("ResourceProperties", {})
+                  cluster_arn = props["ClusterArn"]
+                  secret_arns = props["SecretArnList"]
+
+                  kafka = boto3.client("kafka")
+
+                  if event["RequestType"] == "Delete":
+                      # Try to disassociate secrets on delete
+                      try:
+                          kafka.batch_disassociate_scram_secret(
+                              ClusterArn=cluster_arn,
+                              SecretArnList=secret_arns
+                          )
+                          print("Successfully disassociated SCRAM secrets")
+                      except Exception as e:
+                          print(f"Error disassociating SCRAM secrets (ignoring): {e}")
+
+                      send_response(event, context, "SUCCESS", {"Message": "Delete completed"})
+                      return
+
+                  # Wait for MSK cluster to be ACTIVE
+                  max_wait = 20 * 60  # 20 minutes
+                  start_time = time.time()
+
+                  while time.time() - start_time < max_wait:
+                      try:
+                          response = kafka.describe_cluster(ClusterArn=cluster_arn)
+                          state = response["ClusterInfo"]["State"]
+                          print(f"MSK cluster state: {state}")
+
+                          if state == "ACTIVE":
+                              break
+                          elif state in ["FAILED", "DELETING"]:
+                              send_response(event, context, "FAILED",
+                                          reason=f"MSK cluster in failed state: {state}")
+                              return
+
+                          time.sleep(30)
+                      except Exception as e:
+                          print(f"Error checking cluster state: {e}")
+                          time.sleep(30)
+                  else:
+                      send_response(event, context, "FAILED",
+                                  reason="Timeout waiting for MSK cluster to become ACTIVE")
+                      return
+
+                  # Validate secret naming convention and content
+                  secrets = boto3.client("secretsmanager")
+                  for secret_arn in secret_arns:
+                      secret_name = secret_arn.split('/')[-1]
+                      if not secret_name.startswith('AmazonMSK_'):
+                          print(f"WARNING: Secret {secret_name} does not follow AmazonMSK_ naming convention")
+
+                      # Verify secret has username and password
+                      try:
+                          secret_value = secrets.get_secret_value(SecretId=secret_arn)
+                          secret_data = json.loads(secret_value['SecretString'])
+                          if 'username' not in secret_data or 'password' not in secret_data:
+                              print(f"WARNING: Secret {secret_name} missing required username/password fields")
+                          else:
+                              print(f"Secret {secret_name} validation passed")
+                      except Exception as e:
+                          print(f"WARNING: Could not validate secret {secret_name}: {e}")
+
+                  # Associate SCRAM secrets
+                  print(f"Attempting to associate SCRAM secrets with cluster: {cluster_arn}")
+                  print(f"Secret ARNs to associate: {secret_arns}")
+
+                  kafka.batch_associate_scram_secret(
+                      ClusterArn=cluster_arn,
+                      SecretArnList=secret_arns
+                  )
+
+                  print("Successfully associated SCRAM secrets")
+                  send_response(event, context, "SUCCESS", {"Message": "SCRAM secrets associated"})
+
+              except Exception as e:
+                  print(f"Error: {e}")
+                  send_response(event, context, "FAILED", reason=str(e))
+      FunctionName: !Sub '${AWS::StackName}-msk-scram-association'
+      Handler: index.handler
+      Role: !GetAtt 'MSKScramAssociationRole.Arn'
+      Runtime: python3.13
+      Timeout: 300
+    Type: AWS::Lambda::Function
+  MSKScramAssociationRole:
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+        Version: '2012-10-17'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyDocument:
+            Statement:
+              - Action:
+                  - kafka:DescribeCluster
+                  - kafka:BatchAssociateScramSecret
+                  - kafka:BatchDisassociateScramSecret
+                Effect: Allow
+                Resource: !GetAtt 'MSKCluster.Arn'
+              - Action:
+                  - secretsmanager:GetSecretValue
+                Effect: Allow
+                Resource: !Ref 'MSKCredentials'
+              - Action:
+                  - kms:Decrypt
+                  - kms:GenerateDataKey
+                Effect: Allow
+                Resource: !GetAtt 'MSKSecretsKey.Arn'
+            Version: '2012-10-17'
+          PolicyName: MSKScramAssociationPolicy
+    Type: AWS::IAM::Role
   MSKScramSecretAssociation:
     Properties:
       ClusterArn: !GetAtt 'MSKCluster.Arn'
       SecretArnList:
         - !Ref 'MSKCredentials'
-    Type: AWS::MSK::BatchScramSecret
+      ServiceToken: !GetAtt 'MSKScramAssociationFunction.Arn'
+    Type: AWS::CloudFormation::CustomResource
+  MSKSecretsKey:
+    Properties:
+      Description: KMS key for MSK SASL/SCRAM secrets
+      KeyPolicy:
+        Statement:
+          - Action: kms:*
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Resource: '*'
+            Sid: Enable IAM User Permissions
+          - Action:
+              - kms:Decrypt
+              - kms:GenerateDataKey
+            Effect: Allow
+            Principal:
+              Service: kafka.amazonaws.com
+            Resource: '*'
+            Sid: Allow MSK Service
+          - Action:
+              - kms:Decrypt
+              - kms:GenerateDataKey
+              - kms:ReEncrypt*
+            Effect: Allow
+            Principal:
+              Service: secretsmanager.amazonaws.com
+            Resource: '*'
+            Sid: Allow Secrets Manager
+        Version: '2012-10-17'
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-msk-secrets-key'
+        - Key: ManagedBy
+          Value: Lakerunner
+        - Key: Environment
+          Value: !Ref 'AWS::StackName'
+        - Key: Component
+          Value: MSK
+    Type: AWS::KMS::Key
+  MSKSecretsKeyAlias:
+    Properties:
+      AliasName: !Sub 'alias/${AWS::StackName}-msk-secrets'
+      TargetKeyId: !Ref 'MSKSecretsKey'
+    Type: AWS::KMS::Alias
   MSKSecurityGroup:
     Properties:
       GroupDescription: Security group for MSK cluster - grant access by referencing this SG ID
@@ -189,6 +395,11 @@ Resources:
               - secretsmanager:DescribeSecret
             Effect: Allow
             Resource: !Ref 'MSKCredentials'
+          - Action:
+              - kms:Decrypt
+              - kms:GenerateDataKey
+            Effect: Allow
+            Resource: !GetAtt 'MSKSecretsKey.Arn'
         Version: '2012-10-17'
       PolicyName: MSKAccess
       Roles:
