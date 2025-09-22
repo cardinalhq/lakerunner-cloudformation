@@ -20,10 +20,8 @@ storage_profiles:
 
 # Container Images configuration
 images:
-  migration: "public.ecr.aws/cardinalhq.io/lakerunner:v1.2.2"
-  go_services: "public.ecr.aws/cardinalhq.io/lakerunner:v1.2.2"
-  query_api: "public.ecr.aws/cardinalhq.io/lakerunner/query-api:v1.2.1"
-  query_worker: "public.ecr.aws/cardinalhq.io/lakerunner/query-worker:v1.2.1"
+  migration: "public.ecr.aws/cardinalhq.io/lakerunner:v1.4.0"
+  go_services: "public.ecr.aws/cardinalhq.io/lakerunner:v1.4.0"
 
 # Service configurations for core Lakerunner services
 services:
@@ -98,45 +96,33 @@ services:
     environment: {}
 
   lakerunner-query-api:
-    image: "public.ecr.aws/cardinalhq.io/lakerunner/query-api:v1.2.1"
-    cpu: 2048
-    memory_mib: 8192
+    command: ["/app/bin/lakerunner", "query-api"]
+    cpu: 1024
+    memory_mib: 2048
     replicas: 1
     ingress:
       port: 7101
+      container_port: 8080
       attach_alb: true
-      health_check_path: "/ready"
+      health_check_path: "/healthz"
+      health_check_port: 8090
+    health_check:
+      type: "go"
+      command: ["/app/bin/lakerunner", "sysinfo"]
     environment:
       EXECUTION_ENVIRONMENT: "ecs"
-      QUERY_STACK: "local"
-      METRIC_PREFIX: "lakerunner-query-api"
-      NUM_MIN_QUERY_WORKERS: "8"
-      NUM_MAX_QUERY_WORKERS: "8"
-      SPRING_PROFILES_ACTIVE: "aws"
-    health_check:
-      type: "scala"
-      command: ["curl", "-f", "http://localhost:7101/ready"]
-    bind_mounts:
-      - container_path: "/db"
-        source_volume: "scratch"
-        read_only: false
+      QUERY_WORKER_SERVICE_NAME: "lakerunner-query-worker"
+      # Note: QUERY_WORKER_CLUSTER_NAME is set dynamically in the template
 
   lakerunner-query-worker:
-    image: "public.ecr.aws/cardinalhq.io/lakerunner/query-worker:v1.2.1"
+    command: ["/app/bin/lakerunner", "query-worker"]
     cpu: 2048
     memory_mib: 8192
-    replicas: 8
+    replicas: 2
     ingress:
-      port: 7101
+      port: 8081
       description: "From Query API"
-    environment:
-      EXECUTION_ENVIRONMENT: "ecs"
-      METRIC_PREFIX: "lakerunner-query-worker"
-      SPRING_PROFILES_ACTIVE: "aws"
     health_check:
-      type: "scala"
-      command: ["curl", "-f", "http://localhost:7101/ready"]
-    bind_mounts:
-      - container_path: "/db"
-        source_volume: "scratch"
-        read_only: false
+      type: "go"
+      command: ["/app/bin/lakerunner", "sysinfo"]
+    environment: {}
