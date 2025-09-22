@@ -1180,10 +1180,6 @@ Resources:
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
                 - SecretArn: !Ref 'DbSecretArn'
-            - Name: TOKEN_HMAC256_KEY
-              ValueFrom: !Sub
-                - '${SecretArn}:token_hmac256_key::'
-                - SecretArn: !Ref 'TokenSecret'
           User: '0'
       Cpu: '2048'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
@@ -1296,10 +1292,6 @@ Resources:
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
                 - SecretArn: !Ref 'DbSecretArn'
-            - Name: TOKEN_HMAC256_KEY
-              ValueFrom: !Sub
-                - '${SecretArn}:token_hmac256_key::'
-                - SecretArn: !Ref 'TokenSecret'
           User: '0'
       Cpu: '2048'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
@@ -1599,14 +1591,4 @@ Resources:
       UnhealthyThresholdCount: 2
       VpcId: !Ref 'VpcId'
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
-  TokenSecret:
-    Properties:
-      Description: HMAC256 key for token signing/verification
-      GenerateSecretString:
-        ExcludeCharacters: ' "\@/'
-        GenerateStringKey: token_hmac256_key
-        PasswordLength: 64
-        SecretStringTemplate: '{}'
-      Name: !Sub '${AWS::StackName}-token-key'
-    Type: AWS::SecretsManager::Secret
 

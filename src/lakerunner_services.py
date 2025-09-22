@@ -563,19 +563,6 @@ def create_services_template():
     # -----------------------
     # Application Secrets
     # -----------------------
-    # TOKEN_HMAC256_KEY secret for query API and worker
-    token_secret = t.add_resource(Secret(
-        "TokenSecret",
-        Name=Sub("${AWS::StackName}-token-key"),
-        Description="HMAC256 key for token signing/verification",
-        GenerateSecretString=GenerateSecretString(
-            SecretStringTemplate='{}',
-            GenerateStringKey='token_hmac256_key',
-            ExcludeCharacters=' "\\@/',
-            PasswordLength=64
-        )
-    ))
-
     # API keys configuration parameter
     api_keys_default = yaml.dump(config.get('api_keys', {}), default_flow_style=False)
     t.add_resource(SSMParameter(
@@ -693,12 +680,10 @@ def create_services_template():
             )
         ])
 
-        # Add service-specific environment variables (excluding sensitive ones)
+        # Add service-specific environment variables
         service_env = service_config.get('environment', {})
-        sensitive_keys = {'TOKEN_HMAC256_KEY'}
         for key, value in service_env.items():
-            if key not in sensitive_keys:
-                base_env.append(Environment(Name=key, Value=value))
+            base_env.append(Environment(Name=key, Value=value))
 
         # Build secrets
         secrets = [
@@ -707,13 +692,6 @@ def create_services_template():
             EcsSecret(Name="LRDB_PASSWORD", ValueFrom=Sub("${SecretArn}:password::", SecretArn=DbSecretArnValue)),
             EcsSecret(Name="CONFIGDB_PASSWORD", ValueFrom=Sub("${SecretArn}:password::", SecretArn=DbSecretArnValue))
         ]
-
-        # Add service-specific secrets for sensitive environment variables
-        if service_name in ['lakerunner-query-api', 'lakerunner-query-worker']:
-            secrets.append(EcsSecret(
-                Name="TOKEN_HMAC256_KEY",
-                ValueFrom=Sub("${SecretArn}:token_hmac256_key::", SecretArn=Ref(token_secret))
-            ))
 
         # Build mount points
         mount_points = [MountPoint(
