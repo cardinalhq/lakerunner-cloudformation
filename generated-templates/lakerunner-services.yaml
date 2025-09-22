@@ -33,8 +33,6 @@ Metadata:
           default: Container Images
         Parameters:
           - GoServicesImage
-          - QueryApiImage
-          - QueryWorkerImage
       - Label:
           default: Configuration
         Parameters:
@@ -58,17 +56,13 @@ Metadata:
       EfsId:
         default: EFS File System ID
       GoServicesImage:
-        default: Go Services Image
+        default: Lakerunner Container Image
       OtelEndpoint:
         default: OTEL Collector Endpoint
       PrivateSubnets:
         default: Private Subnets
       PublicSubnets:
         default: Public Subnets
-      QueryApiImage:
-        default: Query API Image
-      QueryWorkerImage:
-        default: Query Worker Image
       StorageStackName:
         default: Storage Stack Name
       TaskSecurityGroupId:
@@ -166,8 +160,8 @@ Parameters:
     Description: 'OPTIONAL: EFS file system ID for services requiring EFS.'
     Type: String
   GoServicesImage:
-    Default: public.ecr.aws/cardinalhq.io/lakerunner:v1.2.2
-    Description: Container image for Go services (pubsub, ingest, compact, etc.)
+    Default: public.ecr.aws/cardinalhq.io/lakerunner:v1.4.0
+    Description: Container image for all Lakerunner services
     Type: String
   OtelEndpoint:
     Default: ''
@@ -180,14 +174,6 @@ Parameters:
     Default: ''
     Description: 'OPTIONAL: Public subnets for ALB (required if AlbScheme is internet-facing).'
     Type: CommaDelimitedList
-  QueryApiImage:
-    Default: public.ecr.aws/cardinalhq.io/lakerunner/query-api:v1.2.1
-    Description: Container image for query-api service
-    Type: String
-  QueryWorkerImage:
-    Default: public.ecr.aws/cardinalhq.io/lakerunner/query-worker:v1.2.1
-    Description: Container image for query-worker service
-    Type: String
   StorageStackName:
     Description: 'REQUIRED: Name of the storage stack for parameter references.'
     Type: String
@@ -519,7 +505,7 @@ Resources:
   ServiceLakerunnerQueryWorker:
     Properties:
       Cluster: !Ref 'ClusterArn'
-      DesiredCount: '8'
+      DesiredCount: '2'
       EnableExecuteCommand: true
       LaunchType: FARGATE
       NetworkConfiguration:
@@ -1072,7 +1058,9 @@ Resources:
   TaskDefLakerunnerQueryApi:
     Properties:
       ContainerDefinitions:
-        - Command: []
+        - Command:
+            - /app/bin/lakerunner
+            - query-api
           Environment:
             - Name: OTEL_SERVICE_NAME
               Value: lakerunner-query-api
@@ -1128,26 +1116,17 @@ Resources:
                 - !Ref 'AWS::NoValue'
             - Name: EXECUTION_ENVIRONMENT
               Value: ecs
-            - Name: QUERY_STACK
-              Value: local
-            - Name: METRIC_PREFIX
-              Value: lakerunner-query-api
-            - Name: NUM_MIN_QUERY_WORKERS
-              Value: '8'
-            - Name: NUM_MAX_QUERY_WORKERS
-              Value: '8'
-            - Name: SPRING_PROFILES_ACTIVE
-              Value: aws
+            - Name: QUERY_WORKER_SERVICE_NAME
+              Value: lakerunner-query-worker
           HealthCheck:
             Command:
-              - curl
-              - -f
-              - http://localhost:7101/ready
+              - /app/bin/lakerunner
+              - sysinfo
             Interval: 30
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: !Ref 'QueryApiImage'
+          Image: !Ref 'GoServicesImage'
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -1156,9 +1135,6 @@ Resources:
               awslogs-stream-prefix: lakerunner-query-api
           MountPoints:
             - ContainerPath: /scratch
-              ReadOnly: false
-              SourceVolume: scratch
-            - ContainerPath: /db
               ReadOnly: false
               SourceVolume: scratch
           Name: AppContainer
@@ -1181,10 +1157,10 @@ Resources:
                 - '${SecretArn}:password::'
                 - SecretArn: !Ref 'DbSecretArn'
           User: '0'
-      Cpu: '2048'
+      Cpu: '1024'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
       Family: lakerunner-query-api-task
-      Memory: '8192'
+      Memory: '2048'
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE
@@ -1198,7 +1174,9 @@ Resources:
   TaskDefLakerunnerQueryWorker:
     Properties:
       ContainerDefinitions:
-        - Command: []
+        - Command:
+            - /app/bin/lakerunner
+            - query-worker
           Environment:
             - Name: OTEL_SERVICE_NAME
               Value: lakerunner-query-worker
@@ -1244,22 +1222,15 @@ Resources:
                 - EnableOtlp
                 - 'true'
                 - !Ref 'AWS::NoValue'
-            - Name: EXECUTION_ENVIRONMENT
-              Value: ecs
-            - Name: METRIC_PREFIX
-              Value: lakerunner-query-worker
-            - Name: SPRING_PROFILES_ACTIVE
-              Value: aws
           HealthCheck:
             Command:
-              - curl
-              - -f
-              - http://localhost:7101/ready
+              - /app/bin/lakerunner
+              - sysinfo
             Interval: 30
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: !Ref 'QueryWorkerImage'
+          Image: !Ref 'GoServicesImage'
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -1270,12 +1241,9 @@ Resources:
             - ContainerPath: /scratch
               ReadOnly: false
               SourceVolume: scratch
-            - ContainerPath: /db
-              ReadOnly: false
-              SourceVolume: scratch
           Name: AppContainer
           PortMappings:
-            - ContainerPort: 7101
+            - ContainerPort: 8081
               Protocol: tcp
           Secrets:
             - Name: STORAGE_PROFILES_ENV

@@ -103,19 +103,7 @@ def create_services_template():
     GoServicesImage = t.add_parameter(Parameter(
         "GoServicesImage", Type="String",
         Default=images.get('go_services', 'public.ecr.aws/cardinalhq.io/lakerunner:latest'),
-        Description="Container image for Go services (pubsub, ingest, compact, etc.)",
-    ))
-
-    QueryApiImage = t.add_parameter(Parameter(
-        "QueryApiImage", Type="String",
-        Default=images.get('query_api', 'public.ecr.aws/cardinalhq.io/lakerunner/query-api:latest'),
-        Description="Container image for query-api service",
-    ))
-
-    QueryWorkerImage = t.add_parameter(Parameter(
-        "QueryWorkerImage", Type="String",
-        Default=images.get('query_worker', 'public.ecr.aws/cardinalhq.io/lakerunner/query-worker:latest'),
-        Description="Container image for query-worker service",
+        Description="Container image for all Lakerunner services",
     ))
 
     # OTLP Telemetry configuration
@@ -163,7 +151,7 @@ def create_services_template():
                 },
                 {
                     "Label": {"default": "Container Images"},
-                    "Parameters": ["GoServicesImage", "QueryApiImage", "QueryWorkerImage"]
+                    "Parameters": ["GoServicesImage"]
                 },
                 {
                     "Label": {"default": "Configuration"},
@@ -182,9 +170,7 @@ def create_services_template():
                 "BucketArn": {"default": "Bucket ARN"},
                 "EfsId": {"default": "EFS File System ID"},
                 "AlbScheme": {"default": "ALB Scheme"},
-                "GoServicesImage": {"default": "Go Services Image"},
-                "QueryApiImage": {"default": "Query API Image"},
-                "QueryWorkerImage": {"default": "Query Worker Image"},
+                "GoServicesImage": {"default": "Lakerunner Container Image"},
                 "OtelEndpoint": {"default": "OTEL Collector Endpoint"},
                 "ApiKeysOverride": {"default": "API Keys Override"},
                 "StorageStackName": {"default": "Storage Stack Name"}
@@ -739,14 +725,10 @@ def create_services_template():
                 Protocol="tcp"
             ))
 
-        # Select container image based on service type
-        if service_name == 'lakerunner-query-api':
-            container_image = Ref(QueryApiImage)
-        elif service_name == 'lakerunner-query-worker':
-            container_image = Ref(QueryWorkerImage)
-        else:
-            # All other services use Go services image (pubsub, ingest, compact, etc.)
-            container_image = Ref(GoServicesImage)
+        # All services now use the unified Go services image
+        # The QueryApiImage and QueryWorkerImage parameters are kept for backward compatibility
+        # but they default to the same go_services image
+        container_image = Ref(GoServicesImage)
 
         # Get base container command from service config
         container_command = service_config.get('command', [])
