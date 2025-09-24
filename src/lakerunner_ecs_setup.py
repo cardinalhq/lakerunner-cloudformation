@@ -58,7 +58,7 @@ class RunEcsTask(AWSObject):
     }
 
 t = Template()
-t.set_description("Lakerunner DB migration (single template): defines TaskDefinition and runs it via Custom Resource.")
+t.set_description("Lakerunner ECS setup: runs database and Kafka setup via Custom Resource.")
 
 # Load defaults for image configuration
 defaults = load_defaults()
@@ -75,7 +75,7 @@ CommonInfraStackName = t.add_parameter(Parameter(
 ContainerImage = t.add_parameter(Parameter(
     "ContainerImage", Type="String",
     Default=images.get('migration', 'public.ecr.aws/cardinalhq.io/lakerunner:latest'),
-    Description="Migration container image."
+    Description="Setup container image."
 ))
 Cpu = t.add_parameter(Parameter(
     "Cpu", Type="String", Default="512",
@@ -97,7 +97,7 @@ t.set_metadata({
             "CommonInfraStackName": {"default": "CommonInfra Stack Name"},
             "Cpu": {"default": "Fargate CPU"},
             "MemoryMiB": {"default": "Fargate Memory (MiB)"},
-            "ContainerImage": {"default": "Migration Image"},
+            "ContainerImage": {"default": "Setup Image"},
         }
     }
 })
@@ -120,16 +120,16 @@ MSKCredentialsArnValue = ImportValue(ci_export("MSKCredentialsArn"))
 # CloudWatch Logs
 # -----------------------
 LogGroupRes = t.add_resource(LogGroup(
-    "MigrationLogGroup",
-    LogGroupName=Sub("/lakerunner/migration/${AWS::StackName}"),
+    "SetupLogGroup",
+    LogGroupName=Sub("/lakerunner/setup/${AWS::StackName}"),
     RetentionInDays=14
 ))
 
 # -----------------------
-# Task Role (runtime permissions for the migration task)
+# Task Role (runtime permissions for the setup task)
 # -----------------------
 TaskRole = t.add_resource(Role(
-    "MigrationTaskRole",
+    "SetupTaskRole",
     AssumeRolePolicyDocument={
         "Version": "2012-10-17",
         "Statement": [{
@@ -140,8 +140,8 @@ TaskRole = t.add_resource(Role(
     },
     Policies=[
         Policy(
-            "MigrationTaskPolicy",
-            PolicyName="MigrationTaskPolicy",
+            "SetupTaskPolicy",
+            PolicyName="SetupTaskPolicy",
             PolicyDocument={
                 "Version": "2012-10-17",
                 "Statement": [
@@ -222,8 +222,8 @@ ExecutionRole = t.add_resource(Role(
 # Task Definition (Fargate)
 # -----------------------
 TaskDef = t.add_resource(TaskDefinition(
-    "MigrationTaskDef",
-    Family="lakerunner-migration",
+    "SetupTaskDef",
+    Family="lakerunner-setup",
     Cpu=Ref(Cpu),
     Memory=Ref(MemoryMiB),
     NetworkMode="awsvpc",
@@ -240,7 +240,7 @@ TaskDef = t.add_resource(TaskDefinition(
                 Options={
                     "awslogs-group": Ref(LogGroupRes),
                     "awslogs-region": Sub("${AWS::Region}"),
-                    "awslogs-stream-prefix": "migration"
+                    "awslogs-stream-prefix": "setup"
                 }
             ),
             Environment=[
@@ -256,19 +256,20 @@ TaskDef = t.add_resource(TaskDefinition(
                 Environment(Name="CONFIGDB_SSLMODE", Value="require"),
                 Environment(Name="API_KEYS_FILE", Value="env:API_KEYS_ENV"),
                 Environment(Name="STORAGE_PROFILE_FILE", Value="env:STORAGE_PROFILES_ENV"),
-                # Kafka configuration for setup command
-                Environment(Name="MSK_CLUSTER_ARN", Value=MSKClusterArnValue),
-                Environment(Name="KAFKA_CREDENTIALS_SECRET", Value=MSKCredentialsArnValue),
-                Environment(Name="KAFKA_AUTH_METHOD", Value="SASL_SCRAM"),
+                # Kafka configuration for setup command - using LAKERUNNER_KAFKA_* pattern
+                Environment(Name="LAKERUNNER_KAFKA_TLS_ENABLED", Value="true"),
+                Environment(Name="LAKERUNNER_KAFKA_SASL_ENABLED", Value="true"),
+                Environment(Name="LAKERUNNER_KAFKA_SASL_MECHANISM", Value="SCRAM-SHA-512"),
+                Environment(Name="LAKERUNNER_KAFKA_TOPICS_DEFAULTS_REPLICATIONFACTOR", Value="2"),
             ],
             Secrets=[
                 EcsSecret(Name="LRDB_PASSWORD", ValueFrom=Sub("${S}:password::", S=DbSecretArnValue)),
                 EcsSecret(Name="CONFIGDB_PASSWORD", ValueFrom=Sub("${S}:password::", S=DbSecretArnValue)),
                 EcsSecret(Name="API_KEYS_ENV", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys")),
                 EcsSecret(Name="STORAGE_PROFILES_ENV", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles")),
-                # Kafka credentials for SASL authentication
-                EcsSecret(Name="KAFKA_USERNAME", ValueFrom=Sub("${S}:username::", S=MSKCredentialsArnValue)),
-                EcsSecret(Name="KAFKA_PASSWORD", ValueFrom=Sub("${S}:password::", S=MSKCredentialsArnValue))
+                # Kafka credentials for SASL authentication - using LAKERUNNER_KAFKA_* pattern
+                EcsSecret(Name="LAKERUNNER_KAFKA_SASL_USERNAME", ValueFrom=Sub("${S}:username::", S=MSKCredentialsArnValue)),
+                EcsSecret(Name="LAKERUNNER_KAFKA_SASL_PASSWORD", ValueFrom=Sub("${S}:password::", S=MSKCredentialsArnValue))
             ]
         )
     ]
@@ -422,8 +423,8 @@ RunnerFn = t.add_resource(Function(
 # -----------------------
 # Custom Resource to trigger the run
 # -----------------------
-RunMigration = t.add_resource(RunEcsTask(
-    "RunMigration",
+RunSetup = t.add_resource(RunEcsTask(
+    "RunSetup",
     ServiceToken=GetAtt(RunnerFn, "Arn"),
     ClusterArn=ClusterArnValue,
     TaskDefinitionArn=GetAtt(TaskDef, "TaskDefinitionArn"),
@@ -451,9 +452,9 @@ t.add_output(Output(
     Export=Export(name=Sub("${AWS::StackName}-LogGroup"))
 ))
 t.add_output(Output(
-    "RunMigrationId",
-    Value=Ref(RunMigration),
-    Export=Export(name=Sub("${AWS::StackName}-RunMigrationId"))
+    "RunSetupId",
+    Value=Ref(RunSetup),
+    Export=Export(name=Sub("${AWS::StackName}-RunSetupId"))
 ))
 
 print(t.to_yaml())

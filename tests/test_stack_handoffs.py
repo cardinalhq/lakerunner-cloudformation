@@ -13,7 +13,7 @@ from lakerunner_vpc import t as vpc_template
 from lakerunner_ecs import t as ecs_template
 from lakerunner_rds import t as rds_template  
 from lakerunner_s3 import t as s3_template
-from lakerunner_services import create_services_template
+from lakerunner_ecs_services import create_services_template
 
 # Create services template instance
 services_template = create_services_template()

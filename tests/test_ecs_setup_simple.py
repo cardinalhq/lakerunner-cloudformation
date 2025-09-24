@@ -3,31 +3,31 @@ import json
 from unittest.mock import patch
 
 
-class TestMigrationTemplateSimple:
-    """Simplified test cases for the Migration CloudFormation template"""
+class TestEcsSetupTemplateSimple:
+    """Simplified test cases for the ECS Setup CloudFormation template"""
 
     @pytest.fixture
     def minimal_config(self):
         """Minimal configuration for testing"""
         return {
             "images": {
-                "migration": "public.ecr.aws/test/migration:latest"
+                "setup": "public.ecr.aws/test/setup:latest"
             }
         }
 
     def test_load_defaults_function(self):
         """Test that the load_defaults function exists and is importable"""
-        from lakerunner_migration import load_defaults
+        from lakerunner_ecs_setup import load_defaults
         assert callable(load_defaults)
 
     def test_template_object_exists(self):
         """Test that the template object exists and is valid"""
-        from lakerunner_migration import t as template
+        from lakerunner_ecs_setup import t as template
         assert template is not None
 
     def test_template_generates_valid_json(self):
         """Test that the template generates valid JSON"""
-        from lakerunner_migration import t as template
+        from lakerunner_ecs_setup import t as template
         
         template_json = template.to_json()
         # Should not raise an exception
@@ -36,7 +36,7 @@ class TestMigrationTemplateSimple:
 
     def test_template_has_basic_sections(self):
         """Test that template has basic CloudFormation sections"""
-        from lakerunner_migration import t as template
+        from lakerunner_ecs_setup import t as template
         
         template_dict = json.loads(template.to_json())
         
@@ -47,7 +47,7 @@ class TestMigrationTemplateSimple:
 
     def test_commoninfra_parameter_exists(self):
         """Test that CommonInfraStackName parameter exists for imports"""
-        from lakerunner_migration import t as template
+        from lakerunner_ecs_setup import t as template
         
         template_dict = json.loads(template.to_json())
         parameters = template_dict["Parameters"]
@@ -55,9 +55,9 @@ class TestMigrationTemplateSimple:
         # Should have parameter for referencing the common infra stack
         assert "CommonInfraStackName" in parameters
 
-    def test_has_migration_resources(self):
-        """Test that migration-related resources exist"""
-        from lakerunner_migration import t as template
+    def test_has_setup_resources(self):
+        """Test that setup-related resources exist"""
+        from lakerunner_ecs_setup import t as template
         
         template_dict = json.loads(template.to_json())
         resources = template_dict["Resources"]
@@ -67,7 +67,7 @@ class TestMigrationTemplateSimple:
 
     def test_template_description(self):
         """Test that template has a description"""
-        from lakerunner_migration import t as template
+        from lakerunner_ecs_setup import t as template
         
         template_dict = json.loads(template.to_json())
         
@@ -77,7 +77,7 @@ class TestMigrationTemplateSimple:
 
     def test_run_ecs_task_class_exists(self):
         """Test that the RunEcsTask custom resource class exists"""
-        from lakerunner_migration import RunEcsTask
+        from lakerunner_ecs_setup import RunEcsTask
         assert RunEcsTask is not None
         assert hasattr(RunEcsTask, 'resource_type')
         assert RunEcsTask.resource_type == "Custom::RunEcsTask"

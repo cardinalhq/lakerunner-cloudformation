@@ -35,8 +35,8 @@ test-common:	## Run tests for CommonInfra template only
 test-services:	## Run simplified tests for Services template
 	source $(VENV_DIR)/bin/activate && $(PYTEST) tests/test_services_simple.py -v
 
-test-migration:	## Run simplified tests for Migration template
-	source $(VENV_DIR)/bin/activate && $(PYTEST) tests/test_migration_simple.py -v
+test-ecs-setup:	## Run simplified tests for ECS Setup template
+	source $(VENV_DIR)/bin/activate && $(PYTEST) tests/test_ecs_setup_simple.py -v
 
 test-grafana-setup:	## Run simplified tests for Grafana Setup template
 	source $(VENV_DIR)/bin/activate && $(PYTEST) tests/test_grafana_setup_simple.py -v

@@ -47,7 +47,7 @@ def create_services_template():
     """Create CloudFormation template for all services"""
 
     t = Template()
-    t.set_description("Lakerunner Services: ECS services, task definitions, IAM roles, and ALB integration")
+    t.set_description("Lakerunner ECS Services: ECS services, task definitions, IAM roles, and ALB integration")
 
     # Load service configurations and image defaults
     config = load_service_config()
@@ -97,6 +97,14 @@ def create_services_template():
     EfsId = t.add_parameter(Parameter(
         "EfsId", Type="String", Default="",
         Description="OPTIONAL: EFS file system ID for services requiring EFS.",
+    ))
+    MSKClusterArn = t.add_parameter(Parameter(
+        "MSKClusterArn", Type="String", Default="",
+        Description="OPTIONAL: MSK cluster ARN for Kafka operations.",
+    ))
+    MSKCredentialsArn = t.add_parameter(Parameter(
+        "MSKCredentialsArn", Type="String", Default="",
+        Description="OPTIONAL: MSK credentials secret ARN.",
     ))
 
     # Container image overrides for air-gapped deployments
@@ -202,6 +210,8 @@ def create_services_template():
     PrivateSubnetsValue = Ref(PrivateSubnets)
     BucketArnValue = Ref(BucketArn)
     PublicSubnetsValue = Ref(PublicSubnets)
+    MSKClusterArnValue = Ref(MSKClusterArn)
+    MSKCredentialsArnValue = Ref(MSKCredentialsArn)
 
     # Conditions
     t.add_condition("EnableOtlp", Not(Equals(Ref(OtelEndpoint), "")))
@@ -639,6 +649,11 @@ def create_services_template():
             Environment(Name="CONFIGDB_DBNAME", Value="lakerunner"),
             Environment(Name="CONFIGDB_USER", Value="lakerunner"),
             Environment(Name="CONFIGDB_SSLMODE", Value="require"),
+            # Kafka configuration
+            Environment(Name="LAKERUNNER_KAFKA_TLS_ENABLED", Value="true"),
+            Environment(Name="LAKERUNNER_KAFKA_SASL_ENABLED", Value="true"),
+            Environment(Name="LAKERUNNER_KAFKA_SASL_MECHANISM", Value="SCRAM-SHA-512"),
+            Environment(Name="LAKERUNNER_KAFKA_TOPICS_DEFAULTS_REPLICATIONFACTOR", Value="2"),
         ]
 
         # Add service-specific discovery environment variables
@@ -676,7 +691,9 @@ def create_services_template():
             EcsSecret(Name="STORAGE_PROFILES_ENV", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${StorageStackName}/storage_profiles", StorageStackName=Ref(StorageStackName))),
             EcsSecret(Name="API_KEYS_ENV", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${AWS::StackName}/api_keys")),
             EcsSecret(Name="LRDB_PASSWORD", ValueFrom=Sub("${SecretArn}:password::", SecretArn=DbSecretArnValue)),
-            EcsSecret(Name="CONFIGDB_PASSWORD", ValueFrom=Sub("${SecretArn}:password::", SecretArn=DbSecretArnValue))
+            EcsSecret(Name="CONFIGDB_PASSWORD", ValueFrom=Sub("${SecretArn}:password::", SecretArn=DbSecretArnValue)),
+            EcsSecret(Name="LAKERUNNER_KAFKA_SASL_USERNAME", ValueFrom=Sub("${SecretArn}:username::", SecretArn=MSKCredentialsArnValue)),
+            EcsSecret(Name="LAKERUNNER_KAFKA_SASL_PASSWORD", ValueFrom=Sub("${SecretArn}:password::", SecretArn=MSKCredentialsArnValue))
         ]
 
         # Build mount points

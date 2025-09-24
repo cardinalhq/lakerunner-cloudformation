@@ -340,57 +340,7 @@ Resources:
           Value: Lakerunner
       TemplateURL: !Sub '${TemplateBaseUrl}/lakerunner-ecs.yaml'
     Type: AWS::CloudFormation::Stack
-  MSKStack:
-    Condition: CreateMSKCondition
-    Properties:
-      Parameters:
-        ExistingTaskRoleArn: !Ref 'ExistingTaskRoleArn'
-        MSKBrokerNodes: !Ref 'MSKBrokerNodes'
-        MSKInstanceType: !Ref 'MSKInstanceType'
-        PrivateSubnets: !Sub '${PrivateSubnet1Id},${PrivateSubnet2Id}'
-        VpcId: !Ref 'VPCId'
-      Tags:
-        - Key: Component
-          Value: MSK
-        - Key: Environment
-          Value: !Ref 'AWS::StackName'
-        - Key: ManagedBy
-          Value: Lakerunner
-      TemplateURL: !Sub '${TemplateBaseUrl}/lakerunner-msk.yaml'
-    Type: AWS::CloudFormation::Stack
-  MigrationStack:
-    Condition: CreateRDSCondition
-    Properties:
-      Parameters:
-        Command: setup
-        CommonInfraStackName: !Ref 'AWS::StackName'
-      Tags:
-        - Key: Component
-          Value: Migration
-        - Key: Environment
-          Value: !Ref 'AWS::StackName'
-        - Key: ManagedBy
-          Value: Lakerunner
-      TemplateURL: !Sub '${TemplateBaseUrl}/lakerunner-migration.yaml'
-    Type: AWS::CloudFormation::Stack
-  RDSStack:
-    Condition: CreateRDSCondition
-    Properties:
-      Parameters:
-        DbInstanceClass: !Ref 'DbInstanceClass'
-        ExistingTaskRoleArn: !Ref 'ExistingTaskRoleArn'
-        PrivateSubnets: !Sub '${PrivateSubnet1Id},${PrivateSubnet2Id}'
-        VpcId: !Ref 'VPCId'
-      Tags:
-        - Key: Component
-          Value: Database
-        - Key: Environment
-          Value: !Ref 'AWS::StackName'
-        - Key: ManagedBy
-          Value: Lakerunner
-      TemplateURL: !Sub '${TemplateBaseUrl}/lakerunner-rds.yaml'
-    Type: AWS::CloudFormation::Stack
-  ServicesStack:
+  EcsServicesStack:
     Condition: CreateECSServicesCondition
     Properties:
       Parameters:
@@ -416,6 +366,14 @@ Resources:
           - !GetAtt 'RDSStack.Outputs.DbSecretArn'
           - !Ref 'ExistingDatabaseSecretArn'
         EfsId: !Ref 'ExistingEfsId'
+        MSKClusterArn: !If
+          - CreateMSKCondition
+          - !GetAtt 'MSKStack.Outputs.MSKClusterArn'
+          - !Ref 'ExistingMSKClusterArn'
+        MSKCredentialsArn: !If
+          - CreateMSKCondition
+          - !GetAtt 'MSKStack.Outputs.MSKCredentialsArn'
+          - ''
         PrivateSubnets: !Sub '${PrivateSubnet1Id},${PrivateSubnet2Id}'
         PublicSubnets: !If
           - HasPublicSubnetsCondition
@@ -437,7 +395,56 @@ Resources:
           Value: !Ref 'AWS::StackName'
         - Key: ManagedBy
           Value: Lakerunner
-      TemplateURL: !Sub '${TemplateBaseUrl}/lakerunner-services.yaml'
+      TemplateURL: !Sub '${TemplateBaseUrl}/lakerunner-ecs-services.yaml'
+    Type: AWS::CloudFormation::Stack
+  EcsSetupStack:
+    Condition: CreateRDSCondition
+    Properties:
+      Parameters:
+        CommonInfraStackName: !Ref 'AWS::StackName'
+      Tags:
+        - Key: Component
+          Value: EcsSetup
+        - Key: Environment
+          Value: !Ref 'AWS::StackName'
+        - Key: ManagedBy
+          Value: Lakerunner
+      TemplateURL: !Sub '${TemplateBaseUrl}/lakerunner-ecs-setup.yaml'
+    Type: AWS::CloudFormation::Stack
+  MSKStack:
+    Condition: CreateMSKCondition
+    Properties:
+      Parameters:
+        ExistingTaskRoleArn: !Ref 'ExistingTaskRoleArn'
+        MSKBrokerNodes: !Ref 'MSKBrokerNodes'
+        MSKInstanceType: !Ref 'MSKInstanceType'
+        PrivateSubnets: !Sub '${PrivateSubnet1Id},${PrivateSubnet2Id}'
+        VpcId: !Ref 'VPCId'
+      Tags:
+        - Key: Component
+          Value: MSK
+        - Key: Environment
+          Value: !Ref 'AWS::StackName'
+        - Key: ManagedBy
+          Value: Lakerunner
+      TemplateURL: !Sub '${TemplateBaseUrl}/lakerunner-msk.yaml'
+    Type: AWS::CloudFormation::Stack
+  RDSStack:
+    Condition: CreateRDSCondition
+    Properties:
+      Parameters:
+        DbInstanceClass: !Ref 'DbInstanceClass'
+        ExistingTaskRoleArn: !Ref 'ExistingTaskRoleArn'
+        PrivateSubnets: !Sub '${PrivateSubnet1Id},${PrivateSubnet2Id}'
+        VpcId: !Ref 'VPCId'
+      Tags:
+        - Key: Component
+          Value: Database
+        - Key: Environment
+          Value: !Ref 'AWS::StackName'
+        - Key: ManagedBy
+          Value: Lakerunner
+      TemplateURL: !Sub '${TemplateBaseUrl}/lakerunner-rds.yaml'
     Type: AWS::CloudFormation::Stack
   StorageStack:
     Condition: CreateS3StorageCondition

@@ -1,4 +1,4 @@
-Description: 'Lakerunner DB migration (single template): defines TaskDefinition and runs it via Custom Resource.'
+Description: 'Lakerunner ECS setup: runs database and Kafka setup via Custom Resource.'
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
@@ -7,9 +7,8 @@ Metadata:
         Parameters:
           - CommonInfraStackName
       - Label:
-          default: Task Configuration
+          default: Task Sizing
         Parameters:
-          - Command
           - Cpu
           - MemoryMiB
       - Label:
@@ -17,12 +16,10 @@ Metadata:
         Parameters:
           - ContainerImage
     ParameterLabels:
-      Command:
-        default: Migration Command
       CommonInfraStackName:
         default: CommonInfra Stack Name
       ContainerImage:
-        default: Migration Image
+        default: Setup Image
       Cpu:
         default: Fargate CPU
       MemoryMiB:
@@ -31,11 +28,11 @@ Outputs:
   LogGroupName:
     Export:
       Name: !Sub '${AWS::StackName}-LogGroup'
-    Value: !Ref 'MigrationLogGroup'
-  RunMigrationId:
+    Value: !Ref 'SetupLogGroup'
+  RunSetupId:
     Export:
-      Name: !Sub '${AWS::StackName}-RunMigrationId'
-    Value: !Ref 'RunMigration'
+      Name: !Sub '${AWS::StackName}-RunSetupId'
+    Value: !Ref 'RunSetup'
   RunnerFunctionArn:
     Export:
       Name: !Sub '${AWS::StackName}-RunnerFnArn'
@@ -43,22 +40,15 @@ Outputs:
   TaskDefinitionArn:
     Export:
       Name: !Sub '${AWS::StackName}-TaskDefinitionArn'
-    Value: !GetAtt 'MigrationTaskDef.TaskDefinitionArn'
+    Value: !GetAtt 'SetupTaskDef.TaskDefinitionArn'
 Parameters:
-  Command:
-    AllowedValues:
-      - migrate
-      - setup
-    Default: migrate
-    Description: 'Command to run: ''migrate'' for database migration only, ''setup'' for full setup including Kafka topics.'
-    Type: String
   CommonInfraStackName:
     Default: ''
     Description: 'REQUIRED: Name of the CommonInfra stack to import values from.'
     Type: String
   ContainerImage:
     Default: public.ecr.aws/cardinalhq.io/lakerunner:v1.4.2-rc3
-    Description: Migration container image.
+    Description: Setup container image.
     Type: String
   Cpu:
     Default: '512'
@@ -69,115 +59,6 @@ Parameters:
     Description: Fargate Memory MiB (e.g., 512/1024/2048).
     Type: String
 Resources:
-  MigrationLogGroup:
-    Properties:
-      LogGroupName: !Sub '/lakerunner/migration/${AWS::StackName}'
-      RetentionInDays: 14
-    Type: AWS::Logs::LogGroup
-  MigrationTaskDef:
-    Properties:
-      ContainerDefinitions:
-        - Command:
-            - /app/bin/lakerunner
-            - !Ref 'Command'
-          Environment:
-            - Name: LRDB_HOST
-              Value: !ImportValue
-                Fn::Sub: ${CommonInfraStackName}-DbEndpoint
-            - Name: LRDB_PORT
-              Value: '5432'
-            - Name: LRDB_DBNAME
-              Value: lakerunner
-            - Name: LRDB_USER
-              Value: lakerunner
-            - Name: LRDB_SSLMODE
-              Value: require
-            - Name: CONFIGDB_HOST
-              Value: !ImportValue
-                Fn::Sub: ${CommonInfraStackName}-DbEndpoint
-            - Name: CONFIGDB_PORT
-              Value: '5432'
-            - Name: CONFIGDB_DBNAME
-              Value: lakerunner
-            - Name: CONFIGDB_USER
-              Value: lakerunner
-            - Name: CONFIGDB_SSLMODE
-              Value: require
-            - Name: API_KEYS_FILE
-              Value: env:API_KEYS_ENV
-            - Name: STORAGE_PROFILE_FILE
-              Value: env:STORAGE_PROFILES_ENV
-            - Name: MSK_CLUSTER_ARN
-              Value: !ImportValue
-                Fn::Sub: ${CommonInfraStackName}-MSKClusterArn
-            - Name: KAFKA_CREDENTIALS_SECRET
-              Value: !ImportValue
-                Fn::Sub: ${CommonInfraStackName}-MSKCredentialsArn
-            - Name: KAFKA_AUTH_METHOD
-              Value: SASL_SCRAM
-          Image: !Ref 'ContainerImage'
-          LogConfiguration:
-            LogDriver: awslogs
-            Options:
-              awslogs-group: !Ref 'MigrationLogGroup'
-              awslogs-region: !Sub '${AWS::Region}'
-              awslogs-stream-prefix: migration
-          Name: Migrator
-          Secrets:
-            - Name: LRDB_PASSWORD
-              ValueFrom: !Sub
-                - '${S}:password::'
-                - S: !ImportValue
-                    Fn::Sub: ${CommonInfraStackName}-DbSecretArn
-            - Name: CONFIGDB_PASSWORD
-              ValueFrom: !Sub
-                - '${S}:password::'
-                - S: !ImportValue
-                    Fn::Sub: ${CommonInfraStackName}-DbSecretArn
-            - Name: API_KEYS_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
-            - Name: STORAGE_PROFILES_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
-            - Name: KAFKA_USERNAME
-              ValueFrom: !Sub
-                - '${S}:username::'
-                - S: !ImportValue
-                    Fn::Sub: ${CommonInfraStackName}-MSKCredentialsArn
-            - Name: KAFKA_PASSWORD
-              ValueFrom: !Sub
-                - '${S}:password::'
-                - S: !ImportValue
-                    Fn::Sub: ${CommonInfraStackName}-MSKCredentialsArn
-      Cpu: !Ref 'Cpu'
-      ExecutionRoleArn: !GetAtt 'TaskExecutionRole.Arn'
-      Family: lakerunner-migration
-      Memory: !Ref 'MemoryMiB'
-      NetworkMode: awsvpc
-      RequiresCompatibilities:
-        - FARGATE
-      TaskRoleArn: !GetAtt 'MigrationTaskRole.Arn'
-    Type: AWS::ECS::TaskDefinition
-  MigrationTaskRole:
-    Properties:
-      AssumeRolePolicyDocument:
-        Statement:
-          - Action: sts:AssumeRole
-            Effect: Allow
-            Principal:
-              Service: ecs-tasks.amazonaws.com
-        Version: '2012-10-17'
-      Policies:
-        - PolicyDocument:
-            Statement:
-              - Action:
-                  - secretsmanager:GetSecretValue
-                Effect: Allow
-                Resource:
-                  - !ImportValue
-                    Fn::Sub: ${CommonInfraStackName}-DbSecretArn
-            Version: '2012-10-17'
-          PolicyName: MigrationTaskPolicy
-    Type: AWS::IAM::Role
   RunEcsTaskFunction:
     Properties:
       Code:
@@ -290,7 +171,7 @@ Resources:
       Runtime: python3.13
       Timeout: 900
     Type: AWS::Lambda::Function
-  RunMigration:
+  RunSetup:
     Properties:
       AssignPublicIp: DISABLED
       ClusterArn: !ImportValue
@@ -303,7 +184,7 @@ Resources:
         - ','
         - !ImportValue
           Fn::Sub: ${CommonInfraStackName}-PrivateSubnets
-      TaskDefinitionArn: !GetAtt 'MigrationTaskDef.TaskDefinitionArn'
+      TaskDefinitionArn: !GetAtt 'SetupTaskDef.TaskDefinitionArn'
     Type: Custom::RunEcsTask
   RunnerLambdaRole:
     Properties:
@@ -332,10 +213,119 @@ Resources:
                   - iam:PassRole
                 Effect: Allow
                 Resource:
-                  - !GetAtt 'MigrationTaskRole.Arn'
+                  - !GetAtt 'SetupTaskRole.Arn'
                   - !GetAtt 'TaskExecutionRole.Arn'
             Version: '2012-10-17'
           PolicyName: RunnerInlinePolicy
+    Type: AWS::IAM::Role
+  SetupLogGroup:
+    Properties:
+      LogGroupName: !Sub '/lakerunner/setup/${AWS::StackName}'
+      RetentionInDays: 14
+    Type: AWS::Logs::LogGroup
+  SetupTaskDef:
+    Properties:
+      ContainerDefinitions:
+        - Command:
+            - /app/bin/lakerunner
+            - setup
+          Environment:
+            - Name: LRDB_HOST
+              Value: !ImportValue
+                Fn::Sub: ${CommonInfraStackName}-DbEndpoint
+            - Name: LRDB_PORT
+              Value: '5432'
+            - Name: LRDB_DBNAME
+              Value: lakerunner
+            - Name: LRDB_USER
+              Value: lakerunner
+            - Name: LRDB_SSLMODE
+              Value: require
+            - Name: CONFIGDB_HOST
+              Value: !ImportValue
+                Fn::Sub: ${CommonInfraStackName}-DbEndpoint
+            - Name: CONFIGDB_PORT
+              Value: '5432'
+            - Name: CONFIGDB_DBNAME
+              Value: lakerunner
+            - Name: CONFIGDB_USER
+              Value: lakerunner
+            - Name: CONFIGDB_SSLMODE
+              Value: require
+            - Name: API_KEYS_FILE
+              Value: env:API_KEYS_ENV
+            - Name: STORAGE_PROFILE_FILE
+              Value: env:STORAGE_PROFILES_ENV
+            - Name: LAKERUNNER_KAFKA_TLS_ENABLED
+              Value: 'true'
+            - Name: LAKERUNNER_KAFKA_SASL_ENABLED
+              Value: 'true'
+            - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
+              Value: SCRAM-SHA-512
+            - Name: LAKERUNNER_KAFKA_TOPICS_DEFAULTS_REPLICATIONFACTOR
+              Value: '2'
+          Image: !Ref 'ContainerImage'
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref 'SetupLogGroup'
+              awslogs-region: !Sub '${AWS::Region}'
+              awslogs-stream-prefix: setup
+          Name: Migrator
+          Secrets:
+            - Name: LRDB_PASSWORD
+              ValueFrom: !Sub
+                - '${S}:password::'
+                - S: !ImportValue
+                    Fn::Sub: ${CommonInfraStackName}-DbSecretArn
+            - Name: CONFIGDB_PASSWORD
+              ValueFrom: !Sub
+                - '${S}:password::'
+                - S: !ImportValue
+                    Fn::Sub: ${CommonInfraStackName}-DbSecretArn
+            - Name: API_KEYS_ENV
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
+            - Name: STORAGE_PROFILES_ENV
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
+            - Name: LAKERUNNER_KAFKA_SASL_USERNAME
+              ValueFrom: !Sub
+                - '${S}:username::'
+                - S: !ImportValue
+                    Fn::Sub: ${CommonInfraStackName}-MSKCredentialsArn
+            - Name: LAKERUNNER_KAFKA_SASL_PASSWORD
+              ValueFrom: !Sub
+                - '${S}:password::'
+                - S: !ImportValue
+                    Fn::Sub: ${CommonInfraStackName}-MSKCredentialsArn
+      Cpu: !Ref 'Cpu'
+      ExecutionRoleArn: !GetAtt 'TaskExecutionRole.Arn'
+      Family: lakerunner-setup
+      Memory: !Ref 'MemoryMiB'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      TaskRoleArn: !GetAtt 'SetupTaskRole.Arn'
+    Type: AWS::ECS::TaskDefinition
+  SetupTaskRole:
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+        Version: '2012-10-17'
+      Policies:
+        - PolicyDocument:
+            Statement:
+              - Action:
+                  - secretsmanager:GetSecretValue
+                Effect: Allow
+                Resource:
+                  - !ImportValue
+                    Fn::Sub: ${CommonInfraStackName}-DbSecretArn
+            Version: '2012-10-17'
+          PolicyName: SetupTaskPolicy
     Type: AWS::IAM::Role
   TaskExecutionRole:
     Properties:

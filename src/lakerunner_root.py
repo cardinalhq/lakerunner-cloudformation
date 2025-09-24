@@ -191,7 +191,7 @@ existing_task_role_arn = t.add_parameter(
     )
 )
 
-existing_msk_arn = t.add_parameter(
+existing_msk_cluster_arn = t.add_parameter(
     Parameter(
         "ExistingMSKClusterArn",
         Type="String",
@@ -461,21 +461,19 @@ msk_stack = t.add_resource(
     )
 )
 
-# Migration Stack (conditional) - Runs database setup with Kafka topics
+# ECS Setup Stack (conditional) - Runs database and Kafka setup
 # Must run after RDS and MSK are created but before Services are deployed
-migration_stack = t.add_resource(
+ecs_setup_stack = t.add_resource(
     Stack(
-        "MigrationStack",
+        "EcsSetupStack",
         Condition="CreateRDSCondition",  # Only run migration if we're creating RDS
-        TemplateURL=Sub("${TemplateBaseUrl}/lakerunner-migration.yaml"),
+        TemplateURL=Sub("${TemplateBaseUrl}/lakerunner-ecs-setup.yaml"),
         Parameters={
             # Pass the CommonInfra stack name for the migration to import values
-            "CommonInfraStackName": Ref("AWS::StackName"),
-            # Override the command to run setup instead of migrate
-            "Command": "setup"
+            "CommonInfraStackName": Ref("AWS::StackName")
         },
         Tags=Tags(
-            Component="Migration",
+            Component="EcsSetup",
             ManagedBy="Lakerunner",
             Environment=Ref("AWS::StackName")
         )
@@ -483,13 +481,13 @@ migration_stack = t.add_resource(
     )
 )
 
-# Services Stack (conditional) - Part 3a: ECS deployment
-# Note: Services must wait for database migration and other dependencies to be ready
-services_stack = t.add_resource(
+# ECS Services Stack (conditional) - Part 3a: ECS deployment
+# Note: Services must wait for database setup and other dependencies to be ready
+ecs_services_stack = t.add_resource(
     Stack(
-        "ServicesStack",
+        "EcsServicesStack",
         Condition="CreateECSServicesCondition",
-        TemplateURL=Sub("${TemplateBaseUrl}/lakerunner-services.yaml"),
+        TemplateURL=Sub("${TemplateBaseUrl}/lakerunner-ecs-services.yaml"),
         Parameters={
             # Infrastructure parameters - from ECS stack or existing
             "ClusterArn": If("CreateECSInfraCondition",
@@ -520,6 +518,14 @@ services_stack = t.add_resource(
                           GetAtt(storage_stack, "Outputs.BucketArn"),
                           Ref(existing_bucket_arn)),
             "StorageStackName": If("CreateS3StorageCondition", Ref(storage_stack), ""),
+
+            # MSK parameters - from MSK stack or existing
+            "MSKClusterArn": If("CreateMSKCondition",
+                              GetAtt(msk_stack, "Outputs.MSKClusterArn"),
+                              Ref(existing_msk_cluster_arn)),
+            "MSKCredentialsArn": If("CreateMSKCondition",
+                                  GetAtt(msk_stack, "Outputs.MSKCredentialsArn"),
+                                  ""),
 
             # Optional parameters
             "EfsId": Ref(existing_efs_id),
@@ -670,7 +676,7 @@ t.add_output(
         Value=If(
             "CreateMSKCondition",
             GetAtt(msk_stack, "Outputs.MSKClusterArn"),
-            Ref(existing_msk_arn)
+            Ref(existing_msk_cluster_arn)
         ),
         Export=Export(Sub("${AWS::StackName}-MSKClusterArn"))
     )

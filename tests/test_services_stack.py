@@ -8,7 +8,7 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-from lakerunner_services import create_services_template
+from lakerunner_ecs_services import create_services_template
 
 # Create template instance
 services_template = create_services_template()

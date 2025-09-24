@@ -8,14 +8,14 @@ The core Lakerunner deployment consists of CloudFormation stacks that can be dep
 
 **Option 1: Use Existing VPC**
 1. **Common Infrastructure** (`lakerunner-common.yaml`) - RDS database, EFS, S3 bucket, SQS queue, and ALB
-2. **Migration** (`lakerunner-migration.yaml`) - Database migration task that runs once during initial setup  
-3. **Services** (`lakerunner-services.yaml`) - ECS Fargate services for all Lakerunner microservices
+2. **ECS Setup** (`lakerunner-ecs-setup.yaml`) - Database and Kafka setup task that runs once during initial setup
+3. **ECS Services** (`lakerunner-ecs-services.yaml`) - ECS Fargate services for all Lakerunner microservices
 
 **Option 2: Create New VPC (Recommended for POCs)**
 1. **VPC Infrastructure** (`lakerunner-vpc.yaml`) - Cost-optimized VPC with essential VPC endpoints
 2. **Common Infrastructure** (`lakerunner-common.yaml`) - RDS database, EFS, S3 bucket, SQS queue, and ALB
-3. **Migration** (`lakerunner-migration.yaml`) - Database migration task that runs once during initial setup
-4. **Services** (`lakerunner-services.yaml`) - ECS Fargate services for all Lakerunner microservices
+3. **ECS Setup** (`lakerunner-ecs-setup.yaml`) - Database and Kafka setup task that runs once during initial setup
+4. **ECS Services** (`lakerunner-ecs-services.yaml`) - ECS Fargate services for all Lakerunner microservices
 
 ## VPC Template (For POCs without existing VPC)
 
@@ -106,29 +106,29 @@ aws cloudformation create-stack \\
   --capabilities CAPABILITY_IAM
 ```
 
-### Step 2: Deploy Migration Task
+### Step 2: Deploy ECS Setup Task
 
-Deploy `generated-templates/lakerunner-migration.yaml` to run database migrations. Required parameters:
+Deploy `generated-templates/lakerunner-ecs-setup.yaml` to run database and Kafka setup. Required parameters:
 
 - **CommonInfraStackName** – Name of the CommonInfra stack (e.g., "lakerunner-common")
 
 Optional parameters:
 
-- **MigrationImage** – Container image for migration task (default: public.ecr.aws/cardinalhq.io/lakerunner:latest)
+- **ContainerImage** – Container image for setup task (default: public.ecr.aws/cardinalhq.io/lakerunner:latest)
 
 **Example AWS CLI deployment:**
 
 ```bash
 aws cloudformation create-stack \\
-  --stack-name lakerunner-migration \\
-  --template-body file://generated-templates/lakerunner-migration.yaml \\
+  --stack-name lakerunner-ecs-setup \\
+  --template-body file://generated-templates/lakerunner-ecs-setup.yaml \\
   --parameters ParameterKey=CommonInfraStackName,ParameterValue=lakerunner-common \\
   --capabilities CAPABILITY_IAM
 ```
 
-### Step 3: Deploy Services
+### Step 3: Deploy ECS Services
 
-Deploy `generated-templates/lakerunner-services.yaml` for all Lakerunner microservices. Required parameters:
+Deploy `generated-templates/lakerunner-ecs-services.yaml` for all Lakerunner microservices. Required parameters:
 
 - **CommonInfraStackName** – Name of the CommonInfra stack (e.g., "lakerunner-common")
 
@@ -145,8 +145,8 @@ Optional parameters:
 
 ```bash
 aws cloudformation create-stack \\
-  --stack-name lakerunner-services \\
-  --template-body file://generated-templates/lakerunner-services.yaml \\
+  --stack-name lakerunner-ecs-services \\
+  --template-body file://generated-templates/lakerunner-ecs-services.yaml \\
   --parameters ParameterKey=CommonInfraStackName,ParameterValue=lakerunner-common \\
   --capabilities CAPABILITY_IAM
 ```
