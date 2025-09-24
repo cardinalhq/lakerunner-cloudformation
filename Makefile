@@ -24,7 +24,7 @@ build-root:	## Generate only the Lakerunner root template
 	source $(VENV_DIR)/bin/activate && python src/lakerunner_root.py > generated-templates/lakerunner-root.yaml && cfn-lint --ignore-checks W1020 generated-templates/lakerunner-root.yaml
 
 test:		## Run unit tests (working tests only)
-	source $(VENV_DIR)/bin/activate && $(PYTEST) tests/test_*_stack.py tests/test_stack_handoffs.py tests/test_root_template.py tests/test_*_simple.py tests/test_demo_otel_collector.py -v
+	source $(VENV_DIR)/bin/activate && $(PYTEST) tests/test_*_stack.py tests/test_stack_handoffs.py tests/test_root_template.py tests/test_*_simple.py tests/test_ecs_collector.py -v
 
 test-all:	## Run all tests including complex ones (may have failures)
 	source $(VENV_DIR)/bin/activate && $(PYTEST) tests/ -v
@@ -41,11 +41,11 @@ test-ecs-setup:	## Run simplified tests for ECS Setup template
 test-grafana-setup:	## Run simplified tests for Grafana Setup template
 	source $(VENV_DIR)/bin/activate && $(PYTEST) tests/test_grafana_setup_simple.py -v
 
-test-grafana-service:	## Run simplified tests for Grafana Service template
-	source $(VENV_DIR)/bin/activate && $(PYTEST) tests/test_grafana_service_simple.py -v
+test-ecs-grafana:	## Run simplified tests for ECS Grafana template
+	source $(VENV_DIR)/bin/activate && $(PYTEST) tests/test_ecs_grafana_simple.py -v
 
-test-otel-collector:	## Run simplified tests for Demo OTEL Collector template
-	source $(VENV_DIR)/bin/activate && $(PYTEST) tests/test_demo_otel_collector.py -v
+test-ecs-collector:	## Run tests for ECS Collector template
+	source $(VENV_DIR)/bin/activate && $(PYTEST) tests/test_ecs_collector.py -v
 
 test-params:	## Run parameter and condition validation tests
 	source $(VENV_DIR)/bin/activate && $(PYTEST) tests/test_parameter_validation.py tests/test_condition_validation.py -v
