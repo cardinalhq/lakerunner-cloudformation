@@ -69,7 +69,7 @@ Parameters:
     Description: Whether to create an internal or external ALB for the OTEL collector.
     Type: String
   OtelCollectorImage:
-    Default: public.ecr.aws/cardinalhq.io/cardinalhq-otel-collector:latest
+    Default: public.ecr.aws/cardinalhq.io/cardinalhq-otel-collector:v1.3.8
     Description: Container image for OTEL collector service
     Type: String
   OtelConfigYaml:

@@ -3,7 +3,7 @@
 
 # Container Images configuration
 images:
-  otel_collector: "public.ecr.aws/cardinalhq.io/cardinalhq-otel-collector:latest"
+  otel_collector: "public.ecr.aws/cardinalhq.io/cardinalhq-otel-collector:v1.3.8"
 
 # OTEL Collector services configuration
 otel_services:
