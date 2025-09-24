@@ -56,16 +56,52 @@ def create_grafana_template():
     # -----------------------
     # Parameters
     # -----------------------
-    CommonInfraStackName = t.add_parameter(Parameter(
-        "CommonInfraStackName", Type="String",
-        Description="REQUIRED: Name of the CommonInfra stack to import infrastructure values from."
+    # Infrastructure parameters (passed from root stack)
+    ClusterArn = t.add_parameter(Parameter(
+        "ClusterArn", Type="String",
+        Description="ECS cluster ARN for running the Grafana service."
     ))
 
-    ServicesStackName = t.add_parameter(Parameter(
-        "ServicesStackName", Type="String",
-        Description="REQUIRED: Name of the Services stack to import Query API ALB DNS and port from."
+    VpcId = t.add_parameter(Parameter(
+        "VpcId", Type="String",
+        Description="VPC ID for the Grafana resources."
     ))
 
+    PrivateSubnets = t.add_parameter(Parameter(
+        "PrivateSubnets", Type="String",
+        Description="Comma-delimited list of private subnet IDs."
+    ))
+
+    PublicSubnets = t.add_parameter(Parameter(
+        "PublicSubnets", Type="String",
+        Default="",
+        Description="Comma-delimited list of public subnet IDs (required for internet-facing ALB)."
+    ))
+
+    TaskSecurityGroupId = t.add_parameter(Parameter(
+        "TaskSecurityGroupId", Type="String",
+        Description="Security group ID for ECS tasks."
+    ))
+
+    DbEndpoint = t.add_parameter(Parameter(
+        "DbEndpoint", Type="String",
+        Description="RDS database endpoint."
+    ))
+
+    DbPort = t.add_parameter(Parameter(
+        "DbPort", Type="String",
+        Description="RDS database port."
+    ))
+
+    DbSecretArn = t.add_parameter(Parameter(
+        "DbSecretArn", Type="String",
+        Description="ARN of the database master user secret."
+    ))
+
+    QueryApiAlbDns = t.add_parameter(Parameter(
+        "QueryApiAlbDns", Type="String",
+        Description="DNS name of the Query API ALB from Services stack."
+    ))
 
     # Container image overrides for air-gapped deployments
     GrafanaImage = t.add_parameter(Parameter(
@@ -97,7 +133,15 @@ def create_grafana_template():
             "ParameterGroups": [
                 {
                     "Label": {"default": "Infrastructure"},
-                    "Parameters": ["CommonInfraStackName", "ServicesStackName", "AlbScheme"]
+                    "Parameters": ["ClusterArn", "VpcId", "PrivateSubnets", "PublicSubnets", "TaskSecurityGroupId", "AlbScheme"]
+                },
+                {
+                    "Label": {"default": "Database"},
+                    "Parameters": ["DbEndpoint", "DbPort", "DbSecretArn"]
+                },
+                {
+                    "Label": {"default": "Integration"},
+                    "Parameters": ["QueryApiAlbDns"]
                 },
                 {
                     "Label": {"default": "Container Images"},
@@ -105,8 +149,15 @@ def create_grafana_template():
                 }
             ],
             "ParameterLabels": {
-                "CommonInfraStackName": {"default": "Common Infra Stack Name"},
-                "ServicesStackName": {"default": "Services Stack Name"},
+                "ClusterArn": {"default": "ECS Cluster ARN"},
+                "VpcId": {"default": "VPC ID"},
+                "PrivateSubnets": {"default": "Private Subnets"},
+                "PublicSubnets": {"default": "Public Subnets"},
+                "TaskSecurityGroupId": {"default": "Task Security Group ID"},
+                "DbEndpoint": {"default": "Database Endpoint"},
+                "DbPort": {"default": "Database Port"},
+                "DbSecretArn": {"default": "Database Secret ARN"},
+                "QueryApiAlbDns": {"default": "Query API ALB DNS"},
                 "AlbScheme": {"default": "ALB Scheme"},
                 "GrafanaImage": {"default": "Grafana Image"},
                 "GrafanaInitImage": {"default": "Grafana Init Image"},
@@ -114,26 +165,16 @@ def create_grafana_template():
         }
     })
 
-    # Helper function for CommonInfra imports
-    def ci_export(suffix):
-        return Sub("${CommonInfraStackName}-%s" % suffix, CommonInfraStackName=Ref(CommonInfraStackName))
-
-    # Helper function for Services imports
-    def svc_export(suffix):
-        return Sub("${ServicesStackName}-%s" % suffix, ServicesStackName=Ref(ServicesStackName))
-
-    # Import values from other stacks
-    ClusterArnValue = ImportValue(ci_export("ClusterArn"))
-    TaskSecurityGroupIdValue = ImportValue(ci_export("TaskSGId"))
-    VpcIdValue = ImportValue(ci_export("VpcId"))
-    PrivateSubnetsValue = Split(",", ImportValue(ci_export("PrivateSubnets")))
-
-    # Import PublicSubnets - CommonInfra always exports this, but may be empty string if not provided
-    PublicSubnetsImport = ImportValue(ci_export("PublicSubnets"))
-    PublicSubnetsValue = Split(",", PublicSubnetsImport)
-
-    # Import Query API ALB DNS from Services stack
-    QueryApiAlbDns = ImportValue(svc_export("AlbDNS"))
+    # Resolved values (use parameters directly)
+    ClusterArnValue = Ref(ClusterArn)
+    TaskSecurityGroupIdValue = Ref(TaskSecurityGroupId)
+    VpcIdValue = Ref(VpcId)
+    PrivateSubnetsValue = Split(",", Ref(PrivateSubnets))
+    PublicSubnetsValue = Split(",", Ref(PublicSubnets))
+    QueryApiAlbDnsValue = Ref(QueryApiAlbDns)
+    DbEndpointValue = Ref(DbEndpoint)
+    DbPortValue = Ref(DbPort)
+    DbSecretArnValue = Ref(DbSecretArn)
 
     # Conditions
     t.add_condition("IsInternetFacing", Equals(Ref(AlbScheme), "internet-facing"))
@@ -242,7 +283,7 @@ def create_grafana_template():
         "GrafanaDatasourceConfig",
         Name=Sub("${AWS::StackName}-grafana-datasource-config"),
         Type="String",
-        Value=Sub(yaml.dump(grafana_datasource_config), QUERY_API_ALB_DNS=QueryApiAlbDns),
+        Value=Sub(yaml.dump(grafana_datasource_config), QUERY_API_ALB_DNS=QueryApiAlbDnsValue),
         Description="Grafana datasource configuration for Cardinal plugin"
     ))
 
@@ -296,9 +337,7 @@ def create_grafana_template():
                             ],
                             "Resource": [
                                 Sub("arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*"),
-                                Sub("${DbSecretArn}*",
-                                    DbSecretArn=ImportValue(Sub("${CommonInfraStackName}-DbSecretArn",
-                                                               CommonInfraStackName=Ref(CommonInfraStackName))))
+                                Sub("${DbSecretArn}*", DbSecretArn=DbSecretArnValue)
                             ]
                         }
                     ]
@@ -410,8 +449,8 @@ def create_grafana_template():
 
     # Add database connection environment variables
     base_env.extend([
-        Environment(Name="GF_DATABASE_HOST", Value=ImportValue(Sub("${CommonInfraStackName}-DbEndpoint", CommonInfraStackName=Ref(CommonInfraStackName)))),
-        Environment(Name="GF_DATABASE_PORT", Value=ImportValue(Sub("${CommonInfraStackName}-DbPort", CommonInfraStackName=Ref(CommonInfraStackName)))),
+        Environment(Name="GF_DATABASE_HOST", Value=DbEndpointValue),
+        Environment(Name="GF_DATABASE_PORT", Value=DbPortValue),
         Environment(Name="GF_DATABASE_NAME", Value="grafana"),
         Environment(Name="GF_DATABASE_USER", Value="grafana"),
     ])
@@ -471,23 +510,19 @@ def create_grafana_template():
         Environment=[
             Environment(Name="GRAFANA_DB_NAME", Value="grafana"),
             Environment(Name="GRAFANA_DB_USER", Value="grafana"),
-            Environment(Name="PGHOST", Value=ImportValue(Sub("${CommonInfraStackName}-DbEndpoint", CommonInfraStackName=Ref(CommonInfraStackName)))),
-            Environment(Name="PGPORT", Value=ImportValue(Sub("${CommonInfraStackName}-DbPort", CommonInfraStackName=Ref(CommonInfraStackName)))),
+            Environment(Name="PGHOST", Value=DbEndpointValue),
+            Environment(Name="PGPORT", Value=DbPortValue),
             Environment(Name="PGDATABASE", Value="postgres"),  # Connect to default postgres db first
             Environment(Name="PGSSLMODE", Value="require")
         ],
         Secrets=[
             EcsSecret(
                 Name="PGUSER",
-                ValueFrom=Sub("${DbSecretArn}:username::",
-                             DbSecretArn=ImportValue(Sub("${CommonInfraStackName}-DbSecretArn",
-                                                        CommonInfraStackName=Ref(CommonInfraStackName))))
+                ValueFrom=Sub("${DbSecretArn}:username::", DbSecretArn=DbSecretArnValue)
             ),
             EcsSecret(
                 Name="PGPASSWORD",
-                ValueFrom=Sub("${DbSecretArn}:password::",
-                             DbSecretArn=ImportValue(Sub("${CommonInfraStackName}-DbSecretArn",
-                                                        CommonInfraStackName=Ref(CommonInfraStackName))))
+                ValueFrom=Sub("${DbSecretArn}:password::", DbSecretArn=DbSecretArnValue)
             ),
             EcsSecret(
                 Name="GRAFANA_DB_PASSWORD",

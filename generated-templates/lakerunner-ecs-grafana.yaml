@@ -9,9 +9,22 @@ Metadata:
       - Label:
           default: Infrastructure
         Parameters:
-          - CommonInfraStackName
-          - ServicesStackName
+          - ClusterArn
+          - VpcId
+          - PrivateSubnets
+          - PublicSubnets
+          - TaskSecurityGroupId
           - AlbScheme
+      - Label:
+          default: Database
+        Parameters:
+          - DbEndpoint
+          - DbPort
+          - DbSecretArn
+      - Label:
+          default: Integration
+        Parameters:
+          - QueryApiAlbDns
       - Label:
           default: Container Images
         Parameters:
@@ -20,14 +33,28 @@ Metadata:
     ParameterLabels:
       AlbScheme:
         default: ALB Scheme
-      CommonInfraStackName:
-        default: Common Infra Stack Name
+      ClusterArn:
+        default: ECS Cluster ARN
+      DbEndpoint:
+        default: Database Endpoint
+      DbPort:
+        default: Database Port
+      DbSecretArn:
+        default: Database Secret ARN
       GrafanaImage:
         default: Grafana Image
       GrafanaInitImage:
         default: Grafana Init Image
-      ServicesStackName:
-        default: Services Stack Name
+      PrivateSubnets:
+        default: Private Subnets
+      PublicSubnets:
+        default: Public Subnets
+      QueryApiAlbDns:
+        default: Query API ALB DNS
+      TaskSecurityGroupId:
+        default: Task Security Group ID
+      VpcId:
+        default: VPC ID
 Outputs:
   GrafanaAdminSecretArn:
     Description: 'ARN of the Grafana admin password secret. Use AWS CLI to retrieve: aws secretsmanager get-secret-value --secret-id <ARN>'
@@ -59,8 +86,17 @@ Parameters:
     Default: internal
     Description: 'Load balancer scheme: ''internet-facing'' for external access or ''internal'' for internal access only.'
     Type: String
-  CommonInfraStackName:
-    Description: 'REQUIRED: Name of the CommonInfra stack to import infrastructure values from.'
+  ClusterArn:
+    Description: ECS cluster ARN for running the Grafana service.
+    Type: String
+  DbEndpoint:
+    Description: RDS database endpoint.
+    Type: String
+  DbPort:
+    Description: RDS database port.
+    Type: String
+  DbSecretArn:
+    Description: ARN of the database master user secret.
     Type: String
   GrafanaImage:
     Default: grafana/grafana:latest
@@ -70,8 +106,21 @@ Parameters:
     Default: public.ecr.aws/cardinalhq.io/lakerunner/initcontainer-grafana:latest
     Description: Container image for Grafana init container (datasource provisioning and database setup)
     Type: String
-  ServicesStackName:
-    Description: 'REQUIRED: Name of the Services stack to import Query API ALB DNS and port from.'
+  PrivateSubnets:
+    Description: Comma-delimited list of private subnet IDs.
+    Type: String
+  PublicSubnets:
+    Default: ''
+    Description: Comma-delimited list of public subnet IDs (required for internet-facing ALB).
+    Type: String
+  QueryApiAlbDns:
+    Description: DNS name of the Query API ALB from Services stack.
+    Type: String
+  TaskSecurityGroupId:
+    Description: Security group ID for ECS tasks.
+    Type: String
+  VpcId:
+    Description: VPC ID for the Grafana resources.
     Type: String
 Resources:
   GrafanaAlb:
@@ -83,16 +132,10 @@ Resources:
         - IsInternetFacing
         - !Split
           - ','
-          - !ImportValue
-            Fn::Sub:
-              - ${CommonInfraStackName}-PublicSubnets
-              - CommonInfraStackName: !Ref 'CommonInfraStackName'
+          - !Ref 'PublicSubnets'
         - !Split
           - ','
-          - !ImportValue
-            Fn::Sub:
-              - ${CommonInfraStackName}-PrivateSubnets
-              - CommonInfraStackName: !Ref 'CommonInfraStackName'
+          - !Ref 'PrivateSubnets'
       Type: application
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
   GrafanaAlb3000Open:
@@ -111,10 +154,7 @@ Resources:
         - CidrIp: '0.0.0.0/0'
           Description: Allow all outbound
           IpProtocol: '-1'
-      VpcId: !ImportValue
-        Fn::Sub:
-          - ${CommonInfraStackName}-VpcId
-          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      VpcId: !Ref 'VpcId'
     Type: AWS::EC2::SecurityGroup
   GrafanaDatasourceConfig:
     Properties:
@@ -134,10 +174,7 @@ Resources:
             secureJsonData:
               apiKey: f70603aa00e6f67999cc66e336134887
             type: cardinalhq-lakerunner-datasource
-        - QUERY_API_ALB_DNS: !ImportValue
-            Fn::Sub:
-              - ${ServicesStackName}-AlbDNS
-              - ServicesStackName: !Ref 'ServicesStackName'
+        - QUERY_API_ALB_DNS: !Ref 'QueryApiAlbDns'
     Type: AWS::SSM::Parameter
   GrafanaDbSecret:
     Properties:
@@ -183,10 +220,7 @@ Resources:
                   - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*'
                   - !Sub
                     - ${DbSecretArn}*
-                    - DbSecretArn: !ImportValue
-                        Fn::Sub:
-                          - ${CommonInfraStackName}-DbSecretArn
-                          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                    - DbSecretArn: !Ref 'DbSecretArn'
             Version: '2012-10-17'
           PolicyName: SSMParameterAccess
       RoleName: !Sub '${AWS::StackName}-exec-role'
@@ -219,10 +253,7 @@ Resources:
     DependsOn:
       - GrafanaListener
     Properties:
-      Cluster: !ImportValue
-        Fn::Sub:
-          - ${CommonInfraStackName}-ClusterArn
-          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      Cluster: !Ref 'ClusterArn'
       DesiredCount: '1'
       EnableExecuteCommand: true
       LaunchType: FARGATE
@@ -233,16 +264,10 @@ Resources:
       NetworkConfiguration:
         AwsvpcConfiguration:
           SecurityGroups:
-            - !ImportValue
-              Fn::Sub:
-                - ${CommonInfraStackName}-TaskSGId
-                - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - !Ref 'TaskSecurityGroupId'
           Subnets: !Split
             - ','
-            - !ImportValue
-              Fn::Sub:
-                - ${CommonInfraStackName}-PrivateSubnets
-                - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - !Ref 'PrivateSubnets'
       ServiceName: grafana
       TaskDefinition: !Ref 'GrafanaTaskDef'
     Type: AWS::ECS::Service
@@ -255,15 +280,9 @@ Resources:
             - Name: GRAFANA_DB_USER
               Value: grafana
             - Name: PGHOST
-              Value: !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-DbEndpoint
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+              Value: !Ref 'DbEndpoint'
             - Name: PGPORT
-              Value: !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-DbPort
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+              Value: !Ref 'DbPort'
             - Name: PGDATABASE
               Value: postgres
             - Name: PGSSLMODE
@@ -281,17 +300,11 @@ Resources:
             - Name: PGUSER
               ValueFrom: !Sub
                 - '${DbSecretArn}:username::'
-                - DbSecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-DbSecretArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                - DbSecretArn: !Ref 'DbSecretArn'
             - Name: PGPASSWORD
               ValueFrom: !Sub
                 - '${DbSecretArn}:password::'
-                - DbSecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-DbSecretArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                - DbSecretArn: !Ref 'DbSecretArn'
             - Name: GRAFANA_DB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
@@ -309,15 +322,9 @@ Resources:
             - Name: HOME
               Value: /scratch
             - Name: GF_DATABASE_HOST
-              Value: !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-DbEndpoint
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+              Value: !Ref 'DbEndpoint'
             - Name: GF_DATABASE_PORT
-              Value: !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-DbPort
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+              Value: !Ref 'DbPort'
             - Name: GF_DATABASE_NAME
               Value: grafana
             - Name: GF_DATABASE_USER
@@ -426,19 +433,13 @@ Resources:
           Value: '30'
       TargetType: ip
       UnhealthyThresholdCount: 3
-      VpcId: !ImportValue
-        Fn::Sub:
-          - ${CommonInfraStackName}-VpcId
-          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      VpcId: !Ref 'VpcId'
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
   TaskFromGrafanaAlb3000:
     Properties:
       Description: Grafana ALB to tasks 3000
       FromPort: 3000
-      GroupId: !ImportValue
-        Fn::Sub:
-          - ${CommonInfraStackName}-TaskSGId
-          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      GroupId: !Ref 'TaskSecurityGroupId'
       IpProtocol: tcp
       SourceSecurityGroupId: !Ref 'GrafanaAlbSecurityGroup'
       ToPort: 3000

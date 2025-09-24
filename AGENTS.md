@@ -4,22 +4,29 @@ This file contains instructions for AI agents on how to work with this CloudForm
 
 ## Repository Structure
 
-The deployment consists of three CloudFormation stacks that must be deployed in order:
+The deployment consists of a root orchestration stack that manages multiple nested stacks:
 
-1. **CommonInfra** (`lakerunner_common.py`) - Core infrastructure
-2. **Migration** (`lakerunner_migration.py`) - Database migration task
-3. **Services** (`lakerunner_services.py`) - ECS Fargate services
+1. **Root** (`lakerunner_root.py`) - Orchestrates all nested stacks with create-or-BYO options
+2. **Nested stacks** managed by root:
+   - RDS (`lakerunner_rds.py`) - PostgreSQL database
+   - Storage (`lakerunner_storage.py`) - S3 bucket and SQS queue
+   - MSK (`lakerunner_msk.py`) - Kafka cluster
+   - ECS (`lakerunner_ecs.py`) - ECS cluster infrastructure
+   - ECS Setup (`lakerunner_ecs_setup.py`) - Database/Kafka setup
+   - ECS Services (`lakerunner_ecs_services.py`) - Application services
+   - ECS Collector (`lakerunner_ecs_collector.py`) - OTEL collector
+   - ECS Grafana (`lakerunner_ecs_grafana.py`) - Grafana dashboard
 
 ### Stack Dependencies
 
-- Migration depends on CommonInfra exports (database, networking, security groups)
-- Services depends on CommonInfra exports (all infrastructure resources)
-- Services auto-detects ALB presence from CommonInfra without requiring user input
+- All nested stacks receive parameters from the root stack
+- ECS services/collector/grafana require ECS infrastructure to be enabled
+- Setup task runs when RDS is created to initialize databases
 
 ### Configuration System
 
 - **lakerunner-stack-defaults.yaml** - Contains all default configurations (API keys, storage profiles, service definitions)
-- **Cross-stack imports** - Services automatically import values from CommonInfra using CloudFormation exports
+- **Cross-stack imports** - Services automatically import values from root stack using CloudFormation exports
 - **Parameter minimization** - Only ask users for what cannot be determined from other stacks
 - **Air-gapped support** - Container image parameters allow overriding public ECR images
 
@@ -30,16 +37,16 @@ The deployment consists of three CloudFormation stacks that must be deployed in 
 Templates use CloudFormation exports/imports extensively:
 
 ```python
-# Export in CommonInfra
+# Export in Root stack
 Export=Export(name=Sub("${AWS::StackName}-ClusterArn"))
 
 # Import in Services
-ClusterArnValue = ImportValue(ci_export("ClusterArn"))
+ClusterArnValue = ImportValue(Sub("${CommonInfraStackName}-ClusterArn"))
 ```
 
 ### Conditional ALB Resources
 
-ALB creation is optional in CommonInfra. Services template automatically detects ALB presence:
+ALB creation is handled by the Services template with configurable scheme:
 
 ```python
 CreateAlbValue = ImportValue(ci_export("CreateAlb"))
@@ -64,9 +71,10 @@ def load_defaults(config_file="defaults.yaml"):
 - `python3 <template>.py` - Generate individual template
 - `cfn-lint out/<template>.yaml` - Validate specific template
 - `make test` - Run all unit tests
-- `make test-common` - Run CommonInfra template tests only
+- `make test-rds` - Run RDS template tests only
+- `make test-storage` - Run Storage template tests only
 - `make test-services` - Run Services template tests only
-- `make test-migration` - Run Migration template tests only
+- `make test-setup` - Run ECS Setup template tests only
 - `make test-params` - Run parameter and condition validation tests only
 - `make build` - Generate templates using Makefile
 - `make lint` - Run cfn-lint validation on all templates

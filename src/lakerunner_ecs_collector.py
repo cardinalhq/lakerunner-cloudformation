@@ -87,6 +87,32 @@ def create_otel_collector_template():
         Description="REQUIRED: Name of the CommonInfra stack to import infrastructure values from."
     ))
 
+    ClusterArn = t.add_parameter(Parameter(
+        "ClusterArn", Type="String",
+        Description="ECS cluster ARN for running the collector service."
+    ))
+
+    VpcId = t.add_parameter(Parameter(
+        "VpcId", Type="String",
+        Description="VPC ID for the collector resources."
+    ))
+
+    PrivateSubnets = t.add_parameter(Parameter(
+        "PrivateSubnets", Type="String",
+        Description="Comma-delimited list of private subnet IDs."
+    ))
+
+    PublicSubnets = t.add_parameter(Parameter(
+        "PublicSubnets", Type="String",
+        Default="",
+        Description="Comma-delimited list of public subnet IDs (required for internet-facing ALB)."
+    ))
+
+    BucketName = t.add_parameter(Parameter(
+        "BucketName", Type="String",
+        Description="S3 bucket name for storing OTEL data."
+    ))
+
     LoadBalancerType = t.add_parameter(Parameter(
         "LoadBalancerType", Type="String",
         Default="internal",
@@ -137,15 +163,12 @@ def create_otel_collector_template():
     })
 
     # Helper function for imports
-    def ci_export(suffix):
-        return Sub("${CommonInfraStackName}-%s" % suffix, CommonInfraStackName=Ref(CommonInfraStackName))
-
-    # Resolved values (import from CommonInfra)
-    ClusterArnValue = ImportValue(ci_export("ClusterArn"))
-    VpcIdValue = ImportValue(ci_export("VpcId"))
-    PrivateSubnetsValue = Split(",", ImportValue(ci_export("PrivateSubnets")))
-    PublicSubnetsValue = Split(",", ImportValue(ci_export("PublicSubnets")))
-    BucketNameValue = ImportValue(ci_export("BucketName"))
+    # Resolved values (use parameters directly)
+    ClusterArnValue = Ref(ClusterArn)
+    VpcIdValue = Ref(VpcId)
+    PrivateSubnetsValue = Split(",", Ref(PrivateSubnets))
+    PublicSubnetsValue = Split(",", Ref(PublicSubnets))
+    BucketNameValue = Ref(BucketName)
 
     # Conditions
     t.add_condition("IsInternal", Equals(Ref(LoadBalancerType), "internal"))

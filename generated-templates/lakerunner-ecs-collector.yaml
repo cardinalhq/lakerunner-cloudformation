@@ -58,6 +58,12 @@ Outputs:
       Name: !Sub '${AWS::StackName}-ServiceArn'
     Value: !Ref 'ServiceOtelGateway'
 Parameters:
+  BucketName:
+    Description: S3 bucket name for storing OTEL data.
+    Type: String
+  ClusterArn:
+    Description: ECS cluster ARN for running the collector service.
+    Type: String
   CommonInfraStackName:
     Description: 'REQUIRED: Name of the CommonInfra stack to import infrastructure values from.'
     Type: String
@@ -75,6 +81,16 @@ Parameters:
   OtelConfigYaml:
     Default: ''
     Description: 'OPTIONAL: Custom OTEL collector configuration in YAML format. Leave blank to use default configuration.'
+    Type: String
+  PrivateSubnets:
+    Description: Comma-delimited list of private subnet IDs.
+    Type: String
+  PublicSubnets:
+    Default: ''
+    Description: Comma-delimited list of public subnet IDs (required for internet-facing ALB).
+    Type: String
+  VpcId:
+    Description: VPC ID for the collector resources.
     Type: String
 Resources:
   AlbSecurityGroup:
@@ -94,10 +110,7 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub '${AWS::StackName}-alb-sg'
-      VpcId: !ImportValue
-        Fn::Sub:
-          - ${CommonInfraStackName}-VpcId
-          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      VpcId: !Ref 'VpcId'
     Type: AWS::EC2::SecurityGroup
   ApplicationLoadBalancer:
     Properties:
@@ -113,16 +126,10 @@ Resources:
         - IsInternal
         - !Split
           - ','
-          - !ImportValue
-            Fn::Sub:
-              - ${CommonInfraStackName}-PrivateSubnets
-              - CommonInfraStackName: !Ref 'CommonInfraStackName'
+          - !Ref 'PrivateSubnets'
         - !Split
           - ','
-          - !ImportValue
-            Fn::Sub:
-              - ${CommonInfraStackName}-PublicSubnets
-              - CommonInfraStackName: !Ref 'CommonInfraStackName'
+          - !Ref 'PublicSubnets'
       Tags:
         - Key: Name
           Value: !Sub '${AWS::StackName}-alb'
@@ -203,10 +210,7 @@ Resources:
           Value: '5'
       TargetType: ip
       UnhealthyThresholdCount: 2
-      VpcId: !ImportValue
-        Fn::Sub:
-          - ${CommonInfraStackName}-VpcId
-          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      VpcId: !Ref 'VpcId'
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
   OtelHttpTargetGroup:
     Properties:
@@ -229,20 +233,14 @@ Resources:
           Value: '5'
       TargetType: ip
       UnhealthyThresholdCount: 2
-      VpcId: !ImportValue
-        Fn::Sub:
-          - ${CommonInfraStackName}-VpcId
-          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      VpcId: !Ref 'VpcId'
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
   ServiceOtelGateway:
     DependsOn:
       - GrpcListener
       - HttpListener
     Properties:
-      Cluster: !ImportValue
-        Fn::Sub:
-          - ${CommonInfraStackName}-ClusterArn
-          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      Cluster: !Ref 'ClusterArn'
       DesiredCount: '1'
       EnableExecuteCommand: true
       LaunchType: FARGATE
@@ -260,10 +258,7 @@ Resources:
             - !Ref 'TaskSecurityGroup'
           Subnets: !Split
             - ','
-            - !ImportValue
-              Fn::Sub:
-                - ${CommonInfraStackName}-PrivateSubnets
-                - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - !Ref 'PrivateSubnets'
       ServiceName: otel-gateway
       TaskDefinition: !Ref 'TaskDefOtelGateway'
     Type: AWS::ECS::Service
@@ -276,10 +271,7 @@ Resources:
             - Name: OTEL_SERVICE_NAME
               Value: otel-gateway
             - Name: AWS_S3_BUCKET
-              Value: !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-BucketName
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+              Value: !Ref 'BucketName'
             - Name: AWS_REGION
               Value: !Ref 'AWS::Region'
             - Name: ORG
@@ -425,16 +417,10 @@ Resources:
                 Resource:
                   - !Sub
                     - arn:aws:s3:::${BucketName}
-                    - BucketName: !ImportValue
-                        Fn::Sub:
-                          - ${CommonInfraStackName}-BucketName
-                          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                    - BucketName: !Ref 'BucketName'
                   - !Sub
                     - arn:aws:s3:::${BucketName}/*
-                    - BucketName: !ImportValue
-                        Fn::Sub:
-                          - ${CommonInfraStackName}-BucketName
-                          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                    - BucketName: !Ref 'BucketName'
             Version: '2012-10-17'
           PolicyName: S3Access
       RoleName: !Sub '${AWS::StackName}-task-role'
@@ -461,9 +447,6 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub '${AWS::StackName}-task-sg'
-      VpcId: !ImportValue
-        Fn::Sub:
-          - ${CommonInfraStackName}-VpcId
-          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      VpcId: !Ref 'VpcId'
     Type: AWS::EC2::SecurityGroup
 

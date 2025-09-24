@@ -37,11 +37,21 @@ The Lakerunner CloudFormation templates are generated using Python and the Tropo
 
 The `src/` directory contains Python templates that generate CloudFormation YAML:
 
-**Core Lakerunner Stacks:**
-- **`src/lakerunner_common.py`** - Core infrastructure (VPC, RDS, EFS, S3, ALB)
-- **`src/lakerunner_migration.py`** - Database migration task
-- **`src/lakerunner_services.py`** - ECS services for all Lakerunner components
-- **`src/lakerunner_grafana_service.py`** - Grafana dashboard service
+**Root Orchestration Stack:**
+- **`src/lakerunner_root.py`** - Root stack that orchestrates all nested stacks
+
+**Infrastructure Stacks:**
+- **`src/lakerunner_vpc.py`** - VPC with subnets and endpoints
+- **`src/lakerunner_rds.py`** - PostgreSQL database
+- **`src/lakerunner_storage.py`** - S3 bucket and SQS queue
+- **`src/lakerunner_msk.py`** - MSK Kafka cluster
+- **`src/lakerunner_ecs.py`** - ECS cluster infrastructure
+
+**Service Stacks:**
+- **`src/lakerunner_ecs_setup.py`** - Database and Kafka setup task
+- **`src/lakerunner_ecs_services.py`** - Core application services
+- **`src/lakerunner_ecs_collector.py`** - OTEL collector service
+- **`src/lakerunner_ecs_grafana.py`** - Grafana dashboard service
 
 ### Configuration Files
 
@@ -54,10 +64,16 @@ Stack-specific configuration files define defaults and service settings:
 
 The `generated-templates/` directory contains the final CloudFormation templates:
 
-- **`lakerunner-common.yaml`** - Core infrastructure
-- **`lakerunner-migration.yaml`** - Database migration
-- **`lakerunner-services.yaml`** - Core services
-- **`lakerunner-grafana-service.yaml`** - Grafana dashboard
+- **`lakerunner-root.yaml`** - Root orchestration stack
+- **`lakerunner-vpc.yaml`** - VPC infrastructure
+- **`lakerunner-rds.yaml`** - Database
+- **`lakerunner-storage.yaml`** - S3/SQS
+- **`lakerunner-msk.yaml`** - Kafka
+- **`lakerunner-ecs.yaml`** - ECS cluster
+- **`lakerunner-ecs-setup.yaml`** - Setup task
+- **`lakerunner-ecs-services.yaml`** - Application services
+- **`lakerunner-ecs-collector.yaml`** - OTEL collector
+- **`lakerunner-ecs-grafana.yaml`** - Grafana
 
 ## Development Workflow
 
@@ -140,7 +156,7 @@ You can also generate templates individually:
 source .venv/bin/activate
 
 # Generate specific template
-python3 src/lakerunner_common.py > generated-templates/lakerunner-common.yaml
+python3 src/lakerunner_root.py > generated-templates/lakerunner-root.yaml
 
 # Validate template
 cfn-lint generated-templates/lakerunner-common.yaml

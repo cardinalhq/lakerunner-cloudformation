@@ -48,9 +48,9 @@ echo "4. Generating Lakerunner MSK..."
   python3 src/lakerunner_msk.py > generated-templates/lakerunner-msk.yaml
   cfn-lint $LINT_OPTS -- generated-templates/lakerunner-msk.yaml
 
-echo "5. Generating Lakerunner Storage..."
-  python3 src/lakerunner_s3.py > generated-templates/lakerunner-storage.yaml
-  cfn-lint $LINT_OPTS -- generated-templates/lakerunner-storage.yaml
+echo "5. Generating Lakerunner S3..."
+  python3 src/lakerunner_s3.py > generated-templates/lakerunner-s3.yaml
+  cfn-lint $LINT_OPTS -- generated-templates/lakerunner-s3.yaml
 
 echo "6. Generating Lakerunner ECS Setup Task..."
   python3 src/lakerunner_ecs_setup.py > generated-templates/lakerunner-ecs-setup.yaml

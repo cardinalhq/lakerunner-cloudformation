@@ -29,8 +29,11 @@ test:		## Run unit tests (working tests only)
 test-all:	## Run all tests including complex ones (may have failures)
 	source $(VENV_DIR)/bin/activate && $(PYTEST) tests/ -v
 
-test-common:	## Run tests for CommonInfra template only
-	source $(VENV_DIR)/bin/activate && $(PYTEST) tests/test_common_infra.py -v
+test-rds:	## Run tests for RDS template only
+	source $(VENV_DIR)/bin/activate && $(PYTEST) tests/test_rds_stack.py -v
+
+test-storage:	## Run tests for Storage template only
+	source $(VENV_DIR)/bin/activate && $(PYTEST) tests/test_s3_stack.py -v
 
 test-services:	## Run simplified tests for Services template
 	source $(VENV_DIR)/bin/activate && $(PYTEST) tests/test_services_simple.py -v

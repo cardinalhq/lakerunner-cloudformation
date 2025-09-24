@@ -54,12 +54,11 @@ base_url = t.add_parameter(
 # =============================================================================
 
 # VPC Selection Parameters (always required)
-# These are used whether VPC was created by Part 1 or is BYO
 vpc_id = t.add_parameter(
     Parameter(
         "VPCId",
         Type="AWS::EC2::VPC::Id",
-        Description="VPC ID to use for deployment (from Part 1 Landscape stack or existing VPC).",
+        Description="VPC ID to use for deployment (from VPC stack or existing VPC).",
     )
 )
 
@@ -67,7 +66,7 @@ private_subnet1 = t.add_parameter(
     Parameter(
         "PrivateSubnet1Id",
         Type="AWS::EC2::Subnet::Id",
-        Description="First private subnet ID (from Part 1 Landscape stack or existing subnet).",
+        Description="First private subnet ID (from VPC stack or existing subnet).",
     )
 )
 
@@ -75,7 +74,7 @@ private_subnet2 = t.add_parameter(
     Parameter(
         "PrivateSubnet2Id",
         Type="AWS::EC2::Subnet::Id",
-        Description="Second private subnet ID (from Part 1 Landscape stack or existing subnet).",
+        Description="Second private subnet ID (from VPC stack or existing subnet).",
     )
 )
 
@@ -84,7 +83,7 @@ public_subnet1 = t.add_parameter(
         "PublicSubnet1Id",
         Type="String",
         Default="",
-        Description="First public subnet ID (from Part 1 Landscape stack or existing subnet). Optional.",
+        Description="First public subnet ID (from VPC stack or existing subnet). Optional.",
     )
 )
 
@@ -93,7 +92,7 @@ public_subnet2 = t.add_parameter(
         "PublicSubnet2Id",
         Type="String",
         Default="",
-        Description="Second public subnet ID (from Part 1 Landscape stack or existing subnet). Optional.",
+        Description="Second public subnet ID (from VPC stack or existing subnet). Optional.",
     )
 )
 
@@ -426,7 +425,7 @@ storage_stack = t.add_resource(
     Stack(
         "StorageStack",
         Condition="CreateS3StorageCondition",
-        TemplateURL=Sub("${TemplateBaseUrl}/lakerunner-storage.yaml"),
+        TemplateURL=Sub("${TemplateBaseUrl}/lakerunner-s3.yaml"),
         Parameters={
             "ExistingTaskRoleArn": Ref(existing_task_role_arn)
         },
@@ -564,6 +563,17 @@ ecs_collector_stack = t.add_resource(
         TemplateURL=Sub("${TemplateBaseUrl}/lakerunner-ecs-collector.yaml"),
         Parameters={
             "CommonInfraStackName": Ref("AWS::StackName"),
+            "ClusterArn": If("CreateECSInfraCondition",
+                           GetAtt(ecs_stack, "Outputs.ClusterArn"),
+                           Ref(existing_cluster_arn)),
+            "VpcId": Ref(vpc_id),
+            "PrivateSubnets": Sub("${PrivateSubnet1Id},${PrivateSubnet2Id}"),
+            "PublicSubnets": If("HasPublicSubnetsCondition",
+                              Sub("${PublicSubnet1Id},${PublicSubnet2Id}"),
+                              ""),
+            "BucketName": If("CreateS3StorageCondition",
+                           GetAtt(storage_stack, "Outputs.BucketName"),
+                           Select(5, Split("/", Ref(existing_bucket_arn)))),
             "LoadBalancerType": Ref(alb_scheme)  # Use the same ALB scheme parameter
         },
         Tags=Tags(
@@ -581,10 +591,32 @@ ecs_grafana_stack = t.add_resource(
         Condition="CreateECSGrafanaCondition",
         TemplateURL=Sub("${TemplateBaseUrl}/lakerunner-ecs-grafana.yaml"),
         Parameters={
-            "CommonInfraStackName": Ref("AWS::StackName"),
-            "ServicesStackName": If("CreateECSServicesCondition",
-                                   Ref(ecs_services_stack),
-                                   ""),
+            # Infrastructure parameters
+            "ClusterArn": If("CreateECSInfraCondition",
+                            GetAtt(ecs_stack, "Outputs.ClusterArn"),
+                            Ref(existing_cluster_arn)),
+            "VpcId": Ref(vpc_id),
+            "PrivateSubnets": Sub("${PrivateSubnet1Id},${PrivateSubnet2Id}"),
+            "PublicSubnets": If("HasPublicSubnetsCondition",
+                               Sub("${PublicSubnet1Id},${PublicSubnet2Id}"),
+                               ""),
+            "TaskSecurityGroupId": If("CreateECSInfraCondition",
+                                     GetAtt(ecs_stack, "Outputs.TaskSGId"),
+                                     Ref(existing_security_group_id)),
+            # Database parameters
+            "DbEndpoint": If("CreateRDSCondition",
+                           GetAtt(rds_stack, "Outputs.DatabaseEndpoint"),
+                           ""),
+            "DbPort": If("CreateRDSCondition",
+                        GetAtt(rds_stack, "Outputs.DatabasePort"),
+                        ""),
+            "DbSecretArn": If("CreateRDSCondition",
+                             GetAtt(rds_stack, "Outputs.DBMasterSecretArn"),
+                             ""),
+            # Services integration
+            "QueryApiAlbDns": If("CreateECSServicesCondition",
+                                GetAtt(ecs_services_stack, "Outputs.AlbDNS"),
+                                ""),
             "AlbScheme": Ref(alb_scheme)
         },
         Tags=Tags(

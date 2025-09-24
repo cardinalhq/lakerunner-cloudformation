@@ -337,24 +337,24 @@ Parameters:
     Description: MSK broker instance type.
     Type: String
   PrivateSubnet1Id:
-    Description: First private subnet ID (from Part 1 Landscape stack or existing subnet).
+    Description: First private subnet ID (from VPC stack or existing subnet).
     Type: AWS::EC2::Subnet::Id
   PrivateSubnet2Id:
-    Description: Second private subnet ID (from Part 1 Landscape stack or existing subnet).
+    Description: Second private subnet ID (from VPC stack or existing subnet).
     Type: AWS::EC2::Subnet::Id
   PublicSubnet1Id:
     Default: ''
-    Description: First public subnet ID (from Part 1 Landscape stack or existing subnet). Optional.
+    Description: First public subnet ID (from VPC stack or existing subnet). Optional.
     Type: String
   PublicSubnet2Id:
     Default: ''
-    Description: Second public subnet ID (from Part 1 Landscape stack or existing subnet). Optional.
+    Description: Second public subnet ID (from VPC stack or existing subnet). Optional.
     Type: String
   TemplateBaseUrl:
     Description: Base URL where nested templates are stored (e.g., https://s3.amazonaws.com/bucket/templates/)
     Type: String
   VPCId:
-    Description: VPC ID to use for deployment (from Part 1 Landscape stack or existing VPC).
+    Description: VPC ID to use for deployment (from VPC stack or existing VPC).
     Type: AWS::EC2::VPC::Id
 Resources:
   ECSStack:
@@ -375,8 +375,26 @@ Resources:
     Condition: CreateECSCollectorCondition
     Properties:
       Parameters:
+        BucketName: !If
+          - CreateS3StorageCondition
+          - !GetAtt 'StorageStack.Outputs.BucketName'
+          - !Select
+            - 5
+            - !Split
+              - /
+              - !Ref 'ExistingBucketArn'
+        ClusterArn: !If
+          - CreateECSInfraCondition
+          - !GetAtt 'ECSStack.Outputs.ClusterArn'
+          - !Ref 'ExistingClusterArn'
         CommonInfraStackName: !Ref 'AWS::StackName'
         LoadBalancerType: !Ref 'AlbScheme'
+        PrivateSubnets: !Sub '${PrivateSubnet1Id},${PrivateSubnet2Id}'
+        PublicSubnets: !If
+          - HasPublicSubnetsCondition
+          - !Sub '${PublicSubnet1Id},${PublicSubnet2Id}'
+          - ''
+        VpcId: !Ref 'VPCId'
       Tags:
         - Key: Component
           Value: Collector
@@ -391,11 +409,36 @@ Resources:
     Properties:
       Parameters:
         AlbScheme: !Ref 'AlbScheme'
-        CommonInfraStackName: !Ref 'AWS::StackName'
-        ServicesStackName: !If
-          - CreateECSServicesCondition
-          - !Ref 'EcsServicesStack'
+        ClusterArn: !If
+          - CreateECSInfraCondition
+          - !GetAtt 'ECSStack.Outputs.ClusterArn'
+          - !Ref 'ExistingClusterArn'
+        DbEndpoint: !If
+          - CreateRDSCondition
+          - !GetAtt 'RDSStack.Outputs.DatabaseEndpoint'
           - ''
+        DbPort: !If
+          - CreateRDSCondition
+          - !GetAtt 'RDSStack.Outputs.DatabasePort'
+          - ''
+        DbSecretArn: !If
+          - CreateRDSCondition
+          - !GetAtt 'RDSStack.Outputs.DBMasterSecretArn'
+          - ''
+        PrivateSubnets: !Sub '${PrivateSubnet1Id},${PrivateSubnet2Id}'
+        PublicSubnets: !If
+          - HasPublicSubnetsCondition
+          - !Sub '${PublicSubnet1Id},${PublicSubnet2Id}'
+          - ''
+        QueryApiAlbDns: !If
+          - CreateECSServicesCondition
+          - !GetAtt 'EcsServicesStack.Outputs.AlbDNS'
+          - ''
+        TaskSecurityGroupId: !If
+          - CreateECSInfraCondition
+          - !GetAtt 'ECSStack.Outputs.TaskSGId'
+          - !Ref 'ExistingSecurityGroupId'
+        VpcId: !Ref 'VPCId'
       Tags:
         - Key: Component
           Value: Grafana
@@ -522,6 +565,6 @@ Resources:
           Value: !Ref 'AWS::StackName'
         - Key: ManagedBy
           Value: Lakerunner
-      TemplateURL: !Sub '${TemplateBaseUrl}/lakerunner-storage.yaml'
+      TemplateURL: !Sub '${TemplateBaseUrl}/lakerunner-s3.yaml'
     Type: AWS::CloudFormation::Stack
 
