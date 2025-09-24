@@ -358,6 +358,21 @@ Resources:
           Value: Lakerunner
       TemplateURL: !Sub '${TemplateBaseUrl}/lakerunner-msk.yaml'
     Type: AWS::CloudFormation::Stack
+  MigrationStack:
+    Condition: CreateRDSCondition
+    Properties:
+      Parameters:
+        Command: setup
+        CommonInfraStackName: !Ref 'AWS::StackName'
+      Tags:
+        - Key: Component
+          Value: Migration
+        - Key: Environment
+          Value: !Ref 'AWS::StackName'
+        - Key: ManagedBy
+          Value: Lakerunner
+      TemplateURL: !Sub '${TemplateBaseUrl}/lakerunner-migration.yaml'
+    Type: AWS::CloudFormation::Stack
   RDSStack:
     Condition: CreateRDSCondition
     Properties:

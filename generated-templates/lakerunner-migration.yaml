@@ -7,8 +7,9 @@ Metadata:
         Parameters:
           - CommonInfraStackName
       - Label:
-          default: Task Sizing
+          default: Task Configuration
         Parameters:
+          - Command
           - Cpu
           - MemoryMiB
       - Label:
@@ -16,6 +17,8 @@ Metadata:
         Parameters:
           - ContainerImage
     ParameterLabels:
+      Command:
+        default: Migration Command
       CommonInfraStackName:
         default: CommonInfra Stack Name
       ContainerImage:
@@ -42,6 +45,13 @@ Outputs:
       Name: !Sub '${AWS::StackName}-TaskDefinitionArn'
     Value: !GetAtt 'MigrationTaskDef.TaskDefinitionArn'
 Parameters:
+  Command:
+    AllowedValues:
+      - migrate
+      - setup
+    Default: migrate
+    Description: 'Command to run: ''migrate'' for database migration only, ''setup'' for full setup including Kafka topics.'
+    Type: String
   CommonInfraStackName:
     Default: ''
     Description: 'REQUIRED: Name of the CommonInfra stack to import values from.'
@@ -69,7 +79,7 @@ Resources:
       ContainerDefinitions:
         - Command:
             - /app/bin/lakerunner
-            - migrate
+            - !Ref 'Command'
           Environment:
             - Name: LRDB_HOST
               Value: !ImportValue
@@ -97,6 +107,14 @@ Resources:
               Value: env:API_KEYS_ENV
             - Name: STORAGE_PROFILE_FILE
               Value: env:STORAGE_PROFILES_ENV
+            - Name: MSK_CLUSTER_ARN
+              Value: !ImportValue
+                Fn::Sub: ${CommonInfraStackName}-MSKClusterArn
+            - Name: KAFKA_CREDENTIALS_SECRET
+              Value: !ImportValue
+                Fn::Sub: ${CommonInfraStackName}-MSKCredentialsArn
+            - Name: KAFKA_AUTH_METHOD
+              Value: SASL_SCRAM
           Image: !Ref 'ContainerImage'
           LogConfiguration:
             LogDriver: awslogs
@@ -120,6 +138,16 @@ Resources:
               ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
             - Name: STORAGE_PROFILES_ENV
               ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
+            - Name: KAFKA_USERNAME
+              ValueFrom: !Sub
+                - '${S}:username::'
+                - S: !ImportValue
+                    Fn::Sub: ${CommonInfraStackName}-MSKCredentialsArn
+            - Name: KAFKA_PASSWORD
+              ValueFrom: !Sub
+                - '${S}:password::'
+                - S: !ImportValue
+                    Fn::Sub: ${CommonInfraStackName}-MSKCredentialsArn
       Cpu: !Ref 'Cpu'
       ExecutionRoleArn: !GetAtt 'TaskExecutionRole.Arn'
       Family: lakerunner-migration
@@ -338,6 +366,32 @@ Resources:
                 Resource:
                   - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
                   - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
+              - Action:
+                  - kafka:DescribeCluster
+                  - kafka:DescribeClusterV2
+                  - kafka:GetBootstrapBrokers
+                  - kafka-cluster:Connect
+                  - kafka-cluster:AlterCluster
+                  - kafka-cluster:DescribeCluster
+                  - kafka-cluster:*Topic*
+                  - kafka-cluster:WriteData
+                  - kafka-cluster:ReadData
+                Effect: Allow
+                Resource:
+                  - !ImportValue
+                    Fn::Sub: ${CommonInfraStackName}-MSKClusterArn
+                  - !Sub
+                    - ${Arn}/*
+                    - Arn: !ImportValue
+                        Fn::Sub: ${CommonInfraStackName}-MSKClusterArn
+              - Action:
+                  - secretsmanager:GetSecretValue
+                Effect: Allow
+                Resource:
+                  - !Sub
+                    - ${SecretArn}*
+                    - SecretArn: !ImportValue
+                        Fn::Sub: ${CommonInfraStackName}-MSKCredentialsArn
             Version: '2012-10-17'
           PolicyName: TaskExecutionSecretsPolicy
     Type: AWS::IAM::Role

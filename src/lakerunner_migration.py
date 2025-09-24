@@ -113,6 +113,8 @@ DbHostValue = ImportValue(ci_export("DbEndpoint"))
 DbSecretArnValue = ImportValue(ci_export("DbSecretArn"))
 SecurityGroupsValue = ImportValue(ci_export("TaskSGId"))
 PrivateSubnetsValue = Split(",", ImportValue(ci_export("PrivateSubnets")))
+MSKClusterArnValue = ImportValue(ci_export("MSKClusterArn"))
+MSKCredentialsArnValue = ImportValue(ci_export("MSKCredentialsArn"))
 
 # -----------------------
 # CloudWatch Logs
@@ -189,6 +191,26 @@ ExecutionRole = t.add_resource(Role(
                             Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys"),
                             Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles")
                         ]
+                    },
+                    {
+                        "Effect": "Allow",
+                        "Action": [
+                            "kafka:DescribeCluster",
+                            "kafka:DescribeClusterV2",
+                            "kafka:GetBootstrapBrokers",
+                            "kafka-cluster:Connect",
+                            "kafka-cluster:AlterCluster",
+                            "kafka-cluster:DescribeCluster",
+                            "kafka-cluster:*Topic*",
+                            "kafka-cluster:WriteData",
+                            "kafka-cluster:ReadData"
+                        ],
+                        "Resource": [MSKClusterArnValue, Sub("${Arn}/*", Arn=MSKClusterArnValue)]
+                    },
+                    {
+                        "Effect": "Allow",
+                        "Action": ["secretsmanager:GetSecretValue"],
+                        "Resource": [Sub("${SecretArn}*", SecretArn=MSKCredentialsArnValue)]
                     }
                 ]
             }
@@ -212,7 +234,7 @@ TaskDef = t.add_resource(TaskDefinition(
         ContainerDefinition(
             Name="Migrator",
             Image=Ref(ContainerImage),
-            Command=["/app/bin/lakerunner", "migrate"],
+            Command=["/app/bin/lakerunner", "setup"],
             LogConfiguration=LogConfiguration(
                 LogDriver="awslogs",
                 Options={
@@ -234,12 +256,19 @@ TaskDef = t.add_resource(TaskDefinition(
                 Environment(Name="CONFIGDB_SSLMODE", Value="require"),
                 Environment(Name="API_KEYS_FILE", Value="env:API_KEYS_ENV"),
                 Environment(Name="STORAGE_PROFILE_FILE", Value="env:STORAGE_PROFILES_ENV"),
+                # Kafka configuration for setup command
+                Environment(Name="MSK_CLUSTER_ARN", Value=MSKClusterArnValue),
+                Environment(Name="KAFKA_CREDENTIALS_SECRET", Value=MSKCredentialsArnValue),
+                Environment(Name="KAFKA_AUTH_METHOD", Value="SASL_SCRAM"),
             ],
             Secrets=[
                 EcsSecret(Name="LRDB_PASSWORD", ValueFrom=Sub("${S}:password::", S=DbSecretArnValue)),
                 EcsSecret(Name="CONFIGDB_PASSWORD", ValueFrom=Sub("${S}:password::", S=DbSecretArnValue)),
                 EcsSecret(Name="API_KEYS_ENV", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys")),
-                EcsSecret(Name="STORAGE_PROFILES_ENV", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles"))
+                EcsSecret(Name="STORAGE_PROFILES_ENV", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles")),
+                # Kafka credentials for SASL authentication
+                EcsSecret(Name="KAFKA_USERNAME", ValueFrom=Sub("${S}:username::", S=MSKCredentialsArnValue)),
+                EcsSecret(Name="KAFKA_PASSWORD", ValueFrom=Sub("${S}:password::", S=MSKCredentialsArnValue))
             ]
         )
     ]

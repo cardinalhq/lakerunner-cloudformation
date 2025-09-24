@@ -461,8 +461,30 @@ msk_stack = t.add_resource(
     )
 )
 
+# Migration Stack (conditional) - Runs database setup with Kafka topics
+# Must run after RDS and MSK are created but before Services are deployed
+migration_stack = t.add_resource(
+    Stack(
+        "MigrationStack",
+        Condition="CreateRDSCondition",  # Only run migration if we're creating RDS
+        TemplateURL=Sub("${TemplateBaseUrl}/lakerunner-migration.yaml"),
+        Parameters={
+            # Pass the CommonInfra stack name for the migration to import values
+            "CommonInfraStackName": Ref("AWS::StackName"),
+            # Override the command to run setup instead of migrate
+            "Command": "setup"
+        },
+        Tags=Tags(
+            Component="Migration",
+            ManagedBy="Lakerunner",
+            Environment=Ref("AWS::StackName")
+        )
+        # Dependencies are handled implicitly through parameter references in the migration template
+    )
+)
+
 # Services Stack (conditional) - Part 3a: ECS deployment
-# Note: Services must wait for database and other dependencies to be ready
+# Note: Services must wait for database migration and other dependencies to be ready
 services_stack = t.add_resource(
     Stack(
         "ServicesStack",
@@ -509,8 +531,8 @@ services_stack = t.add_resource(
             Environment=Ref("AWS::StackName")
         )
         # Note: Dependencies are automatically handled through GetAtt/Ref functions
-        # When Services stack references outputs from other stacks (e.g., GetAtt(rds_stack, "Outputs.DbEndpoint")),
-        # CloudFormation automatically ensures those stacks complete first
+        # Services will wait for RDS/MSK/etc due to parameter references
+        # Migration runs in parallel but database is locked during setup
     )
 )
 
