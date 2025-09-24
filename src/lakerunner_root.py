@@ -84,15 +84,17 @@ private_subnet2 = t.add_parameter(
 public_subnet1 = t.add_parameter(
     Parameter(
         "PublicSubnet1Id",
-        Type="AWS::EC2::Subnet::Id",
+        Type="String",
+        Default="",
         Description="First public subnet ID (from Part 1 Landscape stack or existing subnet). Optional.",
     )
 )
 
 public_subnet2 = t.add_parameter(
     Parameter(
-        "PublicSubnet2Id", 
-        Type="AWS::EC2::Subnet::Id",
+        "PublicSubnet2Id",
+        Type="String",
+        Default="",
         Description="Second public subnet ID (from Part 1 Landscape stack or existing subnet). Optional.",
     )
 )
@@ -198,6 +200,44 @@ existing_msk_arn = t.add_parameter(
     )
 )
 
+# BYO ECS Resources
+existing_cluster_arn = t.add_parameter(
+    Parameter(
+        "ExistingClusterArn",
+        Type="String",
+        Default="",
+        Description="Existing ECS cluster ARN. Required when CreateECSInfrastructure=No and CreateECSServices=Yes.",
+    )
+)
+
+existing_security_group_id = t.add_parameter(
+    Parameter(
+        "ExistingSecurityGroupId",
+        Type="String",
+        Default="",
+        Description="Existing security group ID for ECS tasks. Required when CreateECSInfrastructure=No and CreateECSServices=Yes.",
+    )
+)
+
+existing_efs_id = t.add_parameter(
+    Parameter(
+        "ExistingEfsId",
+        Type="String",
+        Default="",
+        Description="OPTIONAL: Existing EFS file system ID for services requiring persistent storage.",
+    )
+)
+
+alb_scheme = t.add_parameter(
+    Parameter(
+        "AlbScheme",
+        Type="String",
+        Default="internal",
+        AllowedValues=["internet-facing", "internal"],
+        Description="Load balancer scheme: 'internet-facing' for external access or 'internal' for internal access only.",
+    )
+)
+
 msk_instance_type = t.add_parameter(
     Parameter(
         "MSKInstanceType",
@@ -247,6 +287,10 @@ t.add_condition("CreateRDSCondition", Equals(Ref(create_rds), "Yes"))
 t.add_condition("CreateECSInfraCondition", Equals(Ref(create_ecs_infra), "Yes"))
 t.add_condition("CreateECSServicesCondition", Equals(Ref(create_ecs_services), "Yes"))
 t.add_condition("CreateMSKCondition", Equals(Ref(create_msk), "Yes"))
+t.add_condition("HasPublicSubnetsCondition", And(
+    Not(Equals(Ref(public_subnet1), "")),
+    Not(Equals(Ref(public_subnet2), ""))
+))
 
 # Note: Task role conditions are now handled individually by each component stack
 
@@ -297,7 +341,11 @@ t.set_metadata({
                     "ExistingDatabaseEndpoint",
                     "ExistingDatabaseSecretArn",
                     "ExistingTaskRoleArn",
-                    "ExistingMSKClusterArn"
+                    "ExistingMSKClusterArn",
+                    "ExistingClusterArn",
+                    "ExistingSecurityGroupId",
+                    "ExistingEfsId",
+                    "AlbScheme"
                 ]
             }
         ],
@@ -320,7 +368,11 @@ t.set_metadata({
             "ExistingDatabaseEndpoint": {"default": "Existing DB Endpoint"},
             "ExistingDatabaseSecretArn": {"default": "Existing DB Secret ARN"},
             "ExistingTaskRoleArn": {"default": "Existing Task Role ARN"},
-            "ExistingMSKClusterArn": {"default": "Existing MSK Cluster ARN"}
+            "ExistingMSKClusterArn": {"default": "Existing MSK Cluster ARN"},
+            "ExistingClusterArn": {"default": "Existing ECS Cluster ARN"},
+            "ExistingSecurityGroupId": {"default": "Existing Security Group ID"},
+            "ExistingEfsId": {"default": "Existing EFS ID"},
+            "AlbScheme": {"default": "ALB Scheme"}
         }
     }
 })
@@ -410,20 +462,55 @@ msk_stack = t.add_resource(
 )
 
 # Services Stack (conditional) - Part 3a: ECS deployment
+# Note: Services must wait for database and other dependencies to be ready
 services_stack = t.add_resource(
     Stack(
         "ServicesStack",
         Condition="CreateECSServicesCondition",
         TemplateURL=Sub("${TemplateBaseUrl}/lakerunner-services.yaml"),
         Parameters={
-            # Pass storage stack name for parameter references
-            "StorageStackName": If("CreateS3StorageCondition", Ref(storage_stack), "")
+            # Infrastructure parameters - from ECS stack or existing
+            "ClusterArn": If("CreateECSInfraCondition",
+                            GetAtt(ecs_stack, "Outputs.ClusterArn"),
+                            Ref(existing_cluster_arn)),
+            "TaskSecurityGroupId": If("CreateECSInfraCondition",
+                                     GetAtt(ecs_stack, "Outputs.TaskSGId"),
+                                     Ref(existing_security_group_id)),
+            "VpcId": Ref(vpc_id),
+            "PrivateSubnets": Sub("${PrivateSubnet1Id},${PrivateSubnet2Id}"),
+            "PublicSubnets": If("HasPublicSubnetsCondition",
+                               Sub("${PublicSubnet1Id},${PublicSubnet2Id}"),
+                               ""),
+
+            # Database parameters - from RDS stack or existing
+            "DbSecretArn": If("CreateRDSCondition",
+                            GetAtt(rds_stack, "Outputs.DbSecretArn"),
+                            Ref(existing_db_secret_arn)),
+            "DbHost": If("CreateRDSCondition",
+                       GetAtt(rds_stack, "Outputs.DbEndpoint"),
+                       Ref(existing_db_endpoint)),
+            "DbPort": If("CreateRDSCondition",
+                       GetAtt(rds_stack, "Outputs.DbPort"),
+                       "5432"),
+
+            # Storage parameters - from S3 stack or existing
+            "BucketArn": If("CreateS3StorageCondition",
+                          GetAtt(storage_stack, "Outputs.BucketArn"),
+                          Ref(existing_bucket_arn)),
+            "StorageStackName": If("CreateS3StorageCondition", Ref(storage_stack), ""),
+
+            # Optional parameters
+            "EfsId": Ref(existing_efs_id),
+            "AlbScheme": Ref(alb_scheme)
         },
         Tags=Tags(
             Component="Services",
             ManagedBy="Lakerunner",
             Environment=Ref("AWS::StackName")
         )
+        # Note: Dependencies are automatically handled through GetAtt/Ref functions
+        # When Services stack references outputs from other stacks (e.g., GetAtt(rds_stack, "Outputs.DbEndpoint")),
+        # CloudFormation automatically ensures those stacks complete first
     )
 )
 
@@ -451,11 +538,12 @@ t.add_output(
     )
 )
 
-# Public Subnets - from user selection  
+# Public Subnets - from user selection (only if provided)
 t.add_output(
     Output(
         "PublicSubnets",
         Description="Selected public subnet IDs",
+        Condition="HasPublicSubnetsCondition",
         Value=Sub("${PublicSubnet1Id},${PublicSubnet2Id}"),
         Export=Export(Sub("${AWS::StackName}-PublicSubnets"))
     )

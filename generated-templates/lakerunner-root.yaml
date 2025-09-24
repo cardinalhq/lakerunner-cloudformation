@@ -14,6 +14,15 @@ Conditions:
   CreateS3StorageCondition: !Equals
     - !Ref 'CreateS3Storage'
     - 'Yes'
+  HasPublicSubnetsCondition: !And
+    - !Not
+      - !Equals
+        - !Ref 'PublicSubnet1Id'
+        - ''
+    - !Not
+      - !Equals
+        - !Ref 'PublicSubnet2Id'
+        - ''
 Description: Lakerunner infrastructure deployment with modular create-or-bring-your-own options
 Metadata:
   AWS::CloudFormation::Interface:
@@ -52,7 +61,13 @@ Metadata:
           - ExistingDatabaseSecretArn
           - ExistingTaskRoleArn
           - ExistingMSKClusterArn
+          - ExistingClusterArn
+          - ExistingSecurityGroupId
+          - ExistingEfsId
+          - AlbScheme
     ParameterLabels:
+      AlbScheme:
+        default: ALB Scheme
       CreateECSInfrastructure:
         default: Create ECS Infrastructure?
       CreateECSServices:
@@ -67,12 +82,18 @@ Metadata:
         default: RDS Instance Class
       ExistingBucketArn:
         default: Existing Bucket ARN
+      ExistingClusterArn:
+        default: Existing ECS Cluster ARN
       ExistingDatabaseEndpoint:
         default: Existing DB Endpoint
       ExistingDatabaseSecretArn:
         default: Existing DB Secret ARN
+      ExistingEfsId:
+        default: Existing EFS ID
       ExistingMSKClusterArn:
         default: Existing MSK Cluster ARN
+      ExistingSecurityGroupId:
+        default: Existing Security Group ID
       ExistingTaskRoleArn:
         default: Existing Task Role ARN
       MSKBrokerNodes:
@@ -154,6 +175,7 @@ Outputs:
       Name: !Sub '${AWS::StackName}-PrivateSubnets'
     Value: !Sub '${PrivateSubnet1Id},${PrivateSubnet2Id}'
   PublicSubnets:
+    Condition: HasPublicSubnetsCondition
     Description: Selected public subnet IDs
     Export:
       Name: !Sub '${AWS::StackName}-PublicSubnets'
@@ -170,6 +192,13 @@ Outputs:
       Name: !Sub '${AWS::StackName}-VPCId'
     Value: !Ref 'VPCId'
 Parameters:
+  AlbScheme:
+    AllowedValues:
+      - internet-facing
+      - internal
+    Default: internal
+    Description: 'Load balancer scheme: ''internet-facing'' for external access or ''internal'' for internal access only.'
+    Type: String
   CreateECSInfrastructure:
     AllowedValues:
       - 'Yes'
@@ -221,6 +250,10 @@ Parameters:
     Default: ''
     Description: Existing S3 bucket ARN. Required when CreateS3Storage=No.
     Type: String
+  ExistingClusterArn:
+    Default: ''
+    Description: Existing ECS cluster ARN. Required when CreateECSInfrastructure=No and CreateECSServices=Yes.
+    Type: String
   ExistingDatabaseEndpoint:
     Default: ''
     Description: Existing database endpoint. Required when CreateRDS=No.
@@ -229,9 +262,17 @@ Parameters:
     Default: ''
     Description: Existing database secret ARN. Required when CreateRDS=No.
     Type: String
+  ExistingEfsId:
+    Default: ''
+    Description: 'OPTIONAL: Existing EFS file system ID for services requiring persistent storage.'
+    Type: String
   ExistingMSKClusterArn:
     Default: ''
     Description: Existing MSK cluster ARN. Required when CreateMSK=No.
+    Type: String
+  ExistingSecurityGroupId:
+    Default: ''
+    Description: Existing security group ID for ECS tasks. Required when CreateECSInfrastructure=No and CreateECSServices=Yes.
     Type: String
   ExistingTaskRoleArn:
     Default: ''
@@ -271,11 +312,13 @@ Parameters:
     Description: Second private subnet ID (from Part 1 Landscape stack or existing subnet).
     Type: AWS::EC2::Subnet::Id
   PublicSubnet1Id:
+    Default: ''
     Description: First public subnet ID (from Part 1 Landscape stack or existing subnet). Optional.
-    Type: AWS::EC2::Subnet::Id
+    Type: String
   PublicSubnet2Id:
+    Default: ''
     Description: Second public subnet ID (from Part 1 Landscape stack or existing subnet). Optional.
-    Type: AWS::EC2::Subnet::Id
+    Type: String
   TemplateBaseUrl:
     Description: Base URL where nested templates are stored (e.g., https://s3.amazonaws.com/bucket/templates/)
     Type: String
@@ -336,10 +379,42 @@ Resources:
     Condition: CreateECSServicesCondition
     Properties:
       Parameters:
+        AlbScheme: !Ref 'AlbScheme'
+        BucketArn: !If
+          - CreateS3StorageCondition
+          - !GetAtt 'StorageStack.Outputs.BucketArn'
+          - !Ref 'ExistingBucketArn'
+        ClusterArn: !If
+          - CreateECSInfraCondition
+          - !GetAtt 'ECSStack.Outputs.ClusterArn'
+          - !Ref 'ExistingClusterArn'
+        DbHost: !If
+          - CreateRDSCondition
+          - !GetAtt 'RDSStack.Outputs.DbEndpoint'
+          - !Ref 'ExistingDatabaseEndpoint'
+        DbPort: !If
+          - CreateRDSCondition
+          - !GetAtt 'RDSStack.Outputs.DbPort'
+          - '5432'
+        DbSecretArn: !If
+          - CreateRDSCondition
+          - !GetAtt 'RDSStack.Outputs.DbSecretArn'
+          - !Ref 'ExistingDatabaseSecretArn'
+        EfsId: !Ref 'ExistingEfsId'
+        PrivateSubnets: !Sub '${PrivateSubnet1Id},${PrivateSubnet2Id}'
+        PublicSubnets: !If
+          - HasPublicSubnetsCondition
+          - !Sub '${PublicSubnet1Id},${PublicSubnet2Id}'
+          - ''
         StorageStackName: !If
           - CreateS3StorageCondition
           - !Ref 'StorageStack'
           - ''
+        TaskSecurityGroupId: !If
+          - CreateECSInfraCondition
+          - !GetAtt 'ECSStack.Outputs.TaskSGId'
+          - !Ref 'ExistingSecurityGroupId'
+        VpcId: !Ref 'VPCId'
       Tags:
         - Key: Component
           Value: Services

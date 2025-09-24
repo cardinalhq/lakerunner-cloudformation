@@ -20,8 +20,8 @@ storage_profiles:
 
 # Container Images configuration
 images:
-  migration: "public.ecr.aws/cardinalhq.io/lakerunner:v1.4.0"
-  go_services: "public.ecr.aws/cardinalhq.io/lakerunner:v1.4.0"
+  migration: "public.ecr.aws/cardinalhq.io/lakerunner:v1.4.2-rc3"
+  go_services: "public.ecr.aws/cardinalhq.io/lakerunner:v1.4.2-rc3"
 
 # Service configurations for core Lakerunner services
 services:
@@ -87,6 +87,16 @@ services:
 
   lakerunner-sweeper:
     command: ["/app/bin/lakerunner", "sweeper"]
+    cpu: 256
+    memory_mib: 512
+    replicas: 1
+    health_check:
+      type: "go"
+      command: ["/app/bin/lakerunner", "sysinfo"]
+    environment: {}
+
+  lakerunner-boxer:
+    command: ["/app/bin/lakerunner", "boxer", "--all"]
     cpu: 256
     memory_mib: 512
     replicas: 1
