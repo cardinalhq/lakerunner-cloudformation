@@ -134,29 +134,9 @@ services:
       command: ["/app/bin/lakerunner", "sysinfo"]
     environment: {}
 
-  # Boxer services for compaction and rollup
-  lakerunner-boxer-compact-logs:
-    command: ["/app/bin/lakerunner", "boxer-compact-logs"]
-    cpu: 256
-    memory_mib: 512
-    replicas: 1
-    health_check:
-      type: "go"
-      command: ["/app/bin/lakerunner", "sysinfo"]
-    environment: {}
-
-  lakerunner-boxer-compact-metrics:
-    command: ["/app/bin/lakerunner", "boxer-compact-metrics"]
-    cpu: 256
-    memory_mib: 512
-    replicas: 1
-    health_check:
-      type: "go"
-      command: ["/app/bin/lakerunner", "sysinfo"]
-    environment: {}
-
-  lakerunner-boxer-rollup-metrics:
-    command: ["/app/bin/lakerunner", "boxer-rollup-metrics"]
+  # Boxer service for all compaction and rollup tasks
+  lakerunner-boxer-common:
+    command: ["/app/bin/lakerunner", "boxer", "--all"]
     cpu: 256
     memory_mib: 512
     replicas: 1
