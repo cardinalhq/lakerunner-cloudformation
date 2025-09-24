@@ -23,14 +23,13 @@ from troposphere.ecs import (
     Service, TaskDefinition, ContainerDefinition, Environment,
     LogConfiguration, Secret as EcsSecret, Volume, MountPoint,
     HealthCheck, PortMapping, RuntimePlatform, NetworkConfiguration, AwsvpcConfiguration,
-    LoadBalancer as EcsLoadBalancer, EFSVolumeConfiguration, AuthorizationConfig
+    LoadBalancer as EcsLoadBalancer
 )
 from troposphere.iam import Role, Policy
 from troposphere.elasticloadbalancingv2 import LoadBalancer, TargetGroup, TargetGroupAttribute, Listener, Matcher
 from troposphere.elasticloadbalancingv2 import Action as AlbAction
 from troposphere.ssm import Parameter as SSMParameter
 from troposphere.ec2 import SecurityGroup, SecurityGroupIngress
-from troposphere.efs import AccessPoint, PosixUser, RootDirectory, CreationInfo
 from troposphere.logs import LogGroup
 from troposphere.secretsmanager import Secret, GenerateSecretString
 from troposphere.ssm import Parameter as SSMParameter
@@ -94,10 +93,6 @@ def create_services_template():
         "BucketArn", Type="String",
         Description="REQUIRED: ARN of the ingest bucket.",
     ))
-    EfsId = t.add_parameter(Parameter(
-        "EfsId", Type="String", Default="",
-        Description="OPTIONAL: EFS file system ID for services requiring EFS.",
-    ))
     MSKClusterArn = t.add_parameter(Parameter(
         "MSKClusterArn", Type="String", Default="",
         Description="OPTIONAL: MSK cluster ARN for Kafka operations.",
@@ -154,7 +149,7 @@ def create_services_template():
                     "Label": {"default": "Infrastructure"},
                     "Parameters": ["ClusterArn", "DbSecretArn", "DbHost", "DbPort",
                                    "TaskSecurityGroupId", "VpcId", "PrivateSubnets",
-                                   "PublicSubnets", "BucketArn", "EfsId", "AlbScheme", 
+                                   "PublicSubnets", "BucketArn", "AlbScheme", 
                                    "StorageStackName"]
                 },
                 {
@@ -176,7 +171,6 @@ def create_services_template():
                 "PrivateSubnets": {"default": "Private Subnets"},
                 "PublicSubnets": {"default": "Public Subnets"},
                 "BucketArn": {"default": "Bucket ARN"},
-                "EfsId": {"default": "EFS File System ID"},
                 "AlbScheme": {"default": "ALB Scheme"},
                 "GoServicesImage": {"default": "Lakerunner Container Image"},
                 "OtelEndpoint": {"default": "OTEL Collector Endpoint"},
@@ -204,7 +198,6 @@ def create_services_template():
     DbSecretArnValue = Ref(DbSecretArn)
     DbHostValue = Ref(DbHost)
     DbPortValue = Ref(DbPort)
-    EfsIdValue = Ref(EfsId)
     TaskSecurityGroupIdValue = Ref(TaskSecurityGroupId)
     VpcIdValue = Ref(VpcId)
     PrivateSubnetsValue = Ref(PrivateSubnets)
@@ -570,46 +563,6 @@ def create_services_template():
     ))
 
 
-    # Collect services that need EFS access points
-    services_needing_efs = {}
-    for service_name, service_config in services.items():
-        efs_mounts = service_config.get('efs_mounts', [])
-        for mount in efs_mounts:
-            access_point_name = mount['access_point_name']
-            services_needing_efs[access_point_name] = mount
-
-    # Create EFS access points
-    access_points = {}
-    for ap_name, mount_config in services_needing_efs.items():
-        # Configure access point based on service type
-        if ap_name == 'grafana':
-            # Grafana access point: don't enforce POSIX user, let containers use their own users
-            # Root-owned directory with group write permissions allows both root (init) and grafana user access
-            posix_user = PosixUser(Gid="0", Uid="0")  # Use root for access point
-            creation_info = CreationInfo(
-                OwnerGid="0",     # root group owns the directory
-                OwnerUid="0",     # root user owns the directory
-                Permissions="755"  # owner rwx, group rx, others rx - allows access to multiple users
-            )
-        else:
-            # Default for other services (currently none use EFS except Grafana)
-            posix_user = PosixUser(Gid="0", Uid="0")
-            creation_info = CreationInfo(
-                OwnerGid="0",
-                OwnerUid="0",
-                Permissions="750"
-            )
-
-        access_points[ap_name] = t.add_resource(AccessPoint(
-            f"EfsAccessPoint{ap_name.title()}",
-            FileSystemId=EfsIdValue,
-            PosixUser=posix_user,
-            RootDirectory=RootDirectory(
-                Path=mount_config['efs_path'],
-                CreationInfo=creation_info
-            ),
-            AccessPointTags=Tags(Name=Sub("${AWS::StackName}-" + ap_name))
-        ))
 
     # Keep track of target groups for ALB integration
     target_groups = {}
@@ -703,14 +656,6 @@ def create_services_template():
             ReadOnly=False
         )]
 
-        # Add EFS mount points
-        for mount in efs_mounts:
-            ap_name = mount['access_point_name']
-            mount_points.append(MountPoint(
-                ContainerPath=mount['container_path'],
-                SourceVolume=f"efs-{ap_name}",
-                ReadOnly=False
-            ))
 
         # Add bind mounts
         bind_mounts = service_config.get('bind_mounts', [])
@@ -891,8 +836,6 @@ def create_services_template():
         Export=Export(name=Sub("${AWS::StackName}-ExecutionRoleArn"))
     ))
 
-    # Surface the provided EFS filesystem ID so cfn-lint recognizes it is used
-    t.add_output(Output("EfsId", Value=EfsIdValue))
 
     # Output service ARNs
     for service_name, _ in services.items():

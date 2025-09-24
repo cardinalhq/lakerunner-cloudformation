@@ -219,14 +219,6 @@ existing_security_group_id = t.add_parameter(
     )
 )
 
-existing_efs_id = t.add_parameter(
-    Parameter(
-        "ExistingEfsId",
-        Type="String",
-        Default="",
-        Description="OPTIONAL: Existing EFS file system ID for services requiring persistent storage.",
-    )
-)
 
 alb_scheme = t.add_parameter(
     Parameter(
@@ -344,7 +336,6 @@ t.set_metadata({
                     "ExistingMSKClusterArn",
                     "ExistingClusterArn",
                     "ExistingSecurityGroupId",
-                    "ExistingEfsId",
                     "AlbScheme"
                 ]
             }
@@ -371,7 +362,6 @@ t.set_metadata({
             "ExistingMSKClusterArn": {"default": "Existing MSK Cluster ARN"},
             "ExistingClusterArn": {"default": "Existing ECS Cluster ARN"},
             "ExistingSecurityGroupId": {"default": "Existing Security Group ID"},
-            "ExistingEfsId": {"default": "Existing EFS ID"},
             "AlbScheme": {"default": "ALB Scheme"}
         }
     }
@@ -528,7 +518,6 @@ ecs_services_stack = t.add_resource(
                                   ""),
 
             # Optional parameters
-            "EfsId": Ref(existing_efs_id),
             "AlbScheme": Ref(alb_scheme)
         },
         Tags=Tags(

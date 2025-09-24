@@ -101,7 +101,7 @@ class TestServicesTemplateSimple:
         required = {
             "ClusterArn", "DbSecretArn", "DbHost", "DbPort",
             "TaskSecurityGroupId", "VpcId", "PrivateSubnets",
-            "PublicSubnets", "BucketArn", "EfsId"
+            "PublicSubnets", "BucketArn"
         }
         assert required.issubset(params.keys())
 

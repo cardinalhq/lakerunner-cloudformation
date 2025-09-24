@@ -23,7 +23,7 @@ from troposphere.ecs import (
     Service, TaskDefinition, ContainerDefinition, Environment,
     LogConfiguration, Secret as EcsSecret, Volume, MountPoint,
     HealthCheck, PortMapping, RuntimePlatform, NetworkConfiguration, AwsvpcConfiguration,
-    LoadBalancer as EcsLoadBalancer, EFSVolumeConfiguration, AuthorizationConfig
+    LoadBalancer as EcsLoadBalancer
 )
 from troposphere.iam import Role, Policy
 from troposphere.elasticloadbalancingv2 import (
@@ -32,7 +32,6 @@ from troposphere.elasticloadbalancingv2 import (
 )
 from troposphere.logs import LogGroup
 from troposphere.ec2 import SecurityGroup, SecurityGroupRule
-# EFS no longer needed for simplified config approach
 
 def load_otel_config(config_file="otel-stack-defaults.yaml"):
     """Load OTEL collector configuration from YAML file"""
@@ -147,7 +146,6 @@ def create_otel_collector_template():
     PrivateSubnetsValue = Split(",", ImportValue(ci_export("PrivateSubnets")))
     PublicSubnetsValue = Split(",", ImportValue(ci_export("PublicSubnets")))
     BucketNameValue = ImportValue(ci_export("BucketName"))
-    EfsIdValue = ImportValue(ci_export("EfsId"))
 
     # Conditions
     t.add_condition("IsInternal", Equals(Ref(LoadBalancerType), "internal"))
@@ -292,7 +290,6 @@ def create_otel_collector_template():
     ))
 
     # -----------------------
-    # EFS Access Point no longer needed - using environment variable config
 
     # -----------------------
     # IAM Roles
@@ -552,7 +549,6 @@ def create_otel_collector_template():
         Export=Export(Sub("${AWS::StackName}-ServiceArn"))
     ))
 
-    # EFS access point output no longer needed - using environment variable config
 
     return t
 

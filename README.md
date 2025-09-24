@@ -7,13 +7,13 @@ This repository contains CloudFormation templates for deploying the core Lakerun
 The core Lakerunner deployment consists of CloudFormation stacks that can be deployed in order:
 
 **Option 1: Use Existing VPC**
-1. **Common Infrastructure** (`lakerunner-common.yaml`) - RDS database, EFS, S3 bucket, SQS queue, and ALB
+1. **Common Infrastructure** (`lakerunner-common.yaml`) - RDS database, S3 bucket, SQS queue, and ALB
 2. **ECS Setup** (`lakerunner-ecs-setup.yaml`) - Database and Kafka setup task that runs once during initial setup
 3. **ECS Services** (`lakerunner-ecs-services.yaml`) - ECS Fargate services for all Lakerunner microservices
 
 **Option 2: Create New VPC (Recommended for POCs)**
 1. **VPC Infrastructure** (`lakerunner-vpc.yaml`) - Cost-optimized VPC with essential VPC endpoints
-2. **Common Infrastructure** (`lakerunner-common.yaml`) - RDS database, EFS, S3 bucket, SQS queue, and ALB
+2. **Common Infrastructure** (`lakerunner-common.yaml`) - RDS database, S3 bucket, SQS queue, and ALB
 3. **ECS Setup** (`lakerunner-ecs-setup.yaml`) - Database and Kafka setup task that runs once during initial setup
 4. **ECS Services** (`lakerunner-ecs-services.yaml`) - ECS Fargate services for all Lakerunner microservices
 
@@ -86,7 +86,7 @@ Pre-generated CloudFormation templates are available in the `generated-templates
 Deploy `generated-templates/lakerunner-common.yaml` using the AWS Console or CLI. Required parameters:
 
 - **VpcId** – VPC where resources will be created
-- **PrivateSubnets** – Private subnet IDs (for ECS/RDS/EFS). Provide at least two in different AZs.
+- **PrivateSubnets** – Private subnet IDs (for ECS/RDS). Provide at least two in different AZs.
 
 Optional parameters:
 
@@ -354,7 +354,7 @@ All services share:
 - Common ECS task execution and task roles
 - Unified secret injection from Secrets Manager and SSM
 - Standardized logging to CloudWatch
-- EFS mount for shared scratch space (/scratch)
+- Scratch volumes for temporary workspace (/scratch)
 - Health checks appropriate to service type (Go, Scala, cURL)
 - Optional OTLP telemetry export to OpenTelemetry collectors
 
@@ -372,17 +372,17 @@ This repository includes several specialized guides:
 This repository provides **4 CloudFormation stacks** with specific dependencies:
 
 1. **Common Infrastructure** (`lakerunner-common.yaml`) - Core infrastructure
-2. **Migration** (`lakerunner-migration.yaml`) - Database migration task
-3. **Services** (`lakerunner-services.yaml`) - Core Lakerunner services
-4. **Grafana Service** (`lakerunner-grafana-service.yaml`) - Optional Grafana dashboard
+2. **ECS Setup** (`lakerunner-ecs-setup.yaml`) - Database and Kafka setup task
+3. **ECS Services** (`lakerunner-ecs-services.yaml`) - Core Lakerunner services
+4. **ECS Grafana** (`lakerunner-ecs-grafana.yaml`) - Optional Grafana dashboard
 
 ### Dependency Diagram
 
 ```
 lakerunner-common (required)
-├── lakerunner-migration (required after common)
-├── lakerunner-services (required after common)
-└── lakerunner-grafana-service (optional, after common + services)
+├── lakerunner-ecs-setup (required after common)
+├── lakerunner-ecs-services (required after common)
+└── lakerunner-ecs-grafana (optional, after common + services)
 ```
 
 ### Deployment Scenarios
@@ -393,11 +393,11 @@ lakerunner-common (required)
 # 1. Core infrastructure
 aws cloudformation create-stack --stack-name lakerunner-common ...
 
-# 2. Database migration
-aws cloudformation create-stack --stack-name lakerunner-migration ...
+# 2. Database and Kafka setup
+aws cloudformation create-stack --stack-name lakerunner-ecs-setup ...
 
 # 3. Services
-aws cloudformation create-stack --stack-name lakerunner-services ...
+aws cloudformation create-stack --stack-name lakerunner-ecs-services ...
 ```
 
 #### Full Deployment (With Grafana Dashboard)
@@ -406,16 +406,16 @@ aws cloudformation create-stack --stack-name lakerunner-services ...
 # 1. Core infrastructure
 aws cloudformation create-stack --stack-name lakerunner-common ...
 
-# 2. Database migration
-aws cloudformation create-stack --stack-name lakerunner-migration ...
+# 2. Database and Kafka setup
+aws cloudformation create-stack --stack-name lakerunner-ecs-setup ...
 
 # 3. Services
-aws cloudformation create-stack --stack-name lakerunner-services ...
+aws cloudformation create-stack --stack-name lakerunner-ecs-services ...
 
 # 4. Grafana dashboard (optional)
-aws cloudformation create-stack --stack-name lakerunner-grafana \
+aws cloudformation create-stack --stack-name lakerunner-ecs-grafana \
   --parameters ParameterKey=CommonInfraStackName,ParameterValue="lakerunner-common" \
-               ParameterKey=ServicesStackName,ParameterValue="lakerunner-services" ...
+               ParameterKey=ServicesStackName,ParameterValue="lakerunner-ecs-services" ...
 ```
 
 ### Cross-Stack Resource Sharing
@@ -425,19 +425,20 @@ aws cloudformation create-stack --stack-name lakerunner-grafana \
 - VPC ID, Private/Public Subnets
 - ECS Cluster ARN
 - Database endpoint, port, credentials ARN
-- EFS filesystem ID
 - S3 bucket name/ARN
+- MSK cluster ARN and credentials
 - Security groups
 
 **Services imports from Common:**
 
 - All infrastructure resources
 - Database credentials for app configuration
-- EFS for Grafana persistence
+- MSK cluster for Kafka connectivity
 
-**Migration imports from Common:**
+**ECS Setup imports from Common:**
 
 - Database connection details
+- MSK cluster for Kafka topic creation
 - ECS cluster for task execution
 - Network configuration
 
@@ -459,28 +460,28 @@ aws cloudformation create-stack --stack-name lakerunner-grafana \
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `VpcId` | AWS::EC2::VPC::Id | Yes | - | VPC where resources will be created |
-| `PrivateSubnets` | List<AWS::EC2::Subnet::Id> | Yes | - | Private subnet IDs for ECS/RDS/EFS (≥2 in different AZs) |
+| `PrivateSubnets` | List<AWS::EC2::Subnet::Id> | Yes | - | Private subnet IDs for ECS/RDS/MSK (≥2 in different AZs) |
 | `PublicSubnets` | List<AWS::EC2::Subnet::Id> | No | - | Public subnet IDs for internet-facing ALB (≥2 in different AZs) |
 | `ApiKeysOverride` | String | No | "" | Custom API keys configuration in YAML format |
 | `StorageProfilesOverride` | String | No | "" | Custom storage profiles configuration in YAML format |
 
-### Migration Stack Parameters
+### ECS Setup Stack Parameters
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `CommonInfraStackName` | String | Yes | - | Name of the CommonInfra stack to import values from |
-| `ContainerImage` | String | No | public.ecr.aws/cardinalhq.io/lakerunner:v1.2.1 | Migration container image |
+| `ContainerImage` | String | No | public.ecr.aws/cardinalhq.io/lakerunner:v1.2.1 | Setup container image |
 | `Cpu` | String | No | "512" | Fargate CPU units (256/512/1024/2048/4096) |
 | `MemoryMiB` | String | No | "1024" | Fargate Memory in MiB (512/1024/2048/3072/4096/5120/6144/7168/8192) |
 
-### Services Stack Parameters
+### ECS Services Stack Parameters
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `CommonInfraStackName` | String | Yes | - | Name of the CommonInfra stack to import values from |
 | `AlbScheme` | String | No | "internal" | ALB scheme: "internal" or "internet-facing" |
 | `OtelEndpoint` | String | No | "" | OTEL collector HTTP endpoint (e.g., http://collector-dns:4318) |
-| `GrafanaResetToken` | String | No | "" | Change this value to reset Grafana data (wipe EFS volume) |
+| `GrafanaResetToken` | String | No | "" | Change this value to reset Grafana data (recreate database) |
 | `GoServicesImage` | String | No | public.ecr.aws/cardinalhq.io/lakerunner:v1.2.1 | Container image for Go services |
 | `QueryApiImage` | String | No | public.ecr.aws/cardinalhq.io/lakerunner/query-api:latest | Container image for query-api service |
 | `QueryWorkerImage` | String | No | public.ecr.aws/cardinalhq.io/lakerunner/query-worker:latest | Container image for query-worker service |

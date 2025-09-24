@@ -70,6 +70,8 @@ Resources:
     Type: AWS::CloudFormation::CustomResource
   DatabaseCreatorFunction:
     Properties:
+      Architectures:
+        - x86_64
       Code:
         ZipFile: |2
 
@@ -127,6 +129,8 @@ Resources:
                   cfnresponse.send(event, context, cfnresponse.FAILED, {}, reason=str(e))
       FunctionName: !Sub '${AWS::StackName}-database-creator'
       Handler: index.lambda_handler
+      Layers:
+        - !Ref 'Psycopg2Layer'
       Role: !GetAtt 'DatabaseLambdaRole.Arn'
       Runtime: python3.11
       Timeout: 300
@@ -233,6 +237,18 @@ Resources:
       VPCSecurityGroups:
         - !Ref 'DatabaseSecurityGroup'
     Type: AWS::RDS::DBInstance
+  Psycopg2Layer:
+    Properties:
+      CompatibleArchitectures:
+        - x86_64
+      CompatibleRuntimes:
+        - python3.11
+      Content:
+        S3Bucket: aws-data-wrangler-public-artifacts
+        S3Key: releases/3.9.0/awswrangler-layer-3.9.0-py3.11-x86_64.zip
+      Description: psycopg2-binary for PostgreSQL connectivity
+      LayerName: !Sub '${AWS::StackName}-psycopg2'
+    Type: AWS::Lambda::LayerVersion
   SecretsManagerTaskPolicy:
     Properties:
       PolicyDocument:

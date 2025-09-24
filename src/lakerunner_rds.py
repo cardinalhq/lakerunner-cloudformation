@@ -6,7 +6,7 @@ from troposphere.secretsmanager import Secret, GenerateSecretString
 from troposphere.rds import DBInstance, DBSubnetGroup
 from troposphere.iam import PolicyType, Role, Policy
 from troposphere.ec2 import SecurityGroup, SecurityGroupRule
-from troposphere.awslambda import Function, Code, VPCConfig
+from troposphere.awslambda import Function, Code, VPCConfig, LayerVersion, Content
 from troposphere.cloudformation import CustomResource
 
 
@@ -197,6 +197,19 @@ DatabaseLambdaRole = t.add_resource(Role(
 # -----------------------
 # Lambda Function for Database Creation
 # -----------------------
+# Add Lambda Layer for psycopg2
+Psycopg2Layer = t.add_resource(LayerVersion(
+    "Psycopg2Layer",
+    LayerName=Sub("${AWS::StackName}-psycopg2"),
+    Description="psycopg2-binary for PostgreSQL connectivity",
+    Content=Content(
+        S3Bucket="aws-data-wrangler-public-artifacts",
+        S3Key="releases/3.9.0/awswrangler-layer-3.9.0-py3.11-x86_64.zip"
+    ),
+    CompatibleRuntimes=["python3.11"],
+    CompatibleArchitectures=["x86_64"]
+))
+
 DatabaseCreatorFunction = t.add_resource(Function(
     "DatabaseCreatorFunction",
     FunctionName=Sub("${AWS::StackName}-database-creator"),
@@ -204,6 +217,8 @@ DatabaseCreatorFunction = t.add_resource(Function(
     Handler="index.lambda_handler",
     Role=GetAtt(DatabaseLambdaRole, "Arn"),
     Timeout=300,
+    Layers=[Ref(Psycopg2Layer)],
+    Architectures=["x86_64"],
     VpcConfig=VPCConfig(
         SecurityGroupIds=[Ref(DbSecurityGroup)],
         SubnetIds=Ref(PrivateSubnets)

@@ -63,7 +63,6 @@ Metadata:
           - ExistingMSKClusterArn
           - ExistingClusterArn
           - ExistingSecurityGroupId
-          - ExistingEfsId
           - AlbScheme
     ParameterLabels:
       AlbScheme:
@@ -88,8 +87,6 @@ Metadata:
         default: Existing DB Endpoint
       ExistingDatabaseSecretArn:
         default: Existing DB Secret ARN
-      ExistingEfsId:
-        default: Existing EFS ID
       ExistingMSKClusterArn:
         default: Existing MSK Cluster ARN
       ExistingSecurityGroupId:
@@ -262,10 +259,6 @@ Parameters:
     Default: ''
     Description: Existing database secret ARN. Required when CreateRDS=No.
     Type: String
-  ExistingEfsId:
-    Default: ''
-    Description: 'OPTIONAL: Existing EFS file system ID for services requiring persistent storage.'
-    Type: String
   ExistingMSKClusterArn:
     Default: ''
     Description: Existing MSK cluster ARN. Required when CreateMSK=No.
@@ -365,7 +358,6 @@ Resources:
           - CreateRDSCondition
           - !GetAtt 'RDSStack.Outputs.DbSecretArn'
           - !Ref 'ExistingDatabaseSecretArn'
-        EfsId: !Ref 'ExistingEfsId'
         MSKClusterArn: !If
           - CreateMSKCondition
           - !GetAtt 'MSKStack.Outputs.MSKClusterArn'

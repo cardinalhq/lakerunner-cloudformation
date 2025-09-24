@@ -26,7 +26,6 @@ Metadata:
           - PrivateSubnets
           - PublicSubnets
           - BucketArn
-          - EfsId
           - AlbScheme
           - StorageStackName
       - Label:
@@ -53,8 +52,6 @@ Metadata:
         default: DB Port
       DbSecretArn:
         default: DB Secret ARN
-      EfsId:
-        default: EFS File System ID
       GoServicesImage:
         default: Lakerunner Container Image
       OtelEndpoint:
@@ -78,8 +75,6 @@ Outputs:
     Export:
       Name: !Sub '${AWS::StackName}-AlbDNS'
     Value: !GetAtt 'Alb.DNSName'
-  EfsId:
-    Value: !Ref 'EfsId'
   ExecutionRoleArn:
     Export:
       Name: !Sub '${AWS::StackName}-ExecutionRoleArn'
@@ -158,10 +153,6 @@ Parameters:
     Type: String
   DbSecretArn:
     Description: 'REQUIRED: ARN of the database credentials secret.'
-    Type: String
-  EfsId:
-    Default: ''
-    Description: 'OPTIONAL: EFS file system ID for services requiring EFS.'
     Type: String
   GoServicesImage:
     Default: public.ecr.aws/cardinalhq.io/lakerunner:v1.4.2-rc3
