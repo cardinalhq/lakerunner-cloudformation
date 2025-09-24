@@ -69,6 +69,13 @@ Resources:
                   - Name: prefix
                     Value: metrics-raw/
             Queue: !GetAtt 'IngestQueue.Arn'
+          - Event: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: traces-raw/
+            Queue: !GetAtt 'IngestQueue.Arn'
     Type: AWS::S3::Bucket
   IngestQueue:
     Properties:

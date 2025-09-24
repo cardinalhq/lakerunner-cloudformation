@@ -81,6 +81,54 @@ aws cloudformation create-stack \
 
 Pre-generated CloudFormation templates are available in the `generated-templates/` directory. These are region and account agnostic, and should deploy to any AWS account where you have sufficient permissions.
 
+### Option 1: Single Root Stack Deployment (Recommended)
+
+The simplest way to deploy Lakerunner is using the root stack (`lakerunner-root.yaml`), which orchestrates all nested stacks with a single deployment command. This approach allows you to selectively enable components.
+
+Deploy `generated-templates/lakerunner-root.yaml` with the following parameters:
+
+**Required parameters:**
+- **TemplateBaseUrl** – S3 URL where nested templates are stored (upload all generated-templates/*.yaml files to S3)
+- **VpcId** – VPC where resources will be created
+- **PrivateSubnet1Id**, **PrivateSubnet2Id** – Private subnet IDs (at least two in different AZs)
+
+**Component selection (set to "Yes" to enable):**
+- **CreateS3Storage** – Create S3 bucket and SQS queue (default: Yes)
+- **CreateRDS** – Create PostgreSQL database (default: Yes)
+- **CreateMSK** – Create Kafka cluster (default: Yes)
+- **CreateECSInfrastructure** – Create ECS cluster (default: Yes)
+- **CreateECSServices** – Deploy Lakerunner services (default: Yes, requires ECS infrastructure)
+- **CreateECSCollector** – Deploy OTEL Collector (default: Yes, requires ECS infrastructure)
+- **CreateECSGrafana** – Deploy Grafana dashboard (default: No, requires ECS infrastructure)
+
+**Example deployment:**
+
+```bash
+# First, upload templates to S3
+aws s3 cp generated-templates/ s3://my-bucket/lakerunner/templates/ --recursive
+
+# Deploy with defaults (all components except Grafana)
+aws cloudformation create-stack \
+  --stack-name lakerunner \
+  --template-body file://generated-templates/lakerunner-root.yaml \
+  --parameters \
+    ParameterKey=TemplateBaseUrl,ParameterValue=https://s3.amazonaws.com/my-bucket/lakerunner/templates \
+    ParameterKey=VpcId,ParameterValue=vpc-12345678 \
+    ParameterKey=PrivateSubnet1Id,ParameterValue=subnet-12345678 \
+    ParameterKey=PrivateSubnet2Id,ParameterValue=subnet-87654321 \
+  --capabilities CAPABILITY_IAM
+
+# To also include Grafana, add:
+#   ParameterKey=CreateECSGrafana,ParameterValue=Yes
+
+# To disable ECS components, add:
+#   ParameterKey=CreateECSInfrastructure,ParameterValue=No
+```
+
+### Option 2: Individual Stack Deployment
+
+For more control over deployment order and configuration, you can deploy each stack individually:
+
 ### Step 1: Deploy Common Infrastructure
 
 Deploy `generated-templates/lakerunner-common.yaml` using the AWS Console or CLI. Required parameters:

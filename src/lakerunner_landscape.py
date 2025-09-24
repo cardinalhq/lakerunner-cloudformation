@@ -15,8 +15,8 @@ in Part 2 (Common Infrastructure).
 import yaml
 import os
 from troposphere import (
-    Template, Parameter, Output, Ref, Sub, GetAtt, Export, 
-    Join, Select, Split, Condition, Equals, Not, If, GetAZs, And, Tags, Cidr
+    Template, Parameter, Output, Ref, Sub, GetAtt, Export,
+    Join, Select, GetAZs, Cidr
 )
 from troposphere.ec2 import (
     VPC, Subnet, RouteTable, Route, SubnetRouteTableAssociation,

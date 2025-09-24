@@ -197,7 +197,6 @@ DatabaseLambdaRole = t.add_resource(Role(
 # -----------------------
 # Lambda Function for Database Creation
 # -----------------------
-# Add Lambda Layer for psycopg2
 Psycopg2Layer = t.add_resource(LayerVersion(
     "Psycopg2Layer",
     LayerName=Sub("${AWS::StackName}-psycopg2"),
@@ -325,23 +324,23 @@ t.add_resource(PolicyType(
 # Outputs
 # -----------------------
 t.add_output(Output(
-    "DbEndpoint", 
+    "DbEndpoint",
     Description="Database endpoint",
-    Value=DbEndpoint, 
+    Value=DbEndpoint,
     Export=Export(name=Sub("${AWS::StackName}-DbEndpoint"))
 ))
 
 t.add_output(Output(
-    "DbPort", 
+    "DbPort",
     Description="Database port",
-    Value=DbPort, 
+    Value=DbPort,
     Export=Export(name=Sub("${AWS::StackName}-DbPort"))
 ))
 
 t.add_output(Output(
-    "DbSecretArn", 
+    "DbSecretArn",
     Description="Database secret ARN",
-    Value=DbSecretArnValue, 
+    Value=DbSecretArnValue,
     Export=Export(name=Sub("${AWS::StackName}-DbSecretArn"))
 ))
 

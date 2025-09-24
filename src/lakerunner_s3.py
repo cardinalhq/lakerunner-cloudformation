@@ -22,7 +22,6 @@ t.set_description("Storage stack for Lakerunner (S3 ingest bucket and SQS queue)
 # -----------------------
 # Parameters
 # -----------------------
-# Note: API keys parameter moved to ECS services stack where it's actually needed
 
 StorageProfilesOverride = t.add_parameter(Parameter(
     "StorageProfilesOverride",
@@ -113,7 +112,7 @@ BucketRes = t.add_resource(Bucket(
                         Rules=[Rules(Name="prefix", Value=p)]
                     )
                 )
-            ) for p in ["otel-raw/", "logs-raw/", "metrics-raw/"]
+            ) for p in ["otel-raw/", "logs-raw/", "metrics-raw/", "traces-raw/"]
         ]
     ),
 ))
@@ -173,7 +172,7 @@ t.add_resource(PolicyType(
                 "Effect": "Allow",
                 "Action": [
                     "s3:GetObject",
-                    "s3:PutObject", 
+                    "s3:PutObject",
                     "s3:DeleteObject",
                     "s3:ListBucket"
                 ],
@@ -186,7 +185,7 @@ t.add_resource(PolicyType(
                 "Effect": "Allow",
                 "Action": [
                     "sqs:ReceiveMessage",
-                    "sqs:DeleteMessage", 
+                    "sqs:DeleteMessage",
                     "sqs:GetQueueAttributes"
                 ],
                 "Resource": GetAtt(QueueRes, "Arn")

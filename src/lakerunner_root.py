@@ -8,11 +8,10 @@ create-or-bring-your-own options for each major component.
 import yaml
 import os
 from troposphere import (
-    Template, Parameter, Ref, Equals, Sub, GetAtt, If, Not, And, Or,
-    Condition, Output, Export, Tags, Select, Split
+    Template, Parameter, Ref, Equals, Sub, GetAtt, If, Not, And,
+    Output, Export, Tags, Select, Split
 )
-from troposphere.cloudformation import Stack, WaitConditionHandle
-from troposphere.iam import Role, Policy
+from troposphere.cloudformation import Stack
 
 
 def load_defaults():
@@ -52,7 +51,6 @@ base_url = t.add_parameter(
 # =============================================================================
 # Infrastructure Selection
 # The root template orchestrates deployment using existing infrastructure
-# (either from Part 1 Landscape stack or BYO resources)
 # =============================================================================
 
 # VPC Selection Parameters (always required)
@@ -115,7 +113,7 @@ create_s3 = t.add_parameter(
 
 create_rds = t.add_parameter(
     Parameter(
-        "CreateRDS", 
+        "CreateRDS",
         Type="String",
         Default="Yes",
         AllowedValues=["Yes", "No"],
@@ -127,7 +125,7 @@ create_ecs_infra = t.add_parameter(
     Parameter(
         "CreateECSInfrastructure",
         Type="String",
-        Default="No",
+        Default="Yes",
         AllowedValues=["Yes", "No"],
         Description="Create ECS cluster and infrastructure?",
     )
@@ -137,16 +135,36 @@ create_ecs_services = t.add_parameter(
     Parameter(
         "CreateECSServices",
         Type="String",
-        Default="No",
+        Default="Yes",
         AllowedValues=["Yes", "No"],
         Description="Deploy ECS services for Lakerunner?",
+    )
+)
+
+create_ecs_collector = t.add_parameter(
+    Parameter(
+        "CreateECSCollector",
+        Type="String",
+        Default="Yes",
+        AllowedValues=["Yes", "No"],
+        Description="Deploy OTEL Collector service?",
+    )
+)
+
+create_ecs_grafana = t.add_parameter(
+    Parameter(
+        "CreateECSGrafana",
+        Type="String",
+        Default="No",
+        AllowedValues=["Yes", "No"],
+        Description="Deploy Grafana dashboard?",
     )
 )
 
 create_msk = t.add_parameter(
     Parameter(
         "CreateMSK",
-        Type="String", 
+        Type="String",
         Default="Yes",
         AllowedValues=["Yes", "No"],
         Description="Create Amazon MSK (Kafka) cluster?",
@@ -167,7 +185,7 @@ existing_db_endpoint = t.add_parameter(
     Parameter(
         "ExistingDatabaseEndpoint",
         Type="String",
-        Default="", 
+        Default="",
         Description="Existing database endpoint. Required when CreateRDS=No.",
     )
 )
@@ -277,14 +295,25 @@ db_instance_class = t.add_parameter(
 t.add_condition("CreateS3StorageCondition", Equals(Ref(create_s3), "Yes"))
 t.add_condition("CreateRDSCondition", Equals(Ref(create_rds), "Yes"))
 t.add_condition("CreateECSInfraCondition", Equals(Ref(create_ecs_infra), "Yes"))
-t.add_condition("CreateECSServicesCondition", Equals(Ref(create_ecs_services), "Yes"))
+
+# ECS-dependent services require both ECS infrastructure AND the service to be enabled
+t.add_condition("CreateECSServicesCondition", And(
+    Equals(Ref(create_ecs_infra), "Yes"),
+    Equals(Ref(create_ecs_services), "Yes")
+))
+t.add_condition("CreateECSCollectorCondition", And(
+    Equals(Ref(create_ecs_infra), "Yes"),
+    Equals(Ref(create_ecs_collector), "Yes")
+))
+t.add_condition("CreateECSGrafanaCondition", And(
+    Equals(Ref(create_ecs_infra), "Yes"),
+    Equals(Ref(create_ecs_grafana), "Yes")
+))
 t.add_condition("CreateMSKCondition", Equals(Ref(create_msk), "Yes"))
 t.add_condition("HasPublicSubnetsCondition", And(
     Not(Equals(Ref(public_subnet1), "")),
     Not(Equals(Ref(public_subnet2), ""))
 ))
-
-# Note: Task role conditions are now handled individually by each component stack
 
 # =============================================================================
 # Parameter Groups (for CloudFormation console organization)
@@ -322,7 +351,9 @@ t.set_metadata({
                 "Label": {"default": "Service Deployment Options"},
                 "Parameters": [
                     "CreateECSInfrastructure",
-                    "CreateECSServices"
+                    "CreateECSServices",
+                    "CreateECSCollector",
+                    "CreateECSGrafana"
                     # TODO: Add "CreateEKS" when EKS template is created
                 ]
             },
@@ -350,6 +381,8 @@ t.set_metadata({
             "CreateRDS": {"default": "Create RDS Database?"},
             "CreateECSInfrastructure": {"default": "Create ECS Infrastructure?"},
             "CreateECSServices": {"default": "Deploy ECS Services?"},
+            "CreateECSCollector": {"default": "Deploy OTEL Collector?"},
+            "CreateECSGrafana": {"default": "Deploy Grafana Dashboard?"},
             "CreateMSK": {"default": "Create MSK Kafka?"},
             "MSKInstanceType": {"default": "MSK Instance Type"},
             "MSKBrokerNodes": {"default": "MSK Broker Nodes"},
@@ -368,12 +401,7 @@ t.set_metadata({
 })
 
 # =============================================================================
-# Note: Individual stacks now create their own IAM roles and security groups
-# This makes each stack standalone and composable
-# =============================================================================
-
-# =============================================================================
-# Nested Stacks 
+# Nested Stacks
 # =============================================================================
 
 # ECS Infrastructure Stack (conditional)
@@ -387,7 +415,7 @@ ecs_stack = t.add_resource(
         },
         Tags=Tags(
             Component="ECS",
-            ManagedBy="Lakerunner", 
+            ManagedBy="Lakerunner",
             Environment=Ref("AWS::StackName")
         )
     )
@@ -423,7 +451,7 @@ rds_stack = t.add_resource(
             "DbInstanceClass": Ref(db_instance_class)
         },
         Tags=Tags(
-            Component="Database", 
+            Component="Database",
             ManagedBy="Lakerunner",
             Environment=Ref("AWS::StackName")
         )
@@ -525,9 +553,45 @@ ecs_services_stack = t.add_resource(
             ManagedBy="Lakerunner",
             Environment=Ref("AWS::StackName")
         )
-        # Note: Dependencies are automatically handled through GetAtt/Ref functions
-        # Services will wait for RDS/MSK/etc due to parameter references
-        # Migration runs in parallel but database is locked during setup
+    )
+)
+
+# ECS Collector Stack (optional)
+ecs_collector_stack = t.add_resource(
+    Stack(
+        "EcsCollectorStack",
+        Condition="CreateECSCollectorCondition",
+        TemplateURL=Sub("${TemplateBaseUrl}/lakerunner-ecs-collector.yaml"),
+        Parameters={
+            "CommonInfraStackName": Ref("AWS::StackName"),
+            "LoadBalancerType": Ref(alb_scheme)  # Use the same ALB scheme parameter
+        },
+        Tags=Tags(
+            Component="Collector",
+            Environment=Ref("AWS::StackName"),
+            ManagedBy="Lakerunner"
+        )
+    )
+)
+
+# ECS Grafana Stack (optional)
+ecs_grafana_stack = t.add_resource(
+    Stack(
+        "EcsGrafanaStack",
+        Condition="CreateECSGrafanaCondition",
+        TemplateURL=Sub("${TemplateBaseUrl}/lakerunner-ecs-grafana.yaml"),
+        Parameters={
+            "CommonInfraStackName": Ref("AWS::StackName"),
+            "ServicesStackName": If("CreateECSServicesCondition",
+                                   Ref(ecs_services_stack),
+                                   ""),
+            "AlbScheme": Ref(alb_scheme)
+        },
+        Tags=Tags(
+            Component="Grafana",
+            Environment=Ref("AWS::StackName"),
+            ManagedBy="Lakerunner"
+        )
     )
 )
 
@@ -583,7 +647,7 @@ t.add_output(
 t.add_output(
     Output(
         "BucketArn",
-        Description="S3 bucket ARN for ingest (created or existing)", 
+        Description="S3 bucket ARN for ingest (created or existing)",
         Value=If(
             "CreateS3StorageCondition",
             GetAtt(storage_stack, "Outputs.BucketArn"),

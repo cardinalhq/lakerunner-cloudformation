@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 """MSK stack for Lakerunner: Amazon MSK (Kafka) cluster."""
 
-import yaml
-import os
 from troposphere import (
     Template, Parameter, Ref, Sub, If, Equals, Not, Export, Output, GetAtt, Select, Split
 )
-from troposphere.msk import Cluster, BrokerNodeGroupInfo, EBSStorageInfo, StorageInfo, ClientAuthentication, Tls, Sasl, Scram, EncryptionInfo, EncryptionAtRest, EncryptionInTransit, BatchScramSecret
-from troposphere.ec2 import SecurityGroup, SecurityGroupRule
+from troposphere.msk import Cluster, BrokerNodeGroupInfo, EBSStorageInfo, StorageInfo, ClientAuthentication, Sasl, Scram, EncryptionInfo, EncryptionInTransit
+from troposphere.ec2 import SecurityGroup
 from troposphere.iam import PolicyType, Role, Policy
 from troposphere.secretsmanager import Secret, GenerateSecretString
 from troposphere.kms import Key, Alias

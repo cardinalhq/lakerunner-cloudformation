@@ -17,8 +17,8 @@ Features:
 """
 
 from troposphere import (
-    Template, Parameter, Output, Ref, Sub, GetAtt, Export, 
-    Join, Select, Split, Condition, Equals, Not, If, GetAZs, And, Tags, Cidr
+    Template, Parameter, Output, Ref, Sub, GetAtt, Export,
+    Join, Select, Equals, If, GetAZs, And, Cidr
 )
 from troposphere.ec2 import (
     VPC, Subnet, RouteTable, Route, SubnetRouteTableAssociation,
@@ -121,7 +121,7 @@ public_subnet_1 = t.add_resource(Subnet(
 ))
 
 public_subnet_2 = t.add_resource(Subnet(
-    "PublicSubnet2", 
+    "PublicSubnet2",
     Condition="CreatePublicSubnets",
     VpcId=Ref(vpc),
     AvailabilityZone=Select("1", GetAZs()),
@@ -132,7 +132,7 @@ public_subnet_2 = t.add_resource(Subnet(
     ]
 ))
 
-# Private Subnets  
+# Private Subnets
 private_subnet_1 = t.add_resource(Subnet(
     "PrivateSubnet1",
     VpcId=Ref(vpc),
@@ -290,7 +290,7 @@ logs_endpoint = t.add_resource(VPCEndpoint(
 
 # ECS - required for container management
 ecs_endpoint = t.add_resource(VPCEndpoint(
-    "EcsEndpoint", 
+    "EcsEndpoint",
     VpcId=Ref(vpc),
     ServiceName=Sub("com.amazonaws.${AWS::Region}.ecs"),
     VpcEndpointType="Interface",
@@ -304,7 +304,7 @@ ecr_api_endpoint = t.add_resource(VPCEndpoint(
     "EcrApiEndpoint",
     VpcId=Ref(vpc),
     ServiceName=Sub("com.amazonaws.${AWS::Region}.ecr.api"),
-    VpcEndpointType="Interface", 
+    VpcEndpointType="Interface",
     SubnetIds=[Ref(private_subnet_1), Ref(private_subnet_2)],
     SecurityGroupIds=[Ref(vpc_endpoint_sg)],
     PrivateDnsEnabled=True,
@@ -331,7 +331,7 @@ t.add_output(Output(
 
 t.add_output(Output(
     "VpcCidr",
-    Description="VPC CIDR block", 
+    Description="VPC CIDR block",
     Value=Ref(vpc_cidr),
     Export=Export(Sub("${AWS::StackName}-VpcCidr"))
 ))
@@ -360,7 +360,7 @@ t.add_output(Output(
 ))
 
 t.add_output(Output(
-    "PublicSubnet2", 
+    "PublicSubnet2",
     Condition="CreatePublicSubnets",
     Description="Public subnet 2 ID",
     Value=Ref(public_subnet_2),
@@ -369,7 +369,7 @@ t.add_output(Output(
 
 t.add_output(Output(
     "PrivateSubnet1",
-    Description="Private subnet 1 ID", 
+    Description="Private subnet 1 ID",
     Value=Ref(private_subnet_1),
     Export=Export(Sub("${AWS::StackName}-PrivateSubnet1"))
 ))

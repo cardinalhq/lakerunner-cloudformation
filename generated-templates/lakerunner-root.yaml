@@ -1,10 +1,28 @@
 Conditions:
+  CreateECSCollectorCondition: !And
+    - !Equals
+      - !Ref 'CreateECSInfrastructure'
+      - 'Yes'
+    - !Equals
+      - !Ref 'CreateECSCollector'
+      - 'Yes'
+  CreateECSGrafanaCondition: !And
+    - !Equals
+      - !Ref 'CreateECSInfrastructure'
+      - 'Yes'
+    - !Equals
+      - !Ref 'CreateECSGrafana'
+      - 'Yes'
   CreateECSInfraCondition: !Equals
     - !Ref 'CreateECSInfrastructure'
     - 'Yes'
-  CreateECSServicesCondition: !Equals
-    - !Ref 'CreateECSServices'
-    - 'Yes'
+  CreateECSServicesCondition: !And
+    - !Equals
+      - !Ref 'CreateECSInfrastructure'
+      - 'Yes'
+    - !Equals
+      - !Ref 'CreateECSServices'
+      - 'Yes'
   CreateMSKCondition: !Equals
     - !Ref 'CreateMSK'
     - 'Yes'
@@ -53,6 +71,8 @@ Metadata:
         Parameters:
           - CreateECSInfrastructure
           - CreateECSServices
+          - CreateECSCollector
+          - CreateECSGrafana
       - Label:
           default: Existing Resources (BYO)
         Parameters:
@@ -67,6 +87,10 @@ Metadata:
     ParameterLabels:
       AlbScheme:
         default: ALB Scheme
+      CreateECSCollector:
+        default: Deploy OTEL Collector?
+      CreateECSGrafana:
+        default: Deploy Grafana Dashboard?
       CreateECSInfrastructure:
         default: Create ECS Infrastructure?
       CreateECSServices:
@@ -196,18 +220,32 @@ Parameters:
     Default: internal
     Description: 'Load balancer scheme: ''internet-facing'' for external access or ''internal'' for internal access only.'
     Type: String
-  CreateECSInfrastructure:
+  CreateECSCollector:
+    AllowedValues:
+      - 'Yes'
+      - 'No'
+    Default: 'Yes'
+    Description: Deploy OTEL Collector service?
+    Type: String
+  CreateECSGrafana:
     AllowedValues:
       - 'Yes'
       - 'No'
     Default: 'No'
+    Description: Deploy Grafana dashboard?
+    Type: String
+  CreateECSInfrastructure:
+    AllowedValues:
+      - 'Yes'
+      - 'No'
+    Default: 'Yes'
     Description: Create ECS cluster and infrastructure?
     Type: String
   CreateECSServices:
     AllowedValues:
       - 'Yes'
       - 'No'
-    Default: 'No'
+    Default: 'Yes'
     Description: Deploy ECS services for Lakerunner?
     Type: String
   CreateMSK:
@@ -332,6 +370,40 @@ Resources:
         - Key: ManagedBy
           Value: Lakerunner
       TemplateURL: !Sub '${TemplateBaseUrl}/lakerunner-ecs.yaml'
+    Type: AWS::CloudFormation::Stack
+  EcsCollectorStack:
+    Condition: CreateECSCollectorCondition
+    Properties:
+      Parameters:
+        CommonInfraStackName: !Ref 'AWS::StackName'
+        LoadBalancerType: !Ref 'AlbScheme'
+      Tags:
+        - Key: Component
+          Value: Collector
+        - Key: Environment
+          Value: !Ref 'AWS::StackName'
+        - Key: ManagedBy
+          Value: Lakerunner
+      TemplateURL: !Sub '${TemplateBaseUrl}/lakerunner-ecs-collector.yaml'
+    Type: AWS::CloudFormation::Stack
+  EcsGrafanaStack:
+    Condition: CreateECSGrafanaCondition
+    Properties:
+      Parameters:
+        AlbScheme: !Ref 'AlbScheme'
+        CommonInfraStackName: !Ref 'AWS::StackName'
+        ServicesStackName: !If
+          - CreateECSServicesCondition
+          - !Ref 'EcsServicesStack'
+          - ''
+      Tags:
+        - Key: Component
+          Value: Grafana
+        - Key: Environment
+          Value: !Ref 'AWS::StackName'
+        - Key: ManagedBy
+          Value: Lakerunner
+      TemplateURL: !Sub '${TemplateBaseUrl}/lakerunner-ecs-grafana.yaml'
     Type: AWS::CloudFormation::Stack
   EcsServicesStack:
     Condition: CreateECSServicesCondition
