@@ -413,9 +413,15 @@ aws cloudformation create-stack --stack-name lakerunner-migration ...
 aws cloudformation create-stack --stack-name lakerunner-services ...
 
 # 4. Grafana dashboard (optional)
+# First, get the ALB DNS from the Services stack:
+ALB_DNS=$(aws cloudformation describe-stacks --stack-name lakerunner-services \
+  --query 'Stacks[0].Outputs[?OutputKey==`AlbDNS`].OutputValue' --output text)
+
 aws cloudformation create-stack --stack-name lakerunner-grafana \
+  --template-body file://generated-templates/lakerunner-grafana-service.yaml \
   --parameters ParameterKey=CommonInfraStackName,ParameterValue="lakerunner-common" \
-               ParameterKey=ServicesStackName,ParameterValue="lakerunner-services" ...
+               ParameterKey=QueryApiUrl,ParameterValue="http://${ALB_DNS}:7101" \
+  --capabilities CAPABILITY_NAMED_IAM
 ```
 
 ### Cross-Stack Resource Sharing
@@ -484,7 +490,17 @@ aws cloudformation create-stack --stack-name lakerunner-grafana \
 | `GoServicesImage` | String | No | public.ecr.aws/cardinalhq.io/lakerunner:v1.2.1 | Container image for Go services |
 | `QueryApiImage` | String | No | public.ecr.aws/cardinalhq.io/lakerunner/query-api:latest | Container image for query-api service |
 | `QueryWorkerImage` | String | No | public.ecr.aws/cardinalhq.io/lakerunner/query-worker:latest | Container image for query-worker service |
+
+### Grafana Service Stack Parameters
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `CommonInfraStackName` | String | Yes | - | Name of the CommonInfra stack to import values from |
+| `QueryApiUrl` | String | Yes | - | Full URL to the Query API endpoint (e.g., http://alb-dns.region.elb.amazonaws.com:7101) |
+| `AlbScheme` | String | No | "internal" | Load balancer scheme: "internet-facing" or "internal" |
 | `GrafanaImage` | String | No | grafana/grafana:latest | Container image for Grafana service |
+| `GrafanaInitImage` | String | No | public.ecr.aws/cardinalhq.io/lakerunner/initcontainer-grafana:latest | Container image for Grafana init container |
+| `GrafanaResetToken` | String | No | "change-to-reset-grafana" | Change this value to reset Grafana data |
 
 ### OTEL Collector Stack Parameters
 

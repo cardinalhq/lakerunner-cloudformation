@@ -10,7 +10,7 @@ Metadata:
           default: Infrastructure
         Parameters:
           - CommonInfraStackName
-          - ServicesStackName
+          - QueryApiUrl
           - AlbScheme
       - Label:
           default: Container Images
@@ -29,8 +29,8 @@ Metadata:
         default: Grafana Init Image
       GrafanaResetToken:
         default: Grafana Reset Token
-      ServicesStackName:
-        default: Services Stack Name
+      QueryApiUrl:
+        default: Query API URL
 Outputs:
   GrafanaAdminSecretArn:
     Description: 'ARN of the Grafana admin password secret. Use AWS CLI to retrieve: aws secretsmanager get-secret-value --secret-id <ARN>'
@@ -77,8 +77,8 @@ Parameters:
     Default: change-to-reset-grafana
     Description: Reset token for Grafana data wipe. Changing this value will wipe all Grafana data on next deployment.
     Type: String
-  ServicesStackName:
-    Description: 'REQUIRED: Name of the Services stack to import Query API ALB DNS and port from.'
+  QueryApiUrl:
+    Description: 'REQUIRED: Full URL to the Query API endpoint (e.g., http://alb-dns-name.region.elb.amazonaws.com:7101)'
     Type: String
 Resources:
   GrafanaAlb:
@@ -136,15 +136,12 @@ Resources:
             editable: true
             isDefault: true
             jsonData:
-              customPath: http://${QUERY_API_ALB_DNS}:7101
+              customPath: ${QUERY_API_URL}
             name: Cardinal
             secureJsonData:
               apiKey: f70603aa00e6f67999cc66e336134887
             type: cardinalhq-lakerunner-datasource
-        - QUERY_API_ALB_DNS: !ImportValue
-            Fn::Sub:
-              - ${ServicesStackName}-AlbDNS
-              - ServicesStackName: !Ref 'ServicesStackName'
+        - QUERY_API_URL: !Ref 'QueryApiUrl'
     Type: AWS::SSM::Parameter
   GrafanaDbSecret:
     Properties:

@@ -61,9 +61,9 @@ def create_grafana_template():
         Description="REQUIRED: Name of the CommonInfra stack to import infrastructure values from."
     ))
 
-    ServicesStackName = t.add_parameter(Parameter(
-        "ServicesStackName", Type="String",
-        Description="REQUIRED: Name of the Services stack to import Query API ALB DNS and port from."
+    QueryApiUrl = t.add_parameter(Parameter(
+        "QueryApiUrl", Type="String",
+        Description="REQUIRED: Full URL to the Query API endpoint (e.g., http://alb-dns-name.region.elb.amazonaws.com:7101)"
     ))
 
 
@@ -102,7 +102,7 @@ def create_grafana_template():
             "ParameterGroups": [
                 {
                     "Label": {"default": "Infrastructure"},
-                    "Parameters": ["CommonInfraStackName", "ServicesStackName", "AlbScheme"]
+                    "Parameters": ["CommonInfraStackName", "QueryApiUrl", "AlbScheme"]
                 },
                 {
                     "Label": {"default": "Container Images"},
@@ -111,7 +111,7 @@ def create_grafana_template():
             ],
             "ParameterLabels": {
                 "CommonInfraStackName": {"default": "Common Infra Stack Name"},
-                "ServicesStackName": {"default": "Services Stack Name"},
+                "QueryApiUrl": {"default": "Query API URL"},
                 "AlbScheme": {"default": "ALB Scheme"},
                 "GrafanaImage": {"default": "Grafana Image"},
                 "GrafanaInitImage": {"default": "Grafana Init Image"},
@@ -124,10 +124,6 @@ def create_grafana_template():
     def ci_export(suffix):
         return Sub("${CommonInfraStackName}-%s" % suffix, CommonInfraStackName=Ref(CommonInfraStackName))
 
-    # Helper function for Services imports
-    def svc_export(suffix):
-        return Sub("${ServicesStackName}-%s" % suffix, ServicesStackName=Ref(ServicesStackName))
-
     # Import values from other stacks
     ClusterArnValue = ImportValue(ci_export("ClusterArn"))
     TaskSecurityGroupIdValue = ImportValue(ci_export("TaskSGId"))
@@ -137,9 +133,6 @@ def create_grafana_template():
     # Import PublicSubnets - CommonInfra always exports this, but may be empty string if not provided
     PublicSubnetsImport = ImportValue(ci_export("PublicSubnets"))
     PublicSubnetsValue = Split(",", PublicSubnetsImport)
-
-    # Import Query API ALB DNS from Services stack
-    QueryApiAlbDns = ImportValue(svc_export("AlbDNS"))
 
     # Conditions
     t.add_condition("IsInternetFacing", Equals(Ref(AlbScheme), "internet-facing"))
@@ -234,7 +227,7 @@ def create_grafana_template():
                 "isDefault": True,
                 "editable": True,
                 "jsonData": {
-                    "customPath": "http://${QUERY_API_ALB_DNS}:7101"
+                    "customPath": "${QUERY_API_URL}"
                 },
                 "secureJsonData": {
                     "apiKey": default_api_key
@@ -243,12 +236,12 @@ def create_grafana_template():
         ]
     }
 
-    # Create SSM Parameter with Query API ALB DNS substitution
+    # Create SSM Parameter with Query API URL substitution
     grafana_datasource_param = t.add_resource(SSMParameter(
         "GrafanaDatasourceConfig",
         Name=Sub("${AWS::StackName}-grafana-datasource-config"),
         Type="String",
-        Value=Sub(yaml.dump(grafana_datasource_config), QUERY_API_ALB_DNS=QueryApiAlbDns),
+        Value=Sub(yaml.dump(grafana_datasource_config), QUERY_API_URL=Ref(QueryApiUrl)),
         Description="Grafana datasource configuration for Cardinal plugin"
     ))
 
