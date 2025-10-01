@@ -149,6 +149,7 @@ def create_services_template():
     DbHostValue = ImportValue(ci_export("DbEndpoint"))
     DbPortValue = ImportValue(ci_export("DbPort"))
     MSKCredentialsArnValue = ImportValue(ci_export("MSKCredentialsArn"))
+    MSKSecretsKeyArnValue = ImportValue(ci_export("MSKSecretsKeyArn"))
     EfsIdValue = ImportValue(ci_export("EfsId"))
     TaskSecurityGroupIdValue = ImportValue(ci_export("TaskSGId"))
     VpcIdValue = ImportValue(ci_export("VpcId"))
@@ -305,6 +306,14 @@ def create_services_template():
                                 Sub("${SecretArn}*", SecretArn=MSKCredentialsArnValue),
                                 Sub("arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*")
                             ]
+                        },
+                        {
+                            "Effect": "Allow",
+                            "Action": [
+                                "kms:Decrypt",
+                                "kms:DescribeKey"
+                            ],
+                            "Resource": MSKSecretsKeyArnValue
                         }
                     ]
                 }
@@ -372,6 +381,14 @@ def create_services_template():
                         {
                             "Effect": "Allow",
                             "Action": [
+                                "kms:Decrypt",
+                                "kms:DescribeKey"
+                            ],
+                            "Resource": MSKSecretsKeyArnValue
+                        },
+                        {
+                            "Effect": "Allow",
+                            "Action": [
                                 "elasticfilesystem:ClientMount",
                                 "elasticfilesystem:ClientWrite",
                                 "elasticfilesystem:ClientRootAccess",
@@ -428,6 +445,14 @@ def create_services_template():
                                 Sub("${SecretArn}*", SecretArn=MSKCredentialsArnValue),
                                 Sub("arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*")
                             ]
+                        },
+                        {
+                            "Effect": "Allow",
+                            "Action": [
+                                "kms:Decrypt",
+                                "kms:DescribeKey"
+                            ],
+                            "Resource": MSKSecretsKeyArnValue
                         },
                         {
                             "Effect": "Allow",
@@ -498,6 +523,14 @@ def create_services_template():
                                 Sub("${SecretArn}*", SecretArn=MSKCredentialsArnValue),
                                 Sub("arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*")
                             ]
+                        },
+                        {
+                            "Effect": "Allow",
+                            "Action": [
+                                "kms:Decrypt",
+                                "kms:DescribeKey"
+                            ],
+                            "Resource": MSKSecretsKeyArnValue
                         },
                         {
                             "Effect": "Allow",
