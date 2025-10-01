@@ -179,6 +179,12 @@ Resources:
                     Fn::Sub: ${CommonInfraStackName}-DbSecretArn
                   - !ImportValue
                     Fn::Sub: ${CommonInfraStackName}-MSKCredentialsArn
+              - Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Effect: Allow
+                Resource: !ImportValue
+                  Fn::Sub: ${CommonInfraStackName}-MSKSecretsKeyArn
             Version: '2012-10-17'
           PolicyName: MigrationTaskPolicy
     Type: AWS::IAM::Role
@@ -374,6 +380,12 @@ Resources:
                 Resource:
                   - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
                   - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
+              - Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Effect: Allow
+                Resource: !ImportValue
+                  Fn::Sub: ${CommonInfraStackName}-MSKSecretsKeyArn
             Version: '2012-10-17'
           PolicyName: TaskExecutionSecretsPolicy
     Type: AWS::IAM::Role

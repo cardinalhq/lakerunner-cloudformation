@@ -119,6 +119,7 @@ ClusterArnValue = ImportValue(ci_export("ClusterArn"))
 DbHostValue = ImportValue(ci_export("DbEndpoint"))
 DbSecretArnValue = ImportValue(ci_export("DbSecretArn"))
 MSKCredentialsArnValue = ImportValue(ci_export("MSKCredentialsArn"))
+MSKSecretsKeyArnValue = ImportValue(ci_export("MSKSecretsKeyArn"))
 SecurityGroupsValue = ImportValue(ci_export("TaskSGId"))
 PrivateSubnetsValue = Split(",", ImportValue(ci_export("PrivateSubnets")))
 
@@ -155,6 +156,11 @@ TaskRole = t.add_resource(Role(
                         "Effect": "Allow",
                         "Action": ["secretsmanager:GetSecretValue"],
                         "Resource": [DbSecretArnValue, MSKCredentialsArnValue]
+                    },
+                    {
+                        "Effect": "Allow",
+                        "Action": ["kms:Decrypt", "kms:DescribeKey"],
+                        "Resource": MSKSecretsKeyArnValue
                     }
                 ]
             }
@@ -200,6 +206,11 @@ ExecutionRole = t.add_resource(Role(
                             Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys"),
                             Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles")
                         ]
+                    },
+                    {
+                        "Effect": "Allow",
+                        "Action": ["kms:Decrypt", "kms:DescribeKey"],
+                        "Resource": MSKSecretsKeyArnValue
                     }
                 ]
             }
