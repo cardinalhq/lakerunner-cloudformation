@@ -341,7 +341,7 @@ Resources:
             - Name: GF_SERVER_ROOT_URL
               Value: '%(protocol)s://%(domain)s:%(http_port)s'
             - Name: GF_INSTALL_PLUGINS
-              Value: https://github.com/cardinalhq/cardinalhq-lakerunner-datasource/releases/download/v1.2.0-rc.20/cardinalhq-lakerunner-datasource.zip;cardinalhq-lakerunner-datasource
+              Value: https://github.com/cardinalhq/cardinalhq-lakerunner-datasource/releases/download/v1.2.0/cardinalhq-lakerunner-datasource.zip;cardinalhq-lakerunner-datasource
             - Name: GF_PATHS_PROVISIONING
               Value: /etc/grafana/provisioning
             - Name: GF_SECURITY_ALLOW_EMBEDDING

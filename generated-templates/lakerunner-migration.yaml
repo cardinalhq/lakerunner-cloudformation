@@ -53,7 +53,7 @@ Parameters:
     Description: 'REQUIRED: Name of the CommonInfra stack to import values from.'
     Type: String
   ContainerImage:
-    Default: public.ecr.aws/cardinalhq.io/lakerunner:v1.4.4
+    Default: public.ecr.aws/cardinalhq.io/lakerunner:v1.4.7
     Description: Migration container image.
     Type: String
   Cpu:

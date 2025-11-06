@@ -111,7 +111,7 @@ Parameters:
     Description: 'REQUIRED: Name of the CommonInfra stack to import infrastructure values from.'
     Type: String
   GoServicesImage:
-    Default: public.ecr.aws/cardinalhq.io/lakerunner:v1.4.4
+    Default: public.ecr.aws/cardinalhq.io/lakerunner:v1.4.7
     Description: Container image for all Go services (pubsub, ingest, compact, query-api, query-worker, etc.)
     Type: String
   MSKBrokers:
