@@ -42,15 +42,19 @@ echo "3. Generating Lakerunner Migration Task..."
 python3 src/lakerunner_migration.py > generated-templates/lakerunner-migration.yaml
 cfn-lint generated-templates/lakerunner-migration.yaml
 
-echo "4. Generating Lakerunner Services..."
+echo "4. Generating Lakerunner Utility Task..."
+python3 src/lakerunner_utility.py > generated-templates/lakerunner-utility.yaml
+cfn-lint generated-templates/lakerunner-utility.yaml
+
+echo "5. Generating Lakerunner Services..."
 python3 src/lakerunner_services.py > generated-templates/lakerunner-services.yaml
 cfn-lint generated-templates/lakerunner-services.yaml
 
-echo "5. Generating Lakerunner Grafana Service..."
+echo "6. Generating Lakerunner Grafana Service..."
 python3 src/lakerunner_grafana_service.py > generated-templates/lakerunner-grafana-service.yaml
 cfn-lint generated-templates/lakerunner-grafana-service.yaml
 
-echo "6. Generating Demo OTEL Collector..."
+echo "7. Generating Demo OTEL Collector..."
 python3 src/demo_otel_collector.py > generated-templates/lakerunner-demo-otel-collector.yaml
 cfn-lint generated-templates/lakerunner-demo-otel-collector.yaml
 

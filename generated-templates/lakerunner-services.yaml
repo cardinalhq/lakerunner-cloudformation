@@ -111,7 +111,7 @@ Parameters:
     Description: 'REQUIRED: Name of the CommonInfra stack to import infrastructure values from.'
     Type: String
   GoServicesImage:
-    Default: public.ecr.aws/cardinalhq.io/lakerunner:v1.4.7
+    Default: public.ecr.aws/cardinalhq.io/lakerunner:v1.4.10
     Description: Container image for all Go services (pubsub, ingest, compact, query-api, query-worker, etc.)
     Type: String
   MSKBrokers:
@@ -464,7 +464,7 @@ Resources:
         Fn::Sub:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
-      DesiredCount: '2'
+      DesiredCount: '4'
       EnableECSManagedTags: true
       EnableExecuteCommand: true
       LaunchType: FARGATE
@@ -536,7 +536,7 @@ Resources:
         Fn::Sub:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
-      DesiredCount: '2'
+      DesiredCount: '4'
       EnableECSManagedTags: true
       EnableExecuteCommand: true
       LaunchType: FARGATE
@@ -646,7 +646,7 @@ Resources:
         Fn::Sub:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
-      DesiredCount: '1'
+      DesiredCount: '2'
       EnableECSManagedTags: true
       EnableExecuteCommand: true
       LaunchType: FARGATE
@@ -686,7 +686,7 @@ Resources:
         Fn::Sub:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
-      DesiredCount: '2'
+      DesiredCount: '4'
       EnableECSManagedTags: true
       EnableExecuteCommand: true
       LaunchType: FARGATE
@@ -1055,10 +1055,10 @@ Resources:
                       - ${CommonInfraStackName}-MSKCredentialsArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
           User: '0'
-      Cpu: '1024'
+      Cpu: '2048'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
       Family: lakerunner-compact-logs-task
-      Memory: '2048'
+      Memory: '4096'
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE
@@ -1335,10 +1335,10 @@ Resources:
                       - ${CommonInfraStackName}-MSKCredentialsArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
           User: '0'
-      Cpu: '1024'
+      Cpu: '2048'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
       Family: lakerunner-ingest-logs-task
-      Memory: '2048'
+      Memory: '4096'
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE

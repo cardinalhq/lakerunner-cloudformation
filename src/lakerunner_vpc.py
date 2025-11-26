@@ -17,8 +17,8 @@ Features:
 """
 
 from troposphere import (
-    Template, Parameter, Output, Ref, Sub, GetAtt, Export, 
-    Join, Select, Split, Condition, Equals, Not, If, GetAZs
+    Template, Parameter, Output, Ref, Sub, GetAtt, Export,
+    Join, Select, Split, Condition, Equals, Not, If, GetAZs, Cidr
 )
 from troposphere.ec2 import (
     VPC, Subnet, RouteTable, Route, SubnetRouteTableAssociation,
@@ -91,7 +91,7 @@ public_subnet_1 = t.add_resource(Subnet(
     "PublicSubnet1",
     VpcId=Ref(vpc),
     AvailabilityZone=Select("0", GetAZs()),
-    CidrBlock="10.0.1.0/24",
+    CidrBlock=Select("0", Cidr(Ref(vpc_cidr), 4, 8)),
     MapPublicIpOnLaunch=True,
     Tags=[
         {"Key": "Name", "Value": Sub("${EnvironmentName}-public-1")},
@@ -100,10 +100,10 @@ public_subnet_1 = t.add_resource(Subnet(
 ))
 
 public_subnet_2 = t.add_resource(Subnet(
-    "PublicSubnet2", 
+    "PublicSubnet2",
     VpcId=Ref(vpc),
     AvailabilityZone=Select("1", GetAZs()),
-    CidrBlock="10.0.2.0/24",
+    CidrBlock=Select("1", Cidr(Ref(vpc_cidr), 4, 8)),
     MapPublicIpOnLaunch=True,
     Tags=[
         {"Key": "Name", "Value": Sub("${EnvironmentName}-public-2")},
@@ -111,12 +111,12 @@ public_subnet_2 = t.add_resource(Subnet(
     ]
 ))
 
-# Private Subnets  
+# Private Subnets
 private_subnet_1 = t.add_resource(Subnet(
     "PrivateSubnet1",
     VpcId=Ref(vpc),
     AvailabilityZone=Select("0", GetAZs()),
-    CidrBlock="10.0.10.0/24",
+    CidrBlock=Select("2", Cidr(Ref(vpc_cidr), 4, 8)),
     MapPublicIpOnLaunch=False,
     Tags=[
         {"Key": "Name", "Value": Sub("${EnvironmentName}-private-1")},
@@ -128,7 +128,7 @@ private_subnet_2 = t.add_resource(Subnet(
     "PrivateSubnet2",
     VpcId=Ref(vpc),
     AvailabilityZone=Select("1", GetAZs()),
-    CidrBlock="10.0.11.0/24",
+    CidrBlock=Select("3", Cidr(Ref(vpc_cidr), 4, 8)),
     MapPublicIpOnLaunch=False,
     Tags=[
         {"Key": "Name", "Value": Sub("${EnvironmentName}-private-2")},

@@ -369,7 +369,20 @@
       }
      ]
     },
-    "CidrBlock": "10.0.10.0/24",
+    "CidrBlock": {
+     "Fn::Select": [
+      "2",
+      {
+       "Fn::Cidr": [
+        {
+         "Ref": "VpcCidr"
+        },
+        4,
+        8
+       ]
+      }
+     ]
+    },
     "MapPublicIpOnLaunch": false,
     "Tags": [
      {
@@ -410,7 +423,20 @@
       }
      ]
     },
-    "CidrBlock": "10.0.11.0/24",
+    "CidrBlock": {
+     "Fn::Select": [
+      "3",
+      {
+       "Fn::Cidr": [
+        {
+         "Ref": "VpcCidr"
+        },
+        4,
+        8
+       ]
+      }
+     ]
+    },
     "MapPublicIpOnLaunch": false,
     "Tags": [
      {
@@ -480,7 +506,20 @@
       }
      ]
     },
-    "CidrBlock": "10.0.1.0/24",
+    "CidrBlock": {
+     "Fn::Select": [
+      "0",
+      {
+       "Fn::Cidr": [
+        {
+         "Ref": "VpcCidr"
+        },
+        4,
+        8
+       ]
+      }
+     ]
+    },
     "MapPublicIpOnLaunch": true,
     "Tags": [
      {
@@ -521,7 +560,20 @@
       }
      ]
     },
-    "CidrBlock": "10.0.2.0/24",
+    "CidrBlock": {
+     "Fn::Select": [
+      "1",
+      {
+       "Fn::Cidr": [
+        {
+         "Ref": "VpcCidr"
+        },
+        4,
+        8
+       ]
+      }
+     ]
+    },
     "MapPublicIpOnLaunch": true,
     "Tags": [
      {

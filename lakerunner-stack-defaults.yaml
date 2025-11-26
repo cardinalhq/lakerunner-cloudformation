@@ -20,8 +20,9 @@ storage_profiles:
 
 # Container Images configuration
 images:
-  migration: "public.ecr.aws/cardinalhq.io/lakerunner:v1.4.7"
-  go_services: "public.ecr.aws/cardinalhq.io/lakerunner:v1.4.7"
+  migration: "public.ecr.aws/cardinalhq.io/lakerunner:v1.4.10"
+  utility: "public.ecr.aws/cardinalhq.io/lakerunner:v1.4.10"
+  go_services: "public.ecr.aws/cardinalhq.io/lakerunner:v1.4.10"
 
 # MSK configuration
 msk:
