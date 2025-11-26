@@ -805,7 +805,15 @@ def create_services_template():
                     SecurityGroups=[TaskSecurityGroupIdValue]
                 )
             ),
-            EnableExecuteCommand=True
+            EnableExecuteCommand=True,
+            EnableECSManagedTags=True,
+            PropagateTags="SERVICE",
+            Tags=Tags(
+                Name=Sub(f"${{AWS::StackName}}-{service_name}"),
+                ManagedBy="Lakerunner",
+                Environment=Ref("AWS::StackName"),
+                Component="Service"
+            )
         ))
 
         # Store target group mapping for ALB services (use local target groups)

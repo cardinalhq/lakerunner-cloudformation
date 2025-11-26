@@ -518,7 +518,15 @@ def create_otel_collector_template():
             )
         ],
         EnableExecuteCommand=True,
-        DependsOn=[GrpcListener, HttpListener]
+        EnableECSManagedTags=True,
+        PropagateTags="SERVICE",
+        DependsOn=[GrpcListener, HttpListener],
+        Tags=Tags(
+            Name=Sub("${AWS::StackName}-otel-gateway"),
+            ManagedBy="Lakerunner",
+            Environment=Ref("AWS::StackName"),
+            Component="Service"
+        )
     ))
 
     # -----------------------

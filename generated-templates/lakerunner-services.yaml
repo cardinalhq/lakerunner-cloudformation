@@ -429,6 +429,7 @@ Resources:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
       DesiredCount: '1'
+      EnableECSManagedTags: true
       EnableExecuteCommand: true
       LaunchType: FARGATE
       NetworkConfiguration:
@@ -444,7 +445,17 @@ Resources:
               Fn::Sub:
                 - ${CommonInfraStackName}-PrivateSubnets
                 - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      PropagateTags: SERVICE
       ServiceName: lakerunner-boxer-common
+      Tags:
+        - Key: Component
+          Value: Service
+        - Key: Environment
+          Value: !Ref 'AWS::StackName'
+        - Key: ManagedBy
+          Value: Lakerunner
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-lakerunner-boxer-common'
       TaskDefinition: !Ref 'TaskDefLakerunnerBoxerCommon'
     Type: AWS::ECS::Service
   ServiceLakerunnerCompactLogs:
@@ -454,6 +465,7 @@ Resources:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
       DesiredCount: '2'
+      EnableECSManagedTags: true
       EnableExecuteCommand: true
       LaunchType: FARGATE
       NetworkConfiguration:
@@ -469,7 +481,17 @@ Resources:
               Fn::Sub:
                 - ${CommonInfraStackName}-PrivateSubnets
                 - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      PropagateTags: SERVICE
       ServiceName: lakerunner-compact-logs
+      Tags:
+        - Key: Component
+          Value: Service
+        - Key: Environment
+          Value: !Ref 'AWS::StackName'
+        - Key: ManagedBy
+          Value: Lakerunner
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-lakerunner-compact-logs'
       TaskDefinition: !Ref 'TaskDefLakerunnerCompactLogs'
     Type: AWS::ECS::Service
   ServiceLakerunnerCompactMetrics:
@@ -479,6 +501,7 @@ Resources:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
       DesiredCount: '2'
+      EnableECSManagedTags: true
       EnableExecuteCommand: true
       LaunchType: FARGATE
       NetworkConfiguration:
@@ -494,7 +517,17 @@ Resources:
               Fn::Sub:
                 - ${CommonInfraStackName}-PrivateSubnets
                 - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      PropagateTags: SERVICE
       ServiceName: lakerunner-compact-metrics
+      Tags:
+        - Key: Component
+          Value: Service
+        - Key: Environment
+          Value: !Ref 'AWS::StackName'
+        - Key: ManagedBy
+          Value: Lakerunner
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-lakerunner-compact-metrics'
       TaskDefinition: !Ref 'TaskDefLakerunnerCompactMetrics'
     Type: AWS::ECS::Service
   ServiceLakerunnerIngestLogs:
@@ -504,6 +537,7 @@ Resources:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
       DesiredCount: '2'
+      EnableECSManagedTags: true
       EnableExecuteCommand: true
       LaunchType: FARGATE
       NetworkConfiguration:
@@ -519,7 +553,17 @@ Resources:
               Fn::Sub:
                 - ${CommonInfraStackName}-PrivateSubnets
                 - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      PropagateTags: SERVICE
       ServiceName: lakerunner-ingest-logs
+      Tags:
+        - Key: Component
+          Value: Service
+        - Key: Environment
+          Value: !Ref 'AWS::StackName'
+        - Key: ManagedBy
+          Value: Lakerunner
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-lakerunner-ingest-logs'
       TaskDefinition: !Ref 'TaskDefLakerunnerIngestLogs'
     Type: AWS::ECS::Service
   ServiceLakerunnerIngestMetrics:
@@ -529,6 +573,7 @@ Resources:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
       DesiredCount: '1'
+      EnableECSManagedTags: true
       EnableExecuteCommand: true
       LaunchType: FARGATE
       NetworkConfiguration:
@@ -544,7 +589,17 @@ Resources:
               Fn::Sub:
                 - ${CommonInfraStackName}-PrivateSubnets
                 - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      PropagateTags: SERVICE
       ServiceName: lakerunner-ingest-metrics
+      Tags:
+        - Key: Component
+          Value: Service
+        - Key: Environment
+          Value: !Ref 'AWS::StackName'
+        - Key: ManagedBy
+          Value: Lakerunner
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-lakerunner-ingest-metrics'
       TaskDefinition: !Ref 'TaskDefLakerunnerIngestMetrics'
     Type: AWS::ECS::Service
   ServiceLakerunnerPubsubSqs:
@@ -554,6 +609,7 @@ Resources:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
       DesiredCount: '1'
+      EnableECSManagedTags: true
       EnableExecuteCommand: true
       LaunchType: FARGATE
       NetworkConfiguration:
@@ -569,7 +625,17 @@ Resources:
               Fn::Sub:
                 - ${CommonInfraStackName}-PrivateSubnets
                 - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      PropagateTags: SERVICE
       ServiceName: lakerunner-pubsub-sqs
+      Tags:
+        - Key: Component
+          Value: Service
+        - Key: Environment
+          Value: !Ref 'AWS::StackName'
+        - Key: ManagedBy
+          Value: Lakerunner
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-lakerunner-pubsub-sqs'
       TaskDefinition: !Ref 'TaskDefLakerunnerPubsubSqs'
     Type: AWS::ECS::Service
   ServiceLakerunnerQueryApi:
@@ -581,6 +647,7 @@ Resources:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
       DesiredCount: '1'
+      EnableECSManagedTags: true
       EnableExecuteCommand: true
       LaunchType: FARGATE
       LoadBalancers:
@@ -600,7 +667,17 @@ Resources:
               Fn::Sub:
                 - ${CommonInfraStackName}-PrivateSubnets
                 - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      PropagateTags: SERVICE
       ServiceName: lakerunner-query-api
+      Tags:
+        - Key: Component
+          Value: Service
+        - Key: Environment
+          Value: !Ref 'AWS::StackName'
+        - Key: ManagedBy
+          Value: Lakerunner
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-lakerunner-query-api'
       TaskDefinition: !Ref 'TaskDefLakerunnerQueryApi'
     Type: AWS::ECS::Service
   ServiceLakerunnerQueryWorker:
@@ -610,6 +687,7 @@ Resources:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
       DesiredCount: '2'
+      EnableECSManagedTags: true
       EnableExecuteCommand: true
       LaunchType: FARGATE
       NetworkConfiguration:
@@ -625,7 +703,17 @@ Resources:
               Fn::Sub:
                 - ${CommonInfraStackName}-PrivateSubnets
                 - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      PropagateTags: SERVICE
       ServiceName: lakerunner-query-worker
+      Tags:
+        - Key: Component
+          Value: Service
+        - Key: Environment
+          Value: !Ref 'AWS::StackName'
+        - Key: ManagedBy
+          Value: Lakerunner
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-lakerunner-query-worker'
       TaskDefinition: !Ref 'TaskDefLakerunnerQueryWorker'
     Type: AWS::ECS::Service
   ServiceLakerunnerRollupMetrics:
@@ -635,6 +723,7 @@ Resources:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
       DesiredCount: '2'
+      EnableECSManagedTags: true
       EnableExecuteCommand: true
       LaunchType: FARGATE
       NetworkConfiguration:
@@ -650,7 +739,17 @@ Resources:
               Fn::Sub:
                 - ${CommonInfraStackName}-PrivateSubnets
                 - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      PropagateTags: SERVICE
       ServiceName: lakerunner-rollup-metrics
+      Tags:
+        - Key: Component
+          Value: Service
+        - Key: Environment
+          Value: !Ref 'AWS::StackName'
+        - Key: ManagedBy
+          Value: Lakerunner
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-lakerunner-rollup-metrics'
       TaskDefinition: !Ref 'TaskDefLakerunnerRollupMetrics'
     Type: AWS::ECS::Service
   ServiceLakerunnerSweeper:
@@ -660,6 +759,7 @@ Resources:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
       DesiredCount: '1'
+      EnableECSManagedTags: true
       EnableExecuteCommand: true
       LaunchType: FARGATE
       NetworkConfiguration:
@@ -675,7 +775,17 @@ Resources:
               Fn::Sub:
                 - ${CommonInfraStackName}-PrivateSubnets
                 - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      PropagateTags: SERVICE
       ServiceName: lakerunner-sweeper
+      Tags:
+        - Key: Component
+          Value: Service
+        - Key: Environment
+          Value: !Ref 'AWS::StackName'
+        - Key: ManagedBy
+          Value: Lakerunner
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-lakerunner-sweeper'
       TaskDefinition: !Ref 'TaskDefLakerunnerSweeper'
     Type: AWS::ECS::Service
   TaskDefLakerunnerBoxerCommon:
