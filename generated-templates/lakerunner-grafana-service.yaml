@@ -228,6 +228,7 @@ Resources:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
       DesiredCount: '1'
+      EnableECSManagedTags: true
       EnableExecuteCommand: true
       LaunchType: FARGATE
       LoadBalancers:
@@ -247,7 +248,17 @@ Resources:
               Fn::Sub:
                 - ${CommonInfraStackName}-PrivateSubnets
                 - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      PropagateTags: SERVICE
       ServiceName: grafana
+      Tags:
+        - Key: Component
+          Value: Service
+        - Key: Environment
+          Value: !Ref 'AWS::StackName'
+        - Key: ManagedBy
+          Value: Lakerunner
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-grafana'
       TaskDefinition: !Ref 'GrafanaTaskDef'
     Type: AWS::ECS::Service
   GrafanaTaskDef:

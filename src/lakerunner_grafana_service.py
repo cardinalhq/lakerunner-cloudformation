@@ -17,7 +17,7 @@ import yaml
 import os
 from troposphere import (
     Template, Parameter, Ref, Sub, GetAtt, If, Equals, Export, Output,
-    ImportValue, Split
+    ImportValue, Split, Tags
 )
 from troposphere.ecs import (
     Service, TaskDefinition, ContainerDefinition, Environment,
@@ -574,7 +574,15 @@ def create_grafana_template():
             TargetGroupArn=Ref(GrafanaTg)
         )],
         DependsOn=["GrafanaListener"],
-        EnableExecuteCommand=True
+        EnableExecuteCommand=True,
+        EnableECSManagedTags=True,
+        PropagateTags="SERVICE",
+        Tags=Tags(
+            Name=Sub("${AWS::StackName}-grafana"),
+            ManagedBy="Lakerunner",
+            Environment=Ref("AWS::StackName"),
+            Component="Service"
+        )
     ))
 
     # -----------------------
