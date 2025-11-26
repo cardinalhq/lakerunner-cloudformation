@@ -1,0 +1,402 @@
+Description: 'Lakerunner utility task runner (single template): defines TaskDefinition and runs it via Custom Resource.'
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: CommonInfra Stack
+        Parameters:
+          - CommonInfraStackName
+      - Label:
+          default: Command Configuration
+        Parameters:
+          - CommandArguments
+      - Label:
+          default: MSK Configuration
+        Parameters:
+          - MSKBrokers
+      - Label:
+          default: Task Sizing
+        Parameters:
+          - Cpu
+          - MemoryMiB
+      - Label:
+          default: Container Image
+        Parameters:
+          - ContainerImage
+    ParameterLabels:
+      CommandArguments:
+        default: Command Arguments
+      CommonInfraStackName:
+        default: CommonInfra Stack Name
+      ContainerImage:
+        default: Utility Image
+      Cpu:
+        default: Fargate CPU
+      MSKBrokers:
+        default: MSK Broker Endpoints
+      MemoryMiB:
+        default: Fargate Memory (MiB)
+Outputs:
+  LogGroupName:
+    Export:
+      Name: !Sub '${AWS::StackName}-LogGroup'
+    Value: !Ref 'UtilityLogGroup'
+  RunUtilityId:
+    Export:
+      Name: !Sub '${AWS::StackName}-RunUtilityId'
+    Value: !Ref 'RunUtility'
+  RunnerFunctionArn:
+    Export:
+      Name: !Sub '${AWS::StackName}-RunnerFnArn'
+    Value: !GetAtt 'RunEcsTaskFunction.Arn'
+  TaskDefinitionArn:
+    Export:
+      Name: !Sub '${AWS::StackName}-TaskDefinitionArn'
+    Value: !GetAtt 'UtilityTaskDef.TaskDefinitionArn'
+Parameters:
+  CommandArguments:
+    Default: ''
+    Description: 'REQUIRED: Command arguments to pass to lakerunner binary (e.g., ''debug kafka flush-consumer --dry-run --group <group>'').'
+    Type: String
+  CommonInfraStackName:
+    Default: ''
+    Description: 'REQUIRED: Name of the CommonInfra stack to import values from.'
+    Type: String
+  ContainerImage:
+    Default: public.ecr.aws/cardinalhq.io/lakerunner:v1.4.10
+    Description: Utility container image.
+    Type: String
+  Cpu:
+    Default: '512'
+    Description: Fargate CPU units (e.g., 256/512/1024).
+    Type: String
+  MSKBrokers:
+    Default: ''
+    Description: 'REQUIRED: Comma-separated list of MSK broker endpoints (hostname:port)'
+    Type: String
+  MemoryMiB:
+    Default: '1024'
+    Description: Fargate Memory MiB (e.g., 512/1024/2048).
+    Type: String
+Resources:
+  RunEcsTaskFunction:
+    Properties:
+      Code:
+        ZipFile: |2
+
+          import json, time, urllib.request, boto3
+
+          ecs = boto3.client("ecs")
+
+          def send(event, context, status, data=None, reason=""):
+              resp = {
+                  "Status": status,
+                  "Reason": f"{reason} See CloudWatch Logs for details: {context.log_stream_name}",
+                  "PhysicalResourceId": event.get("PhysicalResourceId") or "RunEcsTask",
+                  "StackId": event["StackId"],
+                  "RequestId": event["RequestId"],
+                  "LogicalResourceId": event["LogicalResourceId"],
+                  "NoEcho": False,
+                  "Data": data or {}
+              }
+              body = json.dumps(resp).encode("utf-8")
+              req = urllib.request.Request(event["ResponseURL"], data=body, method="PUT")
+              req.add_header("content-type","")
+              req.add_header("content-length", str(len(body)))
+              try:
+                  with urllib.request.urlopen(req) as r:
+                      r.read()
+              except Exception as e:
+                  print("Failed to send response:", e)
+
+          def handler(event, context):
+              print("Event:", json.dumps(event))
+              reqtype = event["RequestType"]
+              props = event.get("ResourceProperties", {})
+
+              if reqtype == "Delete":
+                  send(event, context, "SUCCESS", {"Message":"Delete no-op"})
+                  return
+
+              cluster = props["ClusterArn"]
+              taskdef = props["TaskDefinitionArn"]
+              subnets = props["Subnets"]
+              sgs = props["SecurityGroups"]
+              assign = props.get("AssignPublicIp","DISABLED")
+
+              try:
+                  run = ecs.run_task(
+                      cluster=cluster,
+                      taskDefinition=taskdef,
+                      launchType="FARGATE",
+                      platformVersion="LATEST",
+                      networkConfiguration={
+                          "awsvpcConfiguration": {
+                              "subnets": subnets,
+                              "securityGroups": sgs,
+                              "assignPublicIp": assign
+                          }
+                      },
+                      count=1
+                  )
+                  failures = run.get("failures",[])
+                  if failures:
+                      reason = "; ".join(f.get("reason","unknown") for f in failures)
+                      send(event, context, "FAILED", {"RunFailures": failures}, reason=f"RunTask failures: {reason}")
+                      return
+
+                  tasks = run.get("tasks", [])
+                  if not tasks:
+                      send(event, context, "FAILED", {"Message":"ecs.run_task returned no tasks"}, reason="No task started")
+                      return
+
+                  task_arn = tasks[0]["taskArn"]
+                  print("Started task:", task_arn)
+
+                  deadline = time.time() + 14*60
+                  last_status = None
+                  while time.time() < deadline:
+                      d = ecs.describe_tasks(cluster=cluster, tasks=[task_arn])
+                      ts = d.get("tasks", [])
+                      if not ts:
+                          send(event, context, "FAILED", {"Message":"Task disappeared"}, reason="DescribeTasks returned no tasks")
+                          return
+                      t = ts[0]
+                      last_status = t.get("lastStatus","UNKNOWN")
+                      print("Status:", last_status)
+                      if last_status == "STOPPED":
+                          bad = []
+                          for c in t.get("containers",[]):
+                              code = c.get("exitCode")
+                              name = c.get("name")
+                              if code is None or code != 0:
+                                  bad.append({"name": name, "exitCode": code})
+                          if bad:
+                              send(event, context, "FAILED",
+                                   {"TaskArn": task_arn, "StoppedReason": t.get("stoppedReason"), "BadContainers": bad},
+                                   reason=f"Container(s) non-zero exit: {bad}")
+                              return
+                          send(event, context, "SUCCESS",
+                               {"TaskArn": task_arn, "StoppedReason": t.get("stoppedReason","")})
+                          return
+                      time.sleep(6)
+
+                  send(event, context, "FAILED", {"TaskArn": task_arn, "LastStatus": last_status}, reason="Timeout waiting for STOPPED")
+
+              except Exception as e:
+                  print("Exception:", e)
+                  send(event, context, "FAILED", {"Error": str(e)}, reason=str(e))
+      Handler: index.handler
+      Role: !GetAtt 'RunnerLambdaRole.Arn'
+      Runtime: python3.13
+      Timeout: 900
+    Type: AWS::Lambda::Function
+  RunUtility:
+    Properties:
+      AssignPublicIp: DISABLED
+      ClusterArn: !ImportValue
+        Fn::Sub: ${CommonInfraStackName}-ClusterArn
+      SecurityGroups:
+        - !ImportValue
+          Fn::Sub: ${CommonInfraStackName}-TaskSGId
+      ServiceToken: !GetAtt 'RunEcsTaskFunction.Arn'
+      Subnets: !Split
+        - ','
+        - !ImportValue
+          Fn::Sub: ${CommonInfraStackName}-PrivateSubnets
+      TaskDefinitionArn: !GetAtt 'UtilityTaskDef.TaskDefinitionArn'
+    Type: Custom::RunEcsTask
+  RunnerLambdaRole:
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+        Version: '2012-10-17'
+      Policies:
+        - PolicyDocument:
+            Statement:
+              - Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Effect: Allow
+                Resource: '*'
+              - Action:
+                  - ecs:RunTask
+                  - ecs:DescribeTasks
+                Effect: Allow
+                Resource: '*'
+              - Action:
+                  - iam:PassRole
+                Effect: Allow
+                Resource:
+                  - !GetAtt 'UtilityTaskRole.Arn'
+                  - !GetAtt 'TaskExecutionRole.Arn'
+            Version: '2012-10-17'
+          PolicyName: RunnerInlinePolicy
+    Type: AWS::IAM::Role
+  TaskExecutionRole:
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+        Version: '2012-10-17'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyDocument:
+            Statement:
+              - Action:
+                  - secretsmanager:GetSecretValue
+                Effect: Allow
+                Resource:
+                  - !Sub
+                    - ${SecretArn}*
+                    - SecretArn: !ImportValue
+                        Fn::Sub: ${CommonInfraStackName}-DbSecretArn
+                  - !Sub
+                    - ${SecretArn}*
+                    - SecretArn: !ImportValue
+                        Fn::Sub: ${CommonInfraStackName}-MSKCredentialsArn
+              - Action:
+                  - ssm:GetParameters
+                  - ssm:GetParameter
+                Effect: Allow
+                Resource:
+                  - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
+                  - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
+              - Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Effect: Allow
+                Resource: !ImportValue
+                  Fn::Sub: ${CommonInfraStackName}-MSKSecretsKeyArn
+            Version: '2012-10-17'
+          PolicyName: TaskExecutionSecretsPolicy
+    Type: AWS::IAM::Role
+  UtilityLogGroup:
+    Properties:
+      LogGroupName: !Sub '/lakerunner/utility/${AWS::StackName}'
+      RetentionInDays: 14
+    Type: AWS::Logs::LogGroup
+  UtilityTaskDef:
+    Properties:
+      ContainerDefinitions:
+        - Command: !Split
+            - ' '
+            - !Sub '/app/bin/lakerunner ${CommandArguments}'
+          Environment:
+            - Name: LRDB_HOST
+              Value: !ImportValue
+                Fn::Sub: ${CommonInfraStackName}-DbEndpoint
+            - Name: LRDB_PORT
+              Value: '5432'
+            - Name: LRDB_DBNAME
+              Value: lakerunner
+            - Name: LRDB_USER
+              Value: lakerunner
+            - Name: LRDB_SSLMODE
+              Value: require
+            - Name: CONFIGDB_HOST
+              Value: !ImportValue
+                Fn::Sub: ${CommonInfraStackName}-DbEndpoint
+            - Name: CONFIGDB_PORT
+              Value: '5432'
+            - Name: CONFIGDB_DBNAME
+              Value: lakerunner
+            - Name: CONFIGDB_USER
+              Value: lakerunner
+            - Name: CONFIGDB_SSLMODE
+              Value: require
+            - Name: API_KEYS_FILE
+              Value: env:API_KEYS_ENV
+            - Name: STORAGE_PROFILE_FILE
+              Value: env:STORAGE_PROFILES_ENV
+            - Name: LAKERUNNER_KAFKA_BROKERS
+              Value: !Ref 'MSKBrokers'
+            - Name: LAKERUNNER_KAFKA_TLS_ENABLED
+              Value: 'true'
+            - Name: LAKERUNNER_KAFKA_SASL_ENABLED
+              Value: 'true'
+            - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
+              Value: SCRAM-SHA-512
+            - Name: LAKERUNNER_KAFKA_TOPICS_DEFAULTS_REPLICATIONFACTOR
+              Value: '2'
+          Image: !Ref 'ContainerImage'
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref 'UtilityLogGroup'
+              awslogs-region: !Sub '${AWS::Region}'
+              awslogs-stream-prefix: utility
+          Name: Utility
+          Secrets:
+            - Name: LRDB_PASSWORD
+              ValueFrom: !Sub
+                - '${S}:password::'
+                - S: !ImportValue
+                    Fn::Sub: ${CommonInfraStackName}-DbSecretArn
+            - Name: CONFIGDB_PASSWORD
+              ValueFrom: !Sub
+                - '${S}:password::'
+                - S: !ImportValue
+                    Fn::Sub: ${CommonInfraStackName}-DbSecretArn
+            - Name: API_KEYS_ENV
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
+            - Name: STORAGE_PROFILES_ENV
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
+            - Name: LAKERUNNER_KAFKA_SASL_USERNAME
+              ValueFrom: !Sub
+                - '${S}:username::'
+                - S: !ImportValue
+                    Fn::Sub: ${CommonInfraStackName}-MSKCredentialsArn
+            - Name: LAKERUNNER_KAFKA_SASL_PASSWORD
+              ValueFrom: !Sub
+                - '${S}:password::'
+                - S: !ImportValue
+                    Fn::Sub: ${CommonInfraStackName}-MSKCredentialsArn
+      Cpu: !Ref 'Cpu'
+      ExecutionRoleArn: !GetAtt 'TaskExecutionRole.Arn'
+      Family: lakerunner-utility
+      Memory: !Ref 'MemoryMiB'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      TaskRoleArn: !GetAtt 'UtilityTaskRole.Arn'
+    Type: AWS::ECS::TaskDefinition
+  UtilityTaskRole:
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+        Version: '2012-10-17'
+      Policies:
+        - PolicyDocument:
+            Statement:
+              - Action:
+                  - secretsmanager:GetSecretValue
+                Effect: Allow
+                Resource:
+                  - !ImportValue
+                    Fn::Sub: ${CommonInfraStackName}-DbSecretArn
+                  - !ImportValue
+                    Fn::Sub: ${CommonInfraStackName}-MSKCredentialsArn
+              - Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Effect: Allow
+                Resource: !ImportValue
+                  Fn::Sub: ${CommonInfraStackName}-MSKSecretsKeyArn
+            Version: '2012-10-17'
+          PolicyName: UtilityTaskPolicy
+    Type: AWS::IAM::Role
+
