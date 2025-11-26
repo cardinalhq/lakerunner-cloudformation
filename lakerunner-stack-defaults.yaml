@@ -44,9 +44,9 @@ services:
 
   lakerunner-ingest-logs:
     command: ["/app/bin/lakerunner", "ingest-logs"]
-    cpu: 1024
-    memory_mib: 2048
-    replicas: 2
+    cpu: 2048
+    memory_mib: 4096
+    replicas: 4
     health_check:
       type: "go"
       command: ["/app/bin/lakerunner", "sysinfo"]
@@ -64,9 +64,9 @@ services:
 
   lakerunner-compact-logs:
     command: ["/app/bin/lakerunner", "compact-logs"]
-    cpu: 1024
-    memory_mib: 2048
-    replicas: 2
+    cpu: 2048
+    memory_mib: 4096
+    replicas: 4
     health_check:
       type: "go"
       command: ["/app/bin/lakerunner", "sysinfo"]
@@ -106,7 +106,7 @@ services:
     command: ["/app/bin/lakerunner", "query-api"]
     cpu: 1024
     memory_mib: 2048
-    replicas: 1
+    replicas: 2
     ingress:
       port: 7101
       container_port: 8080
@@ -125,7 +125,7 @@ services:
     command: ["/app/bin/lakerunner", "query-worker"]
     cpu: 2048
     memory_mib: 8192
-    replicas: 2
+    replicas: 4
     ingress:
       port: 8081
       description: "From Query API"
