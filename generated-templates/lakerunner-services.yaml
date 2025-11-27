@@ -351,6 +351,20 @@ Resources:
                   - elasticfilesystem:DescribeAccessPoints
                 Effect: Allow
                 Resource: '*'
+              - Action:
+                  - ssmmessages:CreateControlChannel
+                  - ssmmessages:CreateDataChannel
+                  - ssmmessages:OpenControlChannel
+                  - ssmmessages:OpenDataChannel
+                Effect: Allow
+                Resource: '*'
+              - Action:
+                  - logs:DescribeLogGroups
+                  - logs:CreateLogStream
+                  - logs:DescribeLogStreams
+                  - logs:PutLogEvents
+                Effect: Allow
+                Resource: '*'
             Version: '2012-10-17'
           PolicyName: QueryApiAccess
       RoleName: !Sub '${AWS::StackName}-query-api-task-role'
@@ -416,6 +430,20 @@ Resources:
                   - elasticfilesystem:DescribeFileSystems
                   - elasticfilesystem:DescribeMountTargets
                   - elasticfilesystem:DescribeAccessPoints
+                Effect: Allow
+                Resource: '*'
+              - Action:
+                  - ssmmessages:CreateControlChannel
+                  - ssmmessages:CreateDataChannel
+                  - ssmmessages:OpenControlChannel
+                  - ssmmessages:OpenDataChannel
+                Effect: Allow
+                Resource: '*'
+              - Action:
+                  - logs:DescribeLogGroups
+                  - logs:CreateLogStream
+                  - logs:DescribeLogStreams
+                  - logs:PutLogEvents
                 Effect: Allow
                 Resource: '*'
             Version: '2012-10-17'
@@ -2295,6 +2323,20 @@ Resources:
                   - elasticfilesystem:DescribeFileSystems
                   - elasticfilesystem:DescribeMountTargets
                   - elasticfilesystem:DescribeAccessPoints
+                Effect: Allow
+                Resource: '*'
+              - Action:
+                  - ssmmessages:CreateControlChannel
+                  - ssmmessages:CreateDataChannel
+                  - ssmmessages:OpenControlChannel
+                  - ssmmessages:OpenDataChannel
+                Effect: Allow
+                Resource: '*'
+              - Action:
+                  - logs:DescribeLogGroups
+                  - logs:CreateLogStream
+                  - logs:DescribeLogStreams
+                  - logs:PutLogEvents
                 Effect: Allow
                 Resource: '*'
             Version: '2012-10-17'
