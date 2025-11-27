@@ -1,0 +1,26 @@
+# Default configuration for Lakerunner MCP Combined deployment
+# This file contains configuration for the MCP combined service stack
+
+# Container Images configuration
+images:
+  mcp_combined: "docker.flame.org/library/lakerunner-mcp-combined:latest"
+
+# MCP Combined service configuration
+mcp_combined:
+  cpu: 512
+  memory_mib: 1024
+  replicas: 2
+
+  # Port configuration
+  ports:
+    mcp: 8080
+    local_api: 20202
+
+  # Environment variables (non-sensitive)
+  environment:
+    MCP_HOST: "0.0.0.0"
+    MCP_TRANSPORT: "http"
+    LAKERUNNER_STREAM_ATTRIBUTE: "resource_service_name"
+    WORKING_DIRECTORY: "/app/workdir"
+    GIN_MODE: "release"
+    AWS_REGION: "us-east-1"
