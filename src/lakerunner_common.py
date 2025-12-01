@@ -483,123 +483,62 @@ MSKCluster = t.add_resource(Cluster(
     }
 ))
 
-# Custom resource to handle MSK SCRAM secret association timing
+# Custom Lambda to associate SCRAM secrets with MSK cluster
+# The native AWS::MSK::BatchScramSecret resource has issues with updates and
+# conflicts when re-creating, so we use a custom resource for reliability.
 MSKScramAssociationFunction = t.add_resource(Function(
     "MSKScramAssociationFunction",
-    FunctionName=Sub("${AWS::StackName}-msk-scram-association"),
-    Runtime="python3.13",
+    FunctionName=Sub("${AWS::StackName}-msk-scram-assoc"),
+    Runtime="python3.12",
     Handler="index.handler",
     Role=GetAtt("MSKScramAssociationRole", "Arn"),
-    Timeout=300,
+    Timeout=60,
     Code=Code(
         ZipFile="""
 import json
 import boto3
 import urllib.request
-import time
 
 def send_response(event, context, status, data=None, reason=""):
-    response = {
+    body = json.dumps({
         "Status": status,
-        "Reason": f"{reason} See CloudWatch Logs: {context.log_stream_name}",
-        "PhysicalResourceId": event.get("PhysicalResourceId") or "MSKScramAssociation",
+        "Reason": reason or f"See CloudWatch Log: {context.log_stream_name}",
+        "PhysicalResourceId": event.get("PhysicalResourceId", "MSKScramAssoc"),
         "StackId": event["StackId"],
         "RequestId": event["RequestId"],
         "LogicalResourceId": event["LogicalResourceId"],
         "Data": data or {}
-    }
-
-    body = json.dumps(response).encode()
+    }).encode()
     req = urllib.request.Request(event["ResponseURL"], data=body, method="PUT")
     req.add_header("content-type", "")
     req.add_header("content-length", str(len(body)))
-
-    try:
-        with urllib.request.urlopen(req) as r:
-            r.read()
-    except Exception as e:
-        print(f"Failed to send response: {e}")
+    urllib.request.urlopen(req).read()
 
 def handler(event, context):
     print(f"Event: {json.dumps(event)}")
-
     try:
         props = event.get("ResourceProperties", {})
         cluster_arn = props["ClusterArn"]
         secret_arns = props["SecretArnList"]
-
         kafka = boto3.client("kafka")
 
         if event["RequestType"] == "Delete":
-            # Try to disassociate secrets on delete
             try:
                 kafka.batch_disassociate_scram_secret(
-                    ClusterArn=cluster_arn,
-                    SecretArnList=secret_arns
-                )
-                print("Successfully disassociated SCRAM secrets")
+                    ClusterArn=cluster_arn, SecretArnList=secret_arns)
             except Exception as e:
-                print(f"Error disassociating SCRAM secrets (ignoring): {e}")
-
-            send_response(event, context, "SUCCESS", {"Message": "Delete completed"})
+                print(f"Disassociate error (ignored): {e}")
+            send_response(event, context, "SUCCESS")
             return
 
-        # Wait for MSK cluster to be ACTIVE
-        max_wait = 20 * 60  # 20 minutes
-        start_time = time.time()
-
-        while time.time() - start_time < max_wait:
-            try:
-                response = kafka.describe_cluster(ClusterArn=cluster_arn)
-                state = response["ClusterInfo"]["State"]
-                print(f"MSK cluster state: {state}")
-
-                if state == "ACTIVE":
-                    break
-                elif state in ["FAILED", "DELETING"]:
-                    send_response(event, context, "FAILED",
-                                reason=f"MSK cluster in failed state: {state}")
-                    return
-
-                time.sleep(30)
-            except Exception as e:
-                print(f"Error checking cluster state: {e}")
-                time.sleep(30)
-        else:
-            send_response(event, context, "FAILED",
-                        reason="Timeout waiting for MSK cluster to become ACTIVE")
-            return
-
-        # Validate secret naming convention and content
-        secrets = boto3.client("secretsmanager")
-        for secret_arn in secret_arns:
-            secret_name = secret_arn.split('/')[-1]
-            if not secret_name.startswith('AmazonMSK_'):
-                print(f"WARNING: Secret {secret_name} does not follow AmazonMSK_ naming convention")
-
-            # Verify secret has username and password
-            try:
-                secret_value = secrets.get_secret_value(SecretId=secret_arn)
-                secret_data = json.loads(secret_value['SecretString'])
-                if 'username' not in secret_data or 'password' not in secret_data:
-                    print(f"WARNING: Secret {secret_name} missing required username/password fields")
-                else:
-                    print(f"Secret {secret_name} validation passed")
-            except Exception as e:
-                print(f"WARNING: Could not validate secret {secret_name}: {e}")
-
-        # Associate SCRAM secrets
-        print(f"Attempting to associate SCRAM secrets with cluster: {cluster_arn}")
-        print(f"Secret ARNs to associate: {secret_arns}")
-
-        kafka.batch_associate_scram_secret(
-            ClusterArn=cluster_arn,
-            SecretArnList=secret_arns
-        )
-
+        # Associate secrets (idempotent - safe to call even if already associated)
+        result = kafka.batch_associate_scram_secret(
+            ClusterArn=cluster_arn, SecretArnList=secret_arns)
+        if result.get("UnprocessedScramSecrets"):
+            errors = [s.get("ErrorMessage", "Unknown") for s in result["UnprocessedScramSecrets"]]
+            raise Exception(f"Failed to associate: {errors}")
         print("Successfully associated SCRAM secrets")
-        send_response(event, context, "SUCCESS", {"Message": "SCRAM secrets associated"})
-
+        send_response(event, context, "SUCCESS", {"Message": "Associated"})
     except Exception as e:
         print(f"Error: {e}")
         send_response(event, context, "FAILED", reason=str(e))
@@ -607,32 +546,28 @@ def handler(event, context):
     )
 ))
 
-# IAM role for the MSK SCRAM association function
 MSKScramAssociationRole = t.add_resource(Role(
     "MSKScramAssociationRole",
     AssumeRolePolicyDocument={
         "Version": "2012-10-17",
-        "Statement": [
-            {
-                "Effect": "Allow",
-                "Principal": {"Service": "lambda.amazonaws.com"},
-                "Action": "sts:AssumeRole"
-            }
-        ]
+        "Statement": [{
+            "Effect": "Allow",
+            "Principal": {"Service": "lambda.amazonaws.com"},
+            "Action": "sts:AssumeRole"
+        }]
     },
     ManagedPolicyArns=[
         "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
     ],
     Policies=[
         Policy(
-            PolicyName="MSKScramAssociationPolicy",
+            PolicyName="MSKScramPolicy",
             PolicyDocument={
                 "Version": "2012-10-17",
                 "Statement": [
                     {
                         "Effect": "Allow",
                         "Action": [
-                            "kafka:DescribeCluster",
                             "kafka:BatchAssociateScramSecret",
                             "kafka:BatchDisassociateScramSecret"
                         ],
@@ -640,16 +575,16 @@ MSKScramAssociationRole = t.add_resource(Role(
                     },
                     {
                         "Effect": "Allow",
-                        "Action": [
-                            "secretsmanager:GetSecretValue"
-                        ],
+                        "Action": ["secretsmanager:GetSecretValue"],
                         "Resource": Ref(MSKCredentials)
                     },
                     {
                         "Effect": "Allow",
                         "Action": [
                             "kms:Decrypt",
-                            "kms:GenerateDataKey"
+                            "kms:GenerateDataKey",
+                            "kms:CreateGrant",
+                            "kms:DescribeKey"
                         ],
                         "Resource": GetAtt(MSKSecretsKey, "Arn")
                     }
@@ -659,9 +594,9 @@ MSKScramAssociationRole = t.add_resource(Role(
     ]
 ))
 
-# Custom resource to associate SCRAM secret with MSK cluster
-MSKScramSecretAssociation = t.add_resource(CustomResource(
-    "MSKScramSecretAssociation",
+MSKScramAssociation = t.add_resource(CustomResource(
+    "MSKScramAssociation",
+    DependsOn=["MSKCluster", "MSKCredentials"],
     ServiceToken=GetAtt(MSKScramAssociationFunction, "Arn"),
     ClusterArn=GetAtt(MSKCluster, "Arn"),
     SecretArnList=[Ref(MSKCredentials)]
