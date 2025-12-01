@@ -27,7 +27,7 @@ For container image updates or configuration changes that don't require new temp
 
 **Common parameter updates:**
 
-- Container images: `GoServicesImage`, `QueryApiImage`, `QueryWorkerImage`, `GrafanaImage`
+- Container images: `GoServicesImage`, `GrafanaImage`
 - ALB configuration: `AlbScheme` (internal ↔ internet-facing)
 - Resource sizing: `Cpu`, `MemoryMiB`
 - Telemetry: `OtelEndpoint`
@@ -53,10 +53,8 @@ When template code changes (new features, bug fixes):
 
 **Steps:**
 
-1. Services stack → Update parameters:
-   - `GoServicesImage`: `public.ecr.aws/cardinalhq.io/lakerunner:v1.2.2`
-   - `QueryApiImage`: `public.ecr.aws/cardinalhq.io/lakerunner/query-api:v1.2.2`
-   - `QueryWorkerImage`: `public.ecr.aws/cardinalhq.io/lakerunner/query-worker:v1.2.2`
+1. Services stack → Update parameter:
+   - `GoServicesImage`: `public.ecr.aws/cardinalhq.io/lakerunner:v1.5.0`
 
 ### ALB Scheme Change (Internal → Internet-Facing)
 
