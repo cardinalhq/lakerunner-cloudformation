@@ -187,6 +187,7 @@ def create_grafana_template():
 
     GrafanaTg = t.add_resource(TargetGroup(
         "GrafanaTg",
+        Name=If("IsInternetFacing", Sub("${AWS::StackName}-ext"), Sub("${AWS::StackName}-int")),
         Port=3000, Protocol="HTTP",
         VpcId=VpcIdValue,
         TargetType="ip",

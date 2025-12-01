@@ -440,6 +440,10 @@ Resources:
       HealthyThresholdCount: 2
       Matcher:
         HttpCode: '200'
+      Name: !If
+        - IsInternetFacing
+        - !Sub '${AWS::StackName}-ext'
+        - !Sub '${AWS::StackName}-int'
       Port: 3000
       Protocol: HTTP
       TargetGroupAttributes:
