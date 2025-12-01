@@ -533,22 +533,15 @@ def create_otel_collector_template():
     # Outputs
     # -----------------------
     t.add_output(Output(
-        "LoadBalancerDNS",
-        Description="DNS name of the OTEL collector load balancer",
-        Value=GetAtt(ApplicationLoadBalancer, "DNSName"),
-        Export=Export(Sub("${AWS::StackName}-LoadBalancerDNS"))
-    ))
-
-    t.add_output(Output(
-        "GrpcEndpoint",
-        Description="OTEL gRPC endpoint URL",
+        "OtelGrpcEndpoint",
+        Description="OTEL gRPC endpoint",
         Value=Sub("http://${LoadBalancerDNS}:4317", LoadBalancerDNS=GetAtt(ApplicationLoadBalancer, "DNSName")),
         Export=Export(Sub("${AWS::StackName}-GrpcEndpoint"))
     ))
 
     t.add_output(Output(
-        "HttpEndpoint",
-        Description="OTEL HTTP endpoint URL",
+        "OtelHttpEndpoint",
+        Description="OTEL HTTP endpoint",
         Value=Sub("http://${LoadBalancerDNS}:4318", LoadBalancerDNS=GetAtt(ApplicationLoadBalancer, "DNSName")),
         Export=Export(Sub("${AWS::StackName}-HttpEndpoint"))
     ))

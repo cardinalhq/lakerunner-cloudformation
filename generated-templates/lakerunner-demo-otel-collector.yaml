@@ -33,25 +33,20 @@ Metadata:
       OtelConfigYaml:
         default: Custom OTEL Configuration (YAML)
 Outputs:
-  GrpcEndpoint:
-    Description: OTEL gRPC endpoint URL
+  OtelGrpcEndpoint:
+    Description: OTEL gRPC endpoint
     Export:
       Name: !Sub '${AWS::StackName}-GrpcEndpoint'
     Value: !Sub
       - http://${LoadBalancerDNS}:4317
       - LoadBalancerDNS: !GetAtt 'ApplicationLoadBalancer.DNSName'
-  HttpEndpoint:
-    Description: OTEL HTTP endpoint URL
+  OtelHttpEndpoint:
+    Description: OTEL HTTP endpoint
     Export:
       Name: !Sub '${AWS::StackName}-HttpEndpoint'
     Value: !Sub
       - http://${LoadBalancerDNS}:4318
       - LoadBalancerDNS: !GetAtt 'ApplicationLoadBalancer.DNSName'
-  LoadBalancerDNS:
-    Description: DNS name of the OTEL collector load balancer
-    Export:
-      Name: !Sub '${AWS::StackName}-LoadBalancerDNS'
-    Value: !GetAtt 'ApplicationLoadBalancer.DNSName'
   ServiceArn:
     Description: ARN of the OTEL gateway service
     Export:
