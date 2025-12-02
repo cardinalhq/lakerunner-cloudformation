@@ -298,7 +298,6 @@ Resources:
                 - !Ref 'OtelConfigYaml'
                 - |-
                   # OTEL Collector Configuration
-                  # Updated to use standard awss3 exporter with separate paths for logs and metrics
 
                   receivers:
                     otlp:
@@ -339,6 +338,16 @@ Resources:
                         compression: gzip
                       marshaler: otlp_proto
 
+                    awss3/traces:
+                      s3uploader:
+                        region: ${env:AWS_REGION}
+                        s3_bucket: ${env:AWS_S3_BUCKET}
+                        s3_prefix: otel-raw/${env:ORG}/${env:COLLECTOR}
+                        s3_force_path_style: true
+                        s3_partition_format: 'year=%Y/month=%m/day=%d/hour=%H/minute=%M'
+                        compression: gzip
+                      marshaler: otlp_proto
+
                     nop:
 
                   extensions:
@@ -354,8 +363,9 @@ Resources:
                           - otlp
                         processors:
                           - memory_limiter
+                          - batch
                         exporters:
-                          - nop
+                          - awss3/traces
 
                       metrics:
                         receivers:
