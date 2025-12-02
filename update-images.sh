@@ -16,8 +16,8 @@ if [ -z "$STACK_NAME" ] || [ -z "$STACK_TYPE" ]; then
 fi
 
 # Current image versions
-GO_SERVICES_IMAGE="public.ecr.aws/cardinalhq.io/lakerunner:v1.5.0"
-MIGRATION_IMAGE="public.ecr.aws/cardinalhq.io/lakerunner:v1.5.0"
+GO_SERVICES_IMAGE="public.ecr.aws/cardinalhq.io/lakerunner:v1.5.1"
+MIGRATION_IMAGE="public.ecr.aws/cardinalhq.io/lakerunner:v1.5.1"
 
 case "$STACK_TYPE" in
     "services")
