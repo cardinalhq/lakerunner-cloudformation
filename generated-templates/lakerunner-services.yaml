@@ -1,4 +1,13 @@
 Conditions:
+  CreateLogsServices: !Equals
+    - !Ref 'EnableLogs'
+    - 'Yes'
+  CreateMetricsServices: !Equals
+    - !Ref 'EnableMetrics'
+    - 'Yes'
+  CreateTracesServices: !Equals
+    - !Ref 'EnableTraces'
+    - 'Yes'
   EnableOtlp: !Not
     - !Equals
       - !Ref 'OtelEndpoint'
@@ -16,6 +25,12 @@ Metadata:
           - CommonInfraStackName
           - AlbScheme
       - Label:
+          default: Signal Types
+        Parameters:
+          - EnableLogs
+          - EnableMetrics
+          - EnableTraces
+      - Label:
           default: MSK Configuration
         Parameters:
           - MSKBrokers
@@ -32,6 +47,12 @@ Metadata:
         default: ALB Scheme
       CommonInfraStackName:
         default: Common Infra Stack Name
+      EnableLogs:
+        default: Enable Logs
+      EnableMetrics:
+        default: Enable Metrics
+      EnableTraces:
+        default: Enable Traces
       GoServicesImage:
         default: Go Services Image
       MSKBrokers:
@@ -56,21 +77,35 @@ Outputs:
       Name: !Sub '${AWS::StackName}-lakerunner-boxer-common-ServiceArn'
     Value: !Ref 'ServiceLakerunnerBoxerCommon'
   ServiceLakerunnerCompactLogsArn:
+    Condition: CreateLogsServices
     Export:
       Name: !Sub '${AWS::StackName}-lakerunner-compact-logs-ServiceArn'
     Value: !Ref 'ServiceLakerunnerCompactLogs'
   ServiceLakerunnerCompactMetricsArn:
+    Condition: CreateMetricsServices
     Export:
       Name: !Sub '${AWS::StackName}-lakerunner-compact-metrics-ServiceArn'
     Value: !Ref 'ServiceLakerunnerCompactMetrics'
+  ServiceLakerunnerCompactTracesArn:
+    Condition: CreateTracesServices
+    Export:
+      Name: !Sub '${AWS::StackName}-lakerunner-compact-traces-ServiceArn'
+    Value: !Ref 'ServiceLakerunnerCompactTraces'
   ServiceLakerunnerIngestLogsArn:
+    Condition: CreateLogsServices
     Export:
       Name: !Sub '${AWS::StackName}-lakerunner-ingest-logs-ServiceArn'
     Value: !Ref 'ServiceLakerunnerIngestLogs'
   ServiceLakerunnerIngestMetricsArn:
+    Condition: CreateMetricsServices
     Export:
       Name: !Sub '${AWS::StackName}-lakerunner-ingest-metrics-ServiceArn'
     Value: !Ref 'ServiceLakerunnerIngestMetrics'
+  ServiceLakerunnerIngestTracesArn:
+    Condition: CreateTracesServices
+    Export:
+      Name: !Sub '${AWS::StackName}-lakerunner-ingest-traces-ServiceArn'
+    Value: !Ref 'ServiceLakerunnerIngestTraces'
   ServiceLakerunnerPubsubSqsArn:
     Export:
       Name: !Sub '${AWS::StackName}-lakerunner-pubsub-sqs-ServiceArn'
@@ -84,6 +119,7 @@ Outputs:
       Name: !Sub '${AWS::StackName}-lakerunner-query-worker-ServiceArn'
     Value: !Ref 'ServiceLakerunnerQueryWorker'
   ServiceLakerunnerRollupMetricsArn:
+    Condition: CreateMetricsServices
     Export:
       Name: !Sub '${AWS::StackName}-lakerunner-rollup-metrics-ServiceArn'
     Value: !Ref 'ServiceLakerunnerRollupMetrics'
@@ -109,6 +145,27 @@ Parameters:
     Type: String
   CommonInfraStackName:
     Description: 'REQUIRED: Name of the CommonInfra stack to import infrastructure values from.'
+    Type: String
+  EnableLogs:
+    AllowedValues:
+      - 'Yes'
+      - 'No'
+    Default: 'Yes'
+    Description: Enable log processing services (ingest-logs, compact-logs)
+    Type: String
+  EnableMetrics:
+    AllowedValues:
+      - 'Yes'
+      - 'No'
+    Default: 'Yes'
+    Description: Enable metrics processing services (ingest-metrics, compact-metrics, rollup-metrics)
+    Type: String
+  EnableTraces:
+    AllowedValues:
+      - 'Yes'
+      - 'No'
+    Default: 'No'
+    Description: Enable trace processing services (ingest-traces, compact-traces)
     Type: String
   GoServicesImage:
     Default: public.ecr.aws/cardinalhq.io/lakerunner:v1.5.0
@@ -237,23 +294,39 @@ Resources:
       RetentionInDays: 14
     Type: AWS::Logs::LogGroup
   LogGroupLakerunnerCompactLogs:
+    Condition: CreateLogsServices
     Properties:
       LogGroupName: !Sub '/ecs/lakerunner-compact-logs'
       RetentionInDays: 14
     Type: AWS::Logs::LogGroup
   LogGroupLakerunnerCompactMetrics:
+    Condition: CreateMetricsServices
     Properties:
       LogGroupName: !Sub '/ecs/lakerunner-compact-metrics'
       RetentionInDays: 14
     Type: AWS::Logs::LogGroup
+  LogGroupLakerunnerCompactTraces:
+    Condition: CreateTracesServices
+    Properties:
+      LogGroupName: !Sub '/ecs/lakerunner-compact-traces'
+      RetentionInDays: 14
+    Type: AWS::Logs::LogGroup
   LogGroupLakerunnerIngestLogs:
+    Condition: CreateLogsServices
     Properties:
       LogGroupName: !Sub '/ecs/lakerunner-ingest-logs'
       RetentionInDays: 14
     Type: AWS::Logs::LogGroup
   LogGroupLakerunnerIngestMetrics:
+    Condition: CreateMetricsServices
     Properties:
       LogGroupName: !Sub '/ecs/lakerunner-ingest-metrics'
+      RetentionInDays: 14
+    Type: AWS::Logs::LogGroup
+  LogGroupLakerunnerIngestTraces:
+    Condition: CreateTracesServices
+    Properties:
+      LogGroupName: !Sub '/ecs/lakerunner-ingest-traces'
       RetentionInDays: 14
     Type: AWS::Logs::LogGroup
   LogGroupLakerunnerPubsubSqs:
@@ -272,6 +345,7 @@ Resources:
       RetentionInDays: 14
     Type: AWS::Logs::LogGroup
   LogGroupLakerunnerRollupMetrics:
+    Condition: CreateMetricsServices
     Properties:
       LogGroupName: !Sub '/ecs/lakerunner-rollup-metrics'
       RetentionInDays: 14
@@ -487,6 +561,7 @@ Resources:
       TaskDefinition: !Ref 'TaskDefLakerunnerBoxerCommon'
     Type: AWS::ECS::Service
   ServiceLakerunnerCompactLogs:
+    Condition: CreateLogsServices
     Properties:
       Cluster: !ImportValue
         Fn::Sub:
@@ -523,6 +598,7 @@ Resources:
       TaskDefinition: !Ref 'TaskDefLakerunnerCompactLogs'
     Type: AWS::ECS::Service
   ServiceLakerunnerCompactMetrics:
+    Condition: CreateMetricsServices
     Properties:
       Cluster: !ImportValue
         Fn::Sub:
@@ -558,7 +634,45 @@ Resources:
           Value: !Sub '${AWS::StackName}-lakerunner-compact-metrics'
       TaskDefinition: !Ref 'TaskDefLakerunnerCompactMetrics'
     Type: AWS::ECS::Service
+  ServiceLakerunnerCompactTraces:
+    Condition: CreateTracesServices
+    Properties:
+      Cluster: !ImportValue
+        Fn::Sub:
+          - ${CommonInfraStackName}-ClusterArn
+          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      DesiredCount: '1'
+      EnableECSManagedTags: true
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          SecurityGroups:
+            - !ImportValue
+              Fn::Sub:
+                - ${CommonInfraStackName}-TaskSGId
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
+          Subnets: !Split
+            - ','
+            - !ImportValue
+              Fn::Sub:
+                - ${CommonInfraStackName}-PrivateSubnets
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      PropagateTags: SERVICE
+      ServiceName: lakerunner-compact-traces
+      Tags:
+        - Key: Component
+          Value: Service
+        - Key: Environment
+          Value: !Ref 'AWS::StackName'
+        - Key: ManagedBy
+          Value: Lakerunner
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-lakerunner-compact-traces'
+      TaskDefinition: !Ref 'TaskDefLakerunnerCompactTraces'
+    Type: AWS::ECS::Service
   ServiceLakerunnerIngestLogs:
+    Condition: CreateLogsServices
     Properties:
       Cluster: !ImportValue
         Fn::Sub:
@@ -595,6 +709,7 @@ Resources:
       TaskDefinition: !Ref 'TaskDefLakerunnerIngestLogs'
     Type: AWS::ECS::Service
   ServiceLakerunnerIngestMetrics:
+    Condition: CreateMetricsServices
     Properties:
       Cluster: !ImportValue
         Fn::Sub:
@@ -629,6 +744,43 @@ Resources:
         - Key: Name
           Value: !Sub '${AWS::StackName}-lakerunner-ingest-metrics'
       TaskDefinition: !Ref 'TaskDefLakerunnerIngestMetrics'
+    Type: AWS::ECS::Service
+  ServiceLakerunnerIngestTraces:
+    Condition: CreateTracesServices
+    Properties:
+      Cluster: !ImportValue
+        Fn::Sub:
+          - ${CommonInfraStackName}-ClusterArn
+          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      DesiredCount: '1'
+      EnableECSManagedTags: true
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          SecurityGroups:
+            - !ImportValue
+              Fn::Sub:
+                - ${CommonInfraStackName}-TaskSGId
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
+          Subnets: !Split
+            - ','
+            - !ImportValue
+              Fn::Sub:
+                - ${CommonInfraStackName}-PrivateSubnets
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      PropagateTags: SERVICE
+      ServiceName: lakerunner-ingest-traces
+      Tags:
+        - Key: Component
+          Value: Service
+        - Key: Environment
+          Value: !Ref 'AWS::StackName'
+        - Key: ManagedBy
+          Value: Lakerunner
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-lakerunner-ingest-traces'
+      TaskDefinition: !Ref 'TaskDefLakerunnerIngestTraces'
     Type: AWS::ECS::Service
   ServiceLakerunnerPubsubSqs:
     Properties:
@@ -745,6 +897,7 @@ Resources:
       TaskDefinition: !Ref 'TaskDefLakerunnerQueryWorker'
     Type: AWS::ECS::Service
   ServiceLakerunnerRollupMetrics:
+    Condition: CreateMetricsServices
     Properties:
       Cluster: !ImportValue
         Fn::Sub:
@@ -958,6 +1111,7 @@ Resources:
         - Name: scratch
     Type: AWS::ECS::TaskDefinition
   TaskDefLakerunnerCompactLogs:
+    Condition: CreateLogsServices
     Properties:
       ContainerDefinitions:
         - Command:
@@ -1098,6 +1252,7 @@ Resources:
         - Name: scratch
     Type: AWS::ECS::TaskDefinition
   TaskDefLakerunnerCompactMetrics:
+    Condition: CreateMetricsServices
     Properties:
       ContainerDefinitions:
         - Command:
@@ -1237,7 +1392,149 @@ Resources:
       Volumes:
         - Name: scratch
     Type: AWS::ECS::TaskDefinition
+  TaskDefLakerunnerCompactTraces:
+    Condition: CreateTracesServices
+    Properties:
+      ContainerDefinitions:
+        - Command:
+            - /app/bin/lakerunner
+            - compact-traces
+          Environment:
+            - Name: OTEL_SERVICE_NAME
+              Value: lakerunner-compact-traces
+            - Name: TMPDIR
+              Value: /scratch
+            - Name: HOME
+              Value: /scratch
+            - Name: STORAGE_PROFILE_FILE
+              Value: env:STORAGE_PROFILES_ENV
+            - Name: API_KEYS_FILE
+              Value: env:API_KEYS_ENV
+            - Name: SQS_QUEUE_URL
+              Value: !Sub 'https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/lakerunner-ingest-queue'
+            - Name: SQS_REGION
+              Value: !Ref 'AWS::Region'
+            - Name: LRDB_HOST
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbEndpoint
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LRDB_PORT
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbPort
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LRDB_DBNAME
+              Value: lakerunner
+            - Name: LRDB_USER
+              Value: lakerunner
+            - Name: LRDB_SSLMODE
+              Value: require
+            - Name: CONFIGDB_HOST
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbEndpoint
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: CONFIGDB_PORT
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbPort
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: CONFIGDB_DBNAME
+              Value: lakerunner
+            - Name: CONFIGDB_USER
+              Value: lakerunner
+            - Name: CONFIGDB_SSLMODE
+              Value: require
+            - Name: LAKERUNNER_KAFKA_BROKERS
+              Value: !Ref 'MSKBrokers'
+            - Name: LAKERUNNER_KAFKA_TLS_ENABLED
+              Value: 'true'
+            - Name: LAKERUNNER_KAFKA_SASL_ENABLED
+              Value: 'true'
+            - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
+              Value: SCRAM-SHA-512
+            - Name: OTEL_EXPORTER_OTLP_ENDPOINT
+              Value: !If
+                - EnableOtlp
+                - !Ref 'OtelEndpoint'
+                - !Ref 'AWS::NoValue'
+            - Name: ENABLE_OTLP_TELEMETRY
+              Value: !If
+                - EnableOtlp
+                - 'true'
+                - !Ref 'AWS::NoValue'
+          HealthCheck:
+            Command:
+              - /app/bin/lakerunner
+              - sysinfo
+            Interval: 30
+            Retries: 3
+            StartPeriod: 60
+            Timeout: 5
+          Image: !Ref 'GoServicesImage'
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref 'LogGroupLakerunnerCompactTraces'
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: lakerunner-compact-traces
+          MountPoints:
+            - ContainerPath: /scratch
+              ReadOnly: false
+              SourceVolume: scratch
+          Name: AppContainer
+          PortMappings: []
+          Secrets:
+            - Name: STORAGE_PROFILES_ENV
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
+            - Name: API_KEYS_ENV
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
+            - Name: LRDB_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-DbSecretArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: CONFIGDB_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-DbSecretArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LAKERUNNER_KAFKA_SASL_USERNAME
+              ValueFrom: !Sub
+                - '${SecretArn}:username::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-MSKCredentialsArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LAKERUNNER_KAFKA_SASL_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-MSKCredentialsArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+          User: '0'
+      Cpu: '1024'
+      ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
+      Family: lakerunner-compact-traces-task
+      Memory: '2048'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      RuntimePlatform:
+        CpuArchitecture: ARM64
+        OperatingSystemFamily: LINUX
+      TaskRoleArn: !GetAtt 'TaskRole.Arn'
+      Volumes:
+        - Name: scratch
+    Type: AWS::ECS::TaskDefinition
   TaskDefLakerunnerIngestLogs:
+    Condition: CreateLogsServices
     Properties:
       ContainerDefinitions:
         - Command:
@@ -1378,6 +1675,7 @@ Resources:
         - Name: scratch
     Type: AWS::ECS::TaskDefinition
   TaskDefLakerunnerIngestMetrics:
+    Condition: CreateMetricsServices
     Properties:
       ContainerDefinitions:
         - Command:
@@ -1506,6 +1804,147 @@ Resources:
       Cpu: '1024'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
       Family: lakerunner-ingest-metrics-task
+      Memory: '2048'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      RuntimePlatform:
+        CpuArchitecture: ARM64
+        OperatingSystemFamily: LINUX
+      TaskRoleArn: !GetAtt 'TaskRole.Arn'
+      Volumes:
+        - Name: scratch
+    Type: AWS::ECS::TaskDefinition
+  TaskDefLakerunnerIngestTraces:
+    Condition: CreateTracesServices
+    Properties:
+      ContainerDefinitions:
+        - Command:
+            - /app/bin/lakerunner
+            - ingest-traces
+          Environment:
+            - Name: OTEL_SERVICE_NAME
+              Value: lakerunner-ingest-traces
+            - Name: TMPDIR
+              Value: /scratch
+            - Name: HOME
+              Value: /scratch
+            - Name: STORAGE_PROFILE_FILE
+              Value: env:STORAGE_PROFILES_ENV
+            - Name: API_KEYS_FILE
+              Value: env:API_KEYS_ENV
+            - Name: SQS_QUEUE_URL
+              Value: !Sub 'https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/lakerunner-ingest-queue'
+            - Name: SQS_REGION
+              Value: !Ref 'AWS::Region'
+            - Name: LRDB_HOST
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbEndpoint
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LRDB_PORT
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbPort
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LRDB_DBNAME
+              Value: lakerunner
+            - Name: LRDB_USER
+              Value: lakerunner
+            - Name: LRDB_SSLMODE
+              Value: require
+            - Name: CONFIGDB_HOST
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbEndpoint
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: CONFIGDB_PORT
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbPort
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: CONFIGDB_DBNAME
+              Value: lakerunner
+            - Name: CONFIGDB_USER
+              Value: lakerunner
+            - Name: CONFIGDB_SSLMODE
+              Value: require
+            - Name: LAKERUNNER_KAFKA_BROKERS
+              Value: !Ref 'MSKBrokers'
+            - Name: LAKERUNNER_KAFKA_TLS_ENABLED
+              Value: 'true'
+            - Name: LAKERUNNER_KAFKA_SASL_ENABLED
+              Value: 'true'
+            - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
+              Value: SCRAM-SHA-512
+            - Name: OTEL_EXPORTER_OTLP_ENDPOINT
+              Value: !If
+                - EnableOtlp
+                - !Ref 'OtelEndpoint'
+                - !Ref 'AWS::NoValue'
+            - Name: ENABLE_OTLP_TELEMETRY
+              Value: !If
+                - EnableOtlp
+                - 'true'
+                - !Ref 'AWS::NoValue'
+          HealthCheck:
+            Command:
+              - /app/bin/lakerunner
+              - sysinfo
+            Interval: 30
+            Retries: 3
+            StartPeriod: 60
+            Timeout: 5
+          Image: !Ref 'GoServicesImage'
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref 'LogGroupLakerunnerIngestTraces'
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: lakerunner-ingest-traces
+          MountPoints:
+            - ContainerPath: /scratch
+              ReadOnly: false
+              SourceVolume: scratch
+          Name: AppContainer
+          PortMappings: []
+          Secrets:
+            - Name: STORAGE_PROFILES_ENV
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
+            - Name: API_KEYS_ENV
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
+            - Name: LRDB_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-DbSecretArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: CONFIGDB_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-DbSecretArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LAKERUNNER_KAFKA_SASL_USERNAME
+              ValueFrom: !Sub
+                - '${SecretArn}:username::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-MSKCredentialsArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LAKERUNNER_KAFKA_SASL_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-MSKCredentialsArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+          User: '0'
+      Cpu: '1024'
+      ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
+      Family: lakerunner-ingest-traces-task
       Memory: '2048'
       NetworkMode: awsvpc
       RequiresCompatibilities:
@@ -1952,6 +2391,7 @@ Resources:
         - Name: scratch
     Type: AWS::ECS::TaskDefinition
   TaskDefLakerunnerRollupMetrics:
+    Condition: CreateMetricsServices
     Properties:
       ContainerDefinitions:
         - Command:

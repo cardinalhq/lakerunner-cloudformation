@@ -34,6 +34,7 @@ msk:
 # Service configurations for core Lakerunner services
 services:
   lakerunner-pubsub-sqs:
+    signal_type: common
     command: ["/app/bin/lakerunner", "pubsub", "sqs"]
     cpu: 1024
     memory_mib: 2048
@@ -44,6 +45,7 @@ services:
     environment: {}
 
   lakerunner-ingest-logs:
+    signal_type: logs
     command: ["/app/bin/lakerunner", "ingest-logs"]
     cpu: 2048
     memory_mib: 4096
@@ -54,6 +56,7 @@ services:
     environment: {}
 
   lakerunner-ingest-metrics:
+    signal_type: metrics
     command: ["/app/bin/lakerunner", "ingest-metrics"]
     cpu: 1024
     memory_mib: 2048
@@ -63,7 +66,19 @@ services:
       command: ["/app/bin/lakerunner", "sysinfo"]
     environment: {}
 
+  lakerunner-ingest-traces:
+    signal_type: traces
+    command: ["/app/bin/lakerunner", "ingest-traces"]
+    cpu: 1024
+    memory_mib: 2048
+    replicas: 1
+    health_check:
+      type: "go"
+      command: ["/app/bin/lakerunner", "sysinfo"]
+    environment: {}
+
   lakerunner-compact-logs:
+    signal_type: logs
     command: ["/app/bin/lakerunner", "compact-logs"]
     cpu: 2048
     memory_mib: 4096
@@ -74,6 +89,7 @@ services:
     environment: {}
 
   lakerunner-compact-metrics:
+    signal_type: metrics
     command: ["/app/bin/lakerunner", "compact-metrics"]
     cpu: 1024
     memory_mib: 2048
@@ -83,7 +99,19 @@ services:
       command: ["/app/bin/lakerunner", "sysinfo"]
     environment: {}
 
+  lakerunner-compact-traces:
+    signal_type: traces
+    command: ["/app/bin/lakerunner", "compact-traces"]
+    cpu: 1024
+    memory_mib: 2048
+    replicas: 1
+    health_check:
+      type: "go"
+      command: ["/app/bin/lakerunner", "sysinfo"]
+    environment: {}
+
   lakerunner-rollup-metrics:
+    signal_type: metrics
     command: ["/app/bin/lakerunner", "rollup-metrics"]
     cpu: 1024
     memory_mib: 2048
@@ -94,6 +122,7 @@ services:
     environment: {}
 
   lakerunner-sweeper:
+    signal_type: common
     command: ["/app/bin/lakerunner", "sweeper"]
     cpu: 256
     memory_mib: 512
@@ -104,6 +133,7 @@ services:
     environment: {}
 
   lakerunner-query-api:
+    signal_type: common
     command: ["/app/bin/lakerunner", "query-api"]
     cpu: 1024
     memory_mib: 2048
@@ -123,6 +153,7 @@ services:
       # Note: QUERY_WORKER_CLUSTER_NAME is set dynamically in the template
 
   lakerunner-query-worker:
+    signal_type: common
     command: ["/app/bin/lakerunner", "query-worker"]
     cpu: 2048
     memory_mib: 8192
@@ -137,6 +168,7 @@ services:
 
   # Boxer service for all compaction and rollup tasks
   lakerunner-boxer-common:
+    signal_type: common
     command: ["/app/bin/lakerunner", "boxer", "--all"]
     cpu: 256
     memory_mib: 512

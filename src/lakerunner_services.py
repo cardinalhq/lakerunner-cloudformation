@@ -83,7 +83,27 @@ def create_services_template():
         Description="REQUIRED: Comma-separated list of MSK broker endpoints (hostname:port)"
     ))
 
+    # Signal Type Configuration
+    EnableLogs = t.add_parameter(Parameter(
+        "EnableLogs", Type="String",
+        AllowedValues=["Yes", "No"],
+        Default="Yes",
+        Description="Enable log processing services (ingest-logs, compact-logs)"
+    ))
 
+    EnableMetrics = t.add_parameter(Parameter(
+        "EnableMetrics", Type="String",
+        AllowedValues=["Yes", "No"],
+        Default="Yes",
+        Description="Enable metrics processing services (ingest-metrics, compact-metrics, rollup-metrics)"
+    ))
+
+    EnableTraces = t.add_parameter(Parameter(
+        "EnableTraces", Type="String",
+        AllowedValues=["Yes", "No"],
+        Default="No",
+        Description="Enable trace processing services (ingest-traces, compact-traces)"
+    ))
 
     # ALB Configuration parameters
 
@@ -104,6 +124,10 @@ def create_services_template():
                     "Parameters": ["CommonInfraStackName", "AlbScheme"]
                 },
                 {
+                    "Label": {"default": "Signal Types"},
+                    "Parameters": ["EnableLogs", "EnableMetrics", "EnableTraces"]
+                },
+                {
                     "Label": {"default": "MSK Configuration"},
                     "Parameters": ["MSKBrokers"]
                 },
@@ -119,6 +143,9 @@ def create_services_template():
             "ParameterLabels": {
                 "CommonInfraStackName": {"default": "Common Infra Stack Name"},
                 "AlbScheme": {"default": "ALB Scheme"},
+                "EnableLogs": {"default": "Enable Logs"},
+                "EnableMetrics": {"default": "Enable Metrics"},
+                "EnableTraces": {"default": "Enable Traces"},
                 "MSKBrokers": {"default": "MSK Broker Endpoints"},
                 "GoServicesImage": {"default": "Go Services Image"},
                 "OtelEndpoint": {"default": "OTEL Collector Endpoint"}
@@ -163,6 +190,9 @@ def create_services_template():
     # Conditions
     t.add_condition("EnableOtlp", Not(Equals(Ref(OtelEndpoint), "")))
     t.add_condition("IsInternetFacing", Equals(Ref(AlbScheme), "internet-facing"))
+    t.add_condition("CreateLogsServices", Equals(Ref(EnableLogs), "Yes"))
+    t.add_condition("CreateMetricsServices", Equals(Ref(EnableMetrics), "Yes"))
+    t.add_condition("CreateTracesServices", Equals(Ref(EnableTraces), "Yes"))
 
 
     # -----------------------
@@ -665,11 +695,26 @@ def create_services_template():
     for service_name, service_config in services.items():
         title_name = ''.join(word.capitalize() for word in service_name.replace('-', '_').split('_'))
 
+        # Determine the condition for this service based on signal type
+        signal_type = service_config.get('signal_type', 'common')
+        condition_name = None
+        if signal_type == 'logs':
+            condition_name = "CreateLogsServices"
+        elif signal_type == 'metrics':
+            condition_name = "CreateMetricsServices"
+        elif signal_type == 'traces':
+            condition_name = "CreateTracesServices"
+
         # Create log group
+        log_group_kwargs = {
+            "LogGroupName": Sub(f"/ecs/{service_name}"),
+            "RetentionInDays": 14
+        }
+        if condition_name:
+            log_group_kwargs["Condition"] = condition_name
         log_group = t.add_resource(LogGroup(
             f"LogGroup{title_name}",
-            LogGroupName=Sub(f"/ecs/{service_name}"),
-            RetentionInDays=14
+            **log_group_kwargs
         ))
 
         # Build volumes list
@@ -832,48 +877,58 @@ def create_services_template():
             task_role_arn = GetAtt(TaskRole, "Arn")
 
         # Create task definition
-        task_def = t.add_resource(TaskDefinition(
-            f"TaskDef{title_name}",
-            Family=service_name + "-task",
-            Cpu=str(service_config.get('cpu', 512)),
-            Memory=str(service_config.get('memory_mib', 1024)),
-            NetworkMode="awsvpc",
-            RequiresCompatibilities=["FARGATE"],
-            ExecutionRoleArn=GetAtt(ExecutionRole, "Arn"),
-            TaskRoleArn=task_role_arn,
-            ContainerDefinitions=container_definitions,
-            Volumes=volumes,
-            RuntimePlatform=RuntimePlatform(
+        task_def_kwargs = {
+            "Family": service_name + "-task",
+            "Cpu": str(service_config.get('cpu', 512)),
+            "Memory": str(service_config.get('memory_mib', 1024)),
+            "NetworkMode": "awsvpc",
+            "RequiresCompatibilities": ["FARGATE"],
+            "ExecutionRoleArn": GetAtt(ExecutionRole, "Arn"),
+            "TaskRoleArn": task_role_arn,
+            "ContainerDefinitions": container_definitions,
+            "Volumes": volumes,
+            "RuntimePlatform": RuntimePlatform(
                 CpuArchitecture="ARM64",
                 OperatingSystemFamily="LINUX"
             )
+        }
+        if condition_name:
+            task_def_kwargs["Condition"] = condition_name
+        task_def = t.add_resource(TaskDefinition(
+            f"TaskDef{title_name}",
+            **task_def_kwargs
         ))
 
         # Create ECS service
         desired_count = str(service_config.get('replicas', 1))
 
-        ecs_service = t.add_resource(Service(
-            f"Service{title_name}",
-            ServiceName=service_name,
-            Cluster=ClusterArnValue,
-            TaskDefinition=Ref(task_def),
-            LaunchType="FARGATE",
-            DesiredCount=desired_count,
-            NetworkConfiguration=NetworkConfiguration(
+        ecs_service_kwargs = {
+            "ServiceName": service_name,
+            "Cluster": ClusterArnValue,
+            "TaskDefinition": Ref(task_def),
+            "LaunchType": "FARGATE",
+            "DesiredCount": desired_count,
+            "NetworkConfiguration": NetworkConfiguration(
                 AwsvpcConfiguration=AwsvpcConfiguration(
                     Subnets=PrivateSubnetsValue,
                     SecurityGroups=[TaskSecurityGroupIdValue]
                 )
             ),
-            EnableExecuteCommand=True,
-            EnableECSManagedTags=True,
-            PropagateTags="SERVICE",
-            Tags=Tags(
+            "EnableExecuteCommand": True,
+            "EnableECSManagedTags": True,
+            "PropagateTags": "SERVICE",
+            "Tags": Tags(
                 Name=Sub(f"${{AWS::StackName}}-{service_name}"),
                 ManagedBy="Lakerunner",
                 Environment=Ref("AWS::StackName"),
                 Component="Service"
             )
+        }
+        if condition_name:
+            ecs_service_kwargs["Condition"] = condition_name
+        ecs_service = t.add_resource(Service(
+            f"Service{title_name}",
+            **ecs_service_kwargs
         ))
 
         # Store target group mapping for ALB services (use local target groups)
@@ -943,12 +998,27 @@ def create_services_template():
     ))
 
     # Output service ARNs
-    for service_name, _ in services.items():
+    for service_name, service_config in services.items():
         title_name = ''.join(word.capitalize() for word in service_name.replace('-', '_').split('_'))
+        # Determine the condition for this service
+        signal_type = service_config.get('signal_type', 'common')
+        condition_name = None
+        if signal_type == 'logs':
+            condition_name = "CreateLogsServices"
+        elif signal_type == 'metrics':
+            condition_name = "CreateMetricsServices"
+        elif signal_type == 'traces':
+            condition_name = "CreateTracesServices"
+
+        output_kwargs = {
+            "Value": Ref(f"Service{title_name}"),
+            "Export": Export(name=Sub(f"${{AWS::StackName}}-{service_name}-ServiceArn"))
+        }
+        if condition_name:
+            output_kwargs["Condition"] = condition_name
         t.add_output(Output(
             f"Service{title_name}Arn",
-            Value=Ref(f"Service{title_name}"),
-            Export=Export(name=Sub(f"${{AWS::StackName}}-{service_name}-ServiceArn"))
+            **output_kwargs
         ))
 
     return t
