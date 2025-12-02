@@ -172,7 +172,7 @@ Parameters:
     Description: Enable trace processing services (ingest-traces, compact-traces)
     Type: String
   GoServicesImage:
-    Default: public.ecr.aws/cardinalhq.io/lakerunner:v1.5.0
+    Default: public.ecr.aws/cardinalhq.io/lakerunner:v1.5.1
     Description: Container image for all Go services (pubsub, ingest, compact, query-api, query-worker, etc.)
     Type: String
   MSKBrokers:
