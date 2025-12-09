@@ -47,7 +47,7 @@ services:
   lakerunner-ingest-logs:
     signal_type: logs
     command: ["/app/bin/lakerunner", "ingest-logs"]
-    cpu: 2048
+    cpu: 1024
     memory_mib: 4096
     replicas: 4
     health_check:
@@ -80,7 +80,7 @@ services:
   lakerunner-compact-logs:
     signal_type: logs
     command: ["/app/bin/lakerunner", "compact-logs"]
-    cpu: 2048
+    cpu: 1024
     memory_mib: 4096
     replicas: 4
     health_check:
