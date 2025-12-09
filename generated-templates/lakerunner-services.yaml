@@ -31,6 +31,37 @@ Metadata:
           - EnableMetrics
           - EnableTraces
       - Label:
+          default: Query Services Configuration
+        Parameters:
+          - QueryApiReplicas
+          - QueryApiCpu
+          - QueryApiMemory
+          - QueryWorkerReplicas
+          - QueryWorkerCpu
+          - QueryWorkerMemory
+      - Label:
+          default: Worker Services Configuration
+        Parameters:
+          - IngestLogsReplicas
+          - IngestLogsMemory
+          - IngestMetricsReplicas
+          - IngestMetricsMemory
+          - IngestTracesReplicas
+          - IngestTracesMemory
+          - CompactLogsReplicas
+          - CompactLogsMemory
+          - CompactMetricsReplicas
+          - CompactMetricsMemory
+          - CompactTracesReplicas
+          - CompactTracesMemory
+          - RollupMetricsReplicas
+          - RollupMetricsMemory
+      - Label:
+          default: Other Services Configuration
+        Parameters:
+          - PubsubSqsReplicas
+          - BoxerCommonReplicas
+      - Label:
           default: MSK Configuration
         Parameters:
           - MSKBrokers
@@ -45,8 +76,22 @@ Metadata:
     ParameterLabels:
       AlbScheme:
         default: ALB Scheme
+      BoxerCommonReplicas:
+        default: Boxer Common Replicas
       CommonInfraStackName:
         default: Common Infra Stack Name
+      CompactLogsMemory:
+        default: Compact Logs Memory (MiB)
+      CompactLogsReplicas:
+        default: Compact Logs Replicas
+      CompactMetricsMemory:
+        default: Compact Metrics Memory (MiB)
+      CompactMetricsReplicas:
+        default: Compact Metrics Replicas
+      CompactTracesMemory:
+        default: Compact Traces Memory (MiB)
+      CompactTracesReplicas:
+        default: Compact Traces Replicas
       EnableLogs:
         default: Enable Logs
       EnableMetrics:
@@ -55,10 +100,40 @@ Metadata:
         default: Enable Traces
       GoServicesImage:
         default: Go Services Image
+      IngestLogsMemory:
+        default: Ingest Logs Memory (MiB)
+      IngestLogsReplicas:
+        default: Ingest Logs Replicas
+      IngestMetricsMemory:
+        default: Ingest Metrics Memory (MiB)
+      IngestMetricsReplicas:
+        default: Ingest Metrics Replicas
+      IngestTracesMemory:
+        default: Ingest Traces Memory (MiB)
+      IngestTracesReplicas:
+        default: Ingest Traces Replicas
       MSKBrokers:
         default: MSK Broker Endpoints
       OtelEndpoint:
         default: OTEL Collector Endpoint
+      PubsubSqsReplicas:
+        default: Pubsub Sqs Replicas
+      QueryApiCpu:
+        default: Query Api CPU
+      QueryApiMemory:
+        default: Query Api Memory (MiB)
+      QueryApiReplicas:
+        default: Query Api Replicas
+      QueryWorkerCpu:
+        default: Query Worker CPU
+      QueryWorkerMemory:
+        default: Query Worker Memory (MiB)
+      QueryWorkerReplicas:
+        default: Query Worker Replicas
+      RollupMetricsMemory:
+        default: Rollup Metrics Memory (MiB)
+      RollupMetricsReplicas:
+        default: Rollup Metrics Replicas
 Outputs:
   AlbArn:
     Export:
@@ -147,9 +222,69 @@ Parameters:
     Default: internal
     Description: 'Load balancer scheme: ''internet-facing'' for external access or ''internal'' for internal access only.'
     Type: String
+  BoxerCommonReplicas:
+    Default: '1'
+    Description: Number of lakerunner-boxer-common task replicas
+    MaxValue: 20
+    MinValue: 0
+    Type: Number
   CommonInfraStackName:
     Description: 'REQUIRED: Name of the CommonInfra stack to import infrastructure values from.'
     Type: String
+  CompactLogsMemory:
+    AllowedValues:
+      - '2048'
+      - '3072'
+      - '4096'
+      - '5120'
+      - '6144'
+      - '7168'
+      - '8192'
+    Default: '4096'
+    Description: 'Memory (MiB) for lakerunner-compact-logs. Valid values for 1024 CPU: 2048, 3072, 4096, 5120, 6144, 7168, 8192'
+    Type: Number
+  CompactLogsReplicas:
+    Default: '4'
+    Description: Number of lakerunner-compact-logs task replicas
+    MaxValue: 20
+    MinValue: 0
+    Type: Number
+  CompactMetricsMemory:
+    AllowedValues:
+      - '2048'
+      - '3072'
+      - '4096'
+      - '5120'
+      - '6144'
+      - '7168'
+      - '8192'
+    Default: '2048'
+    Description: 'Memory (MiB) for lakerunner-compact-metrics. Valid values for 1024 CPU: 2048, 3072, 4096, 5120, 6144, 7168, 8192'
+    Type: Number
+  CompactMetricsReplicas:
+    Default: '2'
+    Description: Number of lakerunner-compact-metrics task replicas
+    MaxValue: 20
+    MinValue: 0
+    Type: Number
+  CompactTracesMemory:
+    AllowedValues:
+      - '2048'
+      - '3072'
+      - '4096'
+      - '5120'
+      - '6144'
+      - '7168'
+      - '8192'
+    Default: '2048'
+    Description: 'Memory (MiB) for lakerunner-compact-traces. Valid values for 1024 CPU: 2048, 3072, 4096, 5120, 6144, 7168, 8192'
+    Type: Number
+  CompactTracesReplicas:
+    Default: '1'
+    Description: Number of lakerunner-compact-traces task replicas
+    MaxValue: 20
+    MinValue: 0
+    Type: Number
   EnableLogs:
     AllowedValues:
       - 'Yes'
@@ -175,6 +310,60 @@ Parameters:
     Default: public.ecr.aws/cardinalhq.io/lakerunner:v1.5.1
     Description: Container image for all Go services (pubsub, ingest, compact, query-api, query-worker, etc.)
     Type: String
+  IngestLogsMemory:
+    AllowedValues:
+      - '2048'
+      - '3072'
+      - '4096'
+      - '5120'
+      - '6144'
+      - '7168'
+      - '8192'
+    Default: '4096'
+    Description: 'Memory (MiB) for lakerunner-ingest-logs. Valid values for 1024 CPU: 2048, 3072, 4096, 5120, 6144, 7168, 8192'
+    Type: Number
+  IngestLogsReplicas:
+    Default: '4'
+    Description: Number of lakerunner-ingest-logs task replicas
+    MaxValue: 20
+    MinValue: 0
+    Type: Number
+  IngestMetricsMemory:
+    AllowedValues:
+      - '2048'
+      - '3072'
+      - '4096'
+      - '5120'
+      - '6144'
+      - '7168'
+      - '8192'
+    Default: '2048'
+    Description: 'Memory (MiB) for lakerunner-ingest-metrics. Valid values for 1024 CPU: 2048, 3072, 4096, 5120, 6144, 7168, 8192'
+    Type: Number
+  IngestMetricsReplicas:
+    Default: '1'
+    Description: Number of lakerunner-ingest-metrics task replicas
+    MaxValue: 20
+    MinValue: 0
+    Type: Number
+  IngestTracesMemory:
+    AllowedValues:
+      - '2048'
+      - '3072'
+      - '4096'
+      - '5120'
+      - '6144'
+      - '7168'
+      - '8192'
+    Default: '2048'
+    Description: 'Memory (MiB) for lakerunner-ingest-traces. Valid values for 1024 CPU: 2048, 3072, 4096, 5120, 6144, 7168, 8192'
+    Type: Number
+  IngestTracesReplicas:
+    Default: '1'
+    Description: Number of lakerunner-ingest-traces task replicas
+    MaxValue: 20
+    MinValue: 0
+    Type: Number
   MSKBrokers:
     Default: ''
     Description: 'REQUIRED: Comma-separated list of MSK broker endpoints (hostname:port)'
@@ -183,6 +372,170 @@ Parameters:
     Default: ''
     Description: 'OPTIONAL: OTEL collector HTTP endpoint URL (e.g., http://collector-dns:4318). Leave blank to disable OTLP telemetry export.'
     Type: String
+  PubsubSqsReplicas:
+    Default: '1'
+    Description: Number of lakerunner-pubsub-sqs task replicas
+    MaxValue: 20
+    MinValue: 0
+    Type: Number
+  QueryApiCpu:
+    AllowedValues:
+      - '256'
+      - '512'
+      - '1024'
+      - '2048'
+      - '4096'
+      - '8192'
+      - '16384'
+    Default: '1024'
+    Description: CPU units for lakerunner-query-api (256, 512, 1024, 2048, 4096, 8192, 16384)
+    Type: Number
+  QueryApiMemory:
+    AllowedValues:
+      - '512'
+      - '1024'
+      - '2048'
+      - '3072'
+      - '4096'
+      - '5120'
+      - '6144'
+      - '7168'
+      - '8192'
+      - '9216'
+      - '10240'
+      - '11264'
+      - '12288'
+      - '13312'
+      - '14336'
+      - '15360'
+      - '16384'
+      - '17408'
+      - '18432'
+      - '19456'
+      - '20480'
+      - '21504'
+      - '22528'
+      - '23552'
+      - '24576'
+      - '25600'
+      - '26624'
+      - '27648'
+      - '28672'
+      - '29696'
+      - '30720'
+      - '32768'
+      - '36864'
+      - '40960'
+      - '45056'
+      - '49152'
+      - '53248'
+      - '57344'
+      - '61440'
+      - '65536'
+      - '73728'
+      - '81920'
+      - '90112'
+      - '98304'
+      - '106496'
+      - '114688'
+      - '122880'
+    Default: '2048'
+    Description: Memory (MiB) for lakerunner-query-api. Must be valid for the selected CPU.
+    Type: Number
+  QueryApiReplicas:
+    Default: '2'
+    Description: Number of lakerunner-query-api task replicas
+    MaxValue: 20
+    MinValue: 0
+    Type: Number
+  QueryWorkerCpu:
+    AllowedValues:
+      - '256'
+      - '512'
+      - '1024'
+      - '2048'
+      - '4096'
+      - '8192'
+      - '16384'
+    Default: '2048'
+    Description: CPU units for lakerunner-query-worker (256, 512, 1024, 2048, 4096, 8192, 16384)
+    Type: Number
+  QueryWorkerMemory:
+    AllowedValues:
+      - '512'
+      - '1024'
+      - '2048'
+      - '3072'
+      - '4096'
+      - '5120'
+      - '6144'
+      - '7168'
+      - '8192'
+      - '9216'
+      - '10240'
+      - '11264'
+      - '12288'
+      - '13312'
+      - '14336'
+      - '15360'
+      - '16384'
+      - '17408'
+      - '18432'
+      - '19456'
+      - '20480'
+      - '21504'
+      - '22528'
+      - '23552'
+      - '24576'
+      - '25600'
+      - '26624'
+      - '27648'
+      - '28672'
+      - '29696'
+      - '30720'
+      - '32768'
+      - '36864'
+      - '40960'
+      - '45056'
+      - '49152'
+      - '53248'
+      - '57344'
+      - '61440'
+      - '65536'
+      - '73728'
+      - '81920'
+      - '90112'
+      - '98304'
+      - '106496'
+      - '114688'
+      - '122880'
+    Default: '8192'
+    Description: Memory (MiB) for lakerunner-query-worker. Must be valid for the selected CPU.
+    Type: Number
+  QueryWorkerReplicas:
+    Default: '4'
+    Description: Number of lakerunner-query-worker task replicas
+    MaxValue: 20
+    MinValue: 0
+    Type: Number
+  RollupMetricsMemory:
+    AllowedValues:
+      - '2048'
+      - '3072'
+      - '4096'
+      - '5120'
+      - '6144'
+      - '7168'
+      - '8192'
+    Default: '2048'
+    Description: 'Memory (MiB) for lakerunner-rollup-metrics. Valid values for 1024 CPU: 2048, 3072, 4096, 5120, 6144, 7168, 8192'
+    Type: Number
+  RollupMetricsReplicas:
+    Default: '2'
+    Description: Number of lakerunner-rollup-metrics task replicas
+    MaxValue: 20
+    MinValue: 0
+    Type: Number
 Resources:
   Alb:
     Properties:
@@ -539,7 +892,7 @@ Resources:
         Fn::Sub:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
-      DesiredCount: '1'
+      DesiredCount: !Ref 'BoxerCommonReplicas'
       EnableECSManagedTags: true
       EnableExecuteCommand: true
       LaunchType: FARGATE
@@ -576,7 +929,7 @@ Resources:
         Fn::Sub:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
-      DesiredCount: '4'
+      DesiredCount: !Ref 'CompactLogsReplicas'
       EnableECSManagedTags: true
       EnableExecuteCommand: true
       LaunchType: FARGATE
@@ -613,7 +966,7 @@ Resources:
         Fn::Sub:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
-      DesiredCount: '2'
+      DesiredCount: !Ref 'CompactMetricsReplicas'
       EnableECSManagedTags: true
       EnableExecuteCommand: true
       LaunchType: FARGATE
@@ -650,7 +1003,7 @@ Resources:
         Fn::Sub:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
-      DesiredCount: '1'
+      DesiredCount: !Ref 'CompactTracesReplicas'
       EnableECSManagedTags: true
       EnableExecuteCommand: true
       LaunchType: FARGATE
@@ -687,7 +1040,7 @@ Resources:
         Fn::Sub:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
-      DesiredCount: '4'
+      DesiredCount: !Ref 'IngestLogsReplicas'
       EnableECSManagedTags: true
       EnableExecuteCommand: true
       LaunchType: FARGATE
@@ -724,7 +1077,7 @@ Resources:
         Fn::Sub:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
-      DesiredCount: '1'
+      DesiredCount: !Ref 'IngestMetricsReplicas'
       EnableECSManagedTags: true
       EnableExecuteCommand: true
       LaunchType: FARGATE
@@ -761,7 +1114,7 @@ Resources:
         Fn::Sub:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
-      DesiredCount: '1'
+      DesiredCount: !Ref 'IngestTracesReplicas'
       EnableECSManagedTags: true
       EnableExecuteCommand: true
       LaunchType: FARGATE
@@ -833,7 +1186,7 @@ Resources:
         Fn::Sub:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
-      DesiredCount: '1'
+      DesiredCount: !Ref 'PubsubSqsReplicas'
       EnableECSManagedTags: true
       EnableExecuteCommand: true
       LaunchType: FARGATE
@@ -871,7 +1224,7 @@ Resources:
         Fn::Sub:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
-      DesiredCount: '2'
+      DesiredCount: !Ref 'QueryApiReplicas'
       EnableECSManagedTags: true
       EnableExecuteCommand: true
       LaunchType: FARGATE
@@ -911,7 +1264,7 @@ Resources:
         Fn::Sub:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
-      DesiredCount: '4'
+      DesiredCount: !Ref 'QueryWorkerReplicas'
       EnableECSManagedTags: true
       EnableExecuteCommand: true
       LaunchType: FARGATE
@@ -948,7 +1301,7 @@ Resources:
         Fn::Sub:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
-      DesiredCount: '2'
+      DesiredCount: !Ref 'RollupMetricsReplicas'
       EnableECSManagedTags: true
       EnableExecuteCommand: true
       LaunchType: FARGATE
@@ -1282,10 +1635,10 @@ Resources:
                       - ${CommonInfraStackName}-MSKCredentialsArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
           User: '0'
-      Cpu: '2048'
+      Cpu: '1024'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
       Family: lakerunner-compact-logs-task
-      Memory: '4096'
+      Memory: !Ref 'CompactLogsMemory'
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE
@@ -1426,7 +1779,7 @@ Resources:
       Cpu: '1024'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
       Family: lakerunner-compact-metrics-task
-      Memory: '2048'
+      Memory: !Ref 'CompactMetricsMemory'
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE
@@ -1567,7 +1920,7 @@ Resources:
       Cpu: '1024'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
       Family: lakerunner-compact-traces-task
-      Memory: '2048'
+      Memory: !Ref 'CompactTracesMemory'
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE
@@ -1705,10 +2058,10 @@ Resources:
                       - ${CommonInfraStackName}-MSKCredentialsArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
           User: '0'
-      Cpu: '2048'
+      Cpu: '1024'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
       Family: lakerunner-ingest-logs-task
-      Memory: '4096'
+      Memory: !Ref 'IngestLogsMemory'
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE
@@ -1849,7 +2202,7 @@ Resources:
       Cpu: '1024'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
       Family: lakerunner-ingest-metrics-task
-      Memory: '2048'
+      Memory: !Ref 'IngestMetricsMemory'
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE
@@ -1990,7 +2343,7 @@ Resources:
       Cpu: '1024'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
       Family: lakerunner-ingest-traces-task
-      Memory: '2048'
+      Memory: !Ref 'IngestTracesMemory'
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE
@@ -2423,10 +2776,10 @@ Resources:
                       - ${CommonInfraStackName}-MSKCredentialsArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
           User: '0'
-      Cpu: '1024'
+      Cpu: !Ref 'QueryApiCpu'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
       Family: lakerunner-query-api-task
-      Memory: '2048'
+      Memory: !Ref 'QueryApiMemory'
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE
@@ -2565,10 +2918,10 @@ Resources:
                       - ${CommonInfraStackName}-MSKCredentialsArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
           User: '0'
-      Cpu: '2048'
+      Cpu: !Ref 'QueryWorkerCpu'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
       Family: lakerunner-query-worker-task
-      Memory: '8192'
+      Memory: !Ref 'QueryWorkerMemory'
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE
@@ -2709,7 +3062,7 @@ Resources:
       Cpu: '1024'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
       Family: lakerunner-rollup-metrics-task
-      Memory: '2048'
+      Memory: !Ref 'RollupMetricsMemory'
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE

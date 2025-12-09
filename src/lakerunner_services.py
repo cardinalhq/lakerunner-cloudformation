@@ -54,6 +54,54 @@ def create_services_template():
     services = config.get('services', {})
     images = config.get('images', {})
 
+    # Define valid Fargate CPU/memory combinations
+    # Format: {cpu_units: [valid_memory_values_in_mib]}
+    FARGATE_CPU_MEMORY = {
+        256: [512, 1024, 2048],
+        512: [1024, 2048, 3072, 4096],
+        1024: [2048, 3072, 4096, 5120, 6144, 7168, 8192],
+        2048: [4096, 5120, 6144, 7168, 8192, 9216, 10240, 11264, 12288, 13312, 14336, 15360, 16384],
+        4096: [8192, 9216, 10240, 11264, 12288, 13312, 14336, 15360, 16384, 17408, 18432, 19456, 20480, 21504, 22528, 23552, 24576, 25600, 26624, 27648, 28672, 29696, 30720],
+        8192: list(range(16384, 61441, 4096)),
+        16384: list(range(32768, 122881, 8192)),
+    }
+
+    # Define lakerunner services that should have configurable parameters
+    # query-api and query-worker get CPU + memory + replicas params
+    LAKERUNNER_QUERY_SERVICES = ['lakerunner-query-api', 'lakerunner-query-worker']
+
+    # Ingest/compact/rollup services get memory + replicas params
+    LAKERUNNER_WORKER_SERVICES = [
+        'lakerunner-ingest-logs',
+        'lakerunner-ingest-metrics',
+        'lakerunner-ingest-traces',
+        'lakerunner-compact-logs',
+        'lakerunner-compact-metrics',
+        'lakerunner-compact-traces',
+        'lakerunner-rollup-metrics',
+    ]
+
+    # Services that use YAML config only (no parameters)
+    # sweeper, monitor use YAML for both replicas and memory
+    # pubsub, boxer use YAML for memory but get replicas param
+    LAKERUNNER_REPLICAS_ONLY_SERVICES = [
+        'lakerunner-pubsub-sqs',
+        'lakerunner-boxer-common',
+    ]
+
+    # All configurable services (for iteration)
+    LAKERUNNER_CONFIGURABLE_SERVICES = (
+        LAKERUNNER_QUERY_SERVICES +
+        LAKERUNNER_WORKER_SERVICES +
+        LAKERUNNER_REPLICAS_ONLY_SERVICES
+    )
+
+    # Helper to convert service name to parameter-friendly name
+    def service_to_param_name(service_name):
+        # lakerunner-query-api -> QueryApi
+        parts = service_name.replace('lakerunner-', '').split('-')
+        return ''.join(word.capitalize() for word in parts)
+
     # -----------------------
     # Parameters (imports from CommonInfra)
     # -----------------------
@@ -115,7 +163,129 @@ def create_services_template():
         Description="Load balancer scheme: 'internet-facing' for external access or 'internal' for internal access only."
     ))
 
-    # Parameter groups for console
+    # -----------------------
+    # Service Configuration Parameters
+    # -----------------------
+    # Store parameter references for use when creating services
+    service_params = {}
+
+    for service_name in LAKERUNNER_CONFIGURABLE_SERVICES:
+        if service_name not in services:
+            continue  # Skip services not defined in defaults
+
+        service_config = services[service_name]
+        param_name = service_to_param_name(service_name)
+        service_params[service_name] = {}
+
+        # Replicas parameter for configurable services
+        default_replicas = service_config.get('replicas', 1)
+        replicas_param = t.add_parameter(Parameter(
+            f"{param_name}Replicas",
+            Type="Number",
+            Default=str(default_replicas),
+            MinValue=0,
+            MaxValue=20,
+            Description=f"Number of {service_name} task replicas"
+        ))
+        service_params[service_name]['replicas'] = replicas_param
+
+        # CPU and Memory for query services
+        if service_name in LAKERUNNER_QUERY_SERVICES:
+            default_cpu = service_config.get('cpu', 1024)
+            cpu_param = t.add_parameter(Parameter(
+                f"{param_name}Cpu",
+                Type="Number",
+                Default=str(default_cpu),
+                AllowedValues=[str(c) for c in FARGATE_CPU_MEMORY.keys()],
+                Description=f"CPU units for {service_name} (256, 512, 1024, 2048, 4096, 8192, 16384)"
+            ))
+            service_params[service_name]['cpu'] = cpu_param
+
+            default_memory = service_config.get('memory_mib', 2048)
+            # Get all valid memory values across all CPU tiers
+            all_memory_values = sorted(set(
+                m for memories in FARGATE_CPU_MEMORY.values() for m in memories
+            ))
+            memory_param = t.add_parameter(Parameter(
+                f"{param_name}Memory",
+                Type="Number",
+                Default=str(default_memory),
+                AllowedValues=[str(m) for m in all_memory_values],
+                Description=f"Memory (MiB) for {service_name}. Must be valid for the selected CPU."
+            ))
+            service_params[service_name]['memory'] = memory_param
+
+        # Memory-only for worker services (ingest, compact, rollup)
+        elif service_name in LAKERUNNER_WORKER_SERVICES:
+            default_memory = service_config.get('memory_mib', 1024)
+            default_cpu = service_config.get('cpu', 512)
+            # Get valid memory values for the service's CPU tier
+            valid_memories = FARGATE_CPU_MEMORY.get(default_cpu, [512, 1024, 2048])
+            memory_param = t.add_parameter(Parameter(
+                f"{param_name}Memory",
+                Type="Number",
+                Default=str(default_memory),
+                AllowedValues=[str(m) for m in valid_memories],
+                Description=f"Memory (MiB) for {service_name}. Valid values for {default_cpu} CPU: {', '.join(str(m) for m in valid_memories)}"
+            ))
+            service_params[service_name]['memory'] = memory_param
+
+        # Replicas-only services (pubsub, boxer) - no memory parameter
+
+    # Build parameter groups for console
+    # Query services get their own group with CPU, Memory, and Replicas
+    query_service_params = []
+    for svc in LAKERUNNER_QUERY_SERVICES:
+        if svc in service_params:
+            param_name = service_to_param_name(svc)
+            query_service_params.extend([
+                f"{param_name}Replicas",
+                f"{param_name}Cpu",
+                f"{param_name}Memory"
+            ])
+
+    # Worker services get Memory and Replicas
+    worker_service_params = []
+    for svc in LAKERUNNER_WORKER_SERVICES:
+        if svc in service_params:
+            param_name = service_to_param_name(svc)
+            worker_service_params.extend([
+                f"{param_name}Replicas",
+                f"{param_name}Memory"
+            ])
+
+    # Replicas-only services (pubsub, boxer)
+    replicas_only_params = []
+    for svc in LAKERUNNER_REPLICAS_ONLY_SERVICES:
+        if svc in service_params:
+            param_name = service_to_param_name(svc)
+            replicas_only_params.append(f"{param_name}Replicas")
+
+    # Build parameter labels
+    param_labels = {
+        "CommonInfraStackName": {"default": "Common Infra Stack Name"},
+        "AlbScheme": {"default": "ALB Scheme"},
+        "EnableLogs": {"default": "Enable Logs"},
+        "EnableMetrics": {"default": "Enable Metrics"},
+        "EnableTraces": {"default": "Enable Traces"},
+        "MSKBrokers": {"default": "MSK Broker Endpoints"},
+        "GoServicesImage": {"default": "Go Services Image"},
+        "OtelEndpoint": {"default": "OTEL Collector Endpoint"}
+    }
+
+    # Add labels for service configuration parameters
+    for service_name in LAKERUNNER_CONFIGURABLE_SERVICES:
+        if service_name not in service_params:
+            continue
+        param_name = service_to_param_name(service_name)
+        # Create friendly label from service name (e.g., "Query Api" from "lakerunner-query-api")
+        friendly_name = service_name.replace('lakerunner-', '').replace('-', ' ').title()
+        param_labels[f"{param_name}Replicas"] = {"default": f"{friendly_name} Replicas"}
+        if service_name in LAKERUNNER_QUERY_SERVICES or service_name in LAKERUNNER_WORKER_SERVICES:
+            param_labels[f"{param_name}Memory"] = {"default": f"{friendly_name} Memory (MiB)"}
+        if service_name in LAKERUNNER_QUERY_SERVICES:
+            param_labels[f"{param_name}Cpu"] = {"default": f"{friendly_name} CPU"}
+
     t.set_metadata({
         "AWS::CloudFormation::Interface": {
             "ParameterGroups": [
@@ -126,6 +296,18 @@ def create_services_template():
                 {
                     "Label": {"default": "Signal Types"},
                     "Parameters": ["EnableLogs", "EnableMetrics", "EnableTraces"]
+                },
+                {
+                    "Label": {"default": "Query Services Configuration"},
+                    "Parameters": query_service_params
+                },
+                {
+                    "Label": {"default": "Worker Services Configuration"},
+                    "Parameters": worker_service_params
+                },
+                {
+                    "Label": {"default": "Other Services Configuration"},
+                    "Parameters": replicas_only_params
                 },
                 {
                     "Label": {"default": "MSK Configuration"},
@@ -140,16 +322,7 @@ def create_services_template():
                     "Parameters": ["OtelEndpoint"]
                 }
             ],
-            "ParameterLabels": {
-                "CommonInfraStackName": {"default": "Common Infra Stack Name"},
-                "AlbScheme": {"default": "ALB Scheme"},
-                "EnableLogs": {"default": "Enable Logs"},
-                "EnableMetrics": {"default": "Enable Metrics"},
-                "EnableTraces": {"default": "Enable Traces"},
-                "MSKBrokers": {"default": "MSK Broker Endpoints"},
-                "GoServicesImage": {"default": "Go Services Image"},
-                "OtelEndpoint": {"default": "OTEL Collector Endpoint"}
-            }
+            "ParameterLabels": param_labels
         }
     })
 
@@ -876,11 +1049,30 @@ def create_services_template():
         else:
             task_role_arn = GetAtt(TaskRole, "Arn")
 
+        # Determine CPU and memory values
+        # For lakerunner services with parameters, use the parameter; otherwise use YAML defaults
+        if service_name in service_params:
+            if 'cpu' in service_params[service_name]:
+                # Query services have CPU parameter
+                cpu_value = Ref(service_params[service_name]['cpu'])
+            else:
+                # Other services use YAML default for CPU
+                cpu_value = str(service_config.get('cpu', 512))
+            if 'memory' in service_params[service_name]:
+                memory_value = Ref(service_params[service_name]['memory'])
+            else:
+                # Replicas-only services use YAML default for memory
+                memory_value = str(service_config.get('memory_mib', 1024))
+        else:
+            # Non-configurable services use YAML defaults
+            cpu_value = str(service_config.get('cpu', 512))
+            memory_value = str(service_config.get('memory_mib', 1024))
+
         # Create task definition
         task_def_kwargs = {
             "Family": service_name + "-task",
-            "Cpu": str(service_config.get('cpu', 512)),
-            "Memory": str(service_config.get('memory_mib', 1024)),
+            "Cpu": cpu_value,
+            "Memory": memory_value,
             "NetworkMode": "awsvpc",
             "RequiresCompatibilities": ["FARGATE"],
             "ExecutionRoleArn": GetAtt(ExecutionRole, "Arn"),
@@ -900,7 +1092,11 @@ def create_services_template():
         ))
 
         # Create ECS service
-        desired_count = str(service_config.get('replicas', 1))
+        # For lakerunner services with parameters, use the parameter; otherwise use YAML defaults
+        if service_name in service_params and 'replicas' in service_params[service_name]:
+            desired_count = Ref(service_params[service_name]['replicas'])
+        else:
+            desired_count = str(service_config.get('replicas', 1))
 
         ecs_service_kwargs = {
             "ServiceName": service_name,

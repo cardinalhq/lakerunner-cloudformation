@@ -1,0 +1,2 @@
+ignore_checks:
+  - W1020  # Fn::Sub isn't needed because there are no variables
