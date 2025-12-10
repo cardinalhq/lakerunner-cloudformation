@@ -609,6 +609,20 @@ Resources:
           - ${CommonInfraStackName}-VpcId
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
     Type: AWS::EC2::SecurityGroup
+  EBSInfrastructureRole:
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: ecs.amazonaws.com
+            Sid: AllowAccessToECSForInfrastructureManagement
+        Version: '2012-10-17'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSInfrastructureRolePolicyForVolumes
+      RoleName: !Sub '${AWS::StackName}-ebs-infra-role'
+    Type: AWS::IAM::Role
   ExecRole:
     Properties:
       AssumeRolePolicyDocument:
@@ -1526,6 +1540,16 @@ Resources:
         - Key: Name
           Value: !Sub '${AWS::StackName}-lakerunner-query-worker'
       TaskDefinition: !Ref 'TaskDefLakerunnerQueryWorker'
+      VolumeConfigurations:
+        - ManagedEBSVolume:
+            Encrypted: true
+            FilesystemType: xfs
+            Iops: 3000
+            RoleArn: !GetAtt 'EBSInfrastructureRole.Arn'
+            SizeInGiB: 100
+            Throughput: 125
+            VolumeType: gp3
+          Name: ebs-data
     Type: AWS::ECS::Service
   ServiceLakerunnerRollupMetrics:
     Condition: CreateMetricsServices
@@ -3112,7 +3136,7 @@ Resources:
           MountPoints:
             - ContainerPath: /scratch
               ReadOnly: false
-              SourceVolume: scratch
+              SourceVolume: ebs-data
           Name: AppContainer
           PortMappings:
             - ContainerPort: 8081
@@ -3163,7 +3187,8 @@ Resources:
         OperatingSystemFamily: LINUX
       TaskRoleArn: !GetAtt 'QueryWorkerTaskRole.Arn'
       Volumes:
-        - Name: scratch
+        - ConfiguredAtLaunch: true
+          Name: ebs-data
     Type: AWS::ECS::TaskDefinition
   TaskDefLakerunnerRollupMetrics:
     Condition: CreateMetricsServices

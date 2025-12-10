@@ -164,6 +164,13 @@ services:
     health_check:
       type: "go"
       command: ["/app/bin/lakerunner", "sysinfo"]
+    ebs_volume:
+      size_gib: 100
+      volume_type: gp3
+      iops: 3000
+      throughput: 125
+      filesystem_type: xfs
+      mount_path: /scratch
     environment: {}
 
   # Boxer service for all compaction and rollup tasks
