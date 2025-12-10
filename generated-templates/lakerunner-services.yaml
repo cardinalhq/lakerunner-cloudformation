@@ -1,16 +1,4 @@
 Conditions:
-  AutoScaleLogsServices: !And
-    - !Condition 'AutoScalingEnabled'
-    - !Condition 'CreateLogsServices'
-  AutoScaleMetricsServices: !And
-    - !Condition 'AutoScalingEnabled'
-    - !Condition 'CreateMetricsServices'
-  AutoScaleTracesServices: !And
-    - !Condition 'AutoScalingEnabled'
-    - !Condition 'CreateTracesServices'
-  AutoScalingEnabled: !Equals
-    - !Ref 'EnableAutoScaling'
-    - 'Yes'
   CreateLogsServices: !Equals
     - !Ref 'EnableLogs'
     - 'Yes'
@@ -76,8 +64,6 @@ Metadata:
       - Label:
           default: Auto-Scaling Configuration
         Parameters:
-          - EnableAutoScaling
-          - AutoScalingMaxReplicas
           - AutoScalingCPUTarget
           - AutoScalingScaleOutCooldown
           - AutoScalingScaleInCooldown
@@ -98,8 +84,6 @@ Metadata:
         default: ALB Scheme
       AutoScalingCPUTarget:
         default: CPU Target % (Auto-Scaling)
-      AutoScalingMaxReplicas:
-        default: Max Replicas (Auto-Scaling)
       AutoScalingScaleInCooldown:
         default: Scale-In Cooldown (seconds)
       AutoScalingScaleOutCooldown:
@@ -111,17 +95,15 @@ Metadata:
       CompactLogsMemory:
         default: Compact Logs Memory (MiB)
       CompactLogsReplicas:
-        default: Compact Logs Replicas
+        default: Compact Logs Max Replicas
       CompactMetricsMemory:
         default: Compact Metrics Memory (MiB)
       CompactMetricsReplicas:
-        default: Compact Metrics Replicas
+        default: Compact Metrics Max Replicas
       CompactTracesMemory:
         default: Compact Traces Memory (MiB)
       CompactTracesReplicas:
-        default: Compact Traces Replicas
-      EnableAutoScaling:
-        default: Enable Auto-Scaling
+        default: Compact Traces Max Replicas
       EnableLogs:
         default: Enable Logs
       EnableMetrics:
@@ -133,15 +115,15 @@ Metadata:
       IngestLogsMemory:
         default: Ingest Logs Memory (MiB)
       IngestLogsReplicas:
-        default: Ingest Logs Replicas
+        default: Ingest Logs Max Replicas
       IngestMetricsMemory:
         default: Ingest Metrics Memory (MiB)
       IngestMetricsReplicas:
-        default: Ingest Metrics Replicas
+        default: Ingest Metrics Max Replicas
       IngestTracesMemory:
         default: Ingest Traces Memory (MiB)
       IngestTracesReplicas:
-        default: Ingest Traces Replicas
+        default: Ingest Traces Max Replicas
       MSKBrokers:
         default: MSK Broker Endpoints
       OtelEndpoint:
@@ -163,7 +145,7 @@ Metadata:
       RollupMetricsMemory:
         default: Rollup Metrics Memory (MiB)
       RollupMetricsReplicas:
-        default: Rollup Metrics Replicas
+        default: Rollup Metrics Max Replicas
 Outputs:
   AlbArn:
     Export:
@@ -258,12 +240,6 @@ Parameters:
     MaxValue: 95
     MinValue: 10
     Type: Number
-  AutoScalingMaxReplicas:
-    Default: '10'
-    Description: Maximum number of tasks when auto-scaling (applies to all scaled services)
-    MaxValue: 50
-    MinValue: 1
-    Type: Number
   AutoScalingScaleInCooldown:
     Default: '300'
     Description: Seconds to wait after a scale-in before another scale-in can occur
@@ -298,10 +274,10 @@ Parameters:
     Description: 'Memory (MiB) for lakerunner-compact-logs. Valid values for 1024 CPU: 2048, 3072, 4096, 5120, 6144, 7168, 8192'
     Type: Number
   CompactLogsReplicas:
-    Default: '1'
-    Description: Number of lakerunner-compact-logs task replicas
-    MaxValue: 20
-    MinValue: 0
+    Default: '10'
+    Description: Maximum number of lakerunner-compact-logs tasks (auto-scales from 1 to this value)
+    MaxValue: 50
+    MinValue: 1
     Type: Number
   CompactMetricsMemory:
     AllowedValues:
@@ -316,10 +292,10 @@ Parameters:
     Description: 'Memory (MiB) for lakerunner-compact-metrics. Valid values for 1024 CPU: 2048, 3072, 4096, 5120, 6144, 7168, 8192'
     Type: Number
   CompactMetricsReplicas:
-    Default: '1'
-    Description: Number of lakerunner-compact-metrics task replicas
-    MaxValue: 20
-    MinValue: 0
+    Default: '10'
+    Description: Maximum number of lakerunner-compact-metrics tasks (auto-scales from 1 to this value)
+    MaxValue: 50
+    MinValue: 1
     Type: Number
   CompactTracesMemory:
     AllowedValues:
@@ -334,18 +310,11 @@ Parameters:
     Description: 'Memory (MiB) for lakerunner-compact-traces. Valid values for 1024 CPU: 2048, 3072, 4096, 5120, 6144, 7168, 8192'
     Type: Number
   CompactTracesReplicas:
-    Default: '1'
-    Description: Number of lakerunner-compact-traces task replicas
-    MaxValue: 20
-    MinValue: 0
+    Default: '10'
+    Description: Maximum number of lakerunner-compact-traces tasks (auto-scales from 1 to this value)
+    MaxValue: 50
+    MinValue: 1
     Type: Number
-  EnableAutoScaling:
-    AllowedValues:
-      - 'Yes'
-      - 'No'
-    Default: 'Yes'
-    Description: Enable CPU-based auto-scaling for ingest, compact, and rollup services
-    Type: String
   EnableLogs:
     AllowedValues:
       - 'Yes'
@@ -384,10 +353,10 @@ Parameters:
     Description: 'Memory (MiB) for lakerunner-ingest-logs. Valid values for 1024 CPU: 2048, 3072, 4096, 5120, 6144, 7168, 8192'
     Type: Number
   IngestLogsReplicas:
-    Default: '1'
-    Description: Number of lakerunner-ingest-logs task replicas
-    MaxValue: 20
-    MinValue: 0
+    Default: '10'
+    Description: Maximum number of lakerunner-ingest-logs tasks (auto-scales from 1 to this value)
+    MaxValue: 50
+    MinValue: 1
     Type: Number
   IngestMetricsMemory:
     AllowedValues:
@@ -402,10 +371,10 @@ Parameters:
     Description: 'Memory (MiB) for lakerunner-ingest-metrics. Valid values for 1024 CPU: 2048, 3072, 4096, 5120, 6144, 7168, 8192'
     Type: Number
   IngestMetricsReplicas:
-    Default: '1'
-    Description: Number of lakerunner-ingest-metrics task replicas
-    MaxValue: 20
-    MinValue: 0
+    Default: '10'
+    Description: Maximum number of lakerunner-ingest-metrics tasks (auto-scales from 1 to this value)
+    MaxValue: 50
+    MinValue: 1
     Type: Number
   IngestTracesMemory:
     AllowedValues:
@@ -420,10 +389,10 @@ Parameters:
     Description: 'Memory (MiB) for lakerunner-ingest-traces. Valid values for 1024 CPU: 2048, 3072, 4096, 5120, 6144, 7168, 8192'
     Type: Number
   IngestTracesReplicas:
-    Default: '1'
-    Description: Number of lakerunner-ingest-traces task replicas
-    MaxValue: 20
-    MinValue: 0
+    Default: '10'
+    Description: Maximum number of lakerunner-ingest-traces tasks (auto-scales from 1 to this value)
+    MaxValue: 50
+    MinValue: 1
     Type: Number
   MSKBrokers:
     Default: ''
@@ -592,10 +561,10 @@ Parameters:
     Description: 'Memory (MiB) for lakerunner-rollup-metrics. Valid values for 1024 CPU: 2048, 3072, 4096, 5120, 6144, 7168, 8192'
     Type: Number
   RollupMetricsReplicas:
-    Default: '1'
-    Description: Number of lakerunner-rollup-metrics task replicas
-    MaxValue: 20
-    MinValue: 0
+    Default: '10'
+    Description: Maximum number of lakerunner-rollup-metrics tasks (auto-scales from 1 to this value)
+    MaxValue: 50
+    MinValue: 1
     Type: Number
 Resources:
   Alb:
@@ -948,12 +917,12 @@ Resources:
       RoleName: !Sub '${AWS::StackName}-query-worker-task-role'
     Type: AWS::IAM::Role
   ScalableTargetLakerunnerCompactLogs:
-    Condition: AutoScaleLogsServices
+    Condition: CreateLogsServices
     DependsOn:
       - ServiceLakerunnerCompactLogs
     Properties:
-      MaxCapacity: !Ref 'AutoScalingMaxReplicas'
-      MinCapacity: !Ref 'CompactLogsReplicas'
+      MaxCapacity: !Ref 'CompactLogsReplicas'
+      MinCapacity: 1
       ResourceId: !Sub
         - service/${ClusterName}/lakerunner-compact-logs
         - ClusterName: !ImportValue
@@ -964,12 +933,12 @@ Resources:
       ServiceNamespace: ecs
     Type: AWS::ApplicationAutoScaling::ScalableTarget
   ScalableTargetLakerunnerCompactMetrics:
-    Condition: AutoScaleMetricsServices
+    Condition: CreateMetricsServices
     DependsOn:
       - ServiceLakerunnerCompactMetrics
     Properties:
-      MaxCapacity: !Ref 'AutoScalingMaxReplicas'
-      MinCapacity: !Ref 'CompactMetricsReplicas'
+      MaxCapacity: !Ref 'CompactMetricsReplicas'
+      MinCapacity: 1
       ResourceId: !Sub
         - service/${ClusterName}/lakerunner-compact-metrics
         - ClusterName: !ImportValue
@@ -980,12 +949,12 @@ Resources:
       ServiceNamespace: ecs
     Type: AWS::ApplicationAutoScaling::ScalableTarget
   ScalableTargetLakerunnerCompactTraces:
-    Condition: AutoScaleTracesServices
+    Condition: CreateTracesServices
     DependsOn:
       - ServiceLakerunnerCompactTraces
     Properties:
-      MaxCapacity: !Ref 'AutoScalingMaxReplicas'
-      MinCapacity: !Ref 'CompactTracesReplicas'
+      MaxCapacity: !Ref 'CompactTracesReplicas'
+      MinCapacity: 1
       ResourceId: !Sub
         - service/${ClusterName}/lakerunner-compact-traces
         - ClusterName: !ImportValue
@@ -996,12 +965,12 @@ Resources:
       ServiceNamespace: ecs
     Type: AWS::ApplicationAutoScaling::ScalableTarget
   ScalableTargetLakerunnerIngestLogs:
-    Condition: AutoScaleLogsServices
+    Condition: CreateLogsServices
     DependsOn:
       - ServiceLakerunnerIngestLogs
     Properties:
-      MaxCapacity: !Ref 'AutoScalingMaxReplicas'
-      MinCapacity: !Ref 'IngestLogsReplicas'
+      MaxCapacity: !Ref 'IngestLogsReplicas'
+      MinCapacity: 1
       ResourceId: !Sub
         - service/${ClusterName}/lakerunner-ingest-logs
         - ClusterName: !ImportValue
@@ -1012,12 +981,12 @@ Resources:
       ServiceNamespace: ecs
     Type: AWS::ApplicationAutoScaling::ScalableTarget
   ScalableTargetLakerunnerIngestMetrics:
-    Condition: AutoScaleMetricsServices
+    Condition: CreateMetricsServices
     DependsOn:
       - ServiceLakerunnerIngestMetrics
     Properties:
-      MaxCapacity: !Ref 'AutoScalingMaxReplicas'
-      MinCapacity: !Ref 'IngestMetricsReplicas'
+      MaxCapacity: !Ref 'IngestMetricsReplicas'
+      MinCapacity: 1
       ResourceId: !Sub
         - service/${ClusterName}/lakerunner-ingest-metrics
         - ClusterName: !ImportValue
@@ -1028,12 +997,12 @@ Resources:
       ServiceNamespace: ecs
     Type: AWS::ApplicationAutoScaling::ScalableTarget
   ScalableTargetLakerunnerIngestTraces:
-    Condition: AutoScaleTracesServices
+    Condition: CreateTracesServices
     DependsOn:
       - ServiceLakerunnerIngestTraces
     Properties:
-      MaxCapacity: !Ref 'AutoScalingMaxReplicas'
-      MinCapacity: !Ref 'IngestTracesReplicas'
+      MaxCapacity: !Ref 'IngestTracesReplicas'
+      MinCapacity: 1
       ResourceId: !Sub
         - service/${ClusterName}/lakerunner-ingest-traces
         - ClusterName: !ImportValue
@@ -1044,12 +1013,12 @@ Resources:
       ServiceNamespace: ecs
     Type: AWS::ApplicationAutoScaling::ScalableTarget
   ScalableTargetLakerunnerRollupMetrics:
-    Condition: AutoScaleMetricsServices
+    Condition: CreateMetricsServices
     DependsOn:
       - ServiceLakerunnerRollupMetrics
     Properties:
-      MaxCapacity: !Ref 'AutoScalingMaxReplicas'
-      MinCapacity: !Ref 'RollupMetricsReplicas'
+      MaxCapacity: !Ref 'RollupMetricsReplicas'
+      MinCapacity: 1
       ResourceId: !Sub
         - service/${ClusterName}/lakerunner-rollup-metrics
         - ClusterName: !ImportValue
@@ -1060,7 +1029,7 @@ Resources:
       ServiceNamespace: ecs
     Type: AWS::ApplicationAutoScaling::ScalableTarget
   ScalingPolicyLakerunnerCompactLogs:
-    Condition: AutoScaleLogsServices
+    Condition: CreateLogsServices
     Properties:
       PolicyName: lakerunner-compact-logs-cpu-scaling
       PolicyType: TargetTrackingScaling
@@ -1073,7 +1042,7 @@ Resources:
         TargetValue: !Ref 'AutoScalingCPUTarget'
     Type: AWS::ApplicationAutoScaling::ScalingPolicy
   ScalingPolicyLakerunnerCompactMetrics:
-    Condition: AutoScaleMetricsServices
+    Condition: CreateMetricsServices
     Properties:
       PolicyName: lakerunner-compact-metrics-cpu-scaling
       PolicyType: TargetTrackingScaling
@@ -1086,7 +1055,7 @@ Resources:
         TargetValue: !Ref 'AutoScalingCPUTarget'
     Type: AWS::ApplicationAutoScaling::ScalingPolicy
   ScalingPolicyLakerunnerCompactTraces:
-    Condition: AutoScaleTracesServices
+    Condition: CreateTracesServices
     Properties:
       PolicyName: lakerunner-compact-traces-cpu-scaling
       PolicyType: TargetTrackingScaling
@@ -1099,7 +1068,7 @@ Resources:
         TargetValue: !Ref 'AutoScalingCPUTarget'
     Type: AWS::ApplicationAutoScaling::ScalingPolicy
   ScalingPolicyLakerunnerIngestLogs:
-    Condition: AutoScaleLogsServices
+    Condition: CreateLogsServices
     Properties:
       PolicyName: lakerunner-ingest-logs-cpu-scaling
       PolicyType: TargetTrackingScaling
@@ -1112,7 +1081,7 @@ Resources:
         TargetValue: !Ref 'AutoScalingCPUTarget'
     Type: AWS::ApplicationAutoScaling::ScalingPolicy
   ScalingPolicyLakerunnerIngestMetrics:
-    Condition: AutoScaleMetricsServices
+    Condition: CreateMetricsServices
     Properties:
       PolicyName: lakerunner-ingest-metrics-cpu-scaling
       PolicyType: TargetTrackingScaling
@@ -1125,7 +1094,7 @@ Resources:
         TargetValue: !Ref 'AutoScalingCPUTarget'
     Type: AWS::ApplicationAutoScaling::ScalingPolicy
   ScalingPolicyLakerunnerIngestTraces:
-    Condition: AutoScaleTracesServices
+    Condition: CreateTracesServices
     Properties:
       PolicyName: lakerunner-ingest-traces-cpu-scaling
       PolicyType: TargetTrackingScaling
@@ -1138,7 +1107,7 @@ Resources:
         TargetValue: !Ref 'AutoScalingCPUTarget'
     Type: AWS::ApplicationAutoScaling::ScalingPolicy
   ScalingPolicyLakerunnerRollupMetrics:
-    Condition: AutoScaleMetricsServices
+    Condition: CreateMetricsServices
     Properties:
       PolicyName: lakerunner-rollup-metrics-cpu-scaling
       PolicyType: TargetTrackingScaling
@@ -1193,7 +1162,7 @@ Resources:
         Fn::Sub:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
-      DesiredCount: !Ref 'CompactLogsReplicas'
+      DesiredCount: 1
       EnableECSManagedTags: true
       EnableExecuteCommand: true
       LaunchType: FARGATE
@@ -1230,7 +1199,7 @@ Resources:
         Fn::Sub:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
-      DesiredCount: !Ref 'CompactMetricsReplicas'
+      DesiredCount: 1
       EnableECSManagedTags: true
       EnableExecuteCommand: true
       LaunchType: FARGATE
@@ -1267,7 +1236,7 @@ Resources:
         Fn::Sub:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
-      DesiredCount: !Ref 'CompactTracesReplicas'
+      DesiredCount: 1
       EnableECSManagedTags: true
       EnableExecuteCommand: true
       LaunchType: FARGATE
@@ -1304,7 +1273,7 @@ Resources:
         Fn::Sub:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
-      DesiredCount: !Ref 'IngestLogsReplicas'
+      DesiredCount: 1
       EnableECSManagedTags: true
       EnableExecuteCommand: true
       LaunchType: FARGATE
@@ -1341,7 +1310,7 @@ Resources:
         Fn::Sub:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
-      DesiredCount: !Ref 'IngestMetricsReplicas'
+      DesiredCount: 1
       EnableECSManagedTags: true
       EnableExecuteCommand: true
       LaunchType: FARGATE
@@ -1378,7 +1347,7 @@ Resources:
         Fn::Sub:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
-      DesiredCount: !Ref 'IngestTracesReplicas'
+      DesiredCount: 1
       EnableECSManagedTags: true
       EnableExecuteCommand: true
       LaunchType: FARGATE
@@ -1565,7 +1534,7 @@ Resources:
         Fn::Sub:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
-      DesiredCount: !Ref 'RollupMetricsReplicas'
+      DesiredCount: 1
       EnableECSManagedTags: true
       EnableExecuteCommand: true
       LaunchType: FARGATE

@@ -182,15 +182,27 @@ def create_services_template():
         service_params[service_name] = {}
 
         # Replicas parameter for configurable services
+        # Worker services use this as max tasks (auto-scale from 1 to max)
+        # Other services use this as the fixed replica count
         default_replicas = service_config.get('replicas', 1)
-        replicas_param = t.add_parameter(Parameter(
-            f"{param_name}Replicas",
-            Type="Number",
-            Default=str(default_replicas),
-            MinValue=0,
-            MaxValue=20,
-            Description=f"Number of {service_name} task replicas"
-        ))
+        if service_name in LAKERUNNER_WORKER_SERVICES:
+            replicas_param = t.add_parameter(Parameter(
+                f"{param_name}Replicas",
+                Type="Number",
+                Default=str(default_replicas),
+                MinValue=1,
+                MaxValue=50,
+                Description=f"Maximum number of {service_name} tasks (auto-scales from 1 to this value)"
+            ))
+        else:
+            replicas_param = t.add_parameter(Parameter(
+                f"{param_name}Replicas",
+                Type="Number",
+                Default=str(default_replicas),
+                MinValue=0,
+                MaxValue=20,
+                Description=f"Number of {service_name} task replicas"
+            ))
         service_params[service_name]['replicas'] = replicas_param
 
         # CPU and Memory for query services
@@ -241,23 +253,6 @@ def create_services_template():
     # -----------------------
     # Services that support CPU-based auto-scaling
     AUTOSCALING_SERVICES = LAKERUNNER_WORKER_SERVICES  # ingest, compact, rollup
-
-    EnableAutoScaling = t.add_parameter(Parameter(
-        "EnableAutoScaling",
-        Type="String",
-        AllowedValues=["Yes", "No"],
-        Default="Yes",
-        Description="Enable CPU-based auto-scaling for ingest, compact, and rollup services"
-    ))
-
-    AutoScalingMaxReplicas = t.add_parameter(Parameter(
-        "AutoScalingMaxReplicas",
-        Type="Number",
-        Default="10",
-        MinValue=1,
-        MaxValue=50,
-        Description="Maximum number of tasks when auto-scaling (applies to all scaled services)"
-    ))
 
     AutoScalingCPUTarget = t.add_parameter(Parameter(
         "AutoScalingCPUTarget",
@@ -317,8 +312,6 @@ def create_services_template():
 
     # Auto-scaling parameters list for parameter groups
     autoscaling_params = [
-        "EnableAutoScaling",
-        "AutoScalingMaxReplicas",
         "AutoScalingCPUTarget",
         "AutoScalingScaleOutCooldown",
         "AutoScalingScaleInCooldown"
@@ -334,8 +327,6 @@ def create_services_template():
         "MSKBrokers": {"default": "MSK Broker Endpoints"},
         "GoServicesImage": {"default": "Go Services Image"},
         "OtelEndpoint": {"default": "OTEL Collector Endpoint"},
-        "EnableAutoScaling": {"default": "Enable Auto-Scaling"},
-        "AutoScalingMaxReplicas": {"default": "Max Replicas (Auto-Scaling)"},
         "AutoScalingCPUTarget": {"default": "CPU Target % (Auto-Scaling)"},
         "AutoScalingScaleOutCooldown": {"default": "Scale-Out Cooldown (seconds)"},
         "AutoScalingScaleInCooldown": {"default": "Scale-In Cooldown (seconds)"}
@@ -348,7 +339,11 @@ def create_services_template():
         param_name = service_to_param_name(service_name)
         # Create friendly label from service name (e.g., "Query Api" from "lakerunner-query-api")
         friendly_name = service_name.replace('lakerunner-', '').replace('-', ' ').title()
-        param_labels[f"{param_name}Replicas"] = {"default": f"{friendly_name} Replicas"}
+        # Worker services use "Max Replicas" since they auto-scale from 1 to max
+        if service_name in LAKERUNNER_WORKER_SERVICES:
+            param_labels[f"{param_name}Replicas"] = {"default": f"{friendly_name} Max Replicas"}
+        else:
+            param_labels[f"{param_name}Replicas"] = {"default": f"{friendly_name} Replicas"}
         if service_name in LAKERUNNER_QUERY_SERVICES or service_name in LAKERUNNER_WORKER_SERVICES:
             param_labels[f"{param_name}Memory"] = {"default": f"{friendly_name} Memory (MiB)"}
         if service_name in LAKERUNNER_QUERY_SERVICES:
@@ -438,20 +433,6 @@ def create_services_template():
     t.add_condition("CreateLogsServices", Equals(Ref(EnableLogs), "Yes"))
     t.add_condition("CreateMetricsServices", Equals(Ref(EnableMetrics), "Yes"))
     t.add_condition("CreateTracesServices", Equals(Ref(EnableTraces), "Yes"))
-    t.add_condition("AutoScalingEnabled", Equals(Ref(EnableAutoScaling), "Yes"))
-    # Combined conditions for auto-scaling per signal type
-    t.add_condition("AutoScaleLogsServices", And(
-        Condition("AutoScalingEnabled"),
-        Condition("CreateLogsServices")
-    ))
-    t.add_condition("AutoScaleMetricsServices", And(
-        Condition("AutoScalingEnabled"),
-        Condition("CreateMetricsServices")
-    ))
-    t.add_condition("AutoScaleTracesServices", And(
-        Condition("AutoScalingEnabled"),
-        Condition("CreateTracesServices")
-    ))
 
 
     # -----------------------
@@ -1178,8 +1159,11 @@ def create_services_template():
         ))
 
         # Create ECS service
-        # For lakerunner services with parameters, use the parameter; otherwise use YAML defaults
-        if service_name in service_params and 'replicas' in service_params[service_name]:
+        # Worker services (with auto-scaling) always start at 1 and scale up as needed
+        # Other services use their replicas parameter or YAML default
+        if service_name in AUTOSCALING_SERVICES:
+            desired_count = 1
+        elif service_name in service_params and 'replicas' in service_params[service_name]:
             desired_count = Ref(service_params[service_name]['replicas'])
         else:
             desired_count = str(service_config.get('replicas', 1))
@@ -1248,24 +1232,26 @@ def create_services_template():
 
         # -----------------------
         # Auto-Scaling for Worker Services (ingest, compact, rollup)
+        # Worker services always have auto-scaling enabled (min=1, max=replicas param)
         # -----------------------
         if service_name in AUTOSCALING_SERVICES:
-            # Determine the auto-scaling condition based on signal type
+            # Determine the condition based on signal type (same as service creation)
             autoscale_condition = None
             if signal_type == 'logs':
-                autoscale_condition = "AutoScaleLogsServices"
+                autoscale_condition = "CreateLogsServices"
             elif signal_type == 'metrics':
-                autoscale_condition = "AutoScaleMetricsServices"
+                autoscale_condition = "CreateMetricsServices"
             elif signal_type == 'traces':
-                autoscale_condition = "AutoScaleTracesServices"
+                autoscale_condition = "CreateTracesServices"
 
             if autoscale_condition:
                 # Create ScalableTarget - registers the ECS service with Application Auto Scaling
+                # MinCapacity is always 1, MaxCapacity comes from the service's replicas param
                 scalable_target = t.add_resource(ScalableTarget(
                     f"ScalableTarget{title_name}",
                     Condition=autoscale_condition,
-                    MaxCapacity=Ref(AutoScalingMaxReplicas),
-                    MinCapacity=Ref(service_params[service_name]['replicas']),
+                    MaxCapacity=Ref(service_params[service_name]['replicas']),
+                    MinCapacity=1,
                     ResourceId=Sub(
                         "service/${ClusterName}/" + service_name,
                         ClusterName=ImportValue(ci_export("ClusterName"))
