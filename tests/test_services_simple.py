@@ -607,7 +607,7 @@ class TestServicesTemplateSimple:
         assert "AutoScalingScaleInCooldown" in parameters
 
         # Check defaults
-        assert parameters["EnableAutoScaling"]["Default"] == "No"
+        assert parameters["EnableAutoScaling"]["Default"] == "Yes"
         assert parameters["AutoScalingMaxReplicas"]["Default"] == "10"
         assert parameters["AutoScalingCPUTarget"]["Default"] == "70"
         assert parameters["AutoScalingScaleOutCooldown"]["Default"] == "60"

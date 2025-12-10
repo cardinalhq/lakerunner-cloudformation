@@ -246,7 +246,7 @@ def create_services_template():
         "EnableAutoScaling",
         Type="String",
         AllowedValues=["Yes", "No"],
-        Default="No",
+        Default="Yes",
         Description="Enable CPU-based auto-scaling for ingest, compact, and rollup services"
     ))
 

@@ -298,7 +298,7 @@ Parameters:
     Description: 'Memory (MiB) for lakerunner-compact-logs. Valid values for 1024 CPU: 2048, 3072, 4096, 5120, 6144, 7168, 8192'
     Type: Number
   CompactLogsReplicas:
-    Default: '4'
+    Default: '1'
     Description: Number of lakerunner-compact-logs task replicas
     MaxValue: 20
     MinValue: 0
@@ -316,7 +316,7 @@ Parameters:
     Description: 'Memory (MiB) for lakerunner-compact-metrics. Valid values for 1024 CPU: 2048, 3072, 4096, 5120, 6144, 7168, 8192'
     Type: Number
   CompactMetricsReplicas:
-    Default: '2'
+    Default: '1'
     Description: Number of lakerunner-compact-metrics task replicas
     MaxValue: 20
     MinValue: 0
@@ -343,7 +343,7 @@ Parameters:
     AllowedValues:
       - 'Yes'
       - 'No'
-    Default: 'No'
+    Default: 'Yes'
     Description: Enable CPU-based auto-scaling for ingest, compact, and rollup services
     Type: String
   EnableLogs:
@@ -384,7 +384,7 @@ Parameters:
     Description: 'Memory (MiB) for lakerunner-ingest-logs. Valid values for 1024 CPU: 2048, 3072, 4096, 5120, 6144, 7168, 8192'
     Type: Number
   IngestLogsReplicas:
-    Default: '4'
+    Default: '1'
     Description: Number of lakerunner-ingest-logs task replicas
     MaxValue: 20
     MinValue: 0
@@ -592,7 +592,7 @@ Parameters:
     Description: 'Memory (MiB) for lakerunner-rollup-metrics. Valid values for 1024 CPU: 2048, 3072, 4096, 5120, 6144, 7168, 8192'
     Type: Number
   RollupMetricsReplicas:
-    Default: '2'
+    Default: '1'
     Description: Number of lakerunner-rollup-metrics task replicas
     MaxValue: 20
     MinValue: 0
