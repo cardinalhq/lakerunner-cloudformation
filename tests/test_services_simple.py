@@ -599,26 +599,23 @@ class TestServicesTemplateSimple:
         template_dict = json.loads(template.to_json())
         parameters = template_dict["Parameters"]
 
-        # Check auto-scaling parameters exist
-        assert "EnableAutoScaling" in parameters
-        assert "AutoScalingMaxReplicas" in parameters
+        # Check auto-scaling parameters exist (EnableAutoScaling and AutoScalingMaxReplicas removed)
         assert "AutoScalingCPUTarget" in parameters
         assert "AutoScalingScaleOutCooldown" in parameters
         assert "AutoScalingScaleInCooldown" in parameters
 
+        # Removed parameters should not exist
+        assert "EnableAutoScaling" not in parameters
+        assert "AutoScalingMaxReplicas" not in parameters
+
         # Check defaults
-        assert parameters["EnableAutoScaling"]["Default"] == "Yes"
-        assert parameters["AutoScalingMaxReplicas"]["Default"] == "10"
         assert parameters["AutoScalingCPUTarget"]["Default"] == "70"
         assert parameters["AutoScalingScaleOutCooldown"]["Default"] == "60"
         assert parameters["AutoScalingScaleInCooldown"]["Default"] == "300"
 
-        # Check EnableAutoScaling is Yes/No
-        assert parameters["EnableAutoScaling"]["AllowedValues"] == ["Yes", "No"]
-
     @patch('lakerunner_services.load_service_config')
-    def test_autoscaling_conditions_exist(self, mock_load_config):
-        """Test that auto-scaling conditions exist"""
+    def test_autoscaling_uses_signal_type_conditions(self, mock_load_config):
+        """Test that auto-scaling uses the signal type conditions (always on when signal enabled)"""
         mock_load_config.return_value = {
             "services": {},
             "images": {"go_services": "test:latest"}
@@ -630,11 +627,17 @@ class TestServicesTemplateSimple:
         template_dict = json.loads(template.to_json())
         conditions = template_dict.get("Conditions", {})
 
-        # Check auto-scaling conditions exist
-        assert "AutoScalingEnabled" in conditions
-        assert "AutoScaleLogsServices" in conditions
-        assert "AutoScaleMetricsServices" in conditions
-        assert "AutoScaleTracesServices" in conditions
+        # Auto-scaling now uses signal type conditions directly (always on)
+        # The separate AutoScalingEnabled and AutoScale* conditions no longer exist
+        assert "AutoScalingEnabled" not in conditions
+        assert "AutoScaleLogsServices" not in conditions
+        assert "AutoScaleMetricsServices" not in conditions
+        assert "AutoScaleTracesServices" not in conditions
+
+        # Signal type conditions still exist and are used for both services and auto-scaling
+        assert "CreateLogsServices" in conditions
+        assert "CreateMetricsServices" in conditions
+        assert "CreateTracesServices" in conditions
 
     @patch('lakerunner_services.load_service_config')
     def test_autoscaling_resources_created_for_worker_services(self, mock_load_config):
@@ -687,25 +690,25 @@ class TestServicesTemplateSimple:
         template_dict = json.loads(template.to_json())
         resources = template_dict["Resources"]
 
-        # Check ScalableTarget resources exist with correct conditions
+        # Check ScalableTarget resources exist with correct conditions (now uses Create*Services)
         assert "ScalableTargetLakerunnerIngestLogs" in resources
-        assert resources["ScalableTargetLakerunnerIngestLogs"]["Condition"] == "AutoScaleLogsServices"
+        assert resources["ScalableTargetLakerunnerIngestLogs"]["Condition"] == "CreateLogsServices"
 
         assert "ScalableTargetLakerunnerCompactMetrics" in resources
-        assert resources["ScalableTargetLakerunnerCompactMetrics"]["Condition"] == "AutoScaleMetricsServices"
+        assert resources["ScalableTargetLakerunnerCompactMetrics"]["Condition"] == "CreateMetricsServices"
 
         assert "ScalableTargetLakerunnerRollupMetrics" in resources
-        assert resources["ScalableTargetLakerunnerRollupMetrics"]["Condition"] == "AutoScaleMetricsServices"
+        assert resources["ScalableTargetLakerunnerRollupMetrics"]["Condition"] == "CreateMetricsServices"
 
         assert "ScalableTargetLakerunnerIngestTraces" in resources
-        assert resources["ScalableTargetLakerunnerIngestTraces"]["Condition"] == "AutoScaleTracesServices"
+        assert resources["ScalableTargetLakerunnerIngestTraces"]["Condition"] == "CreateTracesServices"
 
         # Check ScalingPolicy resources exist with correct conditions
         assert "ScalingPolicyLakerunnerIngestLogs" in resources
-        assert resources["ScalingPolicyLakerunnerIngestLogs"]["Condition"] == "AutoScaleLogsServices"
+        assert resources["ScalingPolicyLakerunnerIngestLogs"]["Condition"] == "CreateLogsServices"
 
         assert "ScalingPolicyLakerunnerCompactMetrics" in resources
-        assert resources["ScalingPolicyLakerunnerCompactMetrics"]["Condition"] == "AutoScaleMetricsServices"
+        assert resources["ScalingPolicyLakerunnerCompactMetrics"]["Condition"] == "CreateMetricsServices"
 
     @patch('lakerunner_services.load_service_config')
     def test_autoscaling_not_created_for_non_worker_services(self, mock_load_config):
@@ -793,7 +796,7 @@ class TestServicesTemplateSimple:
 
     @patch('lakerunner_services.load_service_config')
     def test_scalable_target_uses_correct_min_max(self, mock_load_config):
-        """Test that ScalableTarget uses replicas param for min and max param for max"""
+        """Test that ScalableTarget uses min=1 and replicas param for max"""
         mock_load_config.return_value = {
             "services": {
                 "lakerunner-ingest-logs": {
@@ -816,8 +819,9 @@ class TestServicesTemplateSimple:
         resources = template_dict["Resources"]
 
         # Check scalable target configuration
+        # MinCapacity is always 1, MaxCapacity uses the replicas param
         target = resources["ScalableTargetLakerunnerIngestLogs"]["Properties"]
-        assert target["MinCapacity"] == {"Ref": "IngestLogsReplicas"}
-        assert target["MaxCapacity"] == {"Ref": "AutoScalingMaxReplicas"}
+        assert target["MinCapacity"] == 1
+        assert target["MaxCapacity"] == {"Ref": "IngestLogsReplicas"}
         assert target["ScalableDimension"] == "ecs:service:DesiredCount"
         assert target["ServiceNamespace"] == "ecs"
