@@ -23,7 +23,8 @@ from troposphere.ecs import (
     Service, TaskDefinition, ContainerDefinition, Environment,
     LogConfiguration, Secret as EcsSecret, Volume, MountPoint,
     HealthCheck, PortMapping, RuntimePlatform, NetworkConfiguration, AwsvpcConfiguration,
-    LoadBalancer as EcsLoadBalancer, EFSVolumeConfiguration, AuthorizationConfig
+    LoadBalancer as EcsLoadBalancer, EFSVolumeConfiguration, AuthorizationConfig,
+    ServiceVolumeConfiguration, ServiceManagedEBSVolumeConfiguration
 )
 from troposphere.applicationautoscaling import (
     ScalableTarget, ScalingPolicy,
@@ -541,6 +542,26 @@ def create_services_template():
 
 
     # -----------------------
+    # EBS Infrastructure Role (for services with EBS volumes)
+    # -----------------------
+    EBSInfrastructureRole = t.add_resource(Role(
+        "EBSInfrastructureRole",
+        RoleName=Sub("${AWS::StackName}-ebs-infra-role"),
+        AssumeRolePolicyDocument={
+            "Version": "2012-10-17",
+            "Statement": [{
+                "Sid": "AllowAccessToECSForInfrastructureManagement",
+                "Effect": "Allow",
+                "Principal": {"Service": "ecs.amazonaws.com"},
+                "Action": "sts:AssumeRole"
+            }]
+        },
+        ManagedPolicyArns=[
+            "arn:aws:iam::aws:policy/service-role/AmazonECSInfrastructureRolePolicyForVolumes"
+        ]
+    ))
+
+    # -----------------------
     # Task Execution Role (shared by all services)
     # -----------------------
     ExecutionRole = t.add_resource(Role(
@@ -975,8 +996,24 @@ def create_services_template():
             **log_group_kwargs
         ))
 
+        # Check for EBS volume configuration
+        ebs_volume_config = service_config.get('ebs_volume')
+        ebs_mount_path = ebs_volume_config.get('mount_path', '/data') if ebs_volume_config else None
+
         # Build volumes list
-        volumes = [Volume(Name="scratch")]
+        # If EBS volume is mounted at /scratch, use it instead of the default scratch volume
+        if ebs_volume_config and ebs_mount_path == '/scratch':
+            volumes = []
+        else:
+            volumes = [Volume(Name="scratch")]
+
+        if ebs_volume_config:
+            # Add volume to task definition with ConfiguredAtLaunch=True
+            # The actual volume configuration is done at service level
+            volumes.append(Volume(
+                Name="ebs-data",
+                ConfiguredAtLaunch=True
+            ))
 
         # Build environment variables
         base_env = [
@@ -1041,11 +1078,26 @@ def create_services_template():
 
 
         # Build mount points
-        mount_points = [MountPoint(
-            ContainerPath="/scratch",
-            SourceVolume="scratch",
-            ReadOnly=False
-        )]
+        # If EBS volume is mounted at /scratch, use it instead of the default scratch mount
+        if ebs_volume_config and ebs_mount_path == '/scratch':
+            mount_points = [MountPoint(
+                ContainerPath="/scratch",
+                SourceVolume="ebs-data",
+                ReadOnly=False
+            )]
+        else:
+            mount_points = [MountPoint(
+                ContainerPath="/scratch",
+                SourceVolume="scratch",
+                ReadOnly=False
+            )]
+            # Add EBS volume mount point at a different path
+            if ebs_volume_config:
+                mount_points.append(MountPoint(
+                    ContainerPath=ebs_mount_path,
+                    SourceVolume="ebs-data",
+                    ReadOnly=False
+                ))
 
         # Add EFS mount points
         for mount in efs_mounts:
@@ -1205,6 +1257,24 @@ def create_services_template():
                 Component="Service"
             )
         }
+
+        # Add EBS volume configuration at service level
+        if ebs_volume_config:
+            ecs_service_kwargs["VolumeConfigurations"] = [
+                ServiceVolumeConfiguration(
+                    Name="ebs-data",
+                    ManagedEBSVolume=ServiceManagedEBSVolumeConfiguration(
+                        RoleArn=GetAtt(EBSInfrastructureRole, "Arn"),
+                        SizeInGiB=ebs_volume_config.get('size_gib', 100),
+                        VolumeType=ebs_volume_config.get('volume_type', 'gp3'),
+                        Iops=ebs_volume_config.get('iops', 3000),
+                        Throughput=ebs_volume_config.get('throughput', 125),
+                        FilesystemType=ebs_volume_config.get('filesystem_type', 'xfs'),
+                        Encrypted=ebs_volume_config.get('encrypted', True)
+                    )
+                )
+            ]
+
         if condition_name:
             ecs_service_kwargs["Condition"] = condition_name
         ecs_service = t.add_resource(Service(
