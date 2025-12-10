@@ -1,4 +1,16 @@
 Conditions:
+  AutoScaleLogsServices: !And
+    - !Condition 'AutoScalingEnabled'
+    - !Condition 'CreateLogsServices'
+  AutoScaleMetricsServices: !And
+    - !Condition 'AutoScalingEnabled'
+    - !Condition 'CreateMetricsServices'
+  AutoScaleTracesServices: !And
+    - !Condition 'AutoScalingEnabled'
+    - !Condition 'CreateTracesServices'
+  AutoScalingEnabled: !Equals
+    - !Ref 'EnableAutoScaling'
+    - 'Yes'
   CreateLogsServices: !Equals
     - !Ref 'EnableLogs'
     - 'Yes'
@@ -62,6 +74,14 @@ Metadata:
           - PubsubSqsReplicas
           - BoxerCommonReplicas
       - Label:
+          default: Auto-Scaling Configuration
+        Parameters:
+          - EnableAutoScaling
+          - AutoScalingMaxReplicas
+          - AutoScalingCPUTarget
+          - AutoScalingScaleOutCooldown
+          - AutoScalingScaleInCooldown
+      - Label:
           default: MSK Configuration
         Parameters:
           - MSKBrokers
@@ -76,6 +96,14 @@ Metadata:
     ParameterLabels:
       AlbScheme:
         default: ALB Scheme
+      AutoScalingCPUTarget:
+        default: CPU Target % (Auto-Scaling)
+      AutoScalingMaxReplicas:
+        default: Max Replicas (Auto-Scaling)
+      AutoScalingScaleInCooldown:
+        default: Scale-In Cooldown (seconds)
+      AutoScalingScaleOutCooldown:
+        default: Scale-Out Cooldown (seconds)
       BoxerCommonReplicas:
         default: Boxer Common Replicas
       CommonInfraStackName:
@@ -92,6 +120,8 @@ Metadata:
         default: Compact Traces Memory (MiB)
       CompactTracesReplicas:
         default: Compact Traces Replicas
+      EnableAutoScaling:
+        default: Enable Auto-Scaling
       EnableLogs:
         default: Enable Logs
       EnableMetrics:
@@ -222,6 +252,30 @@ Parameters:
     Default: internal
     Description: 'Load balancer scheme: ''internet-facing'' for external access or ''internal'' for internal access only.'
     Type: String
+  AutoScalingCPUTarget:
+    Default: '70'
+    Description: Target CPU utilization percentage for scaling (e.g., 70 means scale when avg CPU > 70%)
+    MaxValue: 95
+    MinValue: 10
+    Type: Number
+  AutoScalingMaxReplicas:
+    Default: '10'
+    Description: Maximum number of tasks when auto-scaling (applies to all scaled services)
+    MaxValue: 50
+    MinValue: 1
+    Type: Number
+  AutoScalingScaleInCooldown:
+    Default: '300'
+    Description: Seconds to wait after a scale-in before another scale-in can occur
+    MaxValue: 3600
+    MinValue: 0
+    Type: Number
+  AutoScalingScaleOutCooldown:
+    Default: '60'
+    Description: Seconds to wait after a scale-out before another scale-out can occur
+    MaxValue: 3600
+    MinValue: 0
+    Type: Number
   BoxerCommonReplicas:
     Default: '1'
     Description: Number of lakerunner-boxer-common task replicas
@@ -285,6 +339,13 @@ Parameters:
     MaxValue: 20
     MinValue: 0
     Type: Number
+  EnableAutoScaling:
+    AllowedValues:
+      - 'Yes'
+      - 'No'
+    Default: 'No'
+    Description: Enable CPU-based auto-scaling for ingest, compact, and rollup services
+    Type: String
   EnableLogs:
     AllowedValues:
       - 'Yes'
@@ -886,6 +947,209 @@ Resources:
           PolicyName: QueryWorkerAccess
       RoleName: !Sub '${AWS::StackName}-query-worker-task-role'
     Type: AWS::IAM::Role
+  ScalableTargetLakerunnerCompactLogs:
+    Condition: AutoScaleLogsServices
+    DependsOn:
+      - ServiceLakerunnerCompactLogs
+    Properties:
+      MaxCapacity: !Ref 'AutoScalingMaxReplicas'
+      MinCapacity: !Ref 'CompactLogsReplicas'
+      ResourceId: !Sub
+        - service/${ClusterName}/lakerunner-compact-logs
+        - ClusterName: !ImportValue
+            Fn::Sub:
+              - ${CommonInfraStackName}-ClusterName
+              - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+  ScalableTargetLakerunnerCompactMetrics:
+    Condition: AutoScaleMetricsServices
+    DependsOn:
+      - ServiceLakerunnerCompactMetrics
+    Properties:
+      MaxCapacity: !Ref 'AutoScalingMaxReplicas'
+      MinCapacity: !Ref 'CompactMetricsReplicas'
+      ResourceId: !Sub
+        - service/${ClusterName}/lakerunner-compact-metrics
+        - ClusterName: !ImportValue
+            Fn::Sub:
+              - ${CommonInfraStackName}-ClusterName
+              - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+  ScalableTargetLakerunnerCompactTraces:
+    Condition: AutoScaleTracesServices
+    DependsOn:
+      - ServiceLakerunnerCompactTraces
+    Properties:
+      MaxCapacity: !Ref 'AutoScalingMaxReplicas'
+      MinCapacity: !Ref 'CompactTracesReplicas'
+      ResourceId: !Sub
+        - service/${ClusterName}/lakerunner-compact-traces
+        - ClusterName: !ImportValue
+            Fn::Sub:
+              - ${CommonInfraStackName}-ClusterName
+              - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+  ScalableTargetLakerunnerIngestLogs:
+    Condition: AutoScaleLogsServices
+    DependsOn:
+      - ServiceLakerunnerIngestLogs
+    Properties:
+      MaxCapacity: !Ref 'AutoScalingMaxReplicas'
+      MinCapacity: !Ref 'IngestLogsReplicas'
+      ResourceId: !Sub
+        - service/${ClusterName}/lakerunner-ingest-logs
+        - ClusterName: !ImportValue
+            Fn::Sub:
+              - ${CommonInfraStackName}-ClusterName
+              - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+  ScalableTargetLakerunnerIngestMetrics:
+    Condition: AutoScaleMetricsServices
+    DependsOn:
+      - ServiceLakerunnerIngestMetrics
+    Properties:
+      MaxCapacity: !Ref 'AutoScalingMaxReplicas'
+      MinCapacity: !Ref 'IngestMetricsReplicas'
+      ResourceId: !Sub
+        - service/${ClusterName}/lakerunner-ingest-metrics
+        - ClusterName: !ImportValue
+            Fn::Sub:
+              - ${CommonInfraStackName}-ClusterName
+              - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+  ScalableTargetLakerunnerIngestTraces:
+    Condition: AutoScaleTracesServices
+    DependsOn:
+      - ServiceLakerunnerIngestTraces
+    Properties:
+      MaxCapacity: !Ref 'AutoScalingMaxReplicas'
+      MinCapacity: !Ref 'IngestTracesReplicas'
+      ResourceId: !Sub
+        - service/${ClusterName}/lakerunner-ingest-traces
+        - ClusterName: !ImportValue
+            Fn::Sub:
+              - ${CommonInfraStackName}-ClusterName
+              - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+  ScalableTargetLakerunnerRollupMetrics:
+    Condition: AutoScaleMetricsServices
+    DependsOn:
+      - ServiceLakerunnerRollupMetrics
+    Properties:
+      MaxCapacity: !Ref 'AutoScalingMaxReplicas'
+      MinCapacity: !Ref 'RollupMetricsReplicas'
+      ResourceId: !Sub
+        - service/${ClusterName}/lakerunner-rollup-metrics
+        - ClusterName: !ImportValue
+            Fn::Sub:
+              - ${CommonInfraStackName}-ClusterName
+              - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+  ScalingPolicyLakerunnerCompactLogs:
+    Condition: AutoScaleLogsServices
+    Properties:
+      PolicyName: lakerunner-compact-logs-cpu-scaling
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref 'ScalableTargetLakerunnerCompactLogs'
+      TargetTrackingScalingPolicyConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageCPUUtilization
+        ScaleInCooldown: !Ref 'AutoScalingScaleInCooldown'
+        ScaleOutCooldown: !Ref 'AutoScalingScaleOutCooldown'
+        TargetValue: !Ref 'AutoScalingCPUTarget'
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+  ScalingPolicyLakerunnerCompactMetrics:
+    Condition: AutoScaleMetricsServices
+    Properties:
+      PolicyName: lakerunner-compact-metrics-cpu-scaling
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref 'ScalableTargetLakerunnerCompactMetrics'
+      TargetTrackingScalingPolicyConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageCPUUtilization
+        ScaleInCooldown: !Ref 'AutoScalingScaleInCooldown'
+        ScaleOutCooldown: !Ref 'AutoScalingScaleOutCooldown'
+        TargetValue: !Ref 'AutoScalingCPUTarget'
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+  ScalingPolicyLakerunnerCompactTraces:
+    Condition: AutoScaleTracesServices
+    Properties:
+      PolicyName: lakerunner-compact-traces-cpu-scaling
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref 'ScalableTargetLakerunnerCompactTraces'
+      TargetTrackingScalingPolicyConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageCPUUtilization
+        ScaleInCooldown: !Ref 'AutoScalingScaleInCooldown'
+        ScaleOutCooldown: !Ref 'AutoScalingScaleOutCooldown'
+        TargetValue: !Ref 'AutoScalingCPUTarget'
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+  ScalingPolicyLakerunnerIngestLogs:
+    Condition: AutoScaleLogsServices
+    Properties:
+      PolicyName: lakerunner-ingest-logs-cpu-scaling
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref 'ScalableTargetLakerunnerIngestLogs'
+      TargetTrackingScalingPolicyConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageCPUUtilization
+        ScaleInCooldown: !Ref 'AutoScalingScaleInCooldown'
+        ScaleOutCooldown: !Ref 'AutoScalingScaleOutCooldown'
+        TargetValue: !Ref 'AutoScalingCPUTarget'
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+  ScalingPolicyLakerunnerIngestMetrics:
+    Condition: AutoScaleMetricsServices
+    Properties:
+      PolicyName: lakerunner-ingest-metrics-cpu-scaling
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref 'ScalableTargetLakerunnerIngestMetrics'
+      TargetTrackingScalingPolicyConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageCPUUtilization
+        ScaleInCooldown: !Ref 'AutoScalingScaleInCooldown'
+        ScaleOutCooldown: !Ref 'AutoScalingScaleOutCooldown'
+        TargetValue: !Ref 'AutoScalingCPUTarget'
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+  ScalingPolicyLakerunnerIngestTraces:
+    Condition: AutoScaleTracesServices
+    Properties:
+      PolicyName: lakerunner-ingest-traces-cpu-scaling
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref 'ScalableTargetLakerunnerIngestTraces'
+      TargetTrackingScalingPolicyConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageCPUUtilization
+        ScaleInCooldown: !Ref 'AutoScalingScaleInCooldown'
+        ScaleOutCooldown: !Ref 'AutoScalingScaleOutCooldown'
+        TargetValue: !Ref 'AutoScalingCPUTarget'
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+  ScalingPolicyLakerunnerRollupMetrics:
+    Condition: AutoScaleMetricsServices
+    Properties:
+      PolicyName: lakerunner-rollup-metrics-cpu-scaling
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref 'ScalableTargetLakerunnerRollupMetrics'
+      TargetTrackingScalingPolicyConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageCPUUtilization
+        ScaleInCooldown: !Ref 'AutoScalingScaleInCooldown'
+        ScaleOutCooldown: !Ref 'AutoScalingScaleOutCooldown'
+        TargetValue: !Ref 'AutoScalingCPUTarget'
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
   ServiceLakerunnerBoxerCommon:
     Properties:
       Cluster: !ImportValue

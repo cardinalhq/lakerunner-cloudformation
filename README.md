@@ -336,6 +336,55 @@ The ALB can be configured as:
 - **Internal** (default) - Only accessible from within the VPC
 - **Internet-facing** - Accessible from the internet (requires public subnets)
 
+## Auto-Scaling
+
+The Services stack supports optional CPU-based auto-scaling for worker services. When enabled, ECS will automatically add or remove tasks based on average CPU utilization.
+
+### Enabled Services
+
+Auto-scaling applies to these services when `EnableAutoScaling=Yes`:
+
+| Service | Signal Type | Scales When |
+|---------|-------------|-------------|
+| `ingest-logs` | logs | Logs enabled |
+| `ingest-metrics` | metrics | Metrics enabled |
+| `ingest-traces` | traces | Traces enabled |
+| `compact-logs` | logs | Logs enabled |
+| `compact-metrics` | metrics | Metrics enabled |
+| `compact-traces` | traces | Traces enabled |
+| `rollup-metrics` | metrics | Metrics enabled |
+
+### How It Works
+
+- **MinCapacity**: Uses the service's Replicas parameter as the minimum
+- **MaxCapacity**: Uses the `AutoScalingMaxReplicas` parameter as the maximum
+- **Scale Out**: When average CPU exceeds target%, a new task is added (respects cooldown)
+- **Scale In**: When average CPU drops below target%, a task is removed (respects cooldown)
+
+### Example Deployment
+
+```bash
+aws cloudformation create-stack \
+  --stack-name lakerunner-services \
+  --template-body file://generated-templates/lakerunner-services.yaml \
+  --parameters \
+    ParameterKey=CommonInfraStackName,ParameterValue=lakerunner-common \
+    ParameterKey=EnableAutoScaling,ParameterValue=Yes \
+    ParameterKey=AutoScalingMaxReplicas,ParameterValue=20 \
+    ParameterKey=AutoScalingCPUTarget,ParameterValue=70 \
+    ParameterKey=AutoScalingScaleOutCooldown,ParameterValue=60 \
+    ParameterKey=AutoScalingScaleInCooldown,ParameterValue=300 \
+  --capabilities CAPABILITY_IAM
+```
+
+### Cooldown Recommendations
+
+| Scenario | Scale-Out | Scale-In | Notes |
+|----------|-----------|----------|-------|
+| Default | 60s | 300s | Fast scale-up, slow scale-down for recovery |
+| Aggressive | 30s | 120s | Very responsive, may increase costs |
+| Cost-conscious | 120s | 600s | Slower response, minimizes churn |
+
 ## Services Architecture
 
 Lakerunner consists of these microservices that process telemetry data:
@@ -490,6 +539,16 @@ aws cloudformation create-stack --stack-name lakerunner-grafana \
 | `GoServicesImage` | String | No | public.ecr.aws/cardinalhq.io/lakerunner:v1.2.1 | Container image for Go services |
 | `QueryApiImage` | String | No | public.ecr.aws/cardinalhq.io/lakerunner/query-api:latest | Container image for query-api service |
 | `QueryWorkerImage` | String | No | public.ecr.aws/cardinalhq.io/lakerunner/query-worker:latest | Container image for query-worker service |
+
+#### Auto-Scaling Parameters
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `EnableAutoScaling` | String | No | "No" | Enable CPU-based auto-scaling for ingest, compact, and rollup services |
+| `AutoScalingMaxReplicas` | Number | No | 10 | Maximum number of tasks when auto-scaling (1-50) |
+| `AutoScalingCPUTarget` | Number | No | 70 | Target CPU utilization percentage for scaling (10-95) |
+| `AutoScalingScaleOutCooldown` | Number | No | 60 | Seconds to wait after scale-out before another scale-out (0-3600) |
+| `AutoScalingScaleInCooldown` | Number | No | 300 | Seconds to wait after scale-in before another scale-in (0-3600) |
 
 ### Grafana Service Stack Parameters
 

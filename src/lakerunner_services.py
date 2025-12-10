@@ -25,6 +25,10 @@ from troposphere.ecs import (
     HealthCheck, PortMapping, RuntimePlatform, NetworkConfiguration, AwsvpcConfiguration,
     LoadBalancer as EcsLoadBalancer, EFSVolumeConfiguration, AuthorizationConfig
 )
+from troposphere.applicationautoscaling import (
+    ScalableTarget, ScalingPolicy,
+    TargetTrackingScalingPolicyConfiguration, PredefinedMetricSpecification
+)
 from troposphere.iam import Role, Policy
 from troposphere.elasticloadbalancingv2 import LoadBalancer, TargetGroup, TargetGroupAttribute, Listener, Matcher
 from troposphere.elasticloadbalancingv2 import Action as AlbAction
@@ -232,6 +236,56 @@ def create_services_template():
 
         # Replicas-only services (pubsub, boxer) - no memory parameter
 
+    # -----------------------
+    # Auto-Scaling Parameters for Worker Services
+    # -----------------------
+    # Services that support CPU-based auto-scaling
+    AUTOSCALING_SERVICES = LAKERUNNER_WORKER_SERVICES  # ingest, compact, rollup
+
+    EnableAutoScaling = t.add_parameter(Parameter(
+        "EnableAutoScaling",
+        Type="String",
+        AllowedValues=["Yes", "No"],
+        Default="No",
+        Description="Enable CPU-based auto-scaling for ingest, compact, and rollup services"
+    ))
+
+    AutoScalingMaxReplicas = t.add_parameter(Parameter(
+        "AutoScalingMaxReplicas",
+        Type="Number",
+        Default="10",
+        MinValue=1,
+        MaxValue=50,
+        Description="Maximum number of tasks when auto-scaling (applies to all scaled services)"
+    ))
+
+    AutoScalingCPUTarget = t.add_parameter(Parameter(
+        "AutoScalingCPUTarget",
+        Type="Number",
+        Default="70",
+        MinValue=10,
+        MaxValue=95,
+        Description="Target CPU utilization percentage for scaling (e.g., 70 means scale when avg CPU > 70%)"
+    ))
+
+    AutoScalingScaleOutCooldown = t.add_parameter(Parameter(
+        "AutoScalingScaleOutCooldown",
+        Type="Number",
+        Default="60",
+        MinValue=0,
+        MaxValue=3600,
+        Description="Seconds to wait after a scale-out before another scale-out can occur"
+    ))
+
+    AutoScalingScaleInCooldown = t.add_parameter(Parameter(
+        "AutoScalingScaleInCooldown",
+        Type="Number",
+        Default="300",
+        MinValue=0,
+        MaxValue=3600,
+        Description="Seconds to wait after a scale-in before another scale-in can occur"
+    ))
+
     # Build parameter groups for console
     # Query services get their own group with CPU, Memory, and Replicas
     query_service_params = []
@@ -261,6 +315,15 @@ def create_services_template():
             param_name = service_to_param_name(svc)
             replicas_only_params.append(f"{param_name}Replicas")
 
+    # Auto-scaling parameters list for parameter groups
+    autoscaling_params = [
+        "EnableAutoScaling",
+        "AutoScalingMaxReplicas",
+        "AutoScalingCPUTarget",
+        "AutoScalingScaleOutCooldown",
+        "AutoScalingScaleInCooldown"
+    ]
+
     # Build parameter labels
     param_labels = {
         "CommonInfraStackName": {"default": "Common Infra Stack Name"},
@@ -270,7 +333,12 @@ def create_services_template():
         "EnableTraces": {"default": "Enable Traces"},
         "MSKBrokers": {"default": "MSK Broker Endpoints"},
         "GoServicesImage": {"default": "Go Services Image"},
-        "OtelEndpoint": {"default": "OTEL Collector Endpoint"}
+        "OtelEndpoint": {"default": "OTEL Collector Endpoint"},
+        "EnableAutoScaling": {"default": "Enable Auto-Scaling"},
+        "AutoScalingMaxReplicas": {"default": "Max Replicas (Auto-Scaling)"},
+        "AutoScalingCPUTarget": {"default": "CPU Target % (Auto-Scaling)"},
+        "AutoScalingScaleOutCooldown": {"default": "Scale-Out Cooldown (seconds)"},
+        "AutoScalingScaleInCooldown": {"default": "Scale-In Cooldown (seconds)"}
     }
 
     # Add labels for service configuration parameters
@@ -308,6 +376,10 @@ def create_services_template():
                 {
                     "Label": {"default": "Other Services Configuration"},
                     "Parameters": replicas_only_params
+                },
+                {
+                    "Label": {"default": "Auto-Scaling Configuration"},
+                    "Parameters": autoscaling_params
                 },
                 {
                     "Label": {"default": "MSK Configuration"},
@@ -366,6 +438,20 @@ def create_services_template():
     t.add_condition("CreateLogsServices", Equals(Ref(EnableLogs), "Yes"))
     t.add_condition("CreateMetricsServices", Equals(Ref(EnableMetrics), "Yes"))
     t.add_condition("CreateTracesServices", Equals(Ref(EnableTraces), "Yes"))
+    t.add_condition("AutoScalingEnabled", Equals(Ref(EnableAutoScaling), "Yes"))
+    # Combined conditions for auto-scaling per signal type
+    t.add_condition("AutoScaleLogsServices", And(
+        Condition("AutoScalingEnabled"),
+        Condition("CreateLogsServices")
+    ))
+    t.add_condition("AutoScaleMetricsServices", And(
+        Condition("AutoScalingEnabled"),
+        Condition("CreateMetricsServices")
+    ))
+    t.add_condition("AutoScaleTracesServices", And(
+        Condition("AutoScalingEnabled"),
+        Condition("CreateTracesServices")
+    ))
 
 
     # -----------------------
@@ -1159,6 +1245,52 @@ def create_services_template():
             port = ingress['port']
             listener_name = f"Listener{port}"
             ecs_service.DependsOn = [listener_name]
+
+        # -----------------------
+        # Auto-Scaling for Worker Services (ingest, compact, rollup)
+        # -----------------------
+        if service_name in AUTOSCALING_SERVICES:
+            # Determine the auto-scaling condition based on signal type
+            autoscale_condition = None
+            if signal_type == 'logs':
+                autoscale_condition = "AutoScaleLogsServices"
+            elif signal_type == 'metrics':
+                autoscale_condition = "AutoScaleMetricsServices"
+            elif signal_type == 'traces':
+                autoscale_condition = "AutoScaleTracesServices"
+
+            if autoscale_condition:
+                # Create ScalableTarget - registers the ECS service with Application Auto Scaling
+                scalable_target = t.add_resource(ScalableTarget(
+                    f"ScalableTarget{title_name}",
+                    Condition=autoscale_condition,
+                    MaxCapacity=Ref(AutoScalingMaxReplicas),
+                    MinCapacity=Ref(service_params[service_name]['replicas']),
+                    ResourceId=Sub(
+                        "service/${ClusterName}/" + service_name,
+                        ClusterName=ImportValue(ci_export("ClusterName"))
+                    ),
+                    ScalableDimension="ecs:service:DesiredCount",
+                    ServiceNamespace="ecs",
+                    DependsOn=[f"Service{title_name}"]
+                ))
+
+                # Create CPU-based Target Tracking Scaling Policy
+                t.add_resource(ScalingPolicy(
+                    f"ScalingPolicy{title_name}",
+                    Condition=autoscale_condition,
+                    PolicyName=f"{service_name}-cpu-scaling",
+                    PolicyType="TargetTrackingScaling",
+                    ScalingTargetId=Ref(scalable_target),
+                    TargetTrackingScalingPolicyConfiguration=TargetTrackingScalingPolicyConfiguration(
+                        TargetValue=Ref(AutoScalingCPUTarget),
+                        PredefinedMetricSpecification=PredefinedMetricSpecification(
+                            PredefinedMetricType="ECSServiceAverageCPUUtilization"
+                        ),
+                        ScaleInCooldown=Ref(AutoScalingScaleInCooldown),
+                        ScaleOutCooldown=Ref(AutoScalingScaleOutCooldown)
+                    )
+                ))
 
     # -----------------------
     # Outputs

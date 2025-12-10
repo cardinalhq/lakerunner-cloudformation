@@ -584,3 +584,240 @@ class TestServicesTemplateSimple:
         # Sweeper - DesiredCount should be hardcoded from YAML
         sweeper_svc = resources["ServiceLakerunnerSweeper"]["Properties"]
         assert sweeper_svc["DesiredCount"] == "1"
+
+    @patch('lakerunner_services.load_service_config')
+    def test_autoscaling_parameters_exist(self, mock_load_config):
+        """Test that auto-scaling parameters exist with correct defaults"""
+        mock_load_config.return_value = {
+            "services": {},
+            "images": {"go_services": "test:latest"}
+        }
+
+        from lakerunner_services import create_services_template
+
+        template = create_services_template()
+        template_dict = json.loads(template.to_json())
+        parameters = template_dict["Parameters"]
+
+        # Check auto-scaling parameters exist
+        assert "EnableAutoScaling" in parameters
+        assert "AutoScalingMaxReplicas" in parameters
+        assert "AutoScalingCPUTarget" in parameters
+        assert "AutoScalingScaleOutCooldown" in parameters
+        assert "AutoScalingScaleInCooldown" in parameters
+
+        # Check defaults
+        assert parameters["EnableAutoScaling"]["Default"] == "No"
+        assert parameters["AutoScalingMaxReplicas"]["Default"] == "10"
+        assert parameters["AutoScalingCPUTarget"]["Default"] == "70"
+        assert parameters["AutoScalingScaleOutCooldown"]["Default"] == "60"
+        assert parameters["AutoScalingScaleInCooldown"]["Default"] == "300"
+
+        # Check EnableAutoScaling is Yes/No
+        assert parameters["EnableAutoScaling"]["AllowedValues"] == ["Yes", "No"]
+
+    @patch('lakerunner_services.load_service_config')
+    def test_autoscaling_conditions_exist(self, mock_load_config):
+        """Test that auto-scaling conditions exist"""
+        mock_load_config.return_value = {
+            "services": {},
+            "images": {"go_services": "test:latest"}
+        }
+
+        from lakerunner_services import create_services_template
+
+        template = create_services_template()
+        template_dict = json.loads(template.to_json())
+        conditions = template_dict.get("Conditions", {})
+
+        # Check auto-scaling conditions exist
+        assert "AutoScalingEnabled" in conditions
+        assert "AutoScaleLogsServices" in conditions
+        assert "AutoScaleMetricsServices" in conditions
+        assert "AutoScaleTracesServices" in conditions
+
+    @patch('lakerunner_services.load_service_config')
+    def test_autoscaling_resources_created_for_worker_services(self, mock_load_config):
+        """Test that ScalableTarget and ScalingPolicy are created for ingest/compact/rollup services"""
+        mock_load_config.return_value = {
+            "services": {
+                "lakerunner-ingest-logs": {
+                    "signal_type": "logs",
+                    "command": ["/app/bin/lakerunner", "ingest-logs"],
+                    "cpu": 1024,
+                    "memory_mib": 4096,
+                    "replicas": 4,
+                    "health_check": {"type": "go", "command": ["/app/bin/lakerunner", "sysinfo"]},
+                    "environment": {}
+                },
+                "lakerunner-compact-metrics": {
+                    "signal_type": "metrics",
+                    "command": ["/app/bin/lakerunner", "compact-metrics"],
+                    "cpu": 1024,
+                    "memory_mib": 2048,
+                    "replicas": 2,
+                    "health_check": {"type": "go", "command": ["/app/bin/lakerunner", "sysinfo"]},
+                    "environment": {}
+                },
+                "lakerunner-rollup-metrics": {
+                    "signal_type": "metrics",
+                    "command": ["/app/bin/lakerunner", "rollup-metrics"],
+                    "cpu": 1024,
+                    "memory_mib": 2048,
+                    "replicas": 2,
+                    "health_check": {"type": "go", "command": ["/app/bin/lakerunner", "sysinfo"]},
+                    "environment": {}
+                },
+                "lakerunner-ingest-traces": {
+                    "signal_type": "traces",
+                    "command": ["/app/bin/lakerunner", "ingest-traces"],
+                    "cpu": 1024,
+                    "memory_mib": 2048,
+                    "replicas": 1,
+                    "health_check": {"type": "go", "command": ["/app/bin/lakerunner", "sysinfo"]},
+                    "environment": {}
+                }
+            },
+            "images": {"go_services": "test:latest"}
+        }
+
+        from lakerunner_services import create_services_template
+
+        template = create_services_template()
+        template_dict = json.loads(template.to_json())
+        resources = template_dict["Resources"]
+
+        # Check ScalableTarget resources exist with correct conditions
+        assert "ScalableTargetLakerunnerIngestLogs" in resources
+        assert resources["ScalableTargetLakerunnerIngestLogs"]["Condition"] == "AutoScaleLogsServices"
+
+        assert "ScalableTargetLakerunnerCompactMetrics" in resources
+        assert resources["ScalableTargetLakerunnerCompactMetrics"]["Condition"] == "AutoScaleMetricsServices"
+
+        assert "ScalableTargetLakerunnerRollupMetrics" in resources
+        assert resources["ScalableTargetLakerunnerRollupMetrics"]["Condition"] == "AutoScaleMetricsServices"
+
+        assert "ScalableTargetLakerunnerIngestTraces" in resources
+        assert resources["ScalableTargetLakerunnerIngestTraces"]["Condition"] == "AutoScaleTracesServices"
+
+        # Check ScalingPolicy resources exist with correct conditions
+        assert "ScalingPolicyLakerunnerIngestLogs" in resources
+        assert resources["ScalingPolicyLakerunnerIngestLogs"]["Condition"] == "AutoScaleLogsServices"
+
+        assert "ScalingPolicyLakerunnerCompactMetrics" in resources
+        assert resources["ScalingPolicyLakerunnerCompactMetrics"]["Condition"] == "AutoScaleMetricsServices"
+
+    @patch('lakerunner_services.load_service_config')
+    def test_autoscaling_not_created_for_non_worker_services(self, mock_load_config):
+        """Test that auto-scaling is NOT created for query, pubsub, boxer, sweeper, monitoring"""
+        mock_load_config.return_value = {
+            "services": {
+                "lakerunner-query-api": {
+                    "signal_type": "common",
+                    "command": ["/app/bin/lakerunner", "query-api"],
+                    "cpu": 1024,
+                    "memory_mib": 2048,
+                    "replicas": 2,
+                    "health_check": {"type": "go", "command": ["/app/bin/lakerunner", "sysinfo"]},
+                    "environment": {}
+                },
+                "lakerunner-pubsub-sqs": {
+                    "signal_type": "common",
+                    "command": ["/app/bin/lakerunner", "pubsub", "sqs"],
+                    "cpu": 1024,
+                    "memory_mib": 2048,
+                    "replicas": 1,
+                    "health_check": {"type": "go", "command": ["/app/bin/lakerunner", "sysinfo"]},
+                    "environment": {}
+                },
+                "lakerunner-sweeper": {
+                    "signal_type": "common",
+                    "command": ["/app/bin/lakerunner", "sweeper"],
+                    "cpu": 256,
+                    "memory_mib": 512,
+                    "replicas": 1,
+                    "health_check": {"type": "go", "command": ["/app/bin/lakerunner", "sysinfo"]},
+                    "environment": {}
+                }
+            },
+            "images": {"go_services": "test:latest"}
+        }
+
+        from lakerunner_services import create_services_template
+
+        template = create_services_template()
+        template_dict = json.loads(template.to_json())
+        resources = template_dict["Resources"]
+
+        # No auto-scaling resources for non-worker services
+        assert "ScalableTargetLakerunnerQueryApi" not in resources
+        assert "ScalingPolicyLakerunnerQueryApi" not in resources
+        assert "ScalableTargetLakerunnerPubsubSqs" not in resources
+        assert "ScalingPolicyLakerunnerPubsubSqs" not in resources
+        assert "ScalableTargetLakerunnerSweeper" not in resources
+        assert "ScalingPolicyLakerunnerSweeper" not in resources
+
+    @patch('lakerunner_services.load_service_config')
+    def test_autoscaling_policy_uses_cpu_target_tracking(self, mock_load_config):
+        """Test that scaling policy uses CPU target tracking with correct configuration"""
+        mock_load_config.return_value = {
+            "services": {
+                "lakerunner-ingest-logs": {
+                    "signal_type": "logs",
+                    "command": ["/app/bin/lakerunner", "ingest-logs"],
+                    "cpu": 1024,
+                    "memory_mib": 4096,
+                    "replicas": 4,
+                    "health_check": {"type": "go", "command": ["/app/bin/lakerunner", "sysinfo"]},
+                    "environment": {}
+                }
+            },
+            "images": {"go_services": "test:latest"}
+        }
+
+        from lakerunner_services import create_services_template
+
+        template = create_services_template()
+        template_dict = json.loads(template.to_json())
+        resources = template_dict["Resources"]
+
+        # Check scaling policy configuration
+        policy = resources["ScalingPolicyLakerunnerIngestLogs"]["Properties"]
+        assert policy["PolicyType"] == "TargetTrackingScaling"
+
+        config = policy["TargetTrackingScalingPolicyConfiguration"]
+        assert config["TargetValue"] == {"Ref": "AutoScalingCPUTarget"}
+        assert config["ScaleInCooldown"] == {"Ref": "AutoScalingScaleInCooldown"}
+        assert config["ScaleOutCooldown"] == {"Ref": "AutoScalingScaleOutCooldown"}
+        assert config["PredefinedMetricSpecification"]["PredefinedMetricType"] == "ECSServiceAverageCPUUtilization"
+
+    @patch('lakerunner_services.load_service_config')
+    def test_scalable_target_uses_correct_min_max(self, mock_load_config):
+        """Test that ScalableTarget uses replicas param for min and max param for max"""
+        mock_load_config.return_value = {
+            "services": {
+                "lakerunner-ingest-logs": {
+                    "signal_type": "logs",
+                    "command": ["/app/bin/lakerunner", "ingest-logs"],
+                    "cpu": 1024,
+                    "memory_mib": 4096,
+                    "replicas": 4,
+                    "health_check": {"type": "go", "command": ["/app/bin/lakerunner", "sysinfo"]},
+                    "environment": {}
+                }
+            },
+            "images": {"go_services": "test:latest"}
+        }
+
+        from lakerunner_services import create_services_template
+
+        template = create_services_template()
+        template_dict = json.loads(template.to_json())
+        resources = template_dict["Resources"]
+
+        # Check scalable target configuration
+        target = resources["ScalableTargetLakerunnerIngestLogs"]["Properties"]
+        assert target["MinCapacity"] == {"Ref": "IngestLogsReplicas"}
+        assert target["MaxCapacity"] == {"Ref": "AutoScalingMaxReplicas"}
+        assert target["ScalableDimension"] == "ecs:service:DesiredCount"
+        assert target["ServiceNamespace"] == "ecs"
