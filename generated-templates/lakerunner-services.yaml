@@ -259,7 +259,7 @@ Parameters:
     MinValue: 10
     Type: Number
   AutoScalingMaxReplicas:
-    Default: '2'
+    Default: '10'
     Description: Maximum number of tasks when auto-scaling (applies to all scaled services)
     MaxValue: 50
     MinValue: 1
@@ -279,7 +279,6 @@ Parameters:
   BoxerCommonReplicas:
     Default: '1'
     Description: Number of lakerunner-boxer-common task replicas
-    MaxValue: 20
     MinValue: 0
     Type: Number
   CommonInfraStackName:
@@ -300,7 +299,6 @@ Parameters:
   CompactLogsReplicas:
     Default: '1'
     Description: Number of lakerunner-compact-logs task replicas
-    MaxValue: 20
     MinValue: 0
     Type: Number
   CompactMetricsMemory:
@@ -318,7 +316,6 @@ Parameters:
   CompactMetricsReplicas:
     Default: '1'
     Description: Number of lakerunner-compact-metrics task replicas
-    MaxValue: 20
     MinValue: 0
     Type: Number
   CompactTracesMemory:
@@ -336,7 +333,6 @@ Parameters:
   CompactTracesReplicas:
     Default: '1'
     Description: Number of lakerunner-compact-traces task replicas
-    MaxValue: 20
     MinValue: 0
     Type: Number
   EnableAutoScaling:
@@ -386,7 +382,6 @@ Parameters:
   IngestLogsReplicas:
     Default: '1'
     Description: Number of lakerunner-ingest-logs task replicas
-    MaxValue: 20
     MinValue: 0
     Type: Number
   IngestMetricsMemory:
@@ -404,7 +399,6 @@ Parameters:
   IngestMetricsReplicas:
     Default: '1'
     Description: Number of lakerunner-ingest-metrics task replicas
-    MaxValue: 20
     MinValue: 0
     Type: Number
   IngestTracesMemory:
@@ -422,7 +416,6 @@ Parameters:
   IngestTracesReplicas:
     Default: '1'
     Description: Number of lakerunner-ingest-traces task replicas
-    MaxValue: 20
     MinValue: 0
     Type: Number
   MSKBrokers:
@@ -436,7 +429,6 @@ Parameters:
   PubsubSqsReplicas:
     Default: '1'
     Description: Number of lakerunner-pubsub-sqs task replicas
-    MaxValue: 20
     MinValue: 0
     Type: Number
   QueryApiCpu:
@@ -506,7 +498,6 @@ Parameters:
   QueryApiReplicas:
     Default: '2'
     Description: Number of lakerunner-query-api task replicas
-    MaxValue: 20
     MinValue: 0
     Type: Number
   QueryWorkerCpu:
@@ -576,7 +567,6 @@ Parameters:
   QueryWorkerReplicas:
     Default: '8'
     Description: Number of lakerunner-query-worker task replicas
-    MaxValue: 20
     MinValue: 0
     Type: Number
   RollupMetricsMemory:
@@ -594,7 +584,6 @@ Parameters:
   RollupMetricsReplicas:
     Default: '1'
     Description: Number of lakerunner-rollup-metrics task replicas
-    MaxValue: 20
     MinValue: 0
     Type: Number
 Resources:

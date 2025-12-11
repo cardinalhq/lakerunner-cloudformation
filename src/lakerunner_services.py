@@ -188,7 +188,6 @@ def create_services_template():
             Type="Number",
             Default=str(default_replicas),
             MinValue=0,
-            MaxValue=20,
             Description=f"Number of {service_name} task replicas"
         ))
         service_params[service_name]['replicas'] = replicas_param
@@ -253,7 +252,7 @@ def create_services_template():
     AutoScalingMaxReplicas = t.add_parameter(Parameter(
         "AutoScalingMaxReplicas",
         Type="Number",
-        Default="2",
+        Default="10",
         MinValue=1,
         MaxValue=50,
         Description="Maximum number of tasks when auto-scaling (applies to all scaled services)"
