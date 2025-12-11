@@ -368,7 +368,7 @@ Parameters:
     Description: Enable trace processing services (ingest-traces, compact-traces)
     Type: String
   GoServicesImage:
-    Default: public.ecr.aws/cardinalhq.io/lakerunner:v1.5.1
+    Default: public.ecr.aws/cardinalhq.io/lakerunner:v1.6.3
     Description: Container image for all Go services (pubsub, ingest, compact, query-api, query-worker, etc.)
     Type: String
   IngestLogsMemory:
@@ -518,7 +518,7 @@ Parameters:
       - '4096'
       - '8192'
       - '16384'
-    Default: '2048'
+    Default: '4096'
     Description: CPU units for lakerunner-query-worker (256, 512, 1024, 2048, 4096, 8192, 16384)
     Type: Number
   QueryWorkerMemory:
@@ -574,7 +574,7 @@ Parameters:
     Description: Memory (MiB) for lakerunner-query-worker. Must be valid for the selected CPU.
     Type: Number
   QueryWorkerReplicas:
-    Default: '4'
+    Default: '8'
     Description: Number of lakerunner-query-worker task replicas
     MaxValue: 20
     MinValue: 0

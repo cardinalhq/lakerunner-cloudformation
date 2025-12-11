@@ -20,9 +20,9 @@ storage_profiles:
 
 # Container Images configuration
 images:
-  migration: "public.ecr.aws/cardinalhq.io/lakerunner:v1.5.1"
-  utility: "public.ecr.aws/cardinalhq.io/lakerunner:v1.5.1"
-  go_services: "public.ecr.aws/cardinalhq.io/lakerunner:v1.5.1"
+  migration: "public.ecr.aws/cardinalhq.io/lakerunner:v1.6.3"
+  utility: "public.ecr.aws/cardinalhq.io/lakerunner:v1.6.3"
+  go_services: "public.ecr.aws/cardinalhq.io/lakerunner:v1.6.3"
 
 # MSK configuration
 msk:
@@ -155,9 +155,9 @@ services:
   lakerunner-query-worker:
     signal_type: common
     command: ["/app/bin/lakerunner", "query-worker"]
-    cpu: 2048
+    cpu: 4096
     memory_mib: 8192
-    replicas: 4
+    replicas: 8
     ingress:
       port: 8081
       description: "From Query API"
