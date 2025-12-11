@@ -253,7 +253,7 @@ def create_services_template():
     AutoScalingMaxReplicas = t.add_parameter(Parameter(
         "AutoScalingMaxReplicas",
         Type="Number",
-        Default="10",
+        Default="2",
         MinValue=1,
         MaxValue=50,
         Description="Maximum number of tasks when auto-scaling (applies to all scaled services)"

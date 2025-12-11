@@ -259,7 +259,7 @@ Parameters:
     MinValue: 10
     Type: Number
   AutoScalingMaxReplicas:
-    Default: '10'
+    Default: '2'
     Description: Maximum number of tasks when auto-scaling (applies to all scaled services)
     MaxValue: 50
     MinValue: 1
