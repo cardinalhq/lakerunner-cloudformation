@@ -269,7 +269,7 @@ Parameters:
       - '6144'
       - '7168'
       - '8192'
-    Default: '4096'
+    Default: '2048'
     Description: 'Memory (MiB) for lakerunner-compact-logs. Valid values for 1024 CPU: 2048, 3072, 4096, 5120, 6144, 7168, 8192'
     Type: Number
   CompactLogsReplicas:
@@ -348,7 +348,7 @@ Parameters:
       - '6144'
       - '7168'
       - '8192'
-    Default: '4096'
+    Default: '2048'
     Description: 'Memory (MiB) for lakerunner-ingest-logs. Valid values for 1024 CPU: 2048, 3072, 4096, 5120, 6144, 7168, 8192'
     Type: Number
   IngestLogsReplicas:
@@ -1668,6 +1668,8 @@ Resources:
                 - EnableOtlp
                 - 'true'
                 - !Ref 'AWS::NoValue'
+            - Name: OTEL_METRIC_EXPORT_INTERVAL
+              Value: '10000'
           HealthCheck:
             Command:
               - /app/bin/lakerunner
@@ -1809,6 +1811,8 @@ Resources:
                 - EnableOtlp
                 - 'true'
                 - !Ref 'AWS::NoValue'
+            - Name: OTEL_METRIC_EXPORT_INTERVAL
+              Value: '10000'
           HealthCheck:
             Command:
               - /app/bin/lakerunner
@@ -1950,6 +1954,8 @@ Resources:
                 - EnableOtlp
                 - 'true'
                 - !Ref 'AWS::NoValue'
+            - Name: OTEL_METRIC_EXPORT_INTERVAL
+              Value: '10000'
           HealthCheck:
             Command:
               - /app/bin/lakerunner
@@ -2091,6 +2097,8 @@ Resources:
                 - EnableOtlp
                 - 'true'
                 - !Ref 'AWS::NoValue'
+            - Name: OTEL_METRIC_EXPORT_INTERVAL
+              Value: '10000'
           HealthCheck:
             Command:
               - /app/bin/lakerunner
@@ -2232,6 +2240,8 @@ Resources:
                 - EnableOtlp
                 - 'true'
                 - !Ref 'AWS::NoValue'
+            - Name: OTEL_METRIC_EXPORT_INTERVAL
+              Value: '10000'
           HealthCheck:
             Command:
               - /app/bin/lakerunner
@@ -2373,6 +2383,8 @@ Resources:
                 - EnableOtlp
                 - 'true'
                 - !Ref 'AWS::NoValue'
+            - Name: OTEL_METRIC_EXPORT_INTERVAL
+              Value: '10000'
           HealthCheck:
             Command:
               - /app/bin/lakerunner
@@ -2514,6 +2526,8 @@ Resources:
                 - EnableOtlp
                 - 'true'
                 - !Ref 'AWS::NoValue'
+            - Name: OTEL_METRIC_EXPORT_INTERVAL
+              Value: '10000'
           HealthCheck:
             Command:
               - /app/bin/lakerunner
@@ -2656,6 +2670,8 @@ Resources:
                 - EnableOtlp
                 - 'true'
                 - !Ref 'AWS::NoValue'
+            - Name: OTEL_METRIC_EXPORT_INTERVAL
+              Value: '10000'
           HealthCheck:
             Command:
               - /app/bin/lakerunner
@@ -2799,6 +2815,8 @@ Resources:
                 - EnableOtlp
                 - 'true'
                 - !Ref 'AWS::NoValue'
+            - Name: OTEL_METRIC_EXPORT_INTERVAL
+              Value: '10000'
           HealthCheck:
             Command:
               - /app/bin/lakerunner
@@ -2939,6 +2957,8 @@ Resources:
                 - EnableOtlp
                 - 'true'
                 - !Ref 'AWS::NoValue'
+            - Name: OTEL_METRIC_EXPORT_INTERVAL
+              Value: '10000'
             - Name: EXECUTION_ENVIRONMENT
               Value: ecs
             - Name: QUERY_WORKER_SERVICE_NAME
@@ -3090,6 +3110,8 @@ Resources:
                 - EnableOtlp
                 - 'true'
                 - !Ref 'AWS::NoValue'
+            - Name: OTEL_METRIC_EXPORT_INTERVAL
+              Value: '10000'
           HealthCheck:
             Command:
               - /app/bin/lakerunner
@@ -3235,6 +3257,8 @@ Resources:
                 - EnableOtlp
                 - 'true'
                 - !Ref 'AWS::NoValue'
+            - Name: OTEL_METRIC_EXPORT_INTERVAL
+              Value: '10000'
           HealthCheck:
             Command:
               - /app/bin/lakerunner
@@ -3375,6 +3399,8 @@ Resources:
                 - EnableOtlp
                 - 'true'
                 - !Ref 'AWS::NoValue'
+            - Name: OTEL_METRIC_EXPORT_INTERVAL
+              Value: '10000'
           HealthCheck:
             Command:
               - /app/bin/lakerunner
