@@ -3112,6 +3112,10 @@ Resources:
                 - !Ref 'AWS::NoValue'
             - Name: OTEL_METRIC_EXPORT_INTERVAL
               Value: '10000'
+            - Name: LAKERUNNER_QUERY_DISABLE_TABLE_CACHE
+              Value: 'true'
+            - Name: LAKERUNNER_QUERY_MAX_SEGMENTS_PER_WORKER_PER_WAVE
+              Value: '50'
           HealthCheck:
             Command:
               - /app/bin/lakerunner
