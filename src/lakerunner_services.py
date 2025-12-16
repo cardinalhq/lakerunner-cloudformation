@@ -170,6 +170,7 @@ def create_services_template():
         Description="Load balancer scheme: 'internet-facing' for external access or 'internal' for internal access only."
     ))
 
+
     # -----------------------
     # Service Configuration Parameters
     # -----------------------
@@ -463,17 +464,6 @@ def create_services_template():
         Description="HTTP 7101",
     ))
 
-    # Admin API GRPC port (conditional, only if admin-api service is defined)
-    if 'lakerunner-admin-api' in service_params:
-        t.add_resource(SecurityGroupIngress(
-            "Alb9091Open",
-            Condition="EnableAdminApi",
-            GroupId=Ref(AlbSG),
-            IpProtocol="tcp",
-            FromPort=9091, ToPort=9091,
-            CidrIp="0.0.0.0/0",
-            Description="GRPC 9091 (Admin API)",
-        ))
 
     # Add ingress rules to task security group to allow ALB traffic
     # Allow ALB to reach query-api on port 8080 (application port)
@@ -496,16 +486,18 @@ def create_services_template():
         Description="ALB health checks",
     ))
 
-    # Allow ALB to reach admin-api on port 9091 (GRPC) - conditional
+    # Allow NLB to reach admin-api on port 9091 (GRPC) - conditional
+    # NLB doesn't have security groups, so we allow from 0.0.0.0/0
+    # (NLB preserves client IP, so traffic appears to come from clients)
     if 'lakerunner-admin-api' in service_params:
         t.add_resource(SecurityGroupIngress(
-            "TaskFromAlb9091",
+            "TaskFromNlb9091",
             Condition="EnableAdminApi",
             GroupId=TaskSecurityGroupIdValue,
             IpProtocol="tcp",
             FromPort=9091, ToPort=9091,
-            SourceSecurityGroupId=Ref(AlbSG),
-            Description="ALB to admin-api GRPC port",
+            CidrIp="0.0.0.0/0",
+            Description="NLB to admin-api GRPC port",
         ))
 
     # -----------------------
@@ -550,26 +542,38 @@ def create_services_template():
         DefaultActions=[AlbAction(Type="forward", TargetGroupArn=Ref(Tg7101))]
     ))
 
-    # Admin API GRPC target group and listener (conditional, only if admin-api service is defined)
+    # Admin API NLB for GRPC (TCP passthrough, no TLS required)
+    # Using NLB because ALB requires HTTPS for GRPC protocol
+    AdminApiNlb = None
     Tg9091 = None
     if 'lakerunner-admin-api' in service_params:
+        AdminApiNlb = t.add_resource(LoadBalancer(
+            "AdminApiNlb",
+            Condition="EnableAdminApi",
+            Scheme=Ref(AlbScheme),
+            Subnets=If(
+                "IsInternetFacing",
+                PublicSubnetsValue,
+                PrivateSubnetsValue
+            ),
+            Type="network",
+            Tags=Tags(Name=Sub("${AWS::StackName}-admin-api-nlb"))
+        ))
+
         Tg9091 = t.add_resource(TargetGroup(
             "Tg9091",
             Condition="EnableAdminApi",
-            Port=9091, Protocol="HTTP",
-            ProtocolVersion="GRPC",
+            Port=9091,
+            Protocol="TCP",
             VpcId=VpcIdValue,
             TargetType="ip",
-            HealthCheckPath="/grpc.health.v1.Health/Check",
+            HealthCheckProtocol="TCP",
             HealthCheckPort="9091",
-            HealthCheckProtocol="HTTP",
             HealthCheckIntervalSeconds=30,
-            HealthCheckTimeoutSeconds=5,
+            HealthCheckTimeoutSeconds=10,
             HealthyThresholdCount=2,
-            UnhealthyThresholdCount=3,
-            Matcher=Matcher(GrpcCode="0-99"),
+            UnhealthyThresholdCount=2,
             TargetGroupAttributes=[
-                TargetGroupAttribute(Key="stickiness.enabled", Value="false"),
                 TargetGroupAttribute(Key="deregistration_delay.timeout_seconds", Value="5")
             ]
         ))
@@ -577,9 +581,9 @@ def create_services_template():
         t.add_resource(Listener(
             "Listener9091",
             Condition="EnableAdminApi",
-            LoadBalancerArn=Ref(Alb),
+            LoadBalancerArn=Ref(AdminApiNlb),
             Port="9091",
-            Protocol="HTTP",
+            Protocol="TCP",
             DefaultActions=[AlbAction(Type="forward", TargetGroupArn=Ref(Tg9091))]
         ))
 
@@ -1370,6 +1374,16 @@ def create_services_template():
         Value=Ref(Tg7101),
         Export=Export(name=Sub("${AWS::StackName}-Tg7101Arn"))
     ))
+
+    # Admin API NLB Output (conditional)
+    if AdminApiNlb is not None:
+        t.add_output(Output(
+            "AdminApiNlbDNS",
+            Condition="EnableAdminApi",
+            Value=GetAtt(AdminApiNlb, "DNSName"),
+            Export=Export(name=Sub("${AWS::StackName}-AdminApiNlbDNS")),
+            Description="Admin API NLB DNS name (GRPC on port 9091)"
+        ))
 
     # Service Outputs
     t.add_output(Output(

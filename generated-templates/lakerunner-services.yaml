@@ -154,6 +154,12 @@ Metadata:
       RollupMetricsReplicas:
         default: Rollup Metrics Max Replicas
 Outputs:
+  AdminApiNlbDNS:
+    Condition: EnableAdminApi
+    Description: Admin API NLB DNS name (GRPC on port 9091)
+    Export:
+      Name: !Sub '${AWS::StackName}-AdminApiNlbDNS'
+    Value: !GetAtt 'AdminApiNlb.DNSName'
   AlbArn:
     Export:
       Name: !Sub '${AWS::StackName}-AlbArn'
@@ -580,6 +586,29 @@ Parameters:
     MinValue: 1
     Type: Number
 Resources:
+  AdminApiNlb:
+    Condition: EnableAdminApi
+    Properties:
+      Scheme: !Ref 'AlbScheme'
+      Subnets: !If
+        - IsInternetFacing
+        - !Split
+          - ','
+          - !ImportValue
+            Fn::Sub:
+              - ${CommonInfraStackName}-PublicSubnets
+              - CommonInfraStackName: !Ref 'CommonInfraStackName'
+        - !Split
+          - ','
+          - !ImportValue
+            Fn::Sub:
+              - ${CommonInfraStackName}-PrivateSubnets
+              - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-admin-api-nlb'
+      Type: network
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
   Alb:
     Properties:
       Scheme: !Ref 'AlbScheme'
@@ -609,16 +638,6 @@ Resources:
       GroupId: !Ref 'AlbSecurityGroup'
       IpProtocol: tcp
       ToPort: 7101
-    Type: AWS::EC2::SecurityGroupIngress
-  Alb9091Open:
-    Condition: EnableAdminApi
-    Properties:
-      CidrIp: '0.0.0.0/0'
-      Description: GRPC 9091 (Admin API)
-      FromPort: 9091
-      GroupId: !Ref 'AlbSecurityGroup'
-      IpProtocol: tcp
-      ToPort: 9091
     Type: AWS::EC2::SecurityGroupIngress
   AlbSecurityGroup:
     Properties:
@@ -704,9 +723,9 @@ Resources:
       DefaultActions:
         - TargetGroupArn: !Ref 'Tg9091'
           Type: forward
-      LoadBalancerArn: !Ref 'Alb'
+      LoadBalancerArn: !Ref 'AdminApiNlb'
       Port: '9091'
-      Protocol: HTTP
+      Protocol: TCP
     Type: AWS::ElasticLoadBalancingV2::Listener
   LogGroupLakerunnerAdminApi:
     Condition: EnableAdminApi
@@ -3730,17 +3749,17 @@ Resources:
       SourceSecurityGroupId: !Ref 'AlbSecurityGroup'
       ToPort: 8090
     Type: AWS::EC2::SecurityGroupIngress
-  TaskFromAlb9091:
+  TaskFromNlb9091:
     Condition: EnableAdminApi
     Properties:
-      Description: ALB to admin-api GRPC port
+      CidrIp: '0.0.0.0/0'
+      Description: NLB to admin-api GRPC port
       FromPort: 9091
       GroupId: !ImportValue
         Fn::Sub:
           - ${CommonInfraStackName}-TaskSGId
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
       IpProtocol: tcp
-      SourceSecurityGroupId: !Ref 'AlbSecurityGroup'
       ToPort: 9091
     Type: AWS::EC2::SecurityGroupIngress
   TaskRole:
@@ -3859,23 +3878,17 @@ Resources:
     Condition: EnableAdminApi
     Properties:
       HealthCheckIntervalSeconds: 30
-      HealthCheckPath: /grpc.health.v1.Health/Check
       HealthCheckPort: '9091'
-      HealthCheckProtocol: HTTP
-      HealthCheckTimeoutSeconds: 5
+      HealthCheckProtocol: TCP
+      HealthCheckTimeoutSeconds: 10
       HealthyThresholdCount: 2
-      Matcher:
-        GrpcCode: '0-99'
       Port: 9091
-      Protocol: HTTP
-      ProtocolVersion: GRPC
+      Protocol: TCP
       TargetGroupAttributes:
-        - Key: stickiness.enabled
-          Value: 'false'
         - Key: deregistration_delay.timeout_seconds
           Value: '5'
       TargetType: ip
-      UnhealthyThresholdCount: 3
+      UnhealthyThresholdCount: 2
       VpcId: !ImportValue
         Fn::Sub:
           - ${CommonInfraStackName}-VpcId
