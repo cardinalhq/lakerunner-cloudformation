@@ -89,9 +89,11 @@ def create_services_template():
     # Services that use YAML config only (no parameters)
     # sweeper, monitor use YAML for both replicas and memory
     # pubsub, boxer use YAML for memory but get replicas param
+    # admin-api is disabled by default (replicas=0), users can enable via parameter
     LAKERUNNER_REPLICAS_ONLY_SERVICES = [
         'lakerunner-pubsub-sqs',
         'lakerunner-boxer-common',
+        'lakerunner-admin-api',
     ]
 
     # All configurable services (for iteration)
@@ -433,6 +435,9 @@ def create_services_template():
     t.add_condition("CreateLogsServices", Equals(Ref(EnableLogs), "Yes"))
     t.add_condition("CreateMetricsServices", Equals(Ref(EnableMetrics), "Yes"))
     t.add_condition("CreateTracesServices", Equals(Ref(EnableTraces), "Yes"))
+    # Admin API is enabled when replicas > 0 (only if admin-api service is defined)
+    if 'lakerunner-admin-api' in service_params:
+        t.add_condition("EnableAdminApi", Not(Equals(Ref(service_params['lakerunner-admin-api']['replicas']), "0")))
 
 
     # -----------------------
@@ -458,6 +463,18 @@ def create_services_template():
         Description="HTTP 7101",
     ))
 
+    # Admin API GRPC port (conditional, only if admin-api service is defined)
+    if 'lakerunner-admin-api' in service_params:
+        t.add_resource(SecurityGroupIngress(
+            "Alb9091Open",
+            Condition="EnableAdminApi",
+            GroupId=Ref(AlbSG),
+            IpProtocol="tcp",
+            FromPort=9091, ToPort=9091,
+            CidrIp="0.0.0.0/0",
+            Description="GRPC 9091 (Admin API)",
+        ))
+
     # Add ingress rules to task security group to allow ALB traffic
     # Allow ALB to reach query-api on port 8080 (application port)
     t.add_resource(SecurityGroupIngress(
@@ -478,6 +495,18 @@ def create_services_template():
         SourceSecurityGroupId=Ref(AlbSG),
         Description="ALB health checks",
     ))
+
+    # Allow ALB to reach admin-api on port 9091 (GRPC) - conditional
+    if 'lakerunner-admin-api' in service_params:
+        t.add_resource(SecurityGroupIngress(
+            "TaskFromAlb9091",
+            Condition="EnableAdminApi",
+            GroupId=TaskSecurityGroupIdValue,
+            IpProtocol="tcp",
+            FromPort=9091, ToPort=9091,
+            SourceSecurityGroupId=Ref(AlbSG),
+            Description="ALB to admin-api GRPC port",
+        ))
 
     # -----------------------
     # ALB + listeners + target groups
@@ -520,6 +549,39 @@ def create_services_template():
         Protocol="HTTP",
         DefaultActions=[AlbAction(Type="forward", TargetGroupArn=Ref(Tg7101))]
     ))
+
+    # Admin API GRPC target group and listener (conditional, only if admin-api service is defined)
+    Tg9091 = None
+    if 'lakerunner-admin-api' in service_params:
+        Tg9091 = t.add_resource(TargetGroup(
+            "Tg9091",
+            Condition="EnableAdminApi",
+            Port=9091, Protocol="HTTP",
+            ProtocolVersion="GRPC",
+            VpcId=VpcIdValue,
+            TargetType="ip",
+            HealthCheckPath="/grpc.health.v1.Health/Check",
+            HealthCheckPort="9091",
+            HealthCheckProtocol="HTTP",
+            HealthCheckIntervalSeconds=30,
+            HealthCheckTimeoutSeconds=5,
+            HealthyThresholdCount=2,
+            UnhealthyThresholdCount=3,
+            Matcher=Matcher(GrpcCode="0-99"),
+            TargetGroupAttributes=[
+                TargetGroupAttribute(Key="stickiness.enabled", Value="false"),
+                TargetGroupAttribute(Key="deregistration_delay.timeout_seconds", Value="5")
+            ]
+        ))
+
+        t.add_resource(Listener(
+            "Listener9091",
+            Condition="EnableAdminApi",
+            LoadBalancerArn=Ref(Alb),
+            Port="9091",
+            Protocol="HTTP",
+            DefaultActions=[AlbAction(Type="forward", TargetGroupArn=Ref(Tg9091))]
+        ))
 
 
     # -----------------------
@@ -935,7 +997,7 @@ def create_services_template():
     for service_name, service_config in services.items():
         title_name = ''.join(word.capitalize() for word in service_name.replace('-', '_').split('_'))
 
-        # Determine the condition for this service based on signal type
+        # Determine the condition for this service based on signal type or service-specific enablement
         signal_type = service_config.get('signal_type', 'common')
         condition_name = None
         if signal_type == 'logs':
@@ -944,6 +1006,8 @@ def create_services_template():
             condition_name = "CreateMetricsServices"
         elif signal_type == 'traces':
             condition_name = "CreateTracesServices"
+        elif service_name == 'lakerunner-admin-api':
+            condition_name = "EnableAdminApi"
 
         # Create log group
         log_group_kwargs = {
@@ -1211,6 +1275,8 @@ def create_services_template():
             # Map to the appropriate target group created in this stack
             if port == 7101:
                 target_group_arn = Ref(Tg7101)
+            elif port == 9091 and Tg9091 is not None:
+                target_group_arn = Ref(Tg9091)
             else:
                 # For other ports, we'd need to add them to this stack
                 target_group_arn = None
@@ -1330,6 +1396,8 @@ def create_services_template():
             condition_name = "CreateMetricsServices"
         elif signal_type == 'traces':
             condition_name = "CreateTracesServices"
+        elif service_name == 'lakerunner-admin-api':
+            condition_name = "EnableAdminApi"
 
         output_kwargs = {
             "Value": Ref(f"Service{title_name}"),

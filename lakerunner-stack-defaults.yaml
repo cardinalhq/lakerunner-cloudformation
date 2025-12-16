@@ -209,3 +209,22 @@ services:
       command: ["/app/bin/lakerunner", "sysinfo"]
     environment:
       OTEL_METRIC_EXPORT_INTERVAL: "10000"
+
+  # Admin API service (disabled by default)
+  lakerunner-admin-api:
+    signal_type: common
+    command: ["/app/bin/lakerunner", "admin-api", "serve"]
+    cpu: 256
+    memory_mib: 512
+    replicas: 0
+    ingress:
+      port: 9091
+      container_port: 9091
+      attach_alb: true
+      protocol: GRPC
+      health_check_path: "/grpc.health.v1.Health/Check"
+    health_check:
+      type: "go"
+      command: ["/app/bin/lakerunner", "sysinfo"]
+    environment:
+      OTEL_METRIC_EXPORT_INTERVAL: "10000"
