@@ -174,11 +174,11 @@ services:
     health_check:
       type: "go"
       command: ["/app/bin/lakerunner", "sysinfo"]
-    ephemeral_storage_gib: 30
+    ephemeral_storage_gib: 100
     environment:
       OTEL_METRIC_EXPORT_INTERVAL: "10000"
       LAKERUNNER_QUERY_DISABLE_TABLE_CACHE: "true"
-      LAKERUNNER_QUERY_MAX_SEGMENTS_PER_WORKER_PER_WAVE: "50"
+      LAKERUNNER_QUERY_MAX_SEGMENTS_PER_WORKER_PER_WAVE: "100"
 
   # Boxer service for all compaction and rollup tasks
   lakerunner-boxer-common:

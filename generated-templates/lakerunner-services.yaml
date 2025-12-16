@@ -3115,7 +3115,7 @@ Resources:
             - Name: LAKERUNNER_QUERY_DISABLE_TABLE_CACHE
               Value: 'true'
             - Name: LAKERUNNER_QUERY_MAX_SEGMENTS_PER_WORKER_PER_WAVE
-              Value: '50'
+              Value: '100'
           HealthCheck:
             Command:
               - /app/bin/lakerunner
@@ -3175,7 +3175,7 @@ Resources:
           User: '0'
       Cpu: !Ref 'QueryWorkerCpu'
       EphemeralStorage:
-        SizeInGiB: 30
+        SizeInGiB: 100
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
       Family: lakerunner-query-worker-task
       Memory: !Ref 'QueryWorkerMemory'
