@@ -504,7 +504,9 @@ Resources:
             Sid: Enable IAM User Permissions
           - Action:
               - kms:Decrypt
+              - kms:DescribeKey
               - kms:GenerateDataKey
+              - kms:CreateGrant
             Effect: Allow
             Principal:
               Service: kafka.amazonaws.com
@@ -512,7 +514,9 @@ Resources:
             Sid: Allow MSK Service
           - Action:
               - kms:Decrypt
+              - kms:DescribeKey
               - kms:GenerateDataKey
+              - kms:CreateGrant
               - kms:ReEncrypt*
             Effect: Allow
             Principal:

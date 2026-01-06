@@ -29,29 +29,29 @@ from troposphere.ecs import (
 from troposphere.iam import Role, Policy
 from troposphere.elasticloadbalancingv2 import LoadBalancer, TargetGroup, TargetGroupAttribute, Listener, Matcher
 from troposphere.elasticloadbalancingv2 import Action as AlbAction
-from troposphere.ssm import Parameter as SSMParameter
 from troposphere.ec2 import SecurityGroup, SecurityGroupIngress
 from troposphere.logs import LogGroup
-from troposphere.secretsmanager import Secret, GenerateSecretString
+from troposphere.secretsmanager import Secret
 
-def load_mcp_config(config_file="lakerunner-mcp-combined-defaults.yaml"):
-    """Load MCP combined configuration from YAML file"""
+def load_mcp_config(config_file="lakerunner-mcp-defaults.yaml"):
+    """Load MCP configuration from YAML file"""
     script_dir = os.path.dirname(os.path.abspath(__file__))
     config_path = os.path.join(script_dir, "..", config_file)
 
     with open(config_path, 'r') as f:
         return yaml.safe_load(f)
 
-def create_mcp_combined_template():
-    """Create CloudFormation template for MCP combined stack"""
+def create_mcp_template():
+    """Create CloudFormation template for standalone MCP stack"""
 
     t = Template()
-    t.set_description("Lakerunner MCP Combined Service: MCP server with local-api for embeddings and LLM inference")
+    t.set_description("Lakerunner MCP Service: Standalone MCP server for Claude Code integration")
 
     # Load MCP configuration
     config = load_mcp_config()
-    mcp_config = config.get('mcp_combined', {})
+    mcp_config = config.get('mcp', {})
     images = config.get('images', {})
+    default_api_key = config.get('default_api_key', '')
 
     # -----------------------
     # Parameters
@@ -61,22 +61,22 @@ def create_mcp_combined_template():
         Description="REQUIRED: Name of the CommonInfra stack to import infrastructure values from."
     ))
 
-    QueryApiUrl = t.add_parameter(Parameter(
-        "QueryApiUrl", Type="String",
-        Description="REQUIRED: Full URL to the Query API endpoint (e.g., http://alb-dns-name.region.elb.amazonaws.com:7101)"
+    LakerunnerEndpoint = t.add_parameter(Parameter(
+        "LakerunnerEndpoint", Type="String",
+        Description="REQUIRED: Full URL to the Lakerunner endpoint (e.g., https://app.cardinalhq.io or http://alb-dns-name:7101)"
     ))
 
     LakerunnerApiKey = t.add_parameter(Parameter(
         "LakerunnerApiKey", Type="String",
-        NoEcho=True,
-        Description="REQUIRED: API key for accessing the Lakerunner Query API"
+        Default=default_api_key,
+        Description="API key for accessing the Lakerunner API. Defaults to the standard demo key."
     ))
 
-    # Container image overrides for air-gapped deployments
-    McpCombinedImage = t.add_parameter(Parameter(
-        "McpCombinedImage", Type="String",
-        Default=images.get('mcp_combined', 'docker.flame.org/library/lakerunner-mcp-combined:latest'),
-        Description="Container image for MCP combined service"
+    # Container image override for air-gapped deployments
+    McpImage = t.add_parameter(Parameter(
+        "McpImage", Type="String",
+        Default=images.get('mcp', 'public.ecr.aws/cardinalhq.io/lakerunner/standalone-mcp:latest'),
+        Description="Container image for MCP service"
     ))
 
     # ALB Configuration parameters
@@ -92,7 +92,6 @@ def create_mcp_combined_template():
     McpApiKey = t.add_parameter(Parameter(
         "McpApiKey", Type="String",
         Default="",
-        NoEcho=True,
         Description="OPTIONAL: API key for MCP endpoint authentication. Leave blank to disable authentication."
     ))
 
@@ -102,24 +101,28 @@ def create_mcp_combined_template():
             "ParameterGroups": [
                 {
                     "Label": {"default": "Infrastructure"},
-                    "Parameters": ["CommonInfraStackName", "QueryApiUrl", "AlbScheme"]
+                    "Parameters": ["CommonInfraStackName", "AlbScheme"]
                 },
                 {
-                    "Label": {"default": "API Configuration"},
-                    "Parameters": ["LakerunnerApiKey", "McpApiKey"]
+                    "Label": {"default": "Lakerunner Configuration"},
+                    "Parameters": ["LakerunnerEndpoint", "LakerunnerApiKey"]
+                },
+                {
+                    "Label": {"default": "MCP Configuration"},
+                    "Parameters": ["McpApiKey"]
                 },
                 {
                     "Label": {"default": "Container Images"},
-                    "Parameters": ["McpCombinedImage"]
+                    "Parameters": ["McpImage"]
                 }
             ],
             "ParameterLabels": {
                 "CommonInfraStackName": {"default": "Common Infra Stack Name"},
-                "QueryApiUrl": {"default": "Query API URL"},
                 "AlbScheme": {"default": "ALB Scheme"},
+                "LakerunnerEndpoint": {"default": "Lakerunner Endpoint URL"},
                 "LakerunnerApiKey": {"default": "Lakerunner API Key"},
                 "McpApiKey": {"default": "MCP API Key (Optional)"},
-                "McpCombinedImage": {"default": "MCP Combined Image"},
+                "McpImage": {"default": "MCP Container Image"},
             }
         }
     })
@@ -128,7 +131,7 @@ def create_mcp_combined_template():
     def ci_export(suffix):
         return Sub("${CommonInfraStackName}-%s" % suffix, CommonInfraStackName=Ref(CommonInfraStackName))
 
-    # Import values from other stacks
+    # Import values from CommonInfra stack
     ClusterArnValue = ImportValue(ci_export("ClusterArn"))
     TaskSecurityGroupIdValue = ImportValue(ci_export("TaskSGId"))
     VpcIdValue = ImportValue(ci_export("VpcId"))
@@ -147,7 +150,7 @@ def create_mcp_combined_template():
     # -----------------------
     AlbSG = t.add_resource(SecurityGroup(
         "McpAlbSecurityGroup",
-        GroupDescription="Security group for MCP Combined ALB",
+        GroupDescription="Security group for MCP ALB",
         VpcId=VpcIdValue,
         SecurityGroupEgress=[{
             "IpProtocol": "-1",
@@ -156,22 +159,27 @@ def create_mcp_combined_template():
         }]
     ))
 
+    # Port configuration
+    ports = mcp_config.get('ports', {})
+    mcp_port = ports.get('mcp', 8080)
+    local_api_port = ports.get('local_api', 20202)
+
     # Port 8080 for MCP HTTP server
     t.add_resource(SecurityGroupIngress(
         "McpAlb8080Open",
         GroupId=Ref(AlbSG),
         IpProtocol="tcp",
-        FromPort=8080, ToPort=8080,
+        FromPort=mcp_port, ToPort=mcp_port,
         CidrIp="0.0.0.0/0",
         Description="HTTP 8080 for MCP server",
     ))
 
-    # Port 20202 for local-api
+    # Port 20202 for local-api (OpenAI-compatible endpoints)
     t.add_resource(SecurityGroupIngress(
         "McpAlb20202Open",
         GroupId=Ref(AlbSG),
         IpProtocol="tcp",
-        FromPort=20202, ToPort=20202,
+        FromPort=local_api_port, ToPort=local_api_port,
         CidrIp="0.0.0.0/0",
         Description="HTTP 20202 for local-api",
     ))
@@ -181,18 +189,19 @@ def create_mcp_combined_template():
         "TaskFromMcpAlb8080",
         GroupId=TaskSecurityGroupIdValue,
         IpProtocol="tcp",
-        FromPort=8080, ToPort=8080,
+        FromPort=mcp_port, ToPort=mcp_port,
         SourceSecurityGroupId=Ref(AlbSG),
         Description="MCP ALB to tasks 8080",
     ))
 
+    # ALB needs to reach 20202 for health checks
     t.add_resource(SecurityGroupIngress(
         "TaskFromMcpAlb20202",
         GroupId=TaskSecurityGroupIdValue,
         IpProtocol="tcp",
-        FromPort=20202, ToPort=20202,
+        FromPort=local_api_port, ToPort=local_api_port,
         SourceSecurityGroupId=Ref(AlbSG),
-        Description="MCP ALB to tasks 20202",
+        Description="MCP ALB to tasks 20202 (health check)",
     ))
 
     # -----------------------
@@ -213,10 +222,11 @@ def create_mcp_combined_template():
     # Target group for MCP server (8080)
     McpTg = t.add_resource(TargetGroup(
         "McpTg",
-        Port=8080, Protocol="HTTP",
+        Port=mcp_port, Protocol="HTTP",
         VpcId=VpcIdValue,
         TargetType="ip",
         HealthCheckPath="/health",
+        HealthCheckPort=str(local_api_port),
         HealthCheckProtocol="HTTP",
         HealthCheckIntervalSeconds=30,
         HealthCheckTimeoutSeconds=5,
@@ -229,10 +239,10 @@ def create_mcp_combined_template():
         ]
     ))
 
-    # Target group for local-api (20202)
+    # Target group for local-api (20202) - OpenAI-compatible endpoints
     LocalApiTg = t.add_resource(TargetGroup(
         "LocalApiTg",
-        Port=20202, Protocol="HTTP",
+        Port=local_api_port, Protocol="HTTP",
         VpcId=VpcIdValue,
         TargetType="ip",
         HealthCheckPath="/health",
@@ -252,16 +262,16 @@ def create_mcp_combined_template():
     t.add_resource(Listener(
         "McpListener",
         LoadBalancerArn=Ref(McpAlb),
-        Port="8080",
+        Port=str(mcp_port),
         Protocol="HTTP",
         DefaultActions=[AlbAction(Type="forward", TargetGroupArn=Ref(McpTg))]
     ))
 
-    # Listener for local-api
+    # Listener for local-api (OpenAI-compatible endpoints)
     t.add_resource(Listener(
         "LocalApiListener",
         LoadBalancerArn=Ref(McpAlb),
-        Port="20202",
+        Port=str(local_api_port),
         Protocol="HTTP",
         DefaultActions=[AlbAction(Type="forward", TargetGroupArn=Ref(LocalApiTg))]
     ))
@@ -272,8 +282,17 @@ def create_mcp_combined_template():
     lakerunner_api_key_secret = t.add_resource(Secret(
         "LakerunnerApiKeySecret",
         Name=Sub("${AWS::StackName}-lakerunner-api-key"),
-        Description="Lakerunner API key for MCP combined service",
+        Description="Lakerunner API key for MCP service",
         SecretString=Ref(LakerunnerApiKey)
+    ))
+
+    # MCP API Key Secret (optional)
+    mcp_api_key_secret = t.add_resource(Secret(
+        "McpApiKeySecret",
+        Condition="HasMcpApiKey",
+        Name=Sub("${AWS::StackName}-mcp-api-key"),
+        Description="MCP API key for endpoint authentication",
+        SecretString=Ref(McpApiKey)
     ))
 
     # -----------------------
@@ -367,9 +386,17 @@ def create_mcp_combined_template():
                                 "bedrock:InvokeModelWithResponseStream"
                             ],
                             "Resource": [
-                                "arn:aws:bedrock:*::foundation-model/us.anthropic.claude-sonnet-4-5-*",
-                                "arn:aws:bedrock:*::foundation-model/amazon.titan-embed-text-v2:0"
+                                "arn:aws:bedrock:*::foundation-model/*",
+                                Sub("arn:aws:bedrock:*:${AWS::AccountId}:inference-profile/*")
                             ]
+                        },
+                        {
+                            "Effect": "Allow",
+                            "Action": [
+                                "aws-marketplace:ViewSubscriptions",
+                                "aws-marketplace:Subscribe"
+                            ],
+                            "Resource": "*"
                         }
                     ]
                 }
@@ -378,12 +405,12 @@ def create_mcp_combined_template():
     ))
 
     # -----------------------
-    # MCP Combined Service
+    # MCP Service
     # -----------------------
     # Create log group
     log_group = t.add_resource(LogGroup(
         "McpLogGroup",
-        LogGroupName=Sub("/ecs/mcp-combined"),
+        LogGroupName=Sub("/ecs/${AWS::StackName}/mcp"),
         RetentionInDays=14
     ))
 
@@ -392,29 +419,15 @@ def create_mcp_combined_template():
         Volume(Name="scratch")
     ]
 
-    # Build environment variables
+    # Build environment variables (matches k8s deployment)
     base_env = [
-        Environment(Name="BUMP_REVISION", Value="1"),
-        Environment(Name="OTEL_SERVICE_NAME", Value="mcp-combined"),
-        Environment(Name="TMPDIR", Value="/scratch"),
-        Environment(Name="HOME", Value="/scratch"),
-        Environment(Name="LAKERUNNER_API_URL", Value=Ref(QueryApiUrl)),
+        Environment(Name="LAKERUNNER_API_URL", Value=Ref(LakerunnerEndpoint)),
     ]
 
-    # Add MCP-specific environment variables from config
+    # Add environment variables from config
     env_config = mcp_config.get('environment', {})
     for key, value in env_config.items():
         base_env.append(Environment(Name=key, Value=str(value)))
-
-    # Port configuration
-    ports = mcp_config.get('ports', {})
-    mcp_port = ports.get('mcp', 8080)
-    local_api_port = ports.get('local_api', 20202)
-
-    base_env.extend([
-        Environment(Name="MCP_PORT", Value=str(mcp_port)),
-        Environment(Name="PORT", Value=str(local_api_port))
-    ])
 
     # Build secrets
     secrets = [
@@ -424,38 +437,16 @@ def create_mcp_combined_template():
         )
     ]
 
-    # Conditionally add MCP API key if provided
-    # Note: We use a Secret resource for this even though it's optional
-    mcp_api_key_secret = t.add_resource(Secret(
-        "McpApiKeySecret",
-        Condition="HasMcpApiKey",
-        Name=Sub("${AWS::StackName}-mcp-api-key"),
-        Description="MCP API key for endpoint authentication",
-        SecretString=Ref(McpApiKey)
-    ))
-
-    # Note: We can't conditionally add to secrets list in the task definition
-    # So we always add it but it will only be created if the condition is true
-    # The container will handle the empty value gracefully
-    if_mcp_key_secret = If(
-        "HasMcpApiKey",
-        Ref(mcp_api_key_secret),
-        Ref("AWS::NoValue")
-    )
-
-    # We'll handle this differently - only add the secret if condition is met
-    # by using a separate container definition approach or handling in entrypoint
-
-    # Build health check
+    # Build health check (local-api on 20202 has /health endpoint)
     health_check = HealthCheck(
-        Command=["CMD-SHELL", f"wget --no-verbose --tries=1 --spider http://localhost:{mcp_port}/health || exit 1"],
+        Command=["CMD-SHELL", f"wget --no-verbose --tries=1 --spider http://localhost:{local_api_port}/health || exit 1"],
         Interval=30,
         Timeout=5,
         Retries=3,
         StartPeriod=30
     )
 
-    # Port mappings
+    # Port mappings (both ports even though only MCP is exposed via ALB)
     port_mappings = [
         PortMapping(ContainerPort=mcp_port, Protocol="tcp"),
         PortMapping(ContainerPort=local_api_port, Protocol="tcp")
@@ -463,8 +454,8 @@ def create_mcp_combined_template():
 
     # Main container definition
     mcp_container = ContainerDefinition(
-        Name="McpCombinedContainer",
-        Image=Ref(McpCombinedImage),
+        Name="McpContainer",
+        Image=Ref(McpImage),
         Environment=base_env,
         Secrets=secrets,
         PortMappings=port_mappings,
@@ -475,7 +466,7 @@ def create_mcp_combined_template():
             Options={
                 "awslogs-group": Ref(log_group),
                 "awslogs-region": Ref("AWS::Region"),
-                "awslogs-stream-prefix": "mcp-combined"
+                "awslogs-stream-prefix": "mcp"
             }
         )
     )
@@ -483,9 +474,9 @@ def create_mcp_combined_template():
     # Create task definition
     task_def = t.add_resource(TaskDefinition(
         "McpTaskDef",
-        Family="mcp-combined-task",
-        Cpu=str(mcp_config.get('cpu', 512)),
-        Memory=str(mcp_config.get('memory_mib', 1024)),
+        Family=Sub("${AWS::StackName}-mcp-task"),
+        Cpu=str(mcp_config.get('cpu', 1024)),
+        Memory=str(mcp_config.get('memory_mib', 512)),
         NetworkMode="awsvpc",
         RequiresCompatibilities=["FARGATE"],
         ExecutionRoleArn=GetAtt(ExecutionRole, "Arn"),
@@ -499,11 +490,11 @@ def create_mcp_combined_template():
     ))
 
     # Create ECS service
-    desired_count = str(mcp_config.get('replicas', 2))
+    desired_count = str(mcp_config.get('replicas', 1))
 
     mcp_service = t.add_resource(Service(
         "McpService",
-        ServiceName="mcp-combined",
+        ServiceName=Sub("${AWS::StackName}-mcp"),
         Cluster=ClusterArnValue,
         TaskDefinition=Ref(task_def),
         LaunchType="FARGATE",
@@ -516,12 +507,12 @@ def create_mcp_combined_template():
         ),
         LoadBalancers=[
             EcsLoadBalancer(
-                ContainerName="McpCombinedContainer",
+                ContainerName="McpContainer",
                 ContainerPort=mcp_port,
                 TargetGroupArn=Ref(McpTg)
             ),
             EcsLoadBalancer(
-                ContainerName="McpCombinedContainer",
+                ContainerName="McpContainer",
                 ContainerPort=local_api_port,
                 TargetGroupArn=Ref(LocalApiTg)
             )
@@ -531,7 +522,7 @@ def create_mcp_combined_template():
         EnableECSManagedTags=True,
         PropagateTags="SERVICE",
         Tags=Tags(
-            Name=Sub("${AWS::StackName}-mcp-combined"),
+            Name=Sub("${AWS::StackName}-mcp"),
             ManagedBy="Lakerunner",
             Environment=Ref("AWS::StackName"),
             Component="Service"
@@ -543,6 +534,7 @@ def create_mcp_combined_template():
     # -----------------------
     t.add_output(Output(
         "McpAlbDNS",
+        Description="DNS name of the MCP load balancer",
         Value=GetAtt(McpAlb, "DNSName"),
         Export=Export(name=Sub("${AWS::StackName}-AlbDNS"))
     ))
@@ -558,24 +550,17 @@ def create_mcp_combined_template():
     ))
     t.add_output(Output(
         "McpUrl",
-        Description="URL to access MCP server",
-        Value=Sub("http://${McpAlbDns}:8080", McpAlbDns=GetAtt(McpAlb, "DNSName"))
+        Description="URL to access MCP server (use this as SSE endpoint in Claude Code)",
+        Value=Sub("http://${McpAlbDns}:8080/sse", McpAlbDns=GetAtt(McpAlb, "DNSName"))
     ))
     t.add_output(Output(
         "LocalApiUrl",
-        Description="URL to access local-api service",
+        Description="URL for OpenAI-compatible API endpoints (/openai/v1/chat/completions, /openai/v1/models)",
         Value=Sub("http://${McpAlbDns}:20202", McpAlbDns=GetAtt(McpAlb, "DNSName"))
     ))
     t.add_output(Output(
         "TaskRoleArn",
-        Description=(
-            "ARN of the ECS task role with Bedrock permissions. "
-            "This role already has permissions for: "
-            "(1) AWS Bedrock InvokeModel and InvokeModelWithResponseStream for Claude Sonnet 4.5 and Titan Embeddings v2, "
-            "(2) CloudWatch Logs. "
-            "If you need to grant additional permissions (e.g., S3, DynamoDB), attach policies to this role ARN. "
-            "See the BedrockPermissionsPolicy output for the IAM policy document that grants Bedrock access."
-        ),
+        Description="ARN of the ECS task role with Bedrock permissions",
         Value=GetAtt(TaskRole, "Arn"),
         Export=Export(name=Sub("${AWS::StackName}-TaskRoleArn"))
     ))
@@ -585,43 +570,37 @@ def create_mcp_combined_template():
         "Version": "2012-10-17",
         "Statement": [
             {
-                "Sid": "BedrockModelInvokeAccess",
+                "Sid": "BedrockFullModelAccess",
                 "Effect": "Allow",
                 "Action": [
                     "bedrock:InvokeModel",
                     "bedrock:InvokeModelWithResponseStream"
                 ],
                 "Resource": [
-                    "arn:aws:bedrock:*::foundation-model/us.anthropic.claude-sonnet-4-5-*",
-                    "arn:aws:bedrock:*::foundation-model/amazon.titan-embed-text-v2:0"
+                    "arn:aws:bedrock:*::foundation-model/*",
+                    "arn:aws:bedrock:*:ACCOUNT_ID:inference-profile/*"
                 ]
+            },
+            {
+                "Sid": "MarketplaceSubscriptions",
+                "Effect": "Allow",
+                "Action": [
+                    "aws-marketplace:ViewSubscriptions",
+                    "aws-marketplace:Subscribe"
+                ],
+                "Resource": "*"
             }
         ]
     }
 
     t.add_output(Output(
         "BedrockPermissionsPolicy",
-        Description=(
-            "IAM policy document showing the Bedrock permissions already granted to the task role. "
-            "The task role (TaskRoleArn output) has this policy attached. "
-            "Use this as a reference if you need to grant the same permissions to other roles or users."
-        ),
+        Description="IAM policy document showing the Bedrock permissions granted to the task role",
         Value=Sub(json.dumps(bedrock_policy_json, indent=2))
-    ))
-
-    t.add_output(Output(
-        "BedrockModelsUsed",
-        Description=(
-            "List of AWS Bedrock models that the MCP combined service is configured to use: "
-            "(1) us.anthropic.claude-sonnet-4-5-* for LLM inference, "
-            "(2) amazon.titan-embed-text-v2:0 for embeddings. "
-            "Ensure these models are enabled in your AWS account's Bedrock service in the deployment region."
-        ),
-        Value="claude-sonnet-4-5 (LLM), titan-embed-text-v2 (embeddings)"
     ))
 
     return t
 
 if __name__ == "__main__":
-    template = create_mcp_combined_template()
+    template = create_mcp_template()
     print(template.to_yaml())

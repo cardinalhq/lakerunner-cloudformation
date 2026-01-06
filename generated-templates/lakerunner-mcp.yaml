@@ -6,7 +6,7 @@ Conditions:
   IsInternetFacing: !Equals
     - !Ref 'AlbScheme'
     - internet-facing
-Description: 'Lakerunner MCP Combined Service: MCP server with local-api for embeddings and LLM inference'
+Description: 'Lakerunner MCP Service: Standalone MCP server for Claude Code integration'
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
@@ -14,17 +14,20 @@ Metadata:
           default: Infrastructure
         Parameters:
           - CommonInfraStackName
-          - QueryApiUrl
           - AlbScheme
       - Label:
-          default: API Configuration
+          default: Lakerunner Configuration
         Parameters:
+          - LakerunnerEndpoint
           - LakerunnerApiKey
+      - Label:
+          default: MCP Configuration
+        Parameters:
           - McpApiKey
       - Label:
           default: Container Images
         Parameters:
-          - McpCombinedImage
+          - McpImage
     ParameterLabels:
       AlbScheme:
         default: ALB Scheme
@@ -32,27 +35,21 @@ Metadata:
         default: Common Infra Stack Name
       LakerunnerApiKey:
         default: Lakerunner API Key
+      LakerunnerEndpoint:
+        default: Lakerunner Endpoint URL
       McpApiKey:
         default: MCP API Key (Optional)
-      McpCombinedImage:
-        default: MCP Combined Image
-      QueryApiUrl:
-        default: Query API URL
+      McpImage:
+        default: MCP Container Image
 Outputs:
-  BedrockModelsUsed:
-    Description: >-
-      List of AWS Bedrock models that the MCP combined service is configured to use: (1) us.anthropic.claude-sonnet-4-5-* for LLM inference, (2) amazon.titan-embed-text-v2:0 for embeddings. Ensure these
-      models are enabled in your AWS account's Bedrock service in the deployment region.
-    Value: claude-sonnet-4-5 (LLM), titan-embed-text-v2 (embeddings)
   BedrockPermissionsPolicy:
-    Description: >-
-      IAM policy document showing the Bedrock permissions already granted to the task role. The task role (TaskRoleArn output) has this policy attached. Use this as a reference if you need to grant the
-      same permissions to other roles or users.
-    Value: !Sub "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Sid\": \"BedrockModelInvokeAccess\",\n      \"Effect\": \"Allow\",\n      \"Action\": [\n        \"bedrock:InvokeModel\"\
-      ,\n        \"bedrock:InvokeModelWithResponseStream\"\n      ],\n      \"Resource\": [\n        \"arn:aws:bedrock:*::foundation-model/us.anthropic.claude-sonnet-4-5-*\",\n        \"arn:aws:bedrock:*::foundation-model/amazon.titan-embed-text-v2:0\"\
-      \n      ]\n    }\n  ]\n}"
+    Description: IAM policy document showing the Bedrock permissions granted to the task role
+    Value: !Sub "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Sid\": \"BedrockFullModelAccess\",\n      \"Effect\": \"Allow\",\n      \"Action\": [\n        \"bedrock:InvokeModel\"\
+      ,\n        \"bedrock:InvokeModelWithResponseStream\"\n      ],\n      \"Resource\": [\n        \"arn:aws:bedrock:*::foundation-model/*\",\n        \"arn:aws:bedrock:*:ACCOUNT_ID:inference-profile/*\"\
+      \n      ]\n    },\n    {\n      \"Sid\": \"MarketplaceSubscriptions\",\n      \"Effect\": \"Allow\",\n      \"Action\": [\n        \"aws-marketplace:ViewSubscriptions\",\n        \"aws-marketplace:Subscribe\"\
+      \n      ],\n      \"Resource\": \"*\"\n    }\n  ]\n}"
   LocalApiUrl:
-    Description: URL to access local-api service
+    Description: URL for OpenAI-compatible API endpoints (/openai/v1/chat/completions, /openai/v1/models)
     Value: !Sub
       - http://${McpAlbDns}:20202
       - McpAlbDns: !GetAtt 'McpAlb.DNSName'
@@ -61,6 +58,7 @@ Outputs:
       Name: !Sub '${AWS::StackName}-AlbArn'
     Value: !Ref 'McpAlb'
   McpAlbDNS:
+    Description: DNS name of the MCP load balancer
     Export:
       Name: !Sub '${AWS::StackName}-AlbDNS'
     Value: !GetAtt 'McpAlb.DNSName'
@@ -69,15 +67,12 @@ Outputs:
       Name: !Sub '${AWS::StackName}-ServiceArn'
     Value: !Ref 'McpService'
   McpUrl:
-    Description: URL to access MCP server
+    Description: URL to access MCP server (use this as SSE endpoint in Claude Code)
     Value: !Sub
-      - http://${McpAlbDns}:8080
+      - http://${McpAlbDns}:8080/sse
       - McpAlbDns: !GetAtt 'McpAlb.DNSName'
   TaskRoleArn:
-    Description: >-
-      ARN of the ECS task role with Bedrock permissions. This role already has permissions for: (1) AWS Bedrock InvokeModel and InvokeModelWithResponseStream for Claude Sonnet 4.5 and Titan Embeddings v2,
-      (2) CloudWatch Logs. If you need to grant additional permissions (e.g., S3, DynamoDB), attach policies to this role ARN. See the BedrockPermissionsPolicy output for the IAM policy document that grants
-      Bedrock access.
+    Description: ARN of the ECS task role with Bedrock permissions
     Export:
       Name: !Sub '${AWS::StackName}-TaskRoleArn'
     Value: !GetAtt 'McpTaskRole.Arn'
@@ -93,25 +88,24 @@ Parameters:
     Description: 'REQUIRED: Name of the CommonInfra stack to import infrastructure values from.'
     Type: String
   LakerunnerApiKey:
-    Description: 'REQUIRED: API key for accessing the Lakerunner Query API'
-    NoEcho: true
+    Default: f70603aa00e6f67999cc66e336134887
+    Description: API key for accessing the Lakerunner API. Defaults to the standard demo key.
+    Type: String
+  LakerunnerEndpoint:
+    Description: 'REQUIRED: Full URL to the Lakerunner endpoint (e.g., https://app.cardinalhq.io or http://alb-dns-name:7101)'
     Type: String
   McpApiKey:
     Default: ''
     Description: 'OPTIONAL: API key for MCP endpoint authentication. Leave blank to disable authentication.'
-    NoEcho: true
     Type: String
-  McpCombinedImage:
-    Default: docker.flame.org/library/lakerunner-mcp-combined:latest
-    Description: Container image for MCP combined service
-    Type: String
-  QueryApiUrl:
-    Description: 'REQUIRED: Full URL to the Query API endpoint (e.g., http://alb-dns-name.region.elb.amazonaws.com:7101)'
+  McpImage:
+    Default: public.ecr.aws/cardinalhq.io/lakerunner/standalone-mcp:latest
+    Description: Container image for MCP service
     Type: String
 Resources:
   LakerunnerApiKeySecret:
     Properties:
-      Description: Lakerunner API key for MCP combined service
+      Description: Lakerunner API key for MCP service
       Name: !Sub '${AWS::StackName}-lakerunner-api-key'
       SecretString: !Ref 'LakerunnerApiKey'
     Type: AWS::SecretsManager::Secret
@@ -188,7 +182,7 @@ Resources:
     Type: AWS::EC2::SecurityGroupIngress
   McpAlbSecurityGroup:
     Properties:
-      GroupDescription: Security group for MCP Combined ALB
+      GroupDescription: Security group for MCP ALB
       SecurityGroupEgress:
         - CidrIp: '0.0.0.0/0'
           Description: Allow all outbound
@@ -246,7 +240,7 @@ Resources:
     Type: AWS::ElasticLoadBalancingV2::Listener
   McpLogGroup:
     Properties:
-      LogGroupName: !Sub '/ecs/mcp-combined'
+      LogGroupName: !Sub '/ecs/${AWS::StackName}/mcp'
       RetentionInDays: 14
     Type: AWS::Logs::LogGroup
   McpService:
@@ -258,15 +252,15 @@ Resources:
         Fn::Sub:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
-      DesiredCount: '2'
+      DesiredCount: '1'
       EnableECSManagedTags: true
       EnableExecuteCommand: true
       LaunchType: FARGATE
       LoadBalancers:
-        - ContainerName: McpCombinedContainer
+        - ContainerName: McpContainer
           ContainerPort: 8080
           TargetGroupArn: !Ref 'McpTg'
-        - ContainerName: McpCombinedContainer
+        - ContainerName: McpContainer
           ContainerPort: 20202
           TargetGroupArn: !Ref 'LocalApiTg'
       NetworkConfiguration:
@@ -283,7 +277,7 @@ Resources:
                 - ${CommonInfraStackName}-PrivateSubnets
                 - CommonInfraStackName: !Ref 'CommonInfraStackName'
       PropagateTags: SERVICE
-      ServiceName: mcp-combined
+      ServiceName: !Sub '${AWS::StackName}-mcp'
       Tags:
         - Key: Component
           Value: Service
@@ -292,55 +286,37 @@ Resources:
         - Key: ManagedBy
           Value: Lakerunner
         - Key: Name
-          Value: !Sub '${AWS::StackName}-mcp-combined'
+          Value: !Sub '${AWS::StackName}-mcp'
       TaskDefinition: !Ref 'McpTaskDef'
     Type: AWS::ECS::Service
   McpTaskDef:
     Properties:
       ContainerDefinitions:
         - Environment:
-            - Name: BUMP_REVISION
-              Value: '1'
-            - Name: OTEL_SERVICE_NAME
-              Value: mcp-combined
-            - Name: TMPDIR
-              Value: /scratch
-            - Name: HOME
-              Value: /scratch
             - Name: LAKERUNNER_API_URL
-              Value: !Ref 'QueryApiUrl'
-            - Name: MCP_HOST
-              Value: '0.0.0.0'
+              Value: !Ref 'LakerunnerEndpoint'
+            - Name: HOME
+              Value: /tmp
             - Name: MCP_TRANSPORT
               Value: http
-            - Name: LAKERUNNER_STREAM_ATTRIBUTE
-              Value: resource_service_name
-            - Name: WORKING_DIRECTORY
-              Value: /app/workdir
-            - Name: GIN_MODE
-              Value: release
             - Name: AWS_REGION
               Value: us-east-1
-            - Name: MCP_PORT
-              Value: '8080'
-            - Name: PORT
-              Value: '20202'
           HealthCheck:
             Command:
               - CMD-SHELL
-              - wget --no-verbose --tries=1 --spider http://localhost:8080/health || exit 1
+              - wget --no-verbose --tries=1 --spider http://localhost:20202/health || exit 1
             Interval: 30
             Retries: 3
             StartPeriod: 30
             Timeout: 5
-          Image: !Ref 'McpCombinedImage'
+          Image: !Ref 'McpImage'
           LogConfiguration:
             LogDriver: awslogs
             Options:
               awslogs-group: !Ref 'McpLogGroup'
               awslogs-region: !Ref 'AWS::Region'
-              awslogs-stream-prefix: mcp-combined
-          Name: McpCombinedContainer
+              awslogs-stream-prefix: mcp
+          Name: McpContainer
           PortMappings:
             - ContainerPort: 8080
               Protocol: tcp
@@ -352,7 +328,7 @@ Resources:
           User: '65532'
       Cpu: '512'
       ExecutionRoleArn: !GetAtt 'McpExecRole.Arn'
-      Family: mcp-combined-task
+      Family: !Sub '${AWS::StackName}-mcp-task'
       Memory: '1024'
       NetworkMode: awsvpc
       RequiresCompatibilities:
@@ -390,8 +366,13 @@ Resources:
                   - bedrock:InvokeModelWithResponseStream
                 Effect: Allow
                 Resource:
-                  - arn:aws:bedrock:*::foundation-model/us.anthropic.claude-sonnet-4-5-*
-                  - arn:aws:bedrock:*::foundation-model/amazon.titan-embed-text-v2:0
+                  - arn:aws:bedrock:*::foundation-model/*
+                  - !Sub 'arn:aws:bedrock:*:${AWS::AccountId}:inference-profile/*'
+              - Action:
+                  - aws-marketplace:ViewSubscriptions
+                  - aws-marketplace:Subscribe
+                Effect: Allow
+                Resource: '*'
             Version: '2012-10-17'
           PolicyName: BedrockAccess
       RoleName: !Sub '${AWS::StackName}-task-role'
@@ -400,6 +381,7 @@ Resources:
     Properties:
       HealthCheckIntervalSeconds: 30
       HealthCheckPath: /health
+      HealthCheckPort: '20202'
       HealthCheckProtocol: HTTP
       HealthCheckTimeoutSeconds: 5
       HealthyThresholdCount: 2
@@ -421,7 +403,7 @@ Resources:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
   TaskFromMcpAlb20202:
     Properties:
-      Description: MCP ALB to tasks 20202
+      Description: MCP ALB to tasks 20202 (health check)
       FromPort: 20202
       GroupId: !ImportValue
         Fn::Sub:

@@ -394,7 +394,9 @@ MSKSecretsKey = t.add_resource(Key(
                 "Principal": {"Service": "kafka.amazonaws.com"},
                 "Action": [
                     "kms:Decrypt",
-                    "kms:GenerateDataKey"
+                    "kms:DescribeKey",
+                    "kms:GenerateDataKey",
+                    "kms:CreateGrant"
                 ],
                 "Resource": "*"
             },
@@ -404,7 +406,9 @@ MSKSecretsKey = t.add_resource(Key(
                 "Principal": {"Service": "secretsmanager.amazonaws.com"},
                 "Action": [
                     "kms:Decrypt",
+                    "kms:DescribeKey",
                     "kms:GenerateDataKey",
+                    "kms:CreateGrant",
                     "kms:ReEncrypt*"
                 ],
                 "Resource": "*"
