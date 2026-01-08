@@ -99,7 +99,7 @@ Parameters:
     Description: 'OPTIONAL: API key for MCP endpoint authentication. Leave blank to disable authentication.'
     Type: String
   McpImage:
-    Default: public.ecr.aws/cardinalhq.io/lakerunner/standalone-mcp:latest
+    Default: ghcr.io/cardinalhq/lakerunner-standalone-mcp:latest
     Description: Container image for MCP service
     Type: String
 Resources:

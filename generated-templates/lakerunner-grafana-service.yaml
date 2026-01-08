@@ -70,7 +70,7 @@ Parameters:
     Description: Container image for Grafana service
     Type: String
   GrafanaInitImage:
-    Default: public.ecr.aws/cardinalhq.io/lakerunner/initcontainer-grafana:latest
+    Default: ghcr.io/cardinalhq/initcontainer-grafana:latest
     Description: Container image for Grafana init container (datasource provisioning and database setup)
     Type: String
   GrafanaResetToken:
