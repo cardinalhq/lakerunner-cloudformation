@@ -62,6 +62,10 @@ echo "8. Generating Lakerunner MCP Service..."
 python3 src/lakerunner_mcp.py > generated-templates/lakerunner-mcp.yaml
 cfn-lint generated-templates/lakerunner-mcp.yaml
 
+echo "9. Generating Lakerunner Alerting..."
+python3 src/lakerunner_alerting.py > generated-templates/lakerunner-alerting.yaml
+cfn-lint generated-templates/lakerunner-alerting.yaml
+
 echo -e "\nGenerated CloudFormation templates:"
 ls -la generated-templates/
 

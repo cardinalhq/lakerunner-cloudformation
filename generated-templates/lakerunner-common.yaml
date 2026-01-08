@@ -198,6 +198,9 @@ Resources:
   Cluster:
     Properties:
       ClusterName: !Sub '${AWS::StackName}-cluster'
+      ClusterSettings:
+        - Name: containerInsights
+          Value: enabled
       Tags:
         - Key: Component
           Value: Compute

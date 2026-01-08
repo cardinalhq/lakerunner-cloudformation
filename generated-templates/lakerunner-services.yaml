@@ -1,4 +1,28 @@
 Conditions:
+  CreateAlarmLakerunnerAdminApi: !And
+    - !Condition 'EnableAlarms'
+    - !Condition 'EnableAdminApi'
+  CreateAlarmLakerunnerCompactLogs: !And
+    - !Condition 'EnableAlarms'
+    - !Condition 'CreateLogsServices'
+  CreateAlarmLakerunnerCompactMetrics: !And
+    - !Condition 'EnableAlarms'
+    - !Condition 'CreateMetricsServices'
+  CreateAlarmLakerunnerCompactTraces: !And
+    - !Condition 'EnableAlarms'
+    - !Condition 'CreateTracesServices'
+  CreateAlarmLakerunnerIngestLogs: !And
+    - !Condition 'EnableAlarms'
+    - !Condition 'CreateLogsServices'
+  CreateAlarmLakerunnerIngestMetrics: !And
+    - !Condition 'EnableAlarms'
+    - !Condition 'CreateMetricsServices'
+  CreateAlarmLakerunnerIngestTraces: !And
+    - !Condition 'EnableAlarms'
+    - !Condition 'CreateTracesServices'
+  CreateAlarmLakerunnerRollupMetrics: !And
+    - !Condition 'EnableAlarms'
+    - !Condition 'CreateMetricsServices'
   CreateLogsServices: !Equals
     - !Ref 'EnableLogs'
     - 'Yes'
@@ -12,6 +36,10 @@ Conditions:
     - !Equals
       - !Ref 'AdminApiReplicas'
       - '0'
+  EnableAlarms: !Not
+    - !Equals
+      - !Ref 'AlertTopicArn'
+      - ''
   EnableOtlp: !Not
     - !Equals
       - !Ref 'OtelEndpoint'
@@ -84,11 +112,17 @@ Metadata:
           default: Telemetry
         Parameters:
           - OtelEndpoint
+      - Label:
+          default: Alerting
+        Parameters:
+          - AlertTopicArn
     ParameterLabels:
       AdminApiReplicas:
         default: Admin Api Replicas
       AlbScheme:
         default: ALB Scheme
+      AlertTopicArn:
+        default: Alert SNS Topic ARN
       AutoScalingCPUTarget:
         default: CPU Target % (Auto-Scaling)
       AutoScalingScaleInCooldown:
@@ -256,6 +290,10 @@ Parameters:
       - internal
     Default: internal
     Description: 'Load balancer scheme: ''internet-facing'' for external access or ''internal'' for internal access only.'
+    Type: String
+  AlertTopicArn:
+    Default: ''
+    Description: 'OPTIONAL: SNS Topic ARN for CloudWatch alarms. Leave blank to disable task count alarms. Deploy the Alerting stack first to create a topic.'
     Type: String
   AutoScalingCPUTarget:
     Default: '70'
@@ -1701,6 +1739,370 @@ Resources:
           Value: !Sub '${AWS::StackName}-lakerunner-sweeper'
       TaskDefinition: !Ref 'TaskDefLakerunnerSweeper'
     Type: AWS::ECS::Service
+  TaskCountAlarmLakerunnerAdminApi:
+    Condition: CreateAlarmLakerunnerAdminApi
+    Properties:
+      AlarmActions:
+        - !Ref 'AlertTopicArn'
+      AlarmDescription: Alarm when lakerunner-admin-api has no running tasks for 5 minutes
+      AlarmName: !Sub '${AWS::StackName}-lakerunner-admin-api-no-running-tasks'
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: ClusterName
+          Value: !ImportValue
+            Fn::Sub:
+              - ${CommonInfraStackName}-ClusterName
+              - CommonInfraStackName: !Ref 'CommonInfraStackName'
+        - Name: ServiceName
+          Value: lakerunner-admin-api
+      EvaluationPeriods: 5
+      MetricName: RunningTaskCount
+      Namespace: ECS/ContainerInsights
+      OKActions:
+        - !Ref 'AlertTopicArn'
+      Period: 60
+      Statistic: Minimum
+      Threshold: 1
+      TreatMissingData: breaching
+    Type: AWS::CloudWatch::Alarm
+  TaskCountAlarmLakerunnerBoxerCommon:
+    Condition: EnableAlarms
+    Properties:
+      AlarmActions:
+        - !Ref 'AlertTopicArn'
+      AlarmDescription: Alarm when lakerunner-boxer-common has no running tasks for 5 minutes
+      AlarmName: !Sub '${AWS::StackName}-lakerunner-boxer-common-no-running-tasks'
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: ClusterName
+          Value: !ImportValue
+            Fn::Sub:
+              - ${CommonInfraStackName}-ClusterName
+              - CommonInfraStackName: !Ref 'CommonInfraStackName'
+        - Name: ServiceName
+          Value: lakerunner-boxer-common
+      EvaluationPeriods: 5
+      MetricName: RunningTaskCount
+      Namespace: ECS/ContainerInsights
+      OKActions:
+        - !Ref 'AlertTopicArn'
+      Period: 60
+      Statistic: Minimum
+      Threshold: 1
+      TreatMissingData: breaching
+    Type: AWS::CloudWatch::Alarm
+  TaskCountAlarmLakerunnerCompactLogs:
+    Condition: CreateAlarmLakerunnerCompactLogs
+    Properties:
+      AlarmActions:
+        - !Ref 'AlertTopicArn'
+      AlarmDescription: Alarm when lakerunner-compact-logs has no running tasks for 5 minutes
+      AlarmName: !Sub '${AWS::StackName}-lakerunner-compact-logs-no-running-tasks'
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: ClusterName
+          Value: !ImportValue
+            Fn::Sub:
+              - ${CommonInfraStackName}-ClusterName
+              - CommonInfraStackName: !Ref 'CommonInfraStackName'
+        - Name: ServiceName
+          Value: lakerunner-compact-logs
+      EvaluationPeriods: 5
+      MetricName: RunningTaskCount
+      Namespace: ECS/ContainerInsights
+      OKActions:
+        - !Ref 'AlertTopicArn'
+      Period: 60
+      Statistic: Minimum
+      Threshold: 1
+      TreatMissingData: breaching
+    Type: AWS::CloudWatch::Alarm
+  TaskCountAlarmLakerunnerCompactMetrics:
+    Condition: CreateAlarmLakerunnerCompactMetrics
+    Properties:
+      AlarmActions:
+        - !Ref 'AlertTopicArn'
+      AlarmDescription: Alarm when lakerunner-compact-metrics has no running tasks for 5 minutes
+      AlarmName: !Sub '${AWS::StackName}-lakerunner-compact-metrics-no-running-tasks'
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: ClusterName
+          Value: !ImportValue
+            Fn::Sub:
+              - ${CommonInfraStackName}-ClusterName
+              - CommonInfraStackName: !Ref 'CommonInfraStackName'
+        - Name: ServiceName
+          Value: lakerunner-compact-metrics
+      EvaluationPeriods: 5
+      MetricName: RunningTaskCount
+      Namespace: ECS/ContainerInsights
+      OKActions:
+        - !Ref 'AlertTopicArn'
+      Period: 60
+      Statistic: Minimum
+      Threshold: 1
+      TreatMissingData: breaching
+    Type: AWS::CloudWatch::Alarm
+  TaskCountAlarmLakerunnerCompactTraces:
+    Condition: CreateAlarmLakerunnerCompactTraces
+    Properties:
+      AlarmActions:
+        - !Ref 'AlertTopicArn'
+      AlarmDescription: Alarm when lakerunner-compact-traces has no running tasks for 5 minutes
+      AlarmName: !Sub '${AWS::StackName}-lakerunner-compact-traces-no-running-tasks'
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: ClusterName
+          Value: !ImportValue
+            Fn::Sub:
+              - ${CommonInfraStackName}-ClusterName
+              - CommonInfraStackName: !Ref 'CommonInfraStackName'
+        - Name: ServiceName
+          Value: lakerunner-compact-traces
+      EvaluationPeriods: 5
+      MetricName: RunningTaskCount
+      Namespace: ECS/ContainerInsights
+      OKActions:
+        - !Ref 'AlertTopicArn'
+      Period: 60
+      Statistic: Minimum
+      Threshold: 1
+      TreatMissingData: breaching
+    Type: AWS::CloudWatch::Alarm
+  TaskCountAlarmLakerunnerIngestLogs:
+    Condition: CreateAlarmLakerunnerIngestLogs
+    Properties:
+      AlarmActions:
+        - !Ref 'AlertTopicArn'
+      AlarmDescription: Alarm when lakerunner-ingest-logs has no running tasks for 5 minutes
+      AlarmName: !Sub '${AWS::StackName}-lakerunner-ingest-logs-no-running-tasks'
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: ClusterName
+          Value: !ImportValue
+            Fn::Sub:
+              - ${CommonInfraStackName}-ClusterName
+              - CommonInfraStackName: !Ref 'CommonInfraStackName'
+        - Name: ServiceName
+          Value: lakerunner-ingest-logs
+      EvaluationPeriods: 5
+      MetricName: RunningTaskCount
+      Namespace: ECS/ContainerInsights
+      OKActions:
+        - !Ref 'AlertTopicArn'
+      Period: 60
+      Statistic: Minimum
+      Threshold: 1
+      TreatMissingData: breaching
+    Type: AWS::CloudWatch::Alarm
+  TaskCountAlarmLakerunnerIngestMetrics:
+    Condition: CreateAlarmLakerunnerIngestMetrics
+    Properties:
+      AlarmActions:
+        - !Ref 'AlertTopicArn'
+      AlarmDescription: Alarm when lakerunner-ingest-metrics has no running tasks for 5 minutes
+      AlarmName: !Sub '${AWS::StackName}-lakerunner-ingest-metrics-no-running-tasks'
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: ClusterName
+          Value: !ImportValue
+            Fn::Sub:
+              - ${CommonInfraStackName}-ClusterName
+              - CommonInfraStackName: !Ref 'CommonInfraStackName'
+        - Name: ServiceName
+          Value: lakerunner-ingest-metrics
+      EvaluationPeriods: 5
+      MetricName: RunningTaskCount
+      Namespace: ECS/ContainerInsights
+      OKActions:
+        - !Ref 'AlertTopicArn'
+      Period: 60
+      Statistic: Minimum
+      Threshold: 1
+      TreatMissingData: breaching
+    Type: AWS::CloudWatch::Alarm
+  TaskCountAlarmLakerunnerIngestTraces:
+    Condition: CreateAlarmLakerunnerIngestTraces
+    Properties:
+      AlarmActions:
+        - !Ref 'AlertTopicArn'
+      AlarmDescription: Alarm when lakerunner-ingest-traces has no running tasks for 5 minutes
+      AlarmName: !Sub '${AWS::StackName}-lakerunner-ingest-traces-no-running-tasks'
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: ClusterName
+          Value: !ImportValue
+            Fn::Sub:
+              - ${CommonInfraStackName}-ClusterName
+              - CommonInfraStackName: !Ref 'CommonInfraStackName'
+        - Name: ServiceName
+          Value: lakerunner-ingest-traces
+      EvaluationPeriods: 5
+      MetricName: RunningTaskCount
+      Namespace: ECS/ContainerInsights
+      OKActions:
+        - !Ref 'AlertTopicArn'
+      Period: 60
+      Statistic: Minimum
+      Threshold: 1
+      TreatMissingData: breaching
+    Type: AWS::CloudWatch::Alarm
+  TaskCountAlarmLakerunnerMonitoring:
+    Condition: EnableAlarms
+    Properties:
+      AlarmActions:
+        - !Ref 'AlertTopicArn'
+      AlarmDescription: Alarm when lakerunner-monitoring has no running tasks for 5 minutes
+      AlarmName: !Sub '${AWS::StackName}-lakerunner-monitoring-no-running-tasks'
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: ClusterName
+          Value: !ImportValue
+            Fn::Sub:
+              - ${CommonInfraStackName}-ClusterName
+              - CommonInfraStackName: !Ref 'CommonInfraStackName'
+        - Name: ServiceName
+          Value: lakerunner-monitoring
+      EvaluationPeriods: 5
+      MetricName: RunningTaskCount
+      Namespace: ECS/ContainerInsights
+      OKActions:
+        - !Ref 'AlertTopicArn'
+      Period: 60
+      Statistic: Minimum
+      Threshold: 1
+      TreatMissingData: breaching
+    Type: AWS::CloudWatch::Alarm
+  TaskCountAlarmLakerunnerPubsubSqs:
+    Condition: EnableAlarms
+    Properties:
+      AlarmActions:
+        - !Ref 'AlertTopicArn'
+      AlarmDescription: Alarm when lakerunner-pubsub-sqs has no running tasks for 5 minutes
+      AlarmName: !Sub '${AWS::StackName}-lakerunner-pubsub-sqs-no-running-tasks'
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: ClusterName
+          Value: !ImportValue
+            Fn::Sub:
+              - ${CommonInfraStackName}-ClusterName
+              - CommonInfraStackName: !Ref 'CommonInfraStackName'
+        - Name: ServiceName
+          Value: lakerunner-pubsub-sqs
+      EvaluationPeriods: 5
+      MetricName: RunningTaskCount
+      Namespace: ECS/ContainerInsights
+      OKActions:
+        - !Ref 'AlertTopicArn'
+      Period: 60
+      Statistic: Minimum
+      Threshold: 1
+      TreatMissingData: breaching
+    Type: AWS::CloudWatch::Alarm
+  TaskCountAlarmLakerunnerQueryApi:
+    Condition: EnableAlarms
+    Properties:
+      AlarmActions:
+        - !Ref 'AlertTopicArn'
+      AlarmDescription: Alarm when lakerunner-query-api has no running tasks for 5 minutes
+      AlarmName: !Sub '${AWS::StackName}-lakerunner-query-api-no-running-tasks'
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: ClusterName
+          Value: !ImportValue
+            Fn::Sub:
+              - ${CommonInfraStackName}-ClusterName
+              - CommonInfraStackName: !Ref 'CommonInfraStackName'
+        - Name: ServiceName
+          Value: lakerunner-query-api
+      EvaluationPeriods: 5
+      MetricName: RunningTaskCount
+      Namespace: ECS/ContainerInsights
+      OKActions:
+        - !Ref 'AlertTopicArn'
+      Period: 60
+      Statistic: Minimum
+      Threshold: 1
+      TreatMissingData: breaching
+    Type: AWS::CloudWatch::Alarm
+  TaskCountAlarmLakerunnerQueryWorker:
+    Condition: EnableAlarms
+    Properties:
+      AlarmActions:
+        - !Ref 'AlertTopicArn'
+      AlarmDescription: Alarm when lakerunner-query-worker has no running tasks for 5 minutes
+      AlarmName: !Sub '${AWS::StackName}-lakerunner-query-worker-no-running-tasks'
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: ClusterName
+          Value: !ImportValue
+            Fn::Sub:
+              - ${CommonInfraStackName}-ClusterName
+              - CommonInfraStackName: !Ref 'CommonInfraStackName'
+        - Name: ServiceName
+          Value: lakerunner-query-worker
+      EvaluationPeriods: 5
+      MetricName: RunningTaskCount
+      Namespace: ECS/ContainerInsights
+      OKActions:
+        - !Ref 'AlertTopicArn'
+      Period: 60
+      Statistic: Minimum
+      Threshold: 1
+      TreatMissingData: breaching
+    Type: AWS::CloudWatch::Alarm
+  TaskCountAlarmLakerunnerRollupMetrics:
+    Condition: CreateAlarmLakerunnerRollupMetrics
+    Properties:
+      AlarmActions:
+        - !Ref 'AlertTopicArn'
+      AlarmDescription: Alarm when lakerunner-rollup-metrics has no running tasks for 5 minutes
+      AlarmName: !Sub '${AWS::StackName}-lakerunner-rollup-metrics-no-running-tasks'
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: ClusterName
+          Value: !ImportValue
+            Fn::Sub:
+              - ${CommonInfraStackName}-ClusterName
+              - CommonInfraStackName: !Ref 'CommonInfraStackName'
+        - Name: ServiceName
+          Value: lakerunner-rollup-metrics
+      EvaluationPeriods: 5
+      MetricName: RunningTaskCount
+      Namespace: ECS/ContainerInsights
+      OKActions:
+        - !Ref 'AlertTopicArn'
+      Period: 60
+      Statistic: Minimum
+      Threshold: 1
+      TreatMissingData: breaching
+    Type: AWS::CloudWatch::Alarm
+  TaskCountAlarmLakerunnerSweeper:
+    Condition: EnableAlarms
+    Properties:
+      AlarmActions:
+        - !Ref 'AlertTopicArn'
+      AlarmDescription: Alarm when lakerunner-sweeper has no running tasks for 5 minutes
+      AlarmName: !Sub '${AWS::StackName}-lakerunner-sweeper-no-running-tasks'
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: ClusterName
+          Value: !ImportValue
+            Fn::Sub:
+              - ${CommonInfraStackName}-ClusterName
+              - CommonInfraStackName: !Ref 'CommonInfraStackName'
+        - Name: ServiceName
+          Value: lakerunner-sweeper
+      EvaluationPeriods: 5
+      MetricName: RunningTaskCount
+      Namespace: ECS/ContainerInsights
+      OKActions:
+        - !Ref 'AlertTopicArn'
+      Period: 60
+      Statistic: Minimum
+      Threshold: 1
+      TreatMissingData: breaching
+    Type: AWS::CloudWatch::Alarm
   TaskDefLakerunnerAdminApi:
     Condition: EnableAdminApi
     Properties:

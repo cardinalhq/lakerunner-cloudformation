@@ -39,6 +39,7 @@ from troposphere.efs import AccessPoint, PosixUser, RootDirectory, CreationInfo
 from troposphere.logs import LogGroup
 from troposphere.secretsmanager import Secret, GenerateSecretString
 from troposphere.ssm import Parameter as SSMParameter
+from troposphere.cloudwatch import Alarm, MetricDimension
 
 def load_service_config(config_file="lakerunner-stack-defaults.yaml"):
     """Load service configuration from YAML file"""
@@ -130,6 +131,13 @@ def create_services_template():
         "OtelEndpoint", Type="String",
         Default="",
         Description="OPTIONAL: OTEL collector HTTP endpoint URL (e.g., http://collector-dns:4318). Leave blank to disable OTLP telemetry export."
+    ))
+
+    # Alerting configuration
+    AlertTopicArn = t.add_parameter(Parameter(
+        "AlertTopicArn", Type="String",
+        Default="",
+        Description="OPTIONAL: SNS Topic ARN for CloudWatch alarms. Leave blank to disable task count alarms. Deploy the Alerting stack first to create a topic."
     ))
 
     # MSK Configuration
@@ -330,6 +338,7 @@ def create_services_template():
         "MSKBrokers": {"default": "MSK Broker Endpoints"},
         "GoServicesImage": {"default": "Go Services Image"},
         "OtelEndpoint": {"default": "OTEL Collector Endpoint"},
+        "AlertTopicArn": {"default": "Alert SNS Topic ARN"},
         "AutoScalingCPUTarget": {"default": "CPU Target % (Auto-Scaling)"},
         "AutoScalingScaleOutCooldown": {"default": "Scale-Out Cooldown (seconds)"},
         "AutoScalingScaleInCooldown": {"default": "Scale-In Cooldown (seconds)"}
@@ -390,6 +399,10 @@ def create_services_template():
                 {
                     "Label": {"default": "Telemetry"},
                     "Parameters": ["OtelEndpoint"]
+                },
+                {
+                    "Label": {"default": "Alerting"},
+                    "Parameters": ["AlertTopicArn"]
                 }
             ],
             "ParameterLabels": param_labels
@@ -432,6 +445,7 @@ def create_services_template():
 
     # Conditions
     t.add_condition("EnableOtlp", Not(Equals(Ref(OtelEndpoint), "")))
+    t.add_condition("EnableAlarms", Not(Equals(Ref(AlertTopicArn), "")))
     t.add_condition("IsInternetFacing", Equals(Ref(AlbScheme), "internet-facing"))
     t.add_condition("CreateLogsServices", Equals(Ref(EnableLogs), "Yes"))
     t.add_condition("CreateMetricsServices", Equals(Ref(EnableMetrics), "Yes"))
@@ -1354,6 +1368,46 @@ def create_services_template():
                         ScaleOutCooldown=Ref(AutoScalingScaleOutCooldown)
                     )
                 ))
+
+        # -----------------------
+        # CloudWatch Alarm for Task Count (requires Container Insights)
+        # Alert when running tasks drop to 0 for 5 minutes
+        # -----------------------
+        # Create combined condition for alarm: EnableAlarms AND service condition (if any)
+        if condition_name:
+            # Create a combined condition for this alarm
+            alarm_condition_name = f"CreateAlarm{title_name}"
+            t.add_condition(alarm_condition_name, And(
+                Condition("EnableAlarms"),
+                Condition(condition_name)
+            ))
+        else:
+            alarm_condition_name = "EnableAlarms"
+
+        alarm_kwargs = {
+            "AlarmName": Sub(f"${{AWS::StackName}}-{service_name}-no-running-tasks"),
+            "AlarmDescription": f"Alarm when {service_name} has no running tasks for 5 minutes",
+            "MetricName": "RunningTaskCount",
+            "Namespace": "ECS/ContainerInsights",
+            "Dimensions": [
+                MetricDimension(Name="ClusterName", Value=ImportValue(ci_export("ClusterName"))),
+                MetricDimension(Name="ServiceName", Value=service_name)
+            ],
+            "Statistic": "Minimum",
+            "Period": 60,
+            "EvaluationPeriods": 5,
+            "Threshold": 1,
+            "ComparisonOperator": "LessThanThreshold",
+            "TreatMissingData": "breaching",
+            "AlarmActions": [Ref(AlertTopicArn)],
+            "OKActions": [Ref(AlertTopicArn)],
+            "Condition": alarm_condition_name
+        }
+
+        t.add_resource(Alarm(
+            f"TaskCountAlarm{title_name}",
+            **alarm_kwargs
+        ))
 
     # -----------------------
     # Outputs

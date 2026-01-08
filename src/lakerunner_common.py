@@ -20,7 +20,7 @@ from troposphere import (
     Select, Not, Tags, Join
 )
 from troposphere.ec2 import SecurityGroup, SecurityGroupIngress
-from troposphere.ecs import Cluster as ECSCluster
+from troposphere.ecs import Cluster as ECSCluster, ClusterSetting
 from troposphere.s3 import (
     Bucket, LifecycleRule, LifecycleConfiguration,
     NotificationConfiguration, QueueConfigurations,
@@ -241,6 +241,9 @@ t.add_resource(SecurityGroupIngress(
 ClusterRes = t.add_resource(ECSCluster(
     "Cluster",
     ClusterName=Sub("${AWS::StackName}-cluster"),
+    ClusterSettings=[
+        ClusterSetting(Name="containerInsights", Value="enabled")
+    ],
     Tags=Tags(
         Name=Sub("${AWS::StackName}-cluster"),
         ManagedBy="Lakerunner",

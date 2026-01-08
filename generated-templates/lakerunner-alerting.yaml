@@ -1,0 +1,126 @@
+Conditions:
+  HasEmail1: !Not
+    - !Equals
+      - !Ref 'Email1'
+      - ''
+  HasEmail2: !Not
+    - !Equals
+      - !Ref 'Email2'
+      - ''
+  HasEmail3: !Not
+    - !Equals
+      - !Ref 'Email3'
+      - ''
+  HasEmail4: !Not
+    - !Equals
+      - !Ref 'Email4'
+      - ''
+  HasEmail5: !Not
+    - !Equals
+      - !Ref 'Email5'
+      - ''
+Description: 'Lakerunner Alerting: SNS topic for CloudWatch alarms with email subscriptions. Email addresses must confirm subscription after stack creation.'
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Email Notifications
+        Parameters:
+          - Email1
+          - Email2
+          - Email3
+          - Email4
+          - Email5
+    ParameterLabels:
+      Email1:
+        default: Email Address 1
+      Email2:
+        default: Email Address 2
+      Email3:
+        default: Email Address 3
+      Email4:
+        default: Email Address 4
+      Email5:
+        default: Email Address 5
+Outputs:
+  AlertTopicArn:
+    Description: ARN of the SNS topic for CloudWatch alarms. Provide this to the Services stack.
+    Export:
+      Name: !Sub '${AWS::StackName}-AlertTopicArn'
+    Value: !Ref 'AlertTopic'
+  AlertTopicName:
+    Description: Name of the SNS topic
+    Export:
+      Name: !Sub '${AWS::StackName}-AlertTopicName'
+    Value: !GetAtt 'AlertTopic.TopicName'
+Parameters:
+  Email1:
+    Default: ''
+    Description: Email address 1 for alarm notifications (leave blank to skip)
+    Type: String
+  Email2:
+    Default: ''
+    Description: Email address 2 for alarm notifications (leave blank to skip)
+    Type: String
+  Email3:
+    Default: ''
+    Description: Email address 3 for alarm notifications (leave blank to skip)
+    Type: String
+  Email4:
+    Default: ''
+    Description: Email address 4 for alarm notifications (leave blank to skip)
+    Type: String
+  Email5:
+    Default: ''
+    Description: Email address 5 for alarm notifications (leave blank to skip)
+    Type: String
+Resources:
+  AlertTopic:
+    Properties:
+      Tags:
+        - Key: Component
+          Value: Alerting
+        - Key: Environment
+          Value: !Ref 'AWS::StackName'
+        - Key: ManagedBy
+          Value: Lakerunner
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-alerts'
+      TopicName: !Sub '${AWS::StackName}-alerts'
+    Type: AWS::SNS::Topic
+  EmailSubscription1:
+    Condition: HasEmail1
+    Properties:
+      Endpoint: !Ref 'Email1'
+      Protocol: email
+      TopicArn: !Ref 'AlertTopic'
+    Type: AWS::SNS::Subscription
+  EmailSubscription2:
+    Condition: HasEmail2
+    Properties:
+      Endpoint: !Ref 'Email2'
+      Protocol: email
+      TopicArn: !Ref 'AlertTopic'
+    Type: AWS::SNS::Subscription
+  EmailSubscription3:
+    Condition: HasEmail3
+    Properties:
+      Endpoint: !Ref 'Email3'
+      Protocol: email
+      TopicArn: !Ref 'AlertTopic'
+    Type: AWS::SNS::Subscription
+  EmailSubscription4:
+    Condition: HasEmail4
+    Properties:
+      Endpoint: !Ref 'Email4'
+      Protocol: email
+      TopicArn: !Ref 'AlertTopic'
+    Type: AWS::SNS::Subscription
+  EmailSubscription5:
+    Condition: HasEmail5
+    Properties:
+      Endpoint: !Ref 'Email5'
+      Protocol: email
+      TopicArn: !Ref 'AlertTopic'
+    Type: AWS::SNS::Subscription
+
