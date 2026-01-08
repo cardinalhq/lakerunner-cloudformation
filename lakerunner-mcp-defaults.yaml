@@ -3,7 +3,7 @@
 
 # Container Images configuration
 images:
-  mcp: "public.ecr.aws/cardinalhq.io/lakerunner/standalone-mcp:latest"
+  mcp: "ghcr.io/cardinalhq/lakerunner-standalone-mcp:latest"
 
 # MCP service configuration
 mcp:

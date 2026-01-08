@@ -3,12 +3,12 @@
 
 # Container Images configuration
 images:
-  otel_collector: "public.ecr.aws/cardinalhq.io/cardinalhq-otel-collector:v1.4.2"
+  otel_collector: "ghcr.io/cardinalhq/cardinalhq-otel-collector:v1.4.2"
 
 # OTEL Collector services configuration
 otel_services:
   otel-gateway:
-    image: "public.ecr.aws/cardinalhq.io/cardinalhq-otel-collector:v1.4.2"
+    image: "ghcr.io/cardinalhq/cardinalhq-otel-collector:v1.4.2"
     command: ["/app/bin/cardinalhq-otel-collector", "--config=/etc/otel/config.yaml"]
     cpu: 1024
     memory_mib: 2048
