@@ -8,6 +8,12 @@ receivers:
       http:
         endpoint: 0.0.0.0:4318
 
+  # Secondary OTLP receiver for CloudWatch metrics path
+  otlp/cloudwatch:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4319
+
 processors:
   memory_limiter:
     limit_mib: 1024
@@ -17,6 +23,19 @@ processors:
     timeout: 10s
     send_batch_max_size: 10000
     send_batch_size: 10000
+
+  batch/cloudwatch:
+    timeout: 10s
+    send_batch_max_size: 1000
+    send_batch_size: 100
+
+  # Filter to only keep lakerunner.* metrics for CloudWatch
+  filter/lakerunner:
+    metrics:
+      include:
+        match_type: regexp
+        metric_names:
+          - ^lakerunner\..*
 
 exporters:
   awss3/logs:
@@ -51,6 +70,14 @@ exporters:
 
   nop:
 
+  # CloudWatch metrics exporter for secondary path
+  awsemf/cloudwatch:
+    namespace: ${env:CLOUDWATCH_NAMESPACE}
+    region: ${env:AWS_REGION}
+    log_group_name: ${env:CLOUDWATCH_LOG_GROUP}
+    log_stream_name: otel-metrics
+    dimension_rollup_option: NoDimensionRollup
+
 extensions:
   health_check:
     endpoint: 0.0.0.0:13133
@@ -62,6 +89,7 @@ service:
     traces:
       receivers:
         - otlp
+        - otlp/cloudwatch
       processors:
         - memory_limiter
         - batch
@@ -71,6 +99,7 @@ service:
     metrics:
       receivers:
         - otlp
+        - otlp/cloudwatch
       processors:
         - memory_limiter
         - batch
@@ -80,8 +109,21 @@ service:
     logs:
       receivers:
         - otlp
+        - otlp/cloudwatch
       processors:
         - memory_limiter
         - batch
       exporters:
         - awss3/logs
+
+    # Secondary pipeline for CloudWatch metrics (port 4319)
+    # Only lakerunner.* metrics go to CloudWatch
+    metrics/cloudwatch:
+      receivers:
+        - otlp/cloudwatch
+      processors:
+        - memory_limiter
+        - filter/lakerunner
+        - batch/cloudwatch
+      exporters:
+        - awsemf/cloudwatch

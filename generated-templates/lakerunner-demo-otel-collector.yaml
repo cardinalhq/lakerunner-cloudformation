@@ -33,6 +33,13 @@ Metadata:
       OtelConfigYaml:
         default: Custom OTEL Configuration (YAML)
 Outputs:
+  OtelCloudwatchEndpoint:
+    Description: OTEL HTTP endpoint for CloudWatch metrics
+    Export:
+      Name: !Sub '${AWS::StackName}-CloudwatchEndpoint'
+    Value: !Sub
+      - http://${LoadBalancerDNS}:4319
+      - LoadBalancerDNS: !GetAtt 'ApplicationLoadBalancer.DNSName'
   OtelGrpcEndpoint:
     Description: OTEL gRPC endpoint
     Export:
@@ -86,6 +93,11 @@ Resources:
           FromPort: 4318
           IpProtocol: tcp
           ToPort: 4318
+        - CidrIp: '0.0.0.0/0'
+          Description: OTEL HTTP CloudWatch receiver
+          FromPort: 4319
+          IpProtocol: tcp
+          ToPort: 4319
       Tags:
         - Key: Name
           Value: !Sub '${AWS::StackName}-alb-sg'
@@ -123,6 +135,15 @@ Resources:
           Value: !Sub '${AWS::StackName}-alb'
       Type: application
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+  CloudwatchListener:
+    Properties:
+      DefaultActions:
+        - TargetGroupArn: !Ref 'OtelCloudwatchTargetGroup'
+          Type: forward
+      LoadBalancerArn: !Ref 'ApplicationLoadBalancer'
+      Port: 4319
+      Protocol: HTTP
+    Type: AWS::ElasticLoadBalancingV2::Listener
   ExecRole:
     Properties:
       AssumeRolePolicyDocument:
@@ -172,11 +193,42 @@ Resources:
       Port: 4318
       Protocol: HTTP
     Type: AWS::ElasticLoadBalancingV2::Listener
+  LogGroupCloudwatchMetrics:
+    Properties:
+      LogGroupName: /aws/lakerunner/lakerunner-services
+      RetentionInDays: 14
+    Type: AWS::Logs::LogGroup
   LogGroupOtelGateway:
     Properties:
       LogGroupName: !Sub '/ecs/otel-gateway'
       RetentionInDays: 14
     Type: AWS::Logs::LogGroup
+  OtelCloudwatchTargetGroup:
+    Properties:
+      HealthCheckIntervalSeconds: 5
+      HealthCheckPath: /healthz
+      HealthCheckPort: '13133'
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 2
+      HealthyThresholdCount: 2
+      Matcher:
+        HttpCode: '200'
+      Name: !Sub '${AWS::StackName}-otel-cw'
+      Port: 4319
+      Protocol: HTTP
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-otel-cw-tg'
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: '5'
+      TargetType: ip
+      UnhealthyThresholdCount: 2
+      VpcId: !ImportValue
+        Fn::Sub:
+          - ${CommonInfraStackName}-VpcId
+          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
   OtelGrpcTargetGroup:
     Properties:
       HealthCheckIntervalSeconds: 5
@@ -233,6 +285,7 @@ Resources:
     DependsOn:
       - GrpcListener
       - HttpListener
+      - CloudwatchListener
     Properties:
       Cluster: !ImportValue
         Fn::Sub:
@@ -249,6 +302,9 @@ Resources:
         - ContainerName: OtelCollector
           ContainerPort: 4318
           TargetGroupArn: !Ref 'OtelHttpTargetGroup'
+        - ContainerName: OtelCollector
+          ContainerPort: 4319
+          TargetGroupArn: !Ref 'OtelCloudwatchTargetGroup'
       NetworkConfiguration:
         AwsvpcConfiguration:
           AssignPublicIp: DISABLED
@@ -292,6 +348,10 @@ Resources:
               Value: 12340000-0000-4000-8000-000000000000
             - Name: COLLECTOR
               Value: lakerunner
+            - Name: CLOUDWATCH_NAMESPACE
+              Value: Lakerunner
+            - Name: CLOUDWATCH_LOG_GROUP
+              Value: /aws/lakerunner/lakerunner-services
             - Name: CHQ_COLLECTOR_CONFIG_YAML
               Value: !If
                 - HasCustomConfig
@@ -307,6 +367,12 @@ Resources:
                         http:
                           endpoint: 0.0.0.0:4318
 
+                    # Secondary OTLP receiver for CloudWatch metrics path
+                    otlp/cloudwatch:
+                      protocols:
+                        http:
+                          endpoint: 0.0.0.0:4319
+
                   processors:
                     memory_limiter:
                       limit_mib: 1024
@@ -316,6 +382,19 @@ Resources:
                       timeout: 10s
                       send_batch_max_size: 10000
                       send_batch_size: 10000
+
+                    batch/cloudwatch:
+                      timeout: 10s
+                      send_batch_max_size: 1000
+                      send_batch_size: 100
+
+                    # Filter to only keep lakerunner.* metrics for CloudWatch
+                    filter/lakerunner:
+                      metrics:
+                        include:
+                          match_type: regexp
+                          metric_names:
+                            - ^lakerunner\..*
 
                   exporters:
                     awss3/logs:
@@ -350,6 +429,14 @@ Resources:
 
                     nop:
 
+                    # CloudWatch metrics exporter for secondary path
+                    awsemf/cloudwatch:
+                      namespace: ${env:CLOUDWATCH_NAMESPACE}
+                      region: ${env:AWS_REGION}
+                      log_group_name: ${env:CLOUDWATCH_LOG_GROUP}
+                      log_stream_name: otel-metrics
+                      dimension_rollup_option: NoDimensionRollup
+
                   extensions:
                     health_check:
                       endpoint: 0.0.0.0:13133
@@ -361,6 +448,7 @@ Resources:
                       traces:
                         receivers:
                           - otlp
+                          - otlp/cloudwatch
                         processors:
                           - memory_limiter
                           - batch
@@ -370,6 +458,7 @@ Resources:
                       metrics:
                         receivers:
                           - otlp
+                          - otlp/cloudwatch
                         processors:
                           - memory_limiter
                           - batch
@@ -379,11 +468,24 @@ Resources:
                       logs:
                         receivers:
                           - otlp
+                          - otlp/cloudwatch
                         processors:
                           - memory_limiter
                           - batch
                         exporters:
                           - awss3/logs
+
+                      # Secondary pipeline for CloudWatch metrics (port 4319)
+                      # Only lakerunner.* metrics go to CloudWatch
+                      metrics/cloudwatch:
+                        receivers:
+                          - otlp/cloudwatch
+                        processors:
+                          - memory_limiter
+                          - filter/lakerunner
+                          - batch/cloudwatch
+                        exporters:
+                          - awsemf/cloudwatch
             - Name: OTEL_RESOURCE_ATTRIBUTES
               Value: service.name=otel-gateway
           Image: !Ref 'OtelCollectorImage'
@@ -402,6 +504,8 @@ Resources:
             - ContainerPort: 4317
               Protocol: tcp
             - ContainerPort: 4318
+              Protocol: tcp
+            - ContainerPort: 4319
               Protocol: tcp
             - ContainerPort: 13133
               Protocol: tcp
@@ -453,6 +557,24 @@ Resources:
                           - CommonInfraStackName: !Ref 'CommonInfraStackName'
             Version: '2012-10-17'
           PolicyName: S3Access
+        - PolicyDocument:
+            Statement:
+              - Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:DescribeLogStreams
+                Effect: Allow
+                Resource:
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lakerunner/lakerunner-services:*'
+              - Action:
+                  - cloudwatch:PutMetricData
+                Condition:
+                  StringLike:
+                    cloudwatch:namespace: Lakerunner
+                Effect: Allow
+                Resource: '*'
+            Version: '2012-10-17'
+          PolicyName: CloudWatchAccess
       RoleName: !Sub '${AWS::StackName}-task-role'
     Type: AWS::IAM::Role
   TaskSecurityGroup:
@@ -469,6 +591,11 @@ Resources:
           IpProtocol: tcp
           SourceSecurityGroupId: !Ref 'AlbSecurityGroup'
           ToPort: 4318
+        - Description: OTEL HTTP CloudWatch from ALB
+          FromPort: 4319
+          IpProtocol: tcp
+          SourceSecurityGroupId: !Ref 'AlbSecurityGroup'
+          ToPort: 4319
         - Description: OTEL health check from ALB
           FromPort: 13133
           IpProtocol: tcp

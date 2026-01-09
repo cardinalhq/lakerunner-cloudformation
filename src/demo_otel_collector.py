@@ -175,6 +175,13 @@ def create_otel_collector_template():
                 ToPort=4318,
                 CidrIp="0.0.0.0/0",
                 Description="OTEL HTTP receiver"
+            ),
+            SecurityGroupRule(
+                IpProtocol="tcp",
+                FromPort=4319,
+                ToPort=4319,
+                CidrIp="0.0.0.0/0",
+                Description="OTEL HTTP CloudWatch receiver"
             )
         ],
         Tags=Tags(Name=Sub("${AWS::StackName}-alb-sg"))
@@ -199,6 +206,13 @@ def create_otel_collector_template():
                 ToPort=4318,
                 SourceSecurityGroupId=Ref(AlbSecurityGroup),
                 Description="OTEL HTTP from ALB"
+            ),
+            SecurityGroupRule(
+                IpProtocol="tcp",
+                FromPort=4319,
+                ToPort=4319,
+                SourceSecurityGroupId=Ref(AlbSecurityGroup),
+                Description="OTEL HTTP CloudWatch from ALB"
             ),
             SecurityGroupRule(
                 IpProtocol="tcp",
@@ -268,6 +282,27 @@ def create_otel_collector_template():
         Tags=Tags(Name=Sub("${AWS::StackName}-otel-http-tg"))
     ))
 
+    OtelCloudwatchTargetGroup = t.add_resource(TargetGroup(
+        "OtelCloudwatchTargetGroup",
+        Name=Sub("${AWS::StackName}-otel-cw"),
+        Port=4319,
+        Protocol="HTTP",
+        VpcId=VpcIdValue,
+        TargetType="ip",
+        HealthCheckPath="/healthz",
+        HealthCheckProtocol="HTTP",
+        HealthCheckPort="13133",
+        HealthCheckIntervalSeconds=5,
+        HealthCheckTimeoutSeconds=2,
+        HealthyThresholdCount=2,
+        UnhealthyThresholdCount=2,
+        Matcher=Matcher(HttpCode="200"),
+        TargetGroupAttributes=[
+            TargetGroupAttribute(Key="deregistration_delay.timeout_seconds", Value="5")
+        ],
+        Tags=Tags(Name=Sub("${AWS::StackName}-otel-cw-tg"))
+    ))
+
     # Listeners
     GrpcListener = t.add_resource(Listener(
         "GrpcListener",
@@ -288,6 +323,17 @@ def create_otel_collector_template():
         DefaultActions=[AlbAction(
             Type="forward",
             TargetGroupArn=Ref(OtelHttpTargetGroup)
+        )]
+    ))
+
+    CloudwatchListener = t.add_resource(Listener(
+        "CloudwatchListener",
+        LoadBalancerArn=Ref(ApplicationLoadBalancer),
+        Port=4319,
+        Protocol="HTTP",
+        DefaultActions=[AlbAction(
+            Type="forward",
+            TargetGroupArn=Ref(OtelCloudwatchTargetGroup)
         )]
     ))
 
@@ -377,6 +423,37 @@ def create_otel_collector_template():
                         }
                     ]
                 }
+            ),
+            Policy(
+                PolicyName="CloudWatchAccess",
+                PolicyDocument={
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Action": [
+                                "logs:CreateLogStream",
+                                "logs:PutLogEvents",
+                                "logs:DescribeLogStreams"
+                            ],
+                            "Resource": [
+                                Sub("arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lakerunner/lakerunner-services:*")
+                            ]
+                        },
+                        {
+                            "Effect": "Allow",
+                            "Action": [
+                                "cloudwatch:PutMetricData"
+                            ],
+                            "Resource": "*",
+                            "Condition": {
+                                "StringLike": {
+                                    "cloudwatch:namespace": "Lakerunner"
+                                }
+                            }
+                        }
+                    ]
+                }
             )
         ]
     ))
@@ -387,10 +464,17 @@ def create_otel_collector_template():
     # -----------------------
     service_config = otel_services.get('otel-gateway', {})
 
-    # Log Group
+    # Log Group for ECS task logs
     OtelLogGroup = t.add_resource(LogGroup(
         "LogGroupOtelGateway",
         LogGroupName=Sub("/ecs/otel-gateway"),
+        RetentionInDays=14
+    ))
+
+    # Log Group for CloudWatch metrics (EMF)
+    CloudwatchMetricsLogGroup = t.add_resource(LogGroup(
+        "LogGroupCloudwatchMetrics",
+        LogGroupName="/aws/lakerunner/lakerunner-services",
         RetentionInDays=14
     ))
 
@@ -401,6 +485,8 @@ def create_otel_collector_template():
         Environment(Name="AWS_REGION", Value=Ref("AWS::Region")),
         Environment(Name="ORG", Value=organization_id),
         Environment(Name="COLLECTOR", Value=collector_name),
+        Environment(Name="CLOUDWATCH_NAMESPACE", Value="Lakerunner"),
+        Environment(Name="CLOUDWATCH_LOG_GROUP", Value="/aws/lakerunner/lakerunner-services"),
         Environment(
             Name="CHQ_COLLECTOR_CONFIG_YAML",
             Value=If(
@@ -430,6 +516,7 @@ def create_otel_collector_template():
     port_mappings = [
         PortMapping(ContainerPort=4317, Protocol="tcp"),
         PortMapping(ContainerPort=4318, Protocol="tcp"),
+        PortMapping(ContainerPort=4319, Protocol="tcp"),
         PortMapping(ContainerPort=13133, Protocol="tcp")
     ]
 
@@ -515,12 +602,17 @@ def create_otel_collector_template():
                 ContainerName="OtelCollector",
                 ContainerPort=4318,
                 TargetGroupArn=Ref(OtelHttpTargetGroup)
+            ),
+            EcsLoadBalancer(
+                ContainerName="OtelCollector",
+                ContainerPort=4319,
+                TargetGroupArn=Ref(OtelCloudwatchTargetGroup)
             )
         ],
         EnableExecuteCommand=True,
         EnableECSManagedTags=True,
         PropagateTags="SERVICE",
-        DependsOn=[GrpcListener, HttpListener],
+        DependsOn=[GrpcListener, HttpListener, CloudwatchListener],
         Tags=Tags(
             Name=Sub("${AWS::StackName}-otel-gateway"),
             ManagedBy="Lakerunner",
@@ -544,6 +636,13 @@ def create_otel_collector_template():
         Description="OTEL HTTP endpoint",
         Value=Sub("http://${LoadBalancerDNS}:4318", LoadBalancerDNS=GetAtt(ApplicationLoadBalancer, "DNSName")),
         Export=Export(Sub("${AWS::StackName}-HttpEndpoint"))
+    ))
+
+    t.add_output(Output(
+        "OtelCloudwatchEndpoint",
+        Description="OTEL HTTP endpoint for CloudWatch metrics",
+        Value=Sub("http://${LoadBalancerDNS}:4319", LoadBalancerDNS=GetAtt(ApplicationLoadBalancer, "DNSName")),
+        Export=Export(Sub("${AWS::StackName}-CloudwatchEndpoint"))
     ))
 
     t.add_output(Output(
