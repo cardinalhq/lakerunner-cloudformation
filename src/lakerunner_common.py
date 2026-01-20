@@ -32,8 +32,6 @@ from troposphere.rds import DBInstance, DBSubnetGroup
 from troposphere.ssm import Parameter as SsmParameter
 from troposphere.msk import Cluster, BrokerNodeGroupInfo, EBSStorageInfo, StorageInfo, ClientAuthentication, Tls, Sasl, Scram, EncryptionInfo, EncryptionAtRest, EncryptionInTransit, BatchScramSecret
 from troposphere.iam import PolicyType, Role, Policy
-from troposphere.awslambda import Function, Code
-from troposphere.cloudformation import CustomResource
 from troposphere.kms import Key, Alias
 
 t = Template()
@@ -490,126 +488,9 @@ MSKCluster = t.add_resource(Cluster(
     }
 ))
 
-# Custom Lambda to associate SCRAM secrets with MSK cluster
-# The native AWS::MSK::BatchScramSecret resource has issues with updates and
-# conflicts when re-creating, so we use a custom resource for reliability.
-MSKScramAssociationFunction = t.add_resource(Function(
-    "MSKScramAssociationFunction",
-    FunctionName=Sub("${AWS::StackName}-msk-scram-assoc"),
-    Runtime="python3.12",
-    Handler="index.handler",
-    Role=GetAtt("MSKScramAssociationRole", "Arn"),
-    Timeout=60,
-    Code=Code(
-        ZipFile="""
-import json
-import boto3
-import urllib.request
-
-def send_response(event, context, status, data=None, reason=""):
-    body = json.dumps({
-        "Status": status,
-        "Reason": reason or f"See CloudWatch Log: {context.log_stream_name}",
-        "PhysicalResourceId": event.get("PhysicalResourceId", "MSKScramAssoc"),
-        "StackId": event["StackId"],
-        "RequestId": event["RequestId"],
-        "LogicalResourceId": event["LogicalResourceId"],
-        "Data": data or {}
-    }).encode()
-    req = urllib.request.Request(event["ResponseURL"], data=body, method="PUT")
-    req.add_header("content-type", "")
-    req.add_header("content-length", str(len(body)))
-    urllib.request.urlopen(req).read()
-
-def handler(event, context):
-    print(f"Event: {json.dumps(event)}")
-    try:
-        props = event.get("ResourceProperties", {})
-        cluster_arn = props["ClusterArn"]
-        secret_arns = props["SecretArnList"]
-        kafka = boto3.client("kafka")
-
-        if event["RequestType"] == "Delete":
-            try:
-                kafka.batch_disassociate_scram_secret(
-                    ClusterArn=cluster_arn, SecretArnList=secret_arns)
-            except Exception as e:
-                print(f"Disassociate error (ignored): {e}")
-            send_response(event, context, "SUCCESS")
-            return
-
-        # Associate secrets (idempotent - safe to call even if already associated)
-        result = kafka.batch_associate_scram_secret(
-            ClusterArn=cluster_arn, SecretArnList=secret_arns)
-        if result.get("UnprocessedScramSecrets"):
-            errors = [s.get("ErrorMessage", "Unknown") for s in result["UnprocessedScramSecrets"]]
-            raise Exception(f"Failed to associate: {errors}")
-        print("Successfully associated SCRAM secrets")
-        send_response(event, context, "SUCCESS", {"Message": "Associated"})
-    except Exception as e:
-        print(f"Error: {e}")
-        send_response(event, context, "FAILED", reason=str(e))
-"""
-    )
-))
-
-MSKScramAssociationRole = t.add_resource(Role(
-    "MSKScramAssociationRole",
-    AssumeRolePolicyDocument={
-        "Version": "2012-10-17",
-        "Statement": [{
-            "Effect": "Allow",
-            "Principal": {"Service": "lambda.amazonaws.com"},
-            "Action": "sts:AssumeRole"
-        }]
-    },
-    ManagedPolicyArns=[
-        "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-    ],
-    Policies=[
-        Policy(
-            PolicyName="MSKScramPolicy",
-            PolicyDocument={
-                "Version": "2012-10-17",
-                "Statement": [
-                    {
-                        "Effect": "Allow",
-                        "Action": [
-                            "kafka:BatchAssociateScramSecret",
-                            "kafka:BatchDisassociateScramSecret"
-                        ],
-                        "Resource": GetAtt(MSKCluster, "Arn")
-                    },
-                    {
-                        "Effect": "Allow",
-                        "Action": ["secretsmanager:GetSecretValue"],
-                        "Resource": Ref(MSKCredentials)
-                    },
-                    {
-                        "Effect": "Allow",
-                        "Action": [
-                            "kms:Decrypt",
-                            "kms:GenerateDataKey",
-                            "kms:CreateGrant",
-                            "kms:DescribeKey"
-                        ],
-                        "Resource": GetAtt(MSKSecretsKey, "Arn")
-                    }
-                ]
-            }
-        )
-    ]
-))
-
-MSKScramAssociation = t.add_resource(CustomResource(
-    "MSKScramAssociation",
-    DependsOn=["MSKCluster", "MSKCredentials"],
-    ServiceToken=GetAtt(MSKScramAssociationFunction, "Arn"),
-    ClusterArn=GetAtt(MSKCluster, "Arn"),
-    SecretArnList=[Ref(MSKCredentials)]
-))
-
 # MSK outputs
+# NOTE: SCRAM secret association must be done manually via AWS CLI:
+#   aws kafka batch-associate-scram-secret --cluster-arn <cluster-arn> --secret-arn-list <secret-arn>
 t.add_output(Output(
     "MSKClusterArn",
     Description="MSK cluster ARN",
