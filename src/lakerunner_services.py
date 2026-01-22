@@ -23,7 +23,7 @@ from troposphere.ecs import (
     Service, TaskDefinition, ContainerDefinition, Environment,
     LogConfiguration, Secret as EcsSecret, Volume, MountPoint,
     HealthCheck, PortMapping, RuntimePlatform, NetworkConfiguration, AwsvpcConfiguration,
-    LoadBalancer as EcsLoadBalancer, EFSVolumeConfiguration, AuthorizationConfig,
+    LoadBalancer as EcsLoadBalancer,
     EphemeralStorage
 )
 from troposphere.applicationautoscaling import (
@@ -35,7 +35,6 @@ from troposphere.elasticloadbalancingv2 import LoadBalancer, TargetGroup, Target
 from troposphere.elasticloadbalancingv2 import Action as AlbAction
 from troposphere.ssm import Parameter as SSMParameter
 from troposphere.ec2 import SecurityGroup, SecurityGroupIngress
-from troposphere.efs import AccessPoint, PosixUser, RootDirectory, CreationInfo
 from troposphere.logs import LogGroup
 from troposphere.secretsmanager import Secret, GenerateSecretString
 from troposphere.ssm import Parameter as SSMParameter
@@ -48,6 +47,87 @@ def load_service_config(config_file="lakerunner-stack-defaults.yaml"):
 
     with open(config_path, 'r') as f:
         return yaml.safe_load(f)
+
+def calculate_gomemlimit(memory_mib):
+    """
+    Calculate GOMEMLIMIT based on memory limit.
+    Rules (from Helm chart):
+      - If memory > 1GiB: GOMEMLIMIT = total memory - 250MiB
+      - If memory <= 1GiB: GOMEMLIMIT = 75% of memory
+    Returns value in MiB format (e.g., "3840MiB").
+    """
+    memory_mib = int(memory_mib)
+    one_gib_mib = 1024
+    reserve_mib = 250
+
+    if memory_mib > one_gib_mib:
+        result_mib = memory_mib - reserve_mib
+    else:
+        result_mib = int(memory_mib * 0.75)
+
+    return f"{result_mib}MiB"
+
+def calculate_gogc(memory_mib):
+    """
+    Calculate GOGC based on memory limit.
+    Rules (from Helm chart):
+      - If memory <= 1GiB: GOGC = 50
+      - If 1GiB < memory <= 2GiB: GOGC = 100
+      - If memory > 2GiB: GOGC = 200
+    """
+    memory_mib = int(memory_mib)
+    one_gib_mib = 1024
+    two_gib_mib = 2048
+
+    if memory_mib <= one_gib_mib:
+        return "50"
+    elif memory_mib <= two_gib_mib:
+        return "100"
+    else:
+        return "200"
+
+def calculate_duckdb_memory_limit(memory_mib):
+    """
+    Calculate DuckDB memory limit for ingest/compact/rollup services.
+    Rules (from Helm chart):
+      - DuckDB memory = total - 1GiB for Go/OS (minimum 512MiB)
+    Returns value in MB (megabytes, not mebibytes).
+    """
+    memory_mib = int(memory_mib)
+    one_gib_mib = 1024
+    min_duckdb_mib = 512
+
+    duckdb_mib = memory_mib - one_gib_mib
+    if duckdb_mib < min_duckdb_mib:
+        duckdb_mib = min_duckdb_mib
+
+    # Convert MiB to MB (1 MiB = 1.048576 MB)
+    duckdb_mb = int(duckdb_mib * 1.048576)
+    return str(duckdb_mb)
+
+def calculate_query_worker_memory_settings(memory_mib):
+    """
+    Calculate memory settings for query-worker service.
+    Rules (from Helm chart):
+      - LAKERUNNER_DUCKDB_MEMORY_LIMIT = 50% of container memory (in MB)
+      - GOMEMLIMIT = 75% of the remaining 50% (37.5% of total)
+      - GOGC = calculated based on total memory
+    Returns dict with 'gomemlimit', 'gogc', and 'duckdb_memory_limit'.
+    """
+    memory_mib = int(memory_mib)
+
+    # DuckDB gets 50% of total
+    half_mib = memory_mib // 2
+    duckdb_mb = int(half_mib * 1.048576)
+
+    # GOMEMLIMIT = 75% of the other 50% = 37.5% of total
+    gomemlimit_mib = int(half_mib * 0.75)
+
+    return {
+        'gomemlimit': f"{gomemlimit_mib}MiB",
+        'gogc': calculate_gogc(memory_mib),
+        'duckdb_memory_limit': str(duckdb_mb)
+    }
 
 def create_services_template():
     """Create CloudFormation template for all services"""
@@ -433,7 +513,6 @@ def create_services_template():
     DbPortValue = ImportValue(ci_export("DbPort"))
     MSKCredentialsArnValue = ImportValue(ci_export("MSKCredentialsArn"))
     MSKSecretsKeyArnValue = ImportValue(ci_export("MSKSecretsKeyArn"))
-    EfsIdValue = ImportValue(ci_export("EfsId"))
     TaskSecurityGroupIdValue = ImportValue(ci_export("TaskSGId"))
     VpcIdValue = ImportValue(ci_export("VpcId"))
     PrivateSubnetsValue = Split(",", ImportValue(ci_export("PrivateSubnets")))
@@ -739,18 +818,6 @@ def create_services_template():
                         {
                             "Effect": "Allow",
                             "Action": [
-                                "elasticfilesystem:ClientMount",
-                                "elasticfilesystem:ClientWrite",
-                                "elasticfilesystem:ClientRootAccess",
-                                "elasticfilesystem:DescribeFileSystems",
-                                "elasticfilesystem:DescribeMountTargets",
-                                "elasticfilesystem:DescribeAccessPoints"
-                            ],
-                            "Resource": "*"
-                        },
-                        {
-                            "Effect": "Allow",
-                            "Action": [
                                 "ssmmessages:CreateControlChannel",
                                 "ssmmessages:CreateDataChannel",
                                 "ssmmessages:OpenControlChannel",
@@ -837,18 +904,6 @@ def create_services_template():
                         {
                             "Effect": "Allow",
                             "Action": [
-                                "elasticfilesystem:ClientMount",
-                                "elasticfilesystem:ClientWrite",
-                                "elasticfilesystem:ClientRootAccess",
-                                "elasticfilesystem:DescribeFileSystems",
-                                "elasticfilesystem:DescribeMountTargets",
-                                "elasticfilesystem:DescribeAccessPoints"
-                            ],
-                            "Resource": "*"
-                        },
-                        {
-                            "Effect": "Allow",
-                            "Action": [
                                 "ssmmessages:CreateControlChannel",
                                 "ssmmessages:CreateDataChannel",
                                 "ssmmessages:OpenControlChannel",
@@ -925,18 +980,6 @@ def create_services_template():
                         {
                             "Effect": "Allow",
                             "Action": [
-                                "elasticfilesystem:ClientMount",
-                                "elasticfilesystem:ClientWrite",
-                                "elasticfilesystem:ClientRootAccess",
-                                "elasticfilesystem:DescribeFileSystems",
-                                "elasticfilesystem:DescribeMountTargets",
-                                "elasticfilesystem:DescribeAccessPoints"
-                            ],
-                            "Resource": "*"
-                        },
-                        {
-                            "Effect": "Allow",
-                            "Action": [
                                 "ssmmessages:CreateControlChannel",
                                 "ssmmessages:CreateDataChannel",
                                 "ssmmessages:OpenControlChannel",
@@ -964,47 +1007,6 @@ def create_services_template():
     # Application Secrets
     # -----------------------
 
-
-    # Collect services that need EFS access points
-    services_needing_efs = {}
-    for service_name, service_config in services.items():
-        efs_mounts = service_config.get('efs_mounts', [])
-        for mount in efs_mounts:
-            access_point_name = mount['access_point_name']
-            services_needing_efs[access_point_name] = mount
-
-    # Create EFS access points
-    access_points = {}
-    for ap_name, mount_config in services_needing_efs.items():
-        # Configure access point based on service type
-        if ap_name == 'grafana':
-            # Grafana access point: don't enforce POSIX user, let containers use their own users
-            # Root-owned directory with group write permissions allows both root (init) and grafana user access
-            posix_user = PosixUser(Gid="0", Uid="0")  # Use root for access point
-            creation_info = CreationInfo(
-                OwnerGid="0",     # root group owns the directory
-                OwnerUid="0",     # root user owns the directory
-                Permissions="755"  # owner rwx, group rx, others rx - allows access to multiple users
-            )
-        else:
-            # Default for other services (currently none use EFS except Grafana)
-            posix_user = PosixUser(Gid="0", Uid="0")
-            creation_info = CreationInfo(
-                OwnerGid="0",
-                OwnerUid="0",
-                Permissions="750"
-            )
-
-        access_points[ap_name] = t.add_resource(AccessPoint(
-            f"EfsAccessPoint{ap_name.title()}",
-            FileSystemId=EfsIdValue,
-            PosixUser=posix_user,
-            RootDirectory=RootDirectory(
-                Path=mount_config['efs_path'],
-                CreationInfo=creation_info
-            ),
-            AccessPointTags=Tags(Name=Sub("${AWS::StackName}-" + ap_name))
-        ))
 
     # Keep track of target groups for ALB integration
     target_groups = {}
@@ -1092,6 +1094,34 @@ def create_services_template():
         if service_name == "lakerunner-query-api":
             base_env.append(Environment(Name="QUERY_WORKER_CLUSTER_NAME", Value=ImportValue(ci_export("ClusterName"))))
 
+        # Add memory-based environment variables (GOMEMLIMIT, GOGC, DUCKDB settings)
+        # Calculate based on service memory configuration
+        memory_mib = service_config.get('memory_mib', 1024)
+
+        # DuckDB services (ingest, compact, rollup) get specific DuckDB memory tuning
+        if service_name in LAKERUNNER_WORKER_SERVICES:
+            # DuckDB services: GOMEMLIMIT=750MiB, GOGC=100, DuckDB gets (total - 1GiB)
+            base_env.append(Environment(Name="GOMEMLIMIT", Value="750MiB"))
+            base_env.append(Environment(Name="GOGC", Value="100"))
+            duckdb_memory_mb = calculate_duckdb_memory_limit(memory_mib)
+            base_env.append(Environment(Name="LAKERUNNER_DUCKDB_MEMORY_LIMIT", Value=duckdb_memory_mb))
+            base_env.append(Environment(Name="LAKERUNNER_DUCKDB_TEMP_DIRECTORY", Value="/scratch"))
+
+        # Query-worker gets 50/50 memory split between Go and DuckDB
+        elif service_name == "lakerunner-query-worker":
+            qw_settings = calculate_query_worker_memory_settings(memory_mib)
+            base_env.append(Environment(Name="GOMEMLIMIT", Value=qw_settings['gomemlimit']))
+            base_env.append(Environment(Name="GOGC", Value=qw_settings['gogc']))
+            base_env.append(Environment(Name="LAKERUNNER_DUCKDB_MEMORY_LIMIT", Value=qw_settings['duckdb_memory_limit']))
+            base_env.append(Environment(Name="LAKERUNNER_DUCKDB_TEMP_DIRECTORY", Value="/scratch"))
+
+        # Other Go services get standard GOMEMLIMIT and GOGC settings
+        else:
+            gomemlimit = calculate_gomemlimit(memory_mib)
+            gogc = calculate_gogc(memory_mib)
+            base_env.append(Environment(Name="GOMEMLIMIT", Value=gomemlimit))
+            base_env.append(Environment(Name="GOGC", Value=gogc))
+
         # Build secrets
         secrets = [
             EcsSecret(Name="STORAGE_PROFILES_ENV", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles")),
@@ -1110,15 +1140,6 @@ def create_services_template():
             SourceVolume="scratch",
             ReadOnly=False
         )]
-
-        # Add EFS mount points
-        for mount in efs_mounts:
-            ap_name = mount['access_point_name']
-            mount_points.append(MountPoint(
-                ContainerPath=mount['container_path'],
-                SourceVolume=f"efs-{ap_name}",
-                ReadOnly=False
-            ))
 
         # Add bind mounts
         bind_mounts = service_config.get('bind_mounts', [])

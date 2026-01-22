@@ -7,13 +7,13 @@ This repository contains CloudFormation templates for deploying the core Lakerun
 The core Lakerunner deployment consists of CloudFormation stacks that can be deployed in order:
 
 **Option 1: Use Existing VPC**
-1. **Common Infrastructure** (`lakerunner-common.yaml`) - RDS database, EFS, S3 bucket, SQS queue, and ALB
-2. **Migration** (`lakerunner-migration.yaml`) - Database migration task that runs once during initial setup  
+1. **Common Infrastructure** (`lakerunner-common.yaml`) - RDS database, MSK (Kafka), S3 bucket, SQS queue, and ALB
+2. **Migration** (`lakerunner-migration.yaml`) - Database migration task that runs once during initial setup
 3. **Services** (`lakerunner-services.yaml`) - ECS Fargate services for all Lakerunner microservices
 
 **Option 2: Create New VPC (Recommended for POCs)**
 1. **VPC Infrastructure** (`lakerunner-vpc.yaml`) - Cost-optimized VPC with essential VPC endpoints
-2. **Common Infrastructure** (`lakerunner-common.yaml`) - RDS database, EFS, S3 bucket, SQS queue, and ALB
+2. **Common Infrastructure** (`lakerunner-common.yaml`) - RDS database, MSK (Kafka), S3 bucket, SQS queue, and ALB
 3. **Migration** (`lakerunner-migration.yaml`) - Database migration task that runs once during initial setup
 4. **Services** (`lakerunner-services.yaml`) - ECS Fargate services for all Lakerunner microservices
 
@@ -86,7 +86,7 @@ Pre-generated CloudFormation templates are available in the `generated-templates
 Deploy `generated-templates/lakerunner-common.yaml` using the AWS Console or CLI. Required parameters:
 
 - **VpcId** – VPC where resources will be created
-- **PrivateSubnets** – Private subnet IDs (for ECS/RDS/EFS). Provide at least two in different AZs.
+- **PrivateSubnets** – Private subnet IDs (for ECS/RDS/MSK). Provide at least two in different AZs.
 
 Optional parameters:
 
@@ -390,22 +390,47 @@ aws cloudformation create-stack \
 Lakerunner consists of these microservices that process telemetry data:
 
 - **pubsub-sqs** - Receives SQS notifications from S3 bucket
-- **ingest-logs/metrics** - Process raw log and metric files
-- **compact-logs/metrics** - Optimize storage format
-- **rollup-metrics** - Pre-aggregate metrics for faster queries
+- **ingest-logs/metrics/traces** - Process raw telemetry files using DuckDB
+- **compact-logs/metrics/traces** - Optimize storage format using DuckDB
+- **rollup-metrics** - Pre-aggregate metrics for faster queries using DuckDB
 - **sweeper** - Clean up temporary files
 - **query-api** - REST API for data queries (ALB-attached)
-- **query-worker** - Query execution engine
+- **query-worker** - Query execution engine using DuckDB
 - **grafana** - Visualization dashboard (ALB-attached)
+- **monitoring** - Internal monitoring and health metrics
+- **boxer-common** - Task queue management
 
 All services share:
 
 - Common ECS task execution and task roles
 - Unified secret injection from Secrets Manager and SSM
 - Standardized logging to CloudWatch
-- EFS mount for shared scratch space (/scratch)
-- Health checks appropriate to service type (Go, Scala, cURL)
+- Ephemeral storage for temporary files (/scratch - per-task emptyDir volume)
+- Health checks appropriate to service type
 - Optional OTLP telemetry export to OpenTelemetry collectors
+- **Automatic memory tuning** - Environment variables (GOMEMLIMIT, GOGC, DUCKDB settings) configured based on container memory allocation
+
+### Memory-Based Environment Variable Tuning
+
+The Services stack automatically configures runtime memory settings based on each service's memory allocation:
+
+**DuckDB Services** (ingest, compact, rollup):
+- `GOMEMLIMIT=750MiB` - Fixed Go memory limit
+- `GOGC=100` - Fixed garbage collection target
+- `LAKERUNNER_DUCKDB_MEMORY_LIMIT` - Calculated as (total memory - 1GiB), minimum 512MB
+- `LAKERUNNER_DUCKDB_TEMP_DIRECTORY=/scratch` - Temporary file location
+
+**Query Worker Service**:
+- `GOMEMLIMIT` - Set to 37.5% of total memory (75% of remaining after DuckDB)
+- `GOGC` - Calculated based on total memory (50/100/200)
+- `LAKERUNNER_DUCKDB_MEMORY_LIMIT` - Set to 50% of total memory
+- `LAKERUNNER_DUCKDB_TEMP_DIRECTORY=/scratch` - Temporary file location
+
+**Other Go Services**:
+- `GOMEMLIMIT` - If memory > 1GiB: (total - 250MiB), else 75% of total
+- `GOGC` - 50 (≤1GiB), 100 (≤2GiB), or 200 (>2GiB)
+
+This ensures optimal performance and prevents out-of-memory errors by properly allocating memory between Go runtime and DuckDB.
 
 ## Additional Documentation
 
@@ -480,15 +505,16 @@ aws cloudformation create-stack --stack-name lakerunner-grafana \
 - VPC ID, Private/Public Subnets
 - ECS Cluster ARN
 - Database endpoint, port, credentials ARN
-- EFS filesystem ID
+- MSK (Kafka) broker endpoints and credentials
 - S3 bucket name/ARN
+- SQS queue URL
 - Security groups
 
 **Services imports from Common:**
 
 - All infrastructure resources
 - Database credentials for app configuration
-- EFS for Grafana persistence
+- MSK configuration for event streaming
 
 **Migration imports from Common:**
 
@@ -514,7 +540,7 @@ aws cloudformation create-stack --stack-name lakerunner-grafana \
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `VpcId` | AWS::EC2::VPC::Id | Yes | - | VPC where resources will be created |
-| `PrivateSubnets` | List<AWS::EC2::Subnet::Id> | Yes | - | Private subnet IDs for ECS/RDS/EFS (≥2 in different AZs) |
+| `PrivateSubnets` | List<AWS::EC2::Subnet::Id> | Yes | - | Private subnet IDs for ECS/RDS/MSK (≥2 in different AZs) |
 | `PublicSubnets` | List<AWS::EC2::Subnet::Id> | No | - | Public subnet IDs for internet-facing ALB (≥2 in different AZs) |
 | `ApiKeysOverride` | String | No | "" | Custom API keys configuration in YAML format |
 | `StorageProfilesOverride` | String | No | "" | Custom storage profiles configuration in YAML format |
@@ -535,7 +561,7 @@ aws cloudformation create-stack --stack-name lakerunner-grafana \
 | `CommonInfraStackName` | String | Yes | - | Name of the CommonInfra stack to import values from |
 | `AlbScheme` | String | No | "internal" | ALB scheme: "internal" or "internet-facing" |
 | `OtelEndpoint` | String | No | "" | OTEL collector HTTP endpoint (e.g., http://collector-dns:4318) |
-| `GrafanaResetToken` | String | No | "" | Change this value to reset Grafana data (wipe EFS volume) |
+| `GrafanaResetToken` | String | No | "" | Change this value to reset Grafana data |
 | `GoServicesImage` | String | No | public.ecr.aws/cardinalhq.io/lakerunner:v1.2.1 | Container image for Go services |
 | `QueryApiImage` | String | No | public.ecr.aws/cardinalhq.io/lakerunner/query-api:latest | Container image for query-api service |
 | `QueryWorkerImage` | String | No | public.ecr.aws/cardinalhq.io/lakerunner/query-worker:latest | Container image for query-worker service |

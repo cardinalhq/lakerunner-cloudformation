@@ -127,7 +127,6 @@ The repository includes comprehensive parameter validation tests that catch issu
 1. Add service configuration to `defaults.yaml`
 1. Services template will automatically create ECS service, task definition, IAM roles
 1. For ALB attachment, set `ingress.attach_alb: true` in service config
-1. For EFS access, define `efs_mounts` with access point configuration
 
 ### Service Configuration Parameters
 

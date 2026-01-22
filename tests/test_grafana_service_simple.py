@@ -196,7 +196,6 @@ class TestGrafanaTemplateSimple(unittest.TestCase):
         assert "GrafanaAlb" in resources
         assert "GrafanaTg" in resources
         assert "GrafanaSecret" in resources
-        # Note: EFS access point removed, using PostgreSQL now
         assert "GrafanaLogGroup" in resources
     
     @patch('lakerunner_grafana_service.load_grafana_config')

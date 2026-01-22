@@ -38,7 +38,7 @@ The Lakerunner CloudFormation templates are generated using Python and the Tropo
 The `src/` directory contains Python templates that generate CloudFormation YAML:
 
 **Core Lakerunner Stacks:**
-- **`src/lakerunner_common.py`** - Core infrastructure (VPC, RDS, EFS, S3, ALB)
+- **`src/lakerunner_common.py`** - Core infrastructure (VPC, RDS, MSK, S3, SQS, ALB)
 - **`src/lakerunner_migration.py`** - Database migration task
 - **`src/lakerunner_services.py`** - ECS services for all Lakerunner components
 - **`src/lakerunner_grafana_service.py`** - Grafana dashboard service

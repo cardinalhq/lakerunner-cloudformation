@@ -905,15 +905,6 @@ Resources:
                 Effect: Allow
                 Resource: '*'
               - Action:
-                  - elasticfilesystem:ClientMount
-                  - elasticfilesystem:ClientWrite
-                  - elasticfilesystem:ClientRootAccess
-                  - elasticfilesystem:DescribeFileSystems
-                  - elasticfilesystem:DescribeMountTargets
-                  - elasticfilesystem:DescribeAccessPoints
-                Effect: Allow
-                Resource: '*'
-              - Action:
                   - ssmmessages:CreateControlChannel
                   - ssmmessages:CreateDataChannel
                   - ssmmessages:OpenControlChannel
@@ -985,15 +976,6 @@ Resources:
                   Fn::Sub:
                     - ${CommonInfraStackName}-MSKSecretsKeyArn
                     - CommonInfraStackName: !Ref 'CommonInfraStackName'
-              - Action:
-                  - elasticfilesystem:ClientMount
-                  - elasticfilesystem:ClientWrite
-                  - elasticfilesystem:ClientRootAccess
-                  - elasticfilesystem:DescribeFileSystems
-                  - elasticfilesystem:DescribeMountTargets
-                  - elasticfilesystem:DescribeAccessPoints
-                Effect: Allow
-                Resource: '*'
               - Action:
                   - ssmmessages:CreateControlChannel
                   - ssmmessages:CreateDataChannel
@@ -2178,6 +2160,10 @@ Resources:
                 - !Ref 'AWS::NoValue'
             - Name: OTEL_METRIC_EXPORT_INTERVAL
               Value: '10000'
+            - Name: GOMEMLIMIT
+              Value: 384MiB
+            - Name: GOGC
+              Value: '50'
           HealthCheck:
             Command:
               - /app/bin/lakerunner
@@ -2323,6 +2309,10 @@ Resources:
                 - !Ref 'AWS::NoValue'
             - Name: OTEL_METRIC_EXPORT_INTERVAL
               Value: '10000'
+            - Name: GOMEMLIMIT
+              Value: 384MiB
+            - Name: GOGC
+              Value: '50'
           HealthCheck:
             Command:
               - /app/bin/lakerunner
@@ -2466,6 +2456,14 @@ Resources:
                 - !Ref 'AWS::NoValue'
             - Name: OTEL_METRIC_EXPORT_INTERVAL
               Value: '10000'
+            - Name: GOMEMLIMIT
+              Value: 750MiB
+            - Name: GOGC
+              Value: '100'
+            - Name: LAKERUNNER_DUCKDB_MEMORY_LIMIT
+              Value: '1073'
+            - Name: LAKERUNNER_DUCKDB_TEMP_DIRECTORY
+              Value: /scratch
           HealthCheck:
             Command:
               - /app/bin/lakerunner
@@ -2609,6 +2607,14 @@ Resources:
                 - !Ref 'AWS::NoValue'
             - Name: OTEL_METRIC_EXPORT_INTERVAL
               Value: '10000'
+            - Name: GOMEMLIMIT
+              Value: 750MiB
+            - Name: GOGC
+              Value: '100'
+            - Name: LAKERUNNER_DUCKDB_MEMORY_LIMIT
+              Value: '1073'
+            - Name: LAKERUNNER_DUCKDB_TEMP_DIRECTORY
+              Value: /scratch
           HealthCheck:
             Command:
               - /app/bin/lakerunner
@@ -2752,6 +2758,14 @@ Resources:
                 - !Ref 'AWS::NoValue'
             - Name: OTEL_METRIC_EXPORT_INTERVAL
               Value: '10000'
+            - Name: GOMEMLIMIT
+              Value: 750MiB
+            - Name: GOGC
+              Value: '100'
+            - Name: LAKERUNNER_DUCKDB_MEMORY_LIMIT
+              Value: '1073'
+            - Name: LAKERUNNER_DUCKDB_TEMP_DIRECTORY
+              Value: /scratch
           HealthCheck:
             Command:
               - /app/bin/lakerunner
@@ -2895,6 +2909,14 @@ Resources:
                 - !Ref 'AWS::NoValue'
             - Name: OTEL_METRIC_EXPORT_INTERVAL
               Value: '10000'
+            - Name: GOMEMLIMIT
+              Value: 750MiB
+            - Name: GOGC
+              Value: '100'
+            - Name: LAKERUNNER_DUCKDB_MEMORY_LIMIT
+              Value: '1073'
+            - Name: LAKERUNNER_DUCKDB_TEMP_DIRECTORY
+              Value: /scratch
           HealthCheck:
             Command:
               - /app/bin/lakerunner
@@ -3038,6 +3060,14 @@ Resources:
                 - !Ref 'AWS::NoValue'
             - Name: OTEL_METRIC_EXPORT_INTERVAL
               Value: '10000'
+            - Name: GOMEMLIMIT
+              Value: 750MiB
+            - Name: GOGC
+              Value: '100'
+            - Name: LAKERUNNER_DUCKDB_MEMORY_LIMIT
+              Value: '1073'
+            - Name: LAKERUNNER_DUCKDB_TEMP_DIRECTORY
+              Value: /scratch
           HealthCheck:
             Command:
               - /app/bin/lakerunner
@@ -3181,6 +3211,14 @@ Resources:
                 - !Ref 'AWS::NoValue'
             - Name: OTEL_METRIC_EXPORT_INTERVAL
               Value: '10000'
+            - Name: GOMEMLIMIT
+              Value: 750MiB
+            - Name: GOGC
+              Value: '100'
+            - Name: LAKERUNNER_DUCKDB_MEMORY_LIMIT
+              Value: '1073'
+            - Name: LAKERUNNER_DUCKDB_TEMP_DIRECTORY
+              Value: /scratch
           HealthCheck:
             Command:
               - /app/bin/lakerunner
@@ -3325,6 +3363,10 @@ Resources:
                 - !Ref 'AWS::NoValue'
             - Name: OTEL_METRIC_EXPORT_INTERVAL
               Value: '10000'
+            - Name: GOMEMLIMIT
+              Value: 384MiB
+            - Name: GOGC
+              Value: '50'
           HealthCheck:
             Command:
               - /app/bin/lakerunner
@@ -3470,6 +3512,10 @@ Resources:
                 - !Ref 'AWS::NoValue'
             - Name: OTEL_METRIC_EXPORT_INTERVAL
               Value: '10000'
+            - Name: GOMEMLIMIT
+              Value: 1798MiB
+            - Name: GOGC
+              Value: '100'
           HealthCheck:
             Command:
               - /app/bin/lakerunner
@@ -3621,6 +3667,10 @@ Resources:
                 Fn::Sub:
                   - ${CommonInfraStackName}-ClusterName
                   - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: GOMEMLIMIT
+              Value: 1798MiB
+            - Name: GOGC
+              Value: '100'
           HealthCheck:
             Command:
               - /app/bin/lakerunner
@@ -3769,6 +3819,14 @@ Resources:
               Value: 'true'
             - Name: LAKERUNNER_QUERY_MAX_SEGMENTS_PER_WORKER_PER_WAVE
               Value: '100'
+            - Name: GOMEMLIMIT
+              Value: 3072MiB
+            - Name: GOGC
+              Value: '200'
+            - Name: LAKERUNNER_DUCKDB_MEMORY_LIMIT
+              Value: '4294'
+            - Name: LAKERUNNER_DUCKDB_TEMP_DIRECTORY
+              Value: /scratch
           HealthCheck:
             Command:
               - /app/bin/lakerunner
@@ -3916,6 +3974,14 @@ Resources:
                 - !Ref 'AWS::NoValue'
             - Name: OTEL_METRIC_EXPORT_INTERVAL
               Value: '10000'
+            - Name: GOMEMLIMIT
+              Value: 750MiB
+            - Name: GOGC
+              Value: '100'
+            - Name: LAKERUNNER_DUCKDB_MEMORY_LIMIT
+              Value: '1073'
+            - Name: LAKERUNNER_DUCKDB_TEMP_DIRECTORY
+              Value: /scratch
           HealthCheck:
             Command:
               - /app/bin/lakerunner
@@ -4058,6 +4124,10 @@ Resources:
                 - !Ref 'AWS::NoValue'
             - Name: OTEL_METRIC_EXPORT_INTERVAL
               Value: '10000'
+            - Name: GOMEMLIMIT
+              Value: 384MiB
+            - Name: GOGC
+              Value: '50'
           HealthCheck:
             Command:
               - /app/bin/lakerunner
@@ -4225,15 +4295,6 @@ Resources:
                   Fn::Sub:
                     - ${CommonInfraStackName}-MSKSecretsKeyArn
                     - CommonInfraStackName: !Ref 'CommonInfraStackName'
-              - Action:
-                  - elasticfilesystem:ClientMount
-                  - elasticfilesystem:ClientWrite
-                  - elasticfilesystem:ClientRootAccess
-                  - elasticfilesystem:DescribeFileSystems
-                  - elasticfilesystem:DescribeMountTargets
-                  - elasticfilesystem:DescribeAccessPoints
-                Effect: Allow
-                Resource: '*'
               - Action:
                   - ssmmessages:CreateControlChannel
                   - ssmmessages:CreateDataChannel
