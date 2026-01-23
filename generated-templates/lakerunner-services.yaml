@@ -1106,7 +1106,7 @@ Resources:
       ScalableDimension: ecs:service:DesiredCount
       ServiceNamespace: ecs
     Type: AWS::ApplicationAutoScaling::ScalableTarget
-  ScalingPolicyLakerunnerCompactLogs:
+  ScalingPolicyCpuLakerunnerCompactLogs:
     Condition: CreateLogsServices
     Properties:
       PolicyName: lakerunner-compact-logs-cpu-scaling
@@ -1119,7 +1119,7 @@ Resources:
         ScaleOutCooldown: !Ref 'AutoScalingScaleOutCooldown'
         TargetValue: !Ref 'AutoScalingCPUTarget'
     Type: AWS::ApplicationAutoScaling::ScalingPolicy
-  ScalingPolicyLakerunnerCompactMetrics:
+  ScalingPolicyCpuLakerunnerCompactMetrics:
     Condition: CreateMetricsServices
     Properties:
       PolicyName: lakerunner-compact-metrics-cpu-scaling
@@ -1132,7 +1132,7 @@ Resources:
         ScaleOutCooldown: !Ref 'AutoScalingScaleOutCooldown'
         TargetValue: !Ref 'AutoScalingCPUTarget'
     Type: AWS::ApplicationAutoScaling::ScalingPolicy
-  ScalingPolicyLakerunnerCompactTraces:
+  ScalingPolicyCpuLakerunnerCompactTraces:
     Condition: CreateTracesServices
     Properties:
       PolicyName: lakerunner-compact-traces-cpu-scaling
@@ -1145,7 +1145,7 @@ Resources:
         ScaleOutCooldown: !Ref 'AutoScalingScaleOutCooldown'
         TargetValue: !Ref 'AutoScalingCPUTarget'
     Type: AWS::ApplicationAutoScaling::ScalingPolicy
-  ScalingPolicyLakerunnerIngestLogs:
+  ScalingPolicyCpuLakerunnerIngestLogs:
     Condition: CreateLogsServices
     Properties:
       PolicyName: lakerunner-ingest-logs-cpu-scaling
@@ -1158,7 +1158,7 @@ Resources:
         ScaleOutCooldown: !Ref 'AutoScalingScaleOutCooldown'
         TargetValue: !Ref 'AutoScalingCPUTarget'
     Type: AWS::ApplicationAutoScaling::ScalingPolicy
-  ScalingPolicyLakerunnerIngestMetrics:
+  ScalingPolicyCpuLakerunnerIngestMetrics:
     Condition: CreateMetricsServices
     Properties:
       PolicyName: lakerunner-ingest-metrics-cpu-scaling
@@ -1171,7 +1171,7 @@ Resources:
         ScaleOutCooldown: !Ref 'AutoScalingScaleOutCooldown'
         TargetValue: !Ref 'AutoScalingCPUTarget'
     Type: AWS::ApplicationAutoScaling::ScalingPolicy
-  ScalingPolicyLakerunnerIngestTraces:
+  ScalingPolicyCpuLakerunnerIngestTraces:
     Condition: CreateTracesServices
     Properties:
       PolicyName: lakerunner-ingest-traces-cpu-scaling
@@ -1184,7 +1184,7 @@ Resources:
         ScaleOutCooldown: !Ref 'AutoScalingScaleOutCooldown'
         TargetValue: !Ref 'AutoScalingCPUTarget'
     Type: AWS::ApplicationAutoScaling::ScalingPolicy
-  ScalingPolicyLakerunnerRollupMetrics:
+  ScalingPolicyCpuLakerunnerRollupMetrics:
     Condition: CreateMetricsServices
     Properties:
       PolicyName: lakerunner-rollup-metrics-cpu-scaling
@@ -1196,6 +1196,132 @@ Resources:
         ScaleInCooldown: !Ref 'AutoScalingScaleInCooldown'
         ScaleOutCooldown: !Ref 'AutoScalingScaleOutCooldown'
         TargetValue: !Ref 'AutoScalingCPUTarget'
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+  ScalingPolicyLagLakerunnerCompactLogs:
+    Condition: CreateLogsServices
+    Properties:
+      PolicyName: lakerunner-compact-logs-lag-scaling
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref 'ScalableTargetLakerunnerCompactLogs'
+      TargetTrackingScalingPolicyConfiguration:
+        CustomizedMetricSpecification:
+          Dimensions:
+            - Name: task_name
+              Value: compact-logs
+          MetricName: lakerunner.workqueue.lag
+          Namespace: Lakerunner
+          Statistic: Average
+        ScaleInCooldown: !Ref 'AutoScalingScaleInCooldown'
+        ScaleOutCooldown: !Ref 'AutoScalingScaleOutCooldown'
+        TargetValue: 50
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+  ScalingPolicyLagLakerunnerCompactMetrics:
+    Condition: CreateMetricsServices
+    Properties:
+      PolicyName: lakerunner-compact-metrics-lag-scaling
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref 'ScalableTargetLakerunnerCompactMetrics'
+      TargetTrackingScalingPolicyConfiguration:
+        CustomizedMetricSpecification:
+          Dimensions:
+            - Name: task_name
+              Value: compact-metrics
+          MetricName: lakerunner.workqueue.lag
+          Namespace: Lakerunner
+          Statistic: Average
+        ScaleInCooldown: !Ref 'AutoScalingScaleInCooldown'
+        ScaleOutCooldown: !Ref 'AutoScalingScaleOutCooldown'
+        TargetValue: 50
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+  ScalingPolicyLagLakerunnerCompactTraces:
+    Condition: CreateTracesServices
+    Properties:
+      PolicyName: lakerunner-compact-traces-lag-scaling
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref 'ScalableTargetLakerunnerCompactTraces'
+      TargetTrackingScalingPolicyConfiguration:
+        CustomizedMetricSpecification:
+          Dimensions:
+            - Name: task_name
+              Value: compact-traces
+          MetricName: lakerunner.workqueue.lag
+          Namespace: Lakerunner
+          Statistic: Average
+        ScaleInCooldown: !Ref 'AutoScalingScaleInCooldown'
+        ScaleOutCooldown: !Ref 'AutoScalingScaleOutCooldown'
+        TargetValue: 50
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+  ScalingPolicyLagLakerunnerIngestLogs:
+    Condition: CreateLogsServices
+    Properties:
+      PolicyName: lakerunner-ingest-logs-lag-scaling
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref 'ScalableTargetLakerunnerIngestLogs'
+      TargetTrackingScalingPolicyConfiguration:
+        CustomizedMetricSpecification:
+          Dimensions:
+            - Name: task_name
+              Value: ingest-logs
+          MetricName: lakerunner.workqueue.lag
+          Namespace: Lakerunner
+          Statistic: Average
+        ScaleInCooldown: !Ref 'AutoScalingScaleInCooldown'
+        ScaleOutCooldown: !Ref 'AutoScalingScaleOutCooldown'
+        TargetValue: 50
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+  ScalingPolicyLagLakerunnerIngestMetrics:
+    Condition: CreateMetricsServices
+    Properties:
+      PolicyName: lakerunner-ingest-metrics-lag-scaling
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref 'ScalableTargetLakerunnerIngestMetrics'
+      TargetTrackingScalingPolicyConfiguration:
+        CustomizedMetricSpecification:
+          Dimensions:
+            - Name: task_name
+              Value: ingest-metrics
+          MetricName: lakerunner.workqueue.lag
+          Namespace: Lakerunner
+          Statistic: Average
+        ScaleInCooldown: !Ref 'AutoScalingScaleInCooldown'
+        ScaleOutCooldown: !Ref 'AutoScalingScaleOutCooldown'
+        TargetValue: 50
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+  ScalingPolicyLagLakerunnerIngestTraces:
+    Condition: CreateTracesServices
+    Properties:
+      PolicyName: lakerunner-ingest-traces-lag-scaling
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref 'ScalableTargetLakerunnerIngestTraces'
+      TargetTrackingScalingPolicyConfiguration:
+        CustomizedMetricSpecification:
+          Dimensions:
+            - Name: task_name
+              Value: ingest-traces
+          MetricName: lakerunner.workqueue.lag
+          Namespace: Lakerunner
+          Statistic: Average
+        ScaleInCooldown: !Ref 'AutoScalingScaleInCooldown'
+        ScaleOutCooldown: !Ref 'AutoScalingScaleOutCooldown'
+        TargetValue: 50
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+  ScalingPolicyLagLakerunnerRollupMetrics:
+    Condition: CreateMetricsServices
+    Properties:
+      PolicyName: lakerunner-rollup-metrics-lag-scaling
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref 'ScalableTargetLakerunnerRollupMetrics'
+      TargetTrackingScalingPolicyConfiguration:
+        CustomizedMetricSpecification:
+          Dimensions:
+            - Name: task_name
+              Value: rollup-metrics
+          MetricName: lakerunner.workqueue.lag
+          Namespace: Lakerunner
+          Statistic: Average
+        ScaleInCooldown: !Ref 'AutoScalingScaleInCooldown'
+        ScaleOutCooldown: !Ref 'AutoScalingScaleOutCooldown'
+        TargetValue: 50
     Type: AWS::ApplicationAutoScaling::ScalingPolicy
   ServiceLakerunnerAdminApi:
     Condition: EnableAdminApi

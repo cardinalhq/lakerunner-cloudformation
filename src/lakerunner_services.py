@@ -28,7 +28,8 @@ from troposphere.ecs import (
 )
 from troposphere.applicationautoscaling import (
     ScalableTarget, ScalingPolicy,
-    TargetTrackingScalingPolicyConfiguration, PredefinedMetricSpecification
+    TargetTrackingScalingPolicyConfiguration, PredefinedMetricSpecification,
+    CustomizedMetricSpecification, MetricDimension as AutoScalingMetricDimension
 )
 from troposphere.iam import Role, Policy
 from troposphere.elasticloadbalancingv2 import LoadBalancer, TargetGroup, TargetGroupAttribute, Listener, Matcher
@@ -1375,7 +1376,7 @@ def create_services_template():
 
                 # Create CPU-based Target Tracking Scaling Policy
                 t.add_resource(ScalingPolicy(
-                    f"ScalingPolicy{title_name}",
+                    f"ScalingPolicyCpu{title_name}",
                     Condition=autoscale_condition,
                     PolicyName=f"{service_name}-cpu-scaling",
                     PolicyType="TargetTrackingScaling",
@@ -1384,6 +1385,30 @@ def create_services_template():
                         TargetValue=Ref(AutoScalingCPUTarget),
                         PredefinedMetricSpecification=PredefinedMetricSpecification(
                             PredefinedMetricType="ECSServiceAverageCPUUtilization"
+                        ),
+                        ScaleInCooldown=Ref(AutoScalingScaleInCooldown),
+                        ScaleOutCooldown=Ref(AutoScalingScaleOutCooldown)
+                    )
+                ))
+
+                # Create Workqueue Lag-based Target Tracking Scaling Policy
+                # task_name dimension is the service name without "lakerunner-" prefix
+                task_name_dimension = service_name.replace("lakerunner-", "")
+                t.add_resource(ScalingPolicy(
+                    f"ScalingPolicyLag{title_name}",
+                    Condition=autoscale_condition,
+                    PolicyName=f"{service_name}-lag-scaling",
+                    PolicyType="TargetTrackingScaling",
+                    ScalingTargetId=Ref(scalable_target),
+                    TargetTrackingScalingPolicyConfiguration=TargetTrackingScalingPolicyConfiguration(
+                        TargetValue=50,  # Scale when workqueue lag exceeds 50 items
+                        CustomizedMetricSpecification=CustomizedMetricSpecification(
+                            MetricName="lakerunner.workqueue.lag",
+                            Namespace="Lakerunner",
+                            Statistic="Average",
+                            Dimensions=[
+                                AutoScalingMetricDimension(Name="task_name", Value=task_name_dimension)
+                            ]
                         ),
                         ScaleInCooldown=Ref(AutoScalingScaleInCooldown),
                         ScaleOutCooldown=Ref(AutoScalingScaleOutCooldown)

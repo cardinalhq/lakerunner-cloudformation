@@ -338,7 +338,7 @@ The ALB can be configured as:
 
 ## Auto-Scaling
 
-The Services stack supports optional CPU-based auto-scaling for worker services. When enabled, ECS will automatically add or remove tasks based on average CPU utilization.
+The Services stack supports optional dual-metric auto-scaling for worker services. When enabled, ECS will automatically add or remove tasks based on **both CPU utilization and workqueue lag**, scaling to whichever metric requires more capacity.
 
 ### Enabled Services
 
@@ -356,10 +356,23 @@ Auto-scaling applies to these services when `EnableAutoScaling=Yes`:
 
 ### How It Works
 
-- **MinCapacity**: Uses the service's Replicas parameter as the minimum
+**Dual-Metric Scaling:**
+- **CPU Metric**: Scales based on average CPU utilization (target: configurable, default 70%)
+- **Workqueue Lag Metric**: Scales based on pending work items (target: 50 items)
+- **Scale Decision**: Uses whichever metric requires MORE tasks (conservative approach)
+
+**Capacity Limits:**
+- **MinCapacity**: Uses the service's Replicas parameter as the minimum (starts at 1 for auto-scaling services)
 - **MaxCapacity**: Uses the `AutoScalingMaxReplicas` parameter as the maximum
-- **Scale Out**: When average CPU exceeds target%, a new task is added (respects cooldown)
-- **Scale In**: When average CPU drops below target%, a task is removed (respects cooldown)
+
+**Scaling Behavior:**
+- **Scale Out**: When CPU > target% OR lag > 50 items, a new task is added (respects cooldown)
+- **Scale In**: When CPU < target% AND lag < 50 items, a task is removed (respects cooldown)
+
+**Workqueue Metrics:**
+- Metrics are published to CloudWatch namespace `Lakerunner` by the monitoring service
+- Metric name: `lakerunner.workqueue.lag`
+- Dimension: `task_name` (e.g., `ingest-logs`, `compact-metrics`)
 
 ### Example Deployment
 

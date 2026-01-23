@@ -704,11 +704,11 @@ class TestServicesTemplateSimple:
         assert resources["ScalableTargetLakerunnerIngestTraces"]["Condition"] == "CreateTracesServices"
 
         # Check ScalingPolicy resources exist with correct conditions
-        assert "ScalingPolicyLakerunnerIngestLogs" in resources
-        assert resources["ScalingPolicyLakerunnerIngestLogs"]["Condition"] == "CreateLogsServices"
+        assert "ScalingPolicyCpuLakerunnerIngestLogs" in resources
+        assert resources["ScalingPolicyCpuLakerunnerIngestLogs"]["Condition"] == "CreateLogsServices"
 
-        assert "ScalingPolicyLakerunnerCompactMetrics" in resources
-        assert resources["ScalingPolicyLakerunnerCompactMetrics"]["Condition"] == "CreateMetricsServices"
+        assert "ScalingPolicyCpuLakerunnerCompactMetrics" in resources
+        assert resources["ScalingPolicyCpuLakerunnerCompactMetrics"]["Condition"] == "CreateMetricsServices"
 
     @patch('lakerunner_services.load_service_config')
     def test_autoscaling_not_created_for_non_worker_services(self, mock_load_config):
@@ -754,11 +754,11 @@ class TestServicesTemplateSimple:
 
         # No auto-scaling resources for non-worker services
         assert "ScalableTargetLakerunnerQueryApi" not in resources
-        assert "ScalingPolicyLakerunnerQueryApi" not in resources
+        assert "ScalingPolicyCpuLakerunnerQueryApi" not in resources
         assert "ScalableTargetLakerunnerPubsubSqs" not in resources
-        assert "ScalingPolicyLakerunnerPubsubSqs" not in resources
+        assert "ScalingPolicyCpuLakerunnerPubsubSqs" not in resources
         assert "ScalableTargetLakerunnerSweeper" not in resources
-        assert "ScalingPolicyLakerunnerSweeper" not in resources
+        assert "ScalingPolicyCpuLakerunnerSweeper" not in resources
 
     @patch('lakerunner_services.load_service_config')
     def test_autoscaling_policy_uses_cpu_target_tracking(self, mock_load_config):
@@ -785,7 +785,7 @@ class TestServicesTemplateSimple:
         resources = template_dict["Resources"]
 
         # Check scaling policy configuration
-        policy = resources["ScalingPolicyLakerunnerIngestLogs"]["Properties"]
+        policy = resources["ScalingPolicyCpuLakerunnerIngestLogs"]["Properties"]
         assert policy["PolicyType"] == "TargetTrackingScaling"
 
         config = policy["TargetTrackingScalingPolicyConfiguration"]
