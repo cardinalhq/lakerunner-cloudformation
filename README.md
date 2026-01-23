@@ -398,6 +398,41 @@ aws cloudformation create-stack \
 | Aggressive | 30s | 120s | Very responsive, may increase costs |
 | Cost-conscious | 120s | 600s | Slower response, minimizes churn |
 
+## CloudWatch Alarms
+
+The Services stack creates CloudWatch alarms to monitor service health. Alarms are only created when `AlertTopicArn` parameter is provided with a valid SNS topic ARN.
+
+### Available Alarms
+
+**Task Count Alarms (All Services):**
+- Triggers when a service has no running tasks for 5 consecutive minutes
+- Helps detect service failures or deployment issues
+- Evaluation: 5 periods of 1 minute
+
+**Workqueue Lag Alarms (Worker Services Only):**
+- Triggers when workqueue lag exceeds 200 items for 3 consecutive minutes
+- Applies to: `ingest-logs/metrics/traces`, `compact-logs/metrics/traces`, `rollup-metrics`
+- Indicates the service is falling behind on processing work items
+- Evaluation: 3 periods of 1 minute
+- Uses CloudWatch metric: `Lakerunner/lakerunner.workqueue.lag` with dimension `task_name`
+
+**Alarm Actions:**
+- Sends notification to SNS topic when alarm state changes to ALARM
+- Sends notification to SNS topic when alarm state changes to OK
+- Alarms are conditional on service signal type (logs/metrics/traces)
+
+### Example with Alarms
+
+```bash
+aws cloudformation create-stack \
+  --stack-name lakerunner-services \
+  --template-body file://generated-templates/lakerunner-services.yaml \
+  --parameters \
+    ParameterKey=CommonInfraStackName,ParameterValue=lakerunner-common \
+    ParameterKey=AlertTopicArn,ParameterValue=arn:aws:sns:us-east-1:123456789012:lakerunner-alerts \
+  --capabilities CAPABILITY_IAM
+```
+
 ## Services Architecture
 
 Lakerunner consists of these microservices that process telemetry data:

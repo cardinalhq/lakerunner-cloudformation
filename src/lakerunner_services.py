@@ -1455,6 +1455,37 @@ def create_services_template():
             **alarm_kwargs
         ))
 
+        # -----------------------
+        # CloudWatch Alarm for Workqueue Lag (for worker services only)
+        # Alert when workqueue lag exceeds 200 items
+        # -----------------------
+        if service_name in LAKERUNNER_WORKER_SERVICES:
+            task_name_dimension = service_name.replace("lakerunner-", "")
+
+            lag_alarm_kwargs = {
+                "AlarmName": Sub(f"${{AWS::StackName}}-{service_name}-high-workqueue-lag"),
+                "AlarmDescription": f"Alarm when {service_name} workqueue lag exceeds 200 items",
+                "MetricName": "lakerunner.workqueue.lag",
+                "Namespace": "Lakerunner",
+                "Dimensions": [
+                    MetricDimension(Name="task_name", Value=task_name_dimension)
+                ],
+                "Statistic": "Average",
+                "Period": 60,
+                "EvaluationPeriods": 3,
+                "Threshold": 200,
+                "ComparisonOperator": "GreaterThanThreshold",
+                "TreatMissingData": "notBreaching",
+                "AlarmActions": [Ref(AlertTopicArn)],
+                "OKActions": [Ref(AlertTopicArn)],
+                "Condition": alarm_condition_name
+            }
+
+            t.add_resource(Alarm(
+                f"WorkqueueLagAlarm{title_name}",
+                **lag_alarm_kwargs
+            ))
+
     # -----------------------
     # Outputs
     # -----------------------

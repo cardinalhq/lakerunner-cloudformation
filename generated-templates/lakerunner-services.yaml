@@ -4483,4 +4483,151 @@ Resources:
           - ${CommonInfraStackName}-VpcId
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
+  WorkqueueLagAlarmLakerunnerCompactLogs:
+    Condition: CreateAlarmLakerunnerCompactLogs
+    Properties:
+      AlarmActions:
+        - !Ref 'AlertTopicArn'
+      AlarmDescription: Alarm when lakerunner-compact-logs workqueue lag exceeds 200 items
+      AlarmName: !Sub '${AWS::StackName}-lakerunner-compact-logs-high-workqueue-lag'
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: task_name
+          Value: compact-logs
+      EvaluationPeriods: 3
+      MetricName: lakerunner.workqueue.lag
+      Namespace: Lakerunner
+      OKActions:
+        - !Ref 'AlertTopicArn'
+      Period: 60
+      Statistic: Average
+      Threshold: 200
+      TreatMissingData: notBreaching
+    Type: AWS::CloudWatch::Alarm
+  WorkqueueLagAlarmLakerunnerCompactMetrics:
+    Condition: CreateAlarmLakerunnerCompactMetrics
+    Properties:
+      AlarmActions:
+        - !Ref 'AlertTopicArn'
+      AlarmDescription: Alarm when lakerunner-compact-metrics workqueue lag exceeds 200 items
+      AlarmName: !Sub '${AWS::StackName}-lakerunner-compact-metrics-high-workqueue-lag'
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: task_name
+          Value: compact-metrics
+      EvaluationPeriods: 3
+      MetricName: lakerunner.workqueue.lag
+      Namespace: Lakerunner
+      OKActions:
+        - !Ref 'AlertTopicArn'
+      Period: 60
+      Statistic: Average
+      Threshold: 200
+      TreatMissingData: notBreaching
+    Type: AWS::CloudWatch::Alarm
+  WorkqueueLagAlarmLakerunnerCompactTraces:
+    Condition: CreateAlarmLakerunnerCompactTraces
+    Properties:
+      AlarmActions:
+        - !Ref 'AlertTopicArn'
+      AlarmDescription: Alarm when lakerunner-compact-traces workqueue lag exceeds 200 items
+      AlarmName: !Sub '${AWS::StackName}-lakerunner-compact-traces-high-workqueue-lag'
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: task_name
+          Value: compact-traces
+      EvaluationPeriods: 3
+      MetricName: lakerunner.workqueue.lag
+      Namespace: Lakerunner
+      OKActions:
+        - !Ref 'AlertTopicArn'
+      Period: 60
+      Statistic: Average
+      Threshold: 200
+      TreatMissingData: notBreaching
+    Type: AWS::CloudWatch::Alarm
+  WorkqueueLagAlarmLakerunnerIngestLogs:
+    Condition: CreateAlarmLakerunnerIngestLogs
+    Properties:
+      AlarmActions:
+        - !Ref 'AlertTopicArn'
+      AlarmDescription: Alarm when lakerunner-ingest-logs workqueue lag exceeds 200 items
+      AlarmName: !Sub '${AWS::StackName}-lakerunner-ingest-logs-high-workqueue-lag'
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: task_name
+          Value: ingest-logs
+      EvaluationPeriods: 3
+      MetricName: lakerunner.workqueue.lag
+      Namespace: Lakerunner
+      OKActions:
+        - !Ref 'AlertTopicArn'
+      Period: 60
+      Statistic: Average
+      Threshold: 200
+      TreatMissingData: notBreaching
+    Type: AWS::CloudWatch::Alarm
+  WorkqueueLagAlarmLakerunnerIngestMetrics:
+    Condition: CreateAlarmLakerunnerIngestMetrics
+    Properties:
+      AlarmActions:
+        - !Ref 'AlertTopicArn'
+      AlarmDescription: Alarm when lakerunner-ingest-metrics workqueue lag exceeds 200 items
+      AlarmName: !Sub '${AWS::StackName}-lakerunner-ingest-metrics-high-workqueue-lag'
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: task_name
+          Value: ingest-metrics
+      EvaluationPeriods: 3
+      MetricName: lakerunner.workqueue.lag
+      Namespace: Lakerunner
+      OKActions:
+        - !Ref 'AlertTopicArn'
+      Period: 60
+      Statistic: Average
+      Threshold: 200
+      TreatMissingData: notBreaching
+    Type: AWS::CloudWatch::Alarm
+  WorkqueueLagAlarmLakerunnerIngestTraces:
+    Condition: CreateAlarmLakerunnerIngestTraces
+    Properties:
+      AlarmActions:
+        - !Ref 'AlertTopicArn'
+      AlarmDescription: Alarm when lakerunner-ingest-traces workqueue lag exceeds 200 items
+      AlarmName: !Sub '${AWS::StackName}-lakerunner-ingest-traces-high-workqueue-lag'
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: task_name
+          Value: ingest-traces
+      EvaluationPeriods: 3
+      MetricName: lakerunner.workqueue.lag
+      Namespace: Lakerunner
+      OKActions:
+        - !Ref 'AlertTopicArn'
+      Period: 60
+      Statistic: Average
+      Threshold: 200
+      TreatMissingData: notBreaching
+    Type: AWS::CloudWatch::Alarm
+  WorkqueueLagAlarmLakerunnerRollupMetrics:
+    Condition: CreateAlarmLakerunnerRollupMetrics
+    Properties:
+      AlarmActions:
+        - !Ref 'AlertTopicArn'
+      AlarmDescription: Alarm when lakerunner-rollup-metrics workqueue lag exceeds 200 items
+      AlarmName: !Sub '${AWS::StackName}-lakerunner-rollup-metrics-high-workqueue-lag'
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: task_name
+          Value: rollup-metrics
+      EvaluationPeriods: 3
+      MetricName: lakerunner.workqueue.lag
+      Namespace: Lakerunner
+      OKActions:
+        - !Ref 'AlertTopicArn'
+      Period: 60
+      Statistic: Average
+      Threshold: 200
+      TreatMissingData: notBreaching
+    Type: AWS::CloudWatch::Alarm
 
