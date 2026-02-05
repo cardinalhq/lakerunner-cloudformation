@@ -53,7 +53,7 @@ Parameters:
     Description: 'REQUIRED: Name of the CommonInfra stack to import values from.'
     Type: String
   ContainerImage:
-    Default: ghcr.io/cardinalhq/lakerunner:v1.10.1
+    Default: ghcr.io/cardinalhq/lakerunner:v1.10.2
     Description: Migration container image.
     Type: String
   Cpu:
