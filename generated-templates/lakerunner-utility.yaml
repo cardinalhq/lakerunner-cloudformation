@@ -269,8 +269,12 @@ Resources:
                   - ssm:GetParameter
                 Effect: Allow
                 Resource:
-                  - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
-                  - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
+                  - !Sub
+                    - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/api_keys
+                    - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                  - !Sub
+                    - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/storage_profiles
+                    - CommonInfraStackName: !Ref 'CommonInfraStackName'
               - Action:
                   - kms:Decrypt
                   - kms:DescribeKey
@@ -348,9 +352,13 @@ Resources:
                 - S: !ImportValue
                     Fn::Sub: ${CommonInfraStackName}-DbSecretArn
             - Name: API_KEYS_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/api_keys
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: STORAGE_PROFILES_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/storage_profiles
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LAKERUNNER_KAFKA_SASL_USERNAME
               ValueFrom: !Sub
                 - '${S}:username::'

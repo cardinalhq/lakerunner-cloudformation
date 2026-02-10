@@ -2315,9 +2315,13 @@ Resources:
               Protocol: tcp
           Secrets:
             - Name: STORAGE_PROFILES_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/storage_profiles
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: API_KEYS_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/api_keys
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
@@ -2462,9 +2466,13 @@ Resources:
           PortMappings: []
           Secrets:
             - Name: STORAGE_PROFILES_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/storage_profiles
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: API_KEYS_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/api_keys
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
@@ -2613,9 +2621,13 @@ Resources:
           PortMappings: []
           Secrets:
             - Name: STORAGE_PROFILES_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/storage_profiles
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: API_KEYS_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/api_keys
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
@@ -2764,9 +2776,13 @@ Resources:
           PortMappings: []
           Secrets:
             - Name: STORAGE_PROFILES_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/storage_profiles
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: API_KEYS_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/api_keys
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
@@ -2915,9 +2931,13 @@ Resources:
           PortMappings: []
           Secrets:
             - Name: STORAGE_PROFILES_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/storage_profiles
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: API_KEYS_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/api_keys
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
@@ -3066,9 +3086,13 @@ Resources:
           PortMappings: []
           Secrets:
             - Name: STORAGE_PROFILES_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/storage_profiles
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: API_KEYS_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/api_keys
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
@@ -3217,9 +3241,13 @@ Resources:
           PortMappings: []
           Secrets:
             - Name: STORAGE_PROFILES_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/storage_profiles
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: API_KEYS_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/api_keys
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
@@ -3368,9 +3396,13 @@ Resources:
           PortMappings: []
           Secrets:
             - Name: STORAGE_PROFILES_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/storage_profiles
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: API_KEYS_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/api_keys
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
@@ -3518,9 +3550,13 @@ Resources:
               Protocol: tcp
           Secrets:
             - Name: STORAGE_PROFILES_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/storage_profiles
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: API_KEYS_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/api_keys
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
@@ -3665,9 +3701,13 @@ Resources:
           PortMappings: []
           Secrets:
             - Name: STORAGE_PROFILES_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/storage_profiles
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: API_KEYS_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/api_keys
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
@@ -3822,9 +3862,13 @@ Resources:
               Protocol: tcp
           Secrets:
             - Name: STORAGE_PROFILES_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/storage_profiles
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: API_KEYS_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/api_keys
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
@@ -3978,9 +4022,13 @@ Resources:
               Protocol: tcp
           Secrets:
             - Name: STORAGE_PROFILES_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/storage_profiles
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: API_KEYS_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/api_keys
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
@@ -4131,9 +4179,13 @@ Resources:
           PortMappings: []
           Secrets:
             - Name: STORAGE_PROFILES_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/storage_profiles
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: API_KEYS_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/api_keys
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
@@ -4277,9 +4329,13 @@ Resources:
           PortMappings: []
           Secrets:
             - Name: STORAGE_PROFILES_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/storage_profiles'
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/storage_profiles
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: API_KEYS_ENV
-              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/api_keys'
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/api_keys
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'

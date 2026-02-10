@@ -265,7 +265,7 @@ t.add_output(Output(
 # -----------------------
 QueueRes = t.add_resource(Queue(
     "IngestQueue",
-    QueueName="lakerunner-ingest-queue",
+    QueueName=Sub("${AWS::StackName}-ingest-queue"),
     MessageRetentionPeriod=60 * 60 * 24 * 4,  # seconds
     Tags=Tags(
         Name=Sub("${AWS::StackName}-ingest-queue"),
@@ -540,7 +540,7 @@ defaults = load_defaults()
 api_keys_yaml = yaml.dump(defaults['api_keys'], default_flow_style=False)
 t.add_resource(SsmParameter(
     "ApiKeysParam",
-    Name="/lakerunner/api_keys",
+    Name=Sub("/lakerunner/${AWS::StackName}/api_keys"),
     Type="String",
     Value=If(
         "HasApiKeysOverride",
@@ -557,7 +557,7 @@ storage_profiles_default_cf = storage_profiles_default.replace("${BUCKET_NAME}",
 
 t.add_resource(SsmParameter(
     "StorageProfilesParam",
-    Name="/lakerunner/storage_profiles",
+    Name=Sub("/lakerunner/${AWS::StackName}/storage_profiles"),
     Type="String",
     Value=If(
         "HasStorageProfilesOverride",

@@ -116,18 +116,25 @@ class TestParameterValidation:
     def test_condition_usage_in_resources(self):
         """Test that conditions are properly used in resource definitions"""
         from lakerunner_common import t as template
-        
+
         template_dict = json.loads(template.to_json())
         resources = template_dict["Resources"]
-        
+
         # Test that conditions are used in SSM parameter resources
         api_keys_param = None
         for name, resource in resources.items():
-            if (resource["Type"] == "AWS::SSM::Parameter" and 
-                "api_keys" in resource["Properties"].get("Name", "")):
-                api_keys_param = resource
-                break
-        
+            if resource["Type"] == "AWS::SSM::Parameter":
+                name_prop = resource["Properties"].get("Name", "")
+                # Handle both static string and Fn::Sub cases
+                if isinstance(name_prop, str) and "api_keys" in name_prop:
+                    api_keys_param = resource
+                    break
+                elif isinstance(name_prop, dict) and "Fn::Sub" in name_prop:
+                    sub_template = name_prop["Fn::Sub"]
+                    if isinstance(sub_template, str) and "api_keys" in sub_template:
+                        api_keys_param = resource
+                        break
+
         assert api_keys_param is not None, "API keys parameter not found"
         
         # Check that parameter value uses conditional logic

@@ -188,7 +188,7 @@ Resources:
   ApiKeysParam:
     Properties:
       Description: API keys configuration
-      Name: /lakerunner/api_keys
+      Name: !Sub '/lakerunner/${AWS::StackName}/api_keys'
       Type: String
       Value: !If
         - HasApiKeysOverride
@@ -267,7 +267,7 @@ Resources:
   IngestQueue:
     Properties:
       MessageRetentionPeriod: 345600
-      QueueName: lakerunner-ingest-queue
+      QueueName: !Sub '${AWS::StackName}-ingest-queue'
       Tags:
         - Key: Component
           Value: Messaging
@@ -458,7 +458,7 @@ Resources:
   StorageProfilesParam:
     Properties:
       Description: Storage profiles configuration
-      Name: /lakerunner/storage_profiles
+      Name: !Sub '/lakerunner/${AWS::StackName}/storage_profiles'
       Type: String
       Value: !If
         - HasStorageProfilesOverride
