@@ -529,6 +529,7 @@ t.add_output(Output(
 # Export S3 bucket name for IAM policies in other stacks
 t.add_output(Output("BucketName", Value=Ref(BucketRes), Export=Export(name=Sub("${AWS::StackName}-BucketName"))))
 t.add_output(Output("BucketArn", Value=GetAtt(BucketRes, "Arn"), Export=Export(name=Sub("${AWS::StackName}-BucketArn"))))
+t.add_output(Output("QueueUrl", Value=Ref(QueueRes), Export=Export(name=Sub("${AWS::StackName}-QueueUrl"))))
 
 # Load defaults for SSM parameters
 defaults = load_defaults()

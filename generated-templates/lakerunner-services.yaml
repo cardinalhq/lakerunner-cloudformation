@@ -2231,7 +2231,10 @@ Resources:
             - Name: API_KEYS_FILE
               Value: env:API_KEYS_ENV
             - Name: SQS_QUEUE_URL
-              Value: !Sub 'https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/lakerunner-ingest-queue'
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-QueueUrl
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: SQS_REGION
               Value: !Ref 'AWS::Region'
             - Name: LRDB_HOST
@@ -2384,7 +2387,10 @@ Resources:
             - Name: API_KEYS_FILE
               Value: env:API_KEYS_ENV
             - Name: SQS_QUEUE_URL
-              Value: !Sub 'https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/lakerunner-ingest-queue'
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-QueueUrl
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: SQS_REGION
               Value: !Ref 'AWS::Region'
             - Name: LRDB_HOST
@@ -2535,7 +2541,10 @@ Resources:
             - Name: API_KEYS_FILE
               Value: env:API_KEYS_ENV
             - Name: SQS_QUEUE_URL
-              Value: !Sub 'https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/lakerunner-ingest-queue'
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-QueueUrl
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: SQS_REGION
               Value: !Ref 'AWS::Region'
             - Name: LRDB_HOST
@@ -2690,7 +2699,10 @@ Resources:
             - Name: API_KEYS_FILE
               Value: env:API_KEYS_ENV
             - Name: SQS_QUEUE_URL
-              Value: !Sub 'https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/lakerunner-ingest-queue'
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-QueueUrl
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: SQS_REGION
               Value: !Ref 'AWS::Region'
             - Name: LRDB_HOST
@@ -2845,7 +2857,10 @@ Resources:
             - Name: API_KEYS_FILE
               Value: env:API_KEYS_ENV
             - Name: SQS_QUEUE_URL
-              Value: !Sub 'https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/lakerunner-ingest-queue'
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-QueueUrl
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: SQS_REGION
               Value: !Ref 'AWS::Region'
             - Name: LRDB_HOST
@@ -3000,7 +3015,10 @@ Resources:
             - Name: API_KEYS_FILE
               Value: env:API_KEYS_ENV
             - Name: SQS_QUEUE_URL
-              Value: !Sub 'https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/lakerunner-ingest-queue'
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-QueueUrl
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: SQS_REGION
               Value: !Ref 'AWS::Region'
             - Name: LRDB_HOST
@@ -3155,7 +3173,10 @@ Resources:
             - Name: API_KEYS_FILE
               Value: env:API_KEYS_ENV
             - Name: SQS_QUEUE_URL
-              Value: !Sub 'https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/lakerunner-ingest-queue'
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-QueueUrl
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: SQS_REGION
               Value: !Ref 'AWS::Region'
             - Name: LRDB_HOST
@@ -3310,7 +3331,10 @@ Resources:
             - Name: API_KEYS_FILE
               Value: env:API_KEYS_ENV
             - Name: SQS_QUEUE_URL
-              Value: !Sub 'https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/lakerunner-ingest-queue'
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-QueueUrl
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: SQS_REGION
               Value: !Ref 'AWS::Region'
             - Name: LRDB_HOST
@@ -3466,7 +3490,10 @@ Resources:
             - Name: API_KEYS_FILE
               Value: env:API_KEYS_ENV
             - Name: SQS_QUEUE_URL
-              Value: !Sub 'https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/lakerunner-ingest-queue'
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-QueueUrl
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: SQS_REGION
               Value: !Ref 'AWS::Region'
             - Name: LRDB_HOST
@@ -3619,7 +3646,10 @@ Resources:
             - Name: API_KEYS_FILE
               Value: env:API_KEYS_ENV
             - Name: SQS_QUEUE_URL
-              Value: !Sub 'https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/lakerunner-ingest-queue'
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-QueueUrl
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: SQS_REGION
               Value: !Ref 'AWS::Region'
             - Name: LRDB_HOST
@@ -3769,7 +3799,10 @@ Resources:
             - Name: API_KEYS_FILE
               Value: env:API_KEYS_ENV
             - Name: SQS_QUEUE_URL
-              Value: !Sub 'https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/lakerunner-ingest-queue'
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-QueueUrl
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: SQS_REGION
               Value: !Ref 'AWS::Region'
             - Name: LRDB_HOST
@@ -3930,7 +3963,10 @@ Resources:
             - Name: API_KEYS_FILE
               Value: env:API_KEYS_ENV
             - Name: SQS_QUEUE_URL
-              Value: !Sub 'https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/lakerunner-ingest-queue'
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-QueueUrl
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: SQS_REGION
               Value: !Ref 'AWS::Region'
             - Name: LRDB_HOST
@@ -4093,7 +4129,10 @@ Resources:
             - Name: API_KEYS_FILE
               Value: env:API_KEYS_ENV
             - Name: SQS_QUEUE_URL
-              Value: !Sub 'https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/lakerunner-ingest-queue'
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-QueueUrl
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: SQS_REGION
               Value: !Ref 'AWS::Region'
             - Name: LRDB_HOST
@@ -4247,7 +4286,10 @@ Resources:
             - Name: API_KEYS_FILE
               Value: env:API_KEYS_ENV
             - Name: SQS_QUEUE_URL
-              Value: !Sub 'https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/lakerunner-ingest-queue'
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-QueueUrl
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: SQS_REGION
               Value: !Ref 'AWS::Region'
             - Name: LRDB_HOST

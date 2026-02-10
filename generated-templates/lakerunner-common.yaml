@@ -122,6 +122,10 @@ Outputs:
         - ','
         - !Ref 'PublicSubnets'
       - ''
+  QueueUrl:
+    Export:
+      Name: !Sub '${AWS::StackName}-QueueUrl'
+    Value: !Ref 'IngestQueue'
   SupportsInternetFacingAlb:
     Description: Whether this CommonInfra stack supports internet-facing ALBs (requires PublicSubnets)
     Export:

@@ -518,6 +518,7 @@ def create_services_template():
     VpcIdValue = ImportValue(ci_export("VpcId"))
     PrivateSubnetsValue = Split(",", ImportValue(ci_export("PrivateSubnets")))
     BucketArnValue = ImportValue(ci_export("BucketArn"))
+    QueueUrlValue = ImportValue(ci_export("QueueUrl"))
 
     # Import PublicSubnets - CommonInfra always exports this, but may be empty string if not provided
     PublicSubnetsImport = ImportValue(ci_export("PublicSubnets"))
@@ -1052,7 +1053,7 @@ def create_services_template():
             Environment(Name="HOME", Value="/scratch"),
             Environment(Name="STORAGE_PROFILE_FILE", Value="env:STORAGE_PROFILES_ENV"),
             Environment(Name="API_KEYS_FILE", Value="env:API_KEYS_ENV"),
-            Environment(Name="SQS_QUEUE_URL", Value=Sub("https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/lakerunner-ingest-queue")),
+            Environment(Name="SQS_QUEUE_URL", Value=QueueUrlValue),
             Environment(Name="SQS_REGION", Value=Ref("AWS::Region")),
             Environment(Name="LRDB_HOST", Value=DbHostValue),
             Environment(Name="LRDB_PORT", Value=DbPortValue),
