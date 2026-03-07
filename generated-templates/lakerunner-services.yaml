@@ -310,7 +310,7 @@ Parameters:
     Description: 'Load balancer scheme: ''internet-facing'' for external access or ''internal'' for internal access only.'
     Type: String
   AlertEvaluatorReplicas:
-    Default: '0'
+    Default: '1'
     Description: Number of lakerunner-alert-evaluator task replicas
     MinValue: 0
     Type: Number
