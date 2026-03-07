@@ -176,6 +176,7 @@ def create_services_template():
         'lakerunner-pubsub-sqs',
         'lakerunner-boxer-common',
         'lakerunner-admin-api',
+        'lakerunner-alert-evaluator',
     ]
 
     # All configurable services (for iteration)
@@ -541,6 +542,9 @@ def create_services_template():
     # Admin API is enabled when replicas > 0 (only if admin-api service is defined)
     if 'lakerunner-admin-api' in service_params:
         t.add_condition("EnableAdminApi", Not(Equals(Ref(service_params['lakerunner-admin-api']['replicas']), "0")))
+    # Alert Evaluator is enabled when replicas > 0
+    if 'lakerunner-alert-evaluator' in service_params:
+        t.add_condition("EnableAlertEvaluator", Not(Equals(Ref(service_params['lakerunner-alert-evaluator']['replicas']), "0")))
 
 
     # -----------------------
@@ -1037,6 +1041,8 @@ def create_services_template():
             condition_name = "CreateTracesServices"
         elif service_name == 'lakerunner-admin-api':
             condition_name = "EnableAdminApi"
+        elif service_name == 'lakerunner-alert-evaluator':
+            condition_name = "EnableAlertEvaluator"
 
         # Create log group
         log_group_kwargs = {
@@ -1106,6 +1112,14 @@ def create_services_template():
         # Add QUERY_WORKER_CLUSTER_NAME for query-api service
         if service_name == "lakerunner-query-api":
             base_env.append(Environment(Name="QUERY_WORKER_CLUSTER_NAME", Value=ImportValue(ci_export("ClusterName"))))
+
+        # Add QUERY_API_URL for admin-api service (points to ALB)
+        if service_name == "lakerunner-admin-api":
+            base_env.append(Environment(Name="QUERY_API_URL", Value=Sub("http://${AlbDns}:7101", AlbDns=GetAtt(Alb, "DNSName"))))
+
+        # Add ALERT_EVALUATOR_QUERY_API_URL for alert-evaluator service (points to ALB)
+        if service_name == "lakerunner-alert-evaluator":
+            base_env.append(Environment(Name="ALERT_EVALUATOR_QUERY_API_URL", Value=Sub("http://${AlbDns}:7101", AlbDns=GetAtt(Alb, "DNSName"))))
 
         # Add memory-based environment variables (GOMEMLIMIT, GOGC, DUCKDB settings)
         # Calculate based on service memory configuration
@@ -1555,6 +1569,8 @@ def create_services_template():
             condition_name = "CreateTracesServices"
         elif service_name == 'lakerunner-admin-api':
             condition_name = "EnableAdminApi"
+        elif service_name == 'lakerunner-alert-evaluator':
+            condition_name = "EnableAlertEvaluator"
 
         output_kwargs = {
             "Value": Ref(f"Service{title_name}"),

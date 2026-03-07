@@ -2,6 +2,9 @@ Conditions:
   CreateAlarmLakerunnerAdminApi: !And
     - !Condition 'EnableAlarms'
     - !Condition 'EnableAdminApi'
+  CreateAlarmLakerunnerAlertEvaluator: !And
+    - !Condition 'EnableAlarms'
+    - !Condition 'EnableAlertEvaluator'
   CreateAlarmLakerunnerCompactLogs: !And
     - !Condition 'EnableAlarms'
     - !Condition 'CreateLogsServices'
@@ -40,6 +43,10 @@ Conditions:
     - !Equals
       - !Ref 'AlertTopicArn'
       - ''
+  EnableAlertEvaluator: !Not
+    - !Equals
+      - !Ref 'AlertEvaluatorReplicas'
+      - '0'
   EnableOtlp: !Not
     - !Equals
       - !Ref 'OtelEndpoint'
@@ -95,6 +102,7 @@ Metadata:
           - PubsubSqsReplicas
           - BoxerCommonReplicas
           - AdminApiReplicas
+          - AlertEvaluatorReplicas
       - Label:
           default: Auto-Scaling Configuration
         Parameters:
@@ -122,6 +130,8 @@ Metadata:
         default: Admin Api Replicas
       AlbScheme:
         default: ALB Scheme
+      AlertEvaluatorReplicas:
+        default: Alert Evaluator Replicas
       AlertTopicArn:
         default: Alert SNS Topic ARN
       AutoScalingCPUTarget:
@@ -214,6 +224,11 @@ Outputs:
     Export:
       Name: !Sub '${AWS::StackName}-lakerunner-admin-api-ServiceArn'
     Value: !Ref 'ServiceLakerunnerAdminApi'
+  ServiceLakerunnerAlertEvaluatorArn:
+    Condition: EnableAlertEvaluator
+    Export:
+      Name: !Sub '${AWS::StackName}-lakerunner-alert-evaluator-ServiceArn'
+    Value: !Ref 'ServiceLakerunnerAlertEvaluator'
   ServiceLakerunnerBoxerCommonArn:
     Export:
       Name: !Sub '${AWS::StackName}-lakerunner-boxer-common-ServiceArn'
@@ -283,7 +298,7 @@ Outputs:
     Value: !Ref 'Tg7101'
 Parameters:
   AdminApiReplicas:
-    Default: '0'
+    Default: '1'
     Description: Number of lakerunner-admin-api task replicas
     MinValue: 0
     Type: Number
@@ -294,6 +309,11 @@ Parameters:
     Default: internal
     Description: 'Load balancer scheme: ''internet-facing'' for external access or ''internal'' for internal access only.'
     Type: String
+  AlertEvaluatorReplicas:
+    Default: '0'
+    Description: Number of lakerunner-alert-evaluator task replicas
+    MinValue: 0
+    Type: Number
   AlertTopicArn:
     Default: ''
     Description: 'OPTIONAL: SNS Topic ARN for CloudWatch alarms. Leave blank to disable task count alarms. Deploy the Alerting stack first to create a topic.'
@@ -775,6 +795,12 @@ Resources:
     Condition: EnableAdminApi
     Properties:
       LogGroupName: !Sub '/ecs/lakerunner-admin-api'
+      RetentionInDays: 14
+    Type: AWS::Logs::LogGroup
+  LogGroupLakerunnerAlertEvaluator:
+    Condition: EnableAlertEvaluator
+    Properties:
+      LogGroupName: !Sub '/ecs/lakerunner-alert-evaluator'
       RetentionInDays: 14
     Type: AWS::Logs::LogGroup
   LogGroupLakerunnerBoxerCommon:
@@ -1372,6 +1398,43 @@ Resources:
           Value: !Sub '${AWS::StackName}-lakerunner-admin-api'
       TaskDefinition: !Ref 'TaskDefLakerunnerAdminApi'
     Type: AWS::ECS::Service
+  ServiceLakerunnerAlertEvaluator:
+    Condition: EnableAlertEvaluator
+    Properties:
+      Cluster: !ImportValue
+        Fn::Sub:
+          - ${CommonInfraStackName}-ClusterArn
+          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      DesiredCount: !Ref 'AlertEvaluatorReplicas'
+      EnableECSManagedTags: true
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          SecurityGroups:
+            - !ImportValue
+              Fn::Sub:
+                - ${CommonInfraStackName}-TaskSGId
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
+          Subnets: !Split
+            - ','
+            - !ImportValue
+              Fn::Sub:
+                - ${CommonInfraStackName}-PrivateSubnets
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      PropagateTags: SERVICE
+      ServiceName: lakerunner-alert-evaluator
+      Tags:
+        - Key: Component
+          Value: Service
+        - Key: Environment
+          Value: !Ref 'AWS::StackName'
+        - Key: ManagedBy
+          Value: Lakerunner
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-lakerunner-alert-evaluator'
+      TaskDefinition: !Ref 'TaskDefLakerunnerAlertEvaluator'
+    Type: AWS::ECS::Service
   ServiceLakerunnerBoxerCommon:
     Properties:
       Cluster: !ImportValue
@@ -1879,6 +1942,32 @@ Resources:
       Threshold: 1
       TreatMissingData: breaching
     Type: AWS::CloudWatch::Alarm
+  TaskCountAlarmLakerunnerAlertEvaluator:
+    Condition: CreateAlarmLakerunnerAlertEvaluator
+    Properties:
+      AlarmActions:
+        - !Ref 'AlertTopicArn'
+      AlarmDescription: Alarm when lakerunner-alert-evaluator has no running tasks for 5 minutes
+      AlarmName: !Sub '${AWS::StackName}-lakerunner-alert-evaluator-no-running-tasks'
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: ClusterName
+          Value: !ImportValue
+            Fn::Sub:
+              - ${CommonInfraStackName}-ClusterName
+              - CommonInfraStackName: !Ref 'CommonInfraStackName'
+        - Name: ServiceName
+          Value: lakerunner-alert-evaluator
+      EvaluationPeriods: 5
+      MetricName: RunningTaskCount
+      Namespace: ECS/ContainerInsights
+      OKActions:
+        - !Ref 'AlertTopicArn'
+      Period: 60
+      Statistic: Minimum
+      Threshold: 1
+      TreatMissingData: breaching
+    Type: AWS::CloudWatch::Alarm
   TaskCountAlarmLakerunnerBoxerCommon:
     Condition: EnableAlarms
     Properties:
@@ -2301,6 +2390,10 @@ Resources:
                 - !Ref 'AWS::NoValue'
             - Name: OTEL_METRIC_EXPORT_INTERVAL
               Value: '10000'
+            - Name: QUERY_API_URL
+              Value: !Sub
+                - http://${AlbDns}:7101
+                - AlbDns: !GetAtt 'Alb.DNSName'
             - Name: GOMEMLIMIT
               Value: 384MiB
             - Name: GOGC
@@ -2369,6 +2462,170 @@ Resources:
       Cpu: '256'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
       Family: lakerunner-admin-api-task
+      Memory: '512'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      RuntimePlatform:
+        CpuArchitecture: ARM64
+        OperatingSystemFamily: LINUX
+      TaskRoleArn: !GetAtt 'TaskRole.Arn'
+      Volumes:
+        - Name: scratch
+    Type: AWS::ECS::TaskDefinition
+  TaskDefLakerunnerAlertEvaluator:
+    Condition: EnableAlertEvaluator
+    Properties:
+      ContainerDefinitions:
+        - Command:
+            - /app/bin/lakerunner
+            - alert-evaluator
+          Environment:
+            - Name: OTEL_SERVICE_NAME
+              Value: lakerunner-alert-evaluator
+            - Name: TMPDIR
+              Value: /scratch
+            - Name: HOME
+              Value: /scratch
+            - Name: STORAGE_PROFILE_FILE
+              Value: env:STORAGE_PROFILES_ENV
+            - Name: API_KEYS_FILE
+              Value: env:API_KEYS_ENV
+            - Name: SQS_QUEUE_URL
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-QueueUrl
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: SQS_REGION
+              Value: !Ref 'AWS::Region'
+            - Name: LRDB_HOST
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbEndpoint
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LRDB_PORT
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbPort
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LRDB_DBNAME
+              Value: lakerunner
+            - Name: LRDB_USER
+              Value: lakerunner
+            - Name: LRDB_SSLMODE
+              Value: require
+            - Name: CONFIGDB_HOST
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbEndpoint
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: CONFIGDB_PORT
+              Value: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-DbPort
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: CONFIGDB_DBNAME
+              Value: lakerunner
+            - Name: CONFIGDB_USER
+              Value: lakerunner
+            - Name: CONFIGDB_SSLMODE
+              Value: require
+            - Name: LAKERUNNER_KAFKA_BROKERS
+              Value: !Ref 'MSKBrokers'
+            - Name: LAKERUNNER_KAFKA_TLS_ENABLED
+              Value: 'true'
+            - Name: LAKERUNNER_KAFKA_SASL_ENABLED
+              Value: 'true'
+            - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
+              Value: SCRAM-SHA-512
+            - Name: LICENSE_DATA
+              Value: !Ref 'LicenseData'
+            - Name: LICENSE_FILE
+              Value: env:LICENSE_DATA
+            - Name: SOFT_LICENSE_CHECK
+              Value: 'true'
+            - Name: OTEL_EXPORTER_OTLP_ENDPOINT
+              Value: !If
+                - EnableOtlp
+                - !Ref 'OtelEndpoint'
+                - !Ref 'AWS::NoValue'
+            - Name: ENABLE_OTLP_TELEMETRY
+              Value: !If
+                - EnableOtlp
+                - 'true'
+                - !Ref 'AWS::NoValue'
+            - Name: OTEL_METRIC_EXPORT_INTERVAL
+              Value: '10000'
+            - Name: ALERT_EVALUATOR_QUERY_API_URL
+              Value: !Sub
+                - http://${AlbDns}:7101
+                - AlbDns: !GetAtt 'Alb.DNSName'
+            - Name: GOMEMLIMIT
+              Value: 384MiB
+            - Name: GOGC
+              Value: '50'
+          HealthCheck:
+            Command:
+              - /app/bin/lakerunner
+              - sysinfo
+            Interval: 30
+            Retries: 3
+            StartPeriod: 60
+            Timeout: 5
+          Image: !Ref 'GoServicesImage'
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref 'LogGroupLakerunnerAlertEvaluator'
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: lakerunner-alert-evaluator
+          MountPoints:
+            - ContainerPath: /scratch
+              ReadOnly: false
+              SourceVolume: scratch
+          Name: AppContainer
+          PortMappings: []
+          Secrets:
+            - Name: STORAGE_PROFILES_ENV
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/storage_profiles
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: API_KEYS_ENV
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/api_keys
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LRDB_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-DbSecretArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: CONFIGDB_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-DbSecretArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LAKERUNNER_KAFKA_SASL_USERNAME
+              ValueFrom: !Sub
+                - '${SecretArn}:username::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-MSKCredentialsArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LAKERUNNER_KAFKA_SASL_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn: !ImportValue
+                    Fn::Sub:
+                      - ${CommonInfraStackName}-MSKCredentialsArn
+                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
+          User: '0'
+      Cpu: '256'
+      ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
+      Family: lakerunner-alert-evaluator-task
       Memory: '512'
       NetworkMode: awsvpc
       RequiresCompatibilities:
