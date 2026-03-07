@@ -74,6 +74,12 @@ StorageProfilesOverride = t.add_parameter(Parameter(
     Description="OPTIONAL: Custom storage profiles configuration in YAML format. Leave blank to use defaults from defaults.yaml. Bucket name and region will be auto-filled."
 ))
 
+LicenseData = t.add_parameter(Parameter(
+    "LicenseData",
+    Type="String",
+    Description="REQUIRED: License JSON content. Stored in SSM and available to all services."
+))
+
 # MSK parameters
 MSKInstanceType = t.add_parameter(Parameter(
     "MSKInstanceType",
@@ -114,7 +120,7 @@ t.set_metadata({
             },
             {
                 "Label": {"default": "Configuration Overrides (Advanced)"},
-                "Parameters": ["ApiKeysOverride", "StorageProfilesOverride"]
+                "Parameters": ["ApiKeysOverride", "StorageProfilesOverride", "LicenseData"]
             }
         ],
         "ParameterLabels": {
@@ -124,7 +130,8 @@ t.set_metadata({
             "MSKInstanceType": {"default": "MSK Instance Type"},
             "MSKBrokerNodes": {"default": "Number of MSK Broker Nodes"},
             "ApiKeysOverride": {"default": "Custom API Keys (YAML)"},
-            "StorageProfilesOverride": {"default": "Custom Storage Profiles (YAML)"}
+            "StorageProfilesOverride": {"default": "Custom Storage Profiles (YAML)"},
+            "LicenseData": {"default": "License Data (JSON)"}
         }
     }
 })
@@ -568,6 +575,14 @@ t.add_resource(SsmParameter(
     Description="Storage profiles configuration",
 ))
 
+# License parameter
+t.add_resource(SsmParameter(
+    "LicenseParam",
+    Name=Sub("/lakerunner/${AWS::StackName}/license"),
+    Type="String",
+    Value=Ref(LicenseData),
+    Description="License data",
+))
 
 # -----------------------
 # Outputs (for access in other stacks)

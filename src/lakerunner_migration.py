@@ -91,10 +91,16 @@ MSKBrokers = t.add_parameter(Parameter(
     Description="REQUIRED: Comma-separated list of MSK broker endpoints (hostname:port)"
 ))
 
+LicenseData = t.add_parameter(Parameter(
+    "LicenseData", Type="String",
+    Description="REQUIRED: License JSON content."
+))
+
 t.set_metadata({
     "AWS::CloudFormation::Interface": {
         "ParameterGroups": [
             {"Label": {"default": "CommonInfra Stack"}, "Parameters": ["CommonInfraStackName"]},
+            {"Label": {"default": "License"}, "Parameters": ["LicenseData"]},
             {"Label": {"default": "MSK Configuration"}, "Parameters": ["MSKBrokers"]},
             {"Label": {"default": "Task Sizing"}, "Parameters": ["Cpu", "MemoryMiB"]},
             {"Label": {"default": "Container Image"}, "Parameters": ["ContainerImage"]},
@@ -105,6 +111,7 @@ t.set_metadata({
             "Cpu": {"default": "Fargate CPU"},
             "MemoryMiB": {"default": "Fargate Memory (MiB)"},
             "ContainerImage": {"default": "Migration Image"},
+            "LicenseData": {"default": "License Data (JSON)"},
         }
     }
 })
@@ -262,6 +269,10 @@ TaskDef = t.add_resource(TaskDefinition(
                 Environment(Name="LAKERUNNER_KAFKA_SASL_ENABLED", Value="true"),
                 Environment(Name="LAKERUNNER_KAFKA_SASL_MECHANISM", Value="SCRAM-SHA-512"),
                 Environment(Name="LAKERUNNER_KAFKA_TOPICS_DEFAULTS_REPLICATIONFACTOR", Value="2"),
+                # License configuration
+                Environment(Name="LICENSE_DATA", Value=Ref(LicenseData)),
+                Environment(Name="LICENSE_FILE", Value="env:LICENSE_DATA"),
+                Environment(Name="SOFT_LICENSE_CHECK", Value="true"),
             ],
             Secrets=[
                 EcsSecret(Name="LRDB_PASSWORD", ValueFrom=Sub("${S}:password::", S=DbSecretArnValue)),

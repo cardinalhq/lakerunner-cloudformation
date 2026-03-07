@@ -33,9 +33,12 @@ Metadata:
         Parameters:
           - ApiKeysOverride
           - StorageProfilesOverride
+          - LicenseData
     ParameterLabels:
       ApiKeysOverride:
         default: Custom API Keys (YAML)
+      LicenseData:
+        default: License Data (JSON)
       MSKBrokerNodes:
         default: Number of MSK Broker Nodes
       MSKInstanceType:
@@ -146,6 +149,9 @@ Parameters:
   ApiKeysOverride:
     Default: ''
     Description: 'OPTIONAL: Custom API keys configuration in YAML format. Leave blank to use defaults from defaults.yaml. Example: - organization_id: xxx\n  keys:\n    - keyvalue'
+    Type: String
+  LicenseData:
+    Description: 'REQUIRED: License JSON content. Stored in SSM and available to all services.'
     Type: String
   MSKBrokerNodes:
     Default: 2
@@ -332,6 +338,13 @@ Resources:
       VPCSecurityGroups:
         - !Ref 'TaskSG'
     Type: AWS::RDS::DBInstance
+  LicenseParam:
+    Properties:
+      Description: License data
+      Name: !Sub '/lakerunner/${AWS::StackName}/license'
+      Type: String
+      Value: !Ref 'LicenseData'
+    Type: AWS::SSM::Parameter
   MSKCluster:
     Properties:
       BrokerNodeGroupInfo:

@@ -7,6 +7,10 @@ Metadata:
         Parameters:
           - CommonInfraStackName
       - Label:
+          default: License
+        Parameters:
+          - LicenseData
+      - Label:
           default: MSK Configuration
         Parameters:
           - MSKBrokers
@@ -26,6 +30,8 @@ Metadata:
         default: Migration Image
       Cpu:
         default: Fargate CPU
+      LicenseData:
+        default: License Data (JSON)
       MSKBrokers:
         default: MSK Broker Endpoints
       MemoryMiB:
@@ -53,12 +59,15 @@ Parameters:
     Description: 'REQUIRED: Name of the CommonInfra stack to import values from.'
     Type: String
   ContainerImage:
-    Default: ghcr.io/cardinalhq/lakerunner:v1.10.5-rc1
+    Default: ghcr.io/cardinalhq/lakerunner:v1.14.0
     Description: Migration container image.
     Type: String
   Cpu:
     Default: '512'
     Description: Fargate CPU units (e.g., 256/512/1024).
+    Type: String
+  LicenseData:
+    Description: 'REQUIRED: License JSON content.'
     Type: String
   MSKBrokers:
     Default: ''
@@ -117,6 +126,12 @@ Resources:
               Value: SCRAM-SHA-512
             - Name: LAKERUNNER_KAFKA_TOPICS_DEFAULTS_REPLICATIONFACTOR
               Value: '2'
+            - Name: LICENSE_DATA
+              Value: !Ref 'LicenseData'
+            - Name: LICENSE_FILE
+              Value: env:LICENSE_DATA
+            - Name: SOFT_LICENSE_CHECK
+              Value: 'true'
           Image: !Ref 'ContainerImage'
           LogConfiguration:
             LogDriver: awslogs

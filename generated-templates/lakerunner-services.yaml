@@ -56,6 +56,7 @@ Metadata:
         Parameters:
           - CommonInfraStackName
           - AlbScheme
+          - LicenseData
       - Label:
           default: Signal Types
         Parameters:
@@ -165,6 +166,8 @@ Metadata:
         default: Ingest Traces Memory (MiB)
       IngestTracesReplicas:
         default: Ingest Traces Max Replicas
+      LicenseData:
+        default: License Data (JSON)
       MSKBrokers:
         default: MSK Broker Endpoints
       OtelEndpoint:
@@ -397,7 +400,7 @@ Parameters:
     Description: Enable trace processing services (ingest-traces, compact-traces)
     Type: String
   GoServicesImage:
-    Default: ghcr.io/cardinalhq/lakerunner:v1.10.5-rc1
+    Default: ghcr.io/cardinalhq/lakerunner:v1.14.0
     Description: Container image for all Go services (pubsub, ingest, compact, query-api, query-worker, etc.)
     Type: String
   IngestLogsMemory:
@@ -454,6 +457,9 @@ Parameters:
     MaxValue: 50
     MinValue: 1
     Type: Number
+  LicenseData:
+    Description: 'REQUIRED: License JSON content. Changes to this value trigger service redeployment.'
+    Type: String
   MSKBrokers:
     Default: ''
     Description: 'REQUIRED: Comma-separated list of MSK broker endpoints (hostname:port)'
@@ -2277,6 +2283,12 @@ Resources:
               Value: 'true'
             - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
               Value: SCRAM-SHA-512
+            - Name: LICENSE_DATA
+              Value: !Ref 'LicenseData'
+            - Name: LICENSE_FILE
+              Value: env:LICENSE_DATA
+            - Name: SOFT_LICENSE_CHECK
+              Value: 'true'
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp
@@ -2433,6 +2445,12 @@ Resources:
               Value: 'true'
             - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
               Value: SCRAM-SHA-512
+            - Name: LICENSE_DATA
+              Value: !Ref 'LicenseData'
+            - Name: LICENSE_FILE
+              Value: env:LICENSE_DATA
+            - Name: SOFT_LICENSE_CHECK
+              Value: 'true'
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp
@@ -2587,6 +2605,12 @@ Resources:
               Value: 'true'
             - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
               Value: SCRAM-SHA-512
+            - Name: LICENSE_DATA
+              Value: !Ref 'LicenseData'
+            - Name: LICENSE_FILE
+              Value: env:LICENSE_DATA
+            - Name: SOFT_LICENSE_CHECK
+              Value: 'true'
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp
@@ -2745,6 +2769,12 @@ Resources:
               Value: 'true'
             - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
               Value: SCRAM-SHA-512
+            - Name: LICENSE_DATA
+              Value: !Ref 'LicenseData'
+            - Name: LICENSE_FILE
+              Value: env:LICENSE_DATA
+            - Name: SOFT_LICENSE_CHECK
+              Value: 'true'
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp
@@ -2903,6 +2933,12 @@ Resources:
               Value: 'true'
             - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
               Value: SCRAM-SHA-512
+            - Name: LICENSE_DATA
+              Value: !Ref 'LicenseData'
+            - Name: LICENSE_FILE
+              Value: env:LICENSE_DATA
+            - Name: SOFT_LICENSE_CHECK
+              Value: 'true'
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp
@@ -3061,6 +3097,12 @@ Resources:
               Value: 'true'
             - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
               Value: SCRAM-SHA-512
+            - Name: LICENSE_DATA
+              Value: !Ref 'LicenseData'
+            - Name: LICENSE_FILE
+              Value: env:LICENSE_DATA
+            - Name: SOFT_LICENSE_CHECK
+              Value: 'true'
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp
@@ -3219,6 +3261,12 @@ Resources:
               Value: 'true'
             - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
               Value: SCRAM-SHA-512
+            - Name: LICENSE_DATA
+              Value: !Ref 'LicenseData'
+            - Name: LICENSE_FILE
+              Value: env:LICENSE_DATA
+            - Name: SOFT_LICENSE_CHECK
+              Value: 'true'
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp
@@ -3377,6 +3425,12 @@ Resources:
               Value: 'true'
             - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
               Value: SCRAM-SHA-512
+            - Name: LICENSE_DATA
+              Value: !Ref 'LicenseData'
+            - Name: LICENSE_FILE
+              Value: env:LICENSE_DATA
+            - Name: SOFT_LICENSE_CHECK
+              Value: 'true'
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp
@@ -3536,6 +3590,12 @@ Resources:
               Value: 'true'
             - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
               Value: SCRAM-SHA-512
+            - Name: LICENSE_DATA
+              Value: !Ref 'LicenseData'
+            - Name: LICENSE_FILE
+              Value: env:LICENSE_DATA
+            - Name: SOFT_LICENSE_CHECK
+              Value: 'true'
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp
@@ -3692,6 +3752,12 @@ Resources:
               Value: 'true'
             - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
               Value: SCRAM-SHA-512
+            - Name: LICENSE_DATA
+              Value: !Ref 'LicenseData'
+            - Name: LICENSE_FILE
+              Value: env:LICENSE_DATA
+            - Name: SOFT_LICENSE_CHECK
+              Value: 'true'
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp
@@ -3845,6 +3911,12 @@ Resources:
               Value: 'true'
             - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
               Value: SCRAM-SHA-512
+            - Name: LICENSE_DATA
+              Value: !Ref 'LicenseData'
+            - Name: LICENSE_FILE
+              Value: env:LICENSE_DATA
+            - Name: SOFT_LICENSE_CHECK
+              Value: 'true'
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp
@@ -4009,6 +4081,12 @@ Resources:
               Value: 'true'
             - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
               Value: SCRAM-SHA-512
+            - Name: LICENSE_DATA
+              Value: !Ref 'LicenseData'
+            - Name: LICENSE_FILE
+              Value: env:LICENSE_DATA
+            - Name: SOFT_LICENSE_CHECK
+              Value: 'true'
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp
@@ -4175,6 +4253,12 @@ Resources:
               Value: 'true'
             - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
               Value: SCRAM-SHA-512
+            - Name: LICENSE_DATA
+              Value: !Ref 'LicenseData'
+            - Name: LICENSE_FILE
+              Value: env:LICENSE_DATA
+            - Name: SOFT_LICENSE_CHECK
+              Value: 'true'
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp
@@ -4332,6 +4416,12 @@ Resources:
               Value: 'true'
             - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
               Value: SCRAM-SHA-512
+            - Name: LICENSE_DATA
+              Value: !Ref 'LicenseData'
+            - Name: LICENSE_FILE
+              Value: env:LICENSE_DATA
+            - Name: SOFT_LICENSE_CHECK
+              Value: 'true'
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp

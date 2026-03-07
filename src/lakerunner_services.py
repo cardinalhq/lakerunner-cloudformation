@@ -221,6 +221,12 @@ def create_services_template():
         Description="OPTIONAL: SNS Topic ARN for CloudWatch alarms. Leave blank to disable task count alarms. Deploy the Alerting stack first to create a topic."
     ))
 
+    # License Data
+    LicenseData = t.add_parameter(Parameter(
+        "LicenseData", Type="String",
+        Description="REQUIRED: License JSON content. Changes to this value trigger service redeployment."
+    ))
+
     # MSK Configuration
     MSKBrokers = t.add_parameter(Parameter(
         "MSKBrokers", Type="String", Default="",
@@ -413,6 +419,7 @@ def create_services_template():
     param_labels = {
         "CommonInfraStackName": {"default": "Common Infra Stack Name"},
         "AlbScheme": {"default": "ALB Scheme"},
+        "LicenseData": {"default": "License Data (JSON)"},
         "EnableLogs": {"default": "Enable Logs"},
         "EnableMetrics": {"default": "Enable Metrics"},
         "EnableTraces": {"default": "Enable Traces"},
@@ -447,7 +454,7 @@ def create_services_template():
             "ParameterGroups": [
                 {
                     "Label": {"default": "Infrastructure"},
-                    "Parameters": ["CommonInfraStackName", "AlbScheme"]
+                    "Parameters": ["CommonInfraStackName", "AlbScheme", "LicenseData"]
                 },
                 {
                     "Label": {"default": "Signal Types"},
@@ -1070,6 +1077,10 @@ def create_services_template():
             Environment(Name="LAKERUNNER_KAFKA_TLS_ENABLED", Value="true"),
             Environment(Name="LAKERUNNER_KAFKA_SASL_ENABLED", Value="true"),
             Environment(Name="LAKERUNNER_KAFKA_SASL_MECHANISM", Value="SCRAM-SHA-512"),
+            # License configuration
+            Environment(Name="LICENSE_DATA", Value=Ref(LicenseData)),
+            Environment(Name="LICENSE_FILE", Value="env:LICENSE_DATA"),
+            Environment(Name="SOFT_LICENSE_CHECK", Value="true"),
         ]
 
 
