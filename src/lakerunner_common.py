@@ -376,7 +376,19 @@ DbPort = GetAtt(DbRes, "Endpoint.Port")
 
 t.add_output(Output("DbEndpoint", Value=DbEndpoint, Export=Export(name=Sub("${AWS::StackName}-DbEndpoint"))))
 t.add_output(Output("DbPort", Value=DbPort, Export=Export(name=Sub("${AWS::StackName}-DbPort"))))
+# -----------------------
+# Internal service keys secret (shared between alert-evaluator and query-api)
+# -----------------------
+InternalServiceKeysSecret = t.add_resource(Secret(
+    "InternalServiceKeysSecret",
+    GenerateSecretString=GenerateSecretString(
+        ExcludePunctuation=True,
+        PasswordLength=64,
+    ),
+))
+
 t.add_output(Output("DbSecretArnOut", Value=DbSecretArnValue, Export=Export(name=Sub("${AWS::StackName}-DbSecretArn"))))
+t.add_output(Output("InternalServiceKeysSecretArn", Value=Ref(InternalServiceKeysSecret), Export=Export(name=Sub("${AWS::StackName}-InternalServiceKeysSecretArn"))))
 
 # -----------------------
 # MSK Cluster and associated resources

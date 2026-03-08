@@ -80,6 +80,10 @@ Outputs:
     Export:
       Name: !Sub '${AWS::StackName}-DbSecretArn'
     Value: !Ref 'DbSecret'
+  InternalServiceKeysSecretArn:
+    Export:
+      Name: !Sub '${AWS::StackName}-InternalServiceKeysSecretArn'
+    Value: !Ref 'InternalServiceKeysSecret'
   MSKClusterArn:
     Description: MSK cluster ARN
     Export:
@@ -307,6 +311,12 @@ Resources:
       Queues:
         - !Ref 'IngestQueue'
     Type: AWS::SQS::QueuePolicy
+  InternalServiceKeysSecret:
+    Properties:
+      GenerateSecretString:
+        ExcludePunctuation: true
+        PasswordLength: 64
+    Type: AWS::SecretsManager::Secret
   LakerunnerDb:
     Properties:
       AllocatedStorage: '100'

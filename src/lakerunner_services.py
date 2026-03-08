@@ -521,6 +521,7 @@ def create_services_template():
     DbHostValue = ImportValue(ci_export("DbEndpoint"))
     DbPortValue = ImportValue(ci_export("DbPort"))
     MSKCredentialsArnValue = ImportValue(ci_export("MSKCredentialsArn"))
+    InternalServiceKeysSecretArnValue = ImportValue(ci_export("InternalServiceKeysSecretArn"))
     MSKSecretsKeyArnValue = ImportValue(ci_export("MSKSecretsKeyArn"))
     TaskSecurityGroupIdValue = ImportValue(ci_export("TaskSGId"))
     VpcIdValue = ImportValue(ci_export("VpcId"))
@@ -746,6 +747,7 @@ def create_services_template():
                             "Resource": [
                                 Sub("${SecretArn}*", SecretArn=DbSecretArnValue),
                                 Sub("${SecretArn}*", SecretArn=MSKCredentialsArnValue),
+                                Sub("${SecretArn}*", SecretArn=InternalServiceKeysSecretArnValue),
                                 Sub("arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*")
                             ]
                         },
@@ -817,6 +819,7 @@ def create_services_template():
                             "Resource": [
                                 Sub("${SecretArn}*", SecretArn=DbSecretArnValue),
                                 Sub("${SecretArn}*", SecretArn=MSKCredentialsArnValue),
+                                Sub("${SecretArn}*", SecretArn=InternalServiceKeysSecretArnValue),
                                 Sub("arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*")
                             ]
                         },
@@ -893,6 +896,7 @@ def create_services_template():
                             "Resource": [
                                 Sub("${SecretArn}*", SecretArn=DbSecretArnValue),
                                 Sub("${SecretArn}*", SecretArn=MSKCredentialsArnValue),
+                                Sub("${SecretArn}*", SecretArn=InternalServiceKeysSecretArnValue),
                                 Sub("arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*")
                             ]
                         },
@@ -979,6 +983,7 @@ def create_services_template():
                             "Resource": [
                                 Sub("${SecretArn}*", SecretArn=DbSecretArnValue),
                                 Sub("${SecretArn}*", SecretArn=MSKCredentialsArnValue),
+                                Sub("${SecretArn}*", SecretArn=InternalServiceKeysSecretArnValue),
                                 Sub("arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*")
                             ]
                         },
@@ -1160,6 +1165,9 @@ def create_services_template():
             EcsSecret(Name="LAKERUNNER_KAFKA_SASL_PASSWORD", ValueFrom=Sub("${SecretArn}:password::", SecretArn=MSKCredentialsArnValue))
         ]
 
+        # Add internal service keys for alert-evaluator and query-api
+        if service_name in ("lakerunner-alert-evaluator", "lakerunner-query-api"):
+            secrets.append(EcsSecret(Name="INTERNAL_SERVICE_KEYS", ValueFrom=InternalServiceKeysSecretArnValue))
 
         # Build mount points
         mount_points = [MountPoint(

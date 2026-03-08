@@ -66,10 +66,6 @@ echo "9. Generating Lakerunner Alerting..."
 python3 src/lakerunner_alerting.py > generated-templates/lakerunner-alerting.yaml
 cfn-lint generated-templates/lakerunner-alerting.yaml
 
-echo "10. Generating Lakerunner Debug Task..."
-python3 src/lakerunner_debug.py > generated-templates/lakerunner-debug.yaml
-cfn-lint generated-templates/lakerunner-debug.yaml
-
 echo -e "\nGenerated CloudFormation templates:"
 ls -la generated-templates/
 

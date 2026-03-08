@@ -759,6 +759,12 @@ Resources:
                         Fn::Sub:
                           - ${CommonInfraStackName}-MSKCredentialsArn
                           - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                  - !Sub
+                    - ${SecretArn}*
+                    - SecretArn: !ImportValue
+                        Fn::Sub:
+                          - ${CommonInfraStackName}-InternalServiceKeysSecretArn
+                          - CommonInfraStackName: !Ref 'CommonInfraStackName'
                   - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*'
               - Action:
                   - kms:Decrypt
@@ -920,6 +926,12 @@ Resources:
                         Fn::Sub:
                           - ${CommonInfraStackName}-MSKCredentialsArn
                           - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                  - !Sub
+                    - ${SecretArn}*
+                    - SecretArn: !ImportValue
+                        Fn::Sub:
+                          - ${CommonInfraStackName}-InternalServiceKeysSecretArn
+                          - CommonInfraStackName: !Ref 'CommonInfraStackName'
                   - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*'
               - Action:
                   - kms:Decrypt
@@ -998,6 +1010,12 @@ Resources:
                     - SecretArn: !ImportValue
                         Fn::Sub:
                           - ${CommonInfraStackName}-MSKCredentialsArn
+                          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                  - !Sub
+                    - ${SecretArn}*
+                    - SecretArn: !ImportValue
+                        Fn::Sub:
+                          - ${CommonInfraStackName}-InternalServiceKeysSecretArn
                           - CommonInfraStackName: !Ref 'CommonInfraStackName'
                   - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*'
               - Action:
@@ -2622,6 +2640,11 @@ Resources:
                     Fn::Sub:
                       - ${CommonInfraStackName}-MSKCredentialsArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: INTERNAL_SERVICE_KEYS
+              ValueFrom: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-InternalServiceKeysSecretArn
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
           User: '0'
       Cpu: '256'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
@@ -4259,6 +4282,11 @@ Resources:
                     Fn::Sub:
                       - ${CommonInfraStackName}-MSKCredentialsArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: INTERNAL_SERVICE_KEYS
+              ValueFrom: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-InternalServiceKeysSecretArn
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
           User: '0'
       Cpu: !Ref 'QueryApiCpu'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
@@ -4856,6 +4884,12 @@ Resources:
                     - SecretArn: !ImportValue
                         Fn::Sub:
                           - ${CommonInfraStackName}-MSKCredentialsArn
+                          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                  - !Sub
+                    - ${SecretArn}*
+                    - SecretArn: !ImportValue
+                        Fn::Sub:
+                          - ${CommonInfraStackName}-InternalServiceKeysSecretArn
                           - CommonInfraStackName: !Ref 'CommonInfraStackName'
                   - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*'
               - Action:
