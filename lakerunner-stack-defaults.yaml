@@ -229,6 +229,19 @@ services:
     environment:
       OTEL_METRIC_EXPORT_INTERVAL: "10000"
 
+  # Notification Sender service
+  lakerunner-notification-sender:
+    signal_type: common
+    command: ["/app/bin/lakerunner", "notification-sender"]
+    cpu: 256
+    memory_mib: 512
+    replicas: 1
+    health_check:
+      type: "go"
+      command: ["/app/bin/lakerunner", "sysinfo"]
+    environment:
+      OTEL_METRIC_EXPORT_INTERVAL: "10000"
+
   # Alert Evaluator service
   lakerunner-alert-evaluator:
     signal_type: common

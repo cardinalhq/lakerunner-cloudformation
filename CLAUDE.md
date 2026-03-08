@@ -132,25 +132,26 @@ The repository includes comprehensive parameter validation tests that catch issu
 
 The Services stack exposes CloudFormation parameters to configure replicas, CPU, and memory for lakerunner services at deployment time. Different service types have different configurable options:
 
-| Service                    | Replicas  | CPU       | Memory    |
-|----------------------------|-----------|-----------|-----------|
-| **Query Services**         |           |           |           |
-| lakerunner-query-api       | Parameter | Parameter | Parameter |
-| lakerunner-query-worker    | Parameter | Parameter | Parameter |
-| **Worker Services**        |           |           |           |
-| lakerunner-ingest-logs     | Parameter | YAML      | Parameter |
-| lakerunner-ingest-metrics  | Parameter | YAML      | Parameter |
-| lakerunner-ingest-traces   | Parameter | YAML      | Parameter |
-| lakerunner-compact-logs    | Parameter | YAML      | Parameter |
-| lakerunner-compact-metrics | Parameter | YAML      | Parameter |
-| lakerunner-compact-traces  | Parameter | YAML      | Parameter |
-| lakerunner-rollup-metrics  | Parameter | YAML      | Parameter |
-| **Replicas-Only Services** |           |           |           |
-| lakerunner-pubsub-sqs      | Parameter | YAML      | YAML      |
-| lakerunner-boxer-common    | Parameter | YAML      | YAML      |
-| **Fixed Services**         |           |           |           |
-| lakerunner-sweeper         | YAML      | YAML      | YAML      |
-| lakerunner-monitoring      | YAML      | YAML      | YAML      |
+| Service                        | Replicas  | CPU       | Memory    |
+|--------------------------------|-----------|-----------|-----------|
+| **Query Services**             |           |           |           |
+| lakerunner-query-api           | Parameter | Parameter | Parameter |
+| lakerunner-query-worker        | Parameter | Parameter | Parameter |
+| **Worker Services**            |           |           |           |
+| lakerunner-ingest-logs         | Parameter | YAML      | Parameter |
+| lakerunner-ingest-metrics      | Parameter | YAML      | Parameter |
+| lakerunner-ingest-traces       | Parameter | YAML      | Parameter |
+| lakerunner-compact-logs        | Parameter | YAML      | Parameter |
+| lakerunner-compact-metrics     | Parameter | YAML      | Parameter |
+| lakerunner-compact-traces      | Parameter | YAML      | Parameter |
+| lakerunner-rollup-metrics      | Parameter | YAML      | Parameter |
+| **Replicas-Only Services**     |           |           |           |
+| lakerunner-pubsub-sqs          | Parameter | YAML      | YAML      |
+| lakerunner-boxer-common        | Parameter | YAML      | YAML      |
+| lakerunner-notification-sender | Parameter | YAML      | YAML      |
+| **Fixed Services**             |           |           |           |
+| lakerunner-sweeper             | YAML      | YAML      | YAML      |
+| lakerunner-monitoring          | YAML      | YAML      | YAML      |
 
 - **Parameter**: Configurable via CloudFormation parameter at deployment time
 - **YAML**: Uses default value from `lakerunner-stack-defaults.yaml`

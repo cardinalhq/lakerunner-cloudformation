@@ -177,6 +177,7 @@ def create_services_template():
         'lakerunner-boxer-common',
         'lakerunner-admin-api',
         'lakerunner-alert-evaluator',
+        'lakerunner-notification-sender',
     ]
 
     # All configurable services (for iteration)
@@ -546,6 +547,9 @@ def create_services_template():
     # Alert Evaluator is enabled when replicas > 0
     if 'lakerunner-alert-evaluator' in service_params:
         t.add_condition("EnableAlertEvaluator", Not(Equals(Ref(service_params['lakerunner-alert-evaluator']['replicas']), "0")))
+    # Notification Sender is enabled when replicas > 0
+    if 'lakerunner-notification-sender' in service_params:
+        t.add_condition("EnableNotificationSender", Not(Equals(Ref(service_params['lakerunner-notification-sender']['replicas']), "0")))
 
 
     # -----------------------
@@ -1048,6 +1052,8 @@ def create_services_template():
             condition_name = "EnableAdminApi"
         elif service_name == 'lakerunner-alert-evaluator':
             condition_name = "EnableAlertEvaluator"
+        elif service_name == 'lakerunner-notification-sender':
+            condition_name = "EnableNotificationSender"
 
         # Create log group
         log_group_kwargs = {
@@ -1579,6 +1585,8 @@ def create_services_template():
             condition_name = "EnableAdminApi"
         elif service_name == 'lakerunner-alert-evaluator':
             condition_name = "EnableAlertEvaluator"
+        elif service_name == 'lakerunner-notification-sender':
+            condition_name = "EnableNotificationSender"
 
         output_kwargs = {
             "Value": Ref(f"Service{title_name}"),
