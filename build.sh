@@ -30,41 +30,37 @@ if [ -d "generated-templates" ]; then
 fi
 mkdir generated-templates
 
-echo "1. Generating Lakerunner VPC..."
-python3 src/lakerunner_vpc.py > generated-templates/lakerunner-vpc.yaml
-cfn-lint generated-templates/lakerunner-vpc.yaml
+echo "00. Generating Lakerunner VPC..."
+python3 src/lakerunner_vpc.py > generated-templates/lakerunner-00-vpc.yaml
+cfn-lint generated-templates/lakerunner-00-vpc.yaml
 
-echo "2. Generating Lakerunner Common Infrastructure..."
-python3 src/lakerunner_common.py > generated-templates/lakerunner-common.yaml
-cfn-lint generated-templates/lakerunner-common.yaml
+echo "01. Generating Lakerunner Common Infrastructure..."
+python3 src/lakerunner_common.py > generated-templates/lakerunner-01-common.yaml
+cfn-lint generated-templates/lakerunner-01-common.yaml
 
-echo "3. Generating Lakerunner Migration Task..."
-python3 src/lakerunner_migration.py > generated-templates/lakerunner-migration.yaml
-cfn-lint generated-templates/lakerunner-migration.yaml
+echo "02. Generating Lakerunner Migration Task..."
+python3 src/lakerunner_migration.py > generated-templates/lakerunner-02-migration.yaml
+cfn-lint generated-templates/lakerunner-02-migration.yaml
 
-echo "4. Generating Lakerunner Utility Task..."
-python3 src/lakerunner_utility.py > generated-templates/lakerunner-utility.yaml
-cfn-lint generated-templates/lakerunner-utility.yaml
+echo "03. Generating Lakerunner Services..."
+python3 src/lakerunner_services.py > generated-templates/lakerunner-03-services.yaml
+cfn-lint generated-templates/lakerunner-03-services.yaml
 
-echo "5. Generating Lakerunner Services..."
-python3 src/lakerunner_services.py > generated-templates/lakerunner-services.yaml
-cfn-lint generated-templates/lakerunner-services.yaml
+echo "04. Generating Lakerunner Alerting..."
+python3 src/lakerunner_alerting.py > generated-templates/lakerunner-04-alerting.yaml
+cfn-lint generated-templates/lakerunner-04-alerting.yaml
 
-echo "6. Generating Lakerunner Grafana Service..."
-python3 src/lakerunner_grafana_service.py > generated-templates/lakerunner-grafana-service.yaml
-cfn-lint generated-templates/lakerunner-grafana-service.yaml
+echo "05. Generating Lakerunner Grafana Service..."
+python3 src/lakerunner_grafana_service.py > generated-templates/lakerunner-05-grafana-service.yaml
+cfn-lint generated-templates/lakerunner-05-grafana-service.yaml
 
-echo "7. Generating Demo OTEL Collector..."
-python3 src/demo_otel_collector.py > generated-templates/lakerunner-demo-otel-collector.yaml
-cfn-lint generated-templates/lakerunner-demo-otel-collector.yaml
+echo "06. Generating Lakerunner OTEL Collector Service..."
+python3 src/lakerunner_otel_collector_service.py > generated-templates/lakerunner-06-otel-collector-service.yaml
+cfn-lint generated-templates/lakerunner-06-otel-collector-service.yaml
 
-echo "8. Generating Lakerunner MCP Service..."
-python3 src/lakerunner_mcp.py > generated-templates/lakerunner-mcp.yaml
-cfn-lint generated-templates/lakerunner-mcp.yaml
-
-echo "9. Generating Lakerunner Alerting..."
-python3 src/lakerunner_alerting.py > generated-templates/lakerunner-alerting.yaml
-cfn-lint generated-templates/lakerunner-alerting.yaml
+echo "99. Generating Lakerunner Debug Utility..."
+python3 src/lakerunner_debug_utility.py > generated-templates/lakerunner-99-debug-utility.yaml
+cfn-lint generated-templates/lakerunner-99-debug-utility.yaml
 
 echo -e "\nGenerated CloudFormation templates:"
 ls -la generated-templates/

@@ -9,9 +9,9 @@ class TestCrossStackIntegration:
     def test_migration_imports_match_common_exports_generated_templates(self):
         """Test migration stack imports against common stack exports using generated templates"""
         # Read generated templates
-        migration_path = "generated-templates/lakerunner-migration.yaml"
-        common_path = "generated-templates/lakerunner-common.yaml"
-        
+        migration_path = "generated-templates/lakerunner-02-migration.yaml"
+        common_path = "generated-templates/lakerunner-01-common.yaml"
+
         # Verify files exist
         assert os.path.exists(migration_path), f"Generated migration template not found: {migration_path}"
         assert os.path.exists(common_path), f"Generated common template not found: {common_path}"
@@ -66,9 +66,9 @@ class TestCrossStackIntegration:
     def test_services_imports_match_common_exports_generated_templates(self):
         """Test services stack imports against common stack exports using generated templates"""
         # Read generated templates
-        services_path = "generated-templates/lakerunner-services.yaml"
-        common_path = "generated-templates/lakerunner-common.yaml"
-        
+        services_path = "generated-templates/lakerunner-03-services.yaml"
+        common_path = "generated-templates/lakerunner-01-common.yaml"
+
         # Verify files exist
         assert os.path.exists(services_path), f"Generated services template not found: {services_path}"
         assert os.path.exists(common_path), f"Generated common template not found: {common_path}"
@@ -124,8 +124,8 @@ class TestCrossStackIntegration:
 
     def test_export_stack_name_consistency(self):
         """Test that exports use consistent stack name variable"""
-        common_path = "generated-templates/lakerunner-common.yaml"
-        
+        common_path = "generated-templates/lakerunner-01-common.yaml"
+
         assert os.path.exists(common_path), f"Generated common template not found: {common_path}"
         
         with open(common_path, 'r') as f:
@@ -149,9 +149,9 @@ class TestCrossStackIntegration:
 
     def test_no_direct_resource_references_in_dependent_stacks(self):
         """Test that dependent stacks don't directly reference resources from other stacks"""
-        migration_path = "generated-templates/lakerunner-migration.yaml"
-        services_path = "generated-templates/lakerunner-services.yaml"
-        
+        migration_path = "generated-templates/lakerunner-02-migration.yaml"
+        services_path = "generated-templates/lakerunner-03-services.yaml"
+
         assert os.path.exists(migration_path), f"Generated migration template not found: {migration_path}"
         assert os.path.exists(services_path), f"Generated services template not found: {services_path}"
         

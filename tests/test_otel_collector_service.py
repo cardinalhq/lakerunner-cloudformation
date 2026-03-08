@@ -8,21 +8,21 @@ class TestDemoOtelCollectorTemplate:
 
     def test_load_otel_config_function(self):
         """Test that the load_otel_config function exists and is importable"""
-        from demo_otel_collector import load_otel_config
+        from lakerunner_otel_collector_service import load_otel_config
         assert callable(load_otel_config)
 
     def test_load_default_otel_yaml_function(self):
         """Test that the load_default_otel_yaml function exists and is importable"""
-        from demo_otel_collector import load_default_otel_yaml
+        from lakerunner_otel_collector_service import load_default_otel_yaml
         assert callable(load_default_otel_yaml)
 
     def test_create_otel_collector_template_function(self):
         """Test that the create_otel_collector_template function exists and is importable"""
-        from demo_otel_collector import create_otel_collector_template
+        from lakerunner_otel_collector_service import create_otel_collector_template
         assert callable(create_otel_collector_template)
 
-    @patch('demo_otel_collector.load_otel_config')
-    @patch('demo_otel_collector.load_default_otel_yaml')
+    @patch('lakerunner_otel_collector_service.load_otel_config')
+    @patch('lakerunner_otel_collector_service.load_default_otel_yaml')
     def test_template_generation_basic(self, mock_load_yaml, mock_load_config):
         """Test basic template generation with minimal mock config"""
         # Mock the OTEL config YAML
@@ -69,7 +69,7 @@ service:
             }
         }
 
-        from demo_otel_collector import create_otel_collector_template
+        from lakerunner_otel_collector_service import create_otel_collector_template
         
         # This should not raise an exception
         template = create_otel_collector_template()
@@ -82,7 +82,7 @@ service:
 
     def test_template_has_required_parameters(self):
         """Test that the template has all required parameters"""
-        from demo_otel_collector import create_otel_collector_template
+        from lakerunner_otel_collector_service import create_otel_collector_template
         from unittest.mock import patch, mock_open
         
         mock_config = {
@@ -101,8 +101,8 @@ service:
         
         mock_yaml_content = "test: config"
         
-        with patch('demo_otel_collector.load_otel_config', return_value=mock_config), \
-             patch('demo_otel_collector.load_default_otel_yaml', return_value=mock_yaml_content):
+        with patch('lakerunner_otel_collector_service.load_otel_config', return_value=mock_config), \
+             patch('lakerunner_otel_collector_service.load_default_otel_yaml', return_value=mock_yaml_content):
             
             template = create_otel_collector_template()
             yaml_output = template.to_yaml()
@@ -115,7 +115,7 @@ service:
 
     def test_template_has_required_resources(self):
         """Test that the template has all required resources"""
-        from demo_otel_collector import create_otel_collector_template
+        from lakerunner_otel_collector_service import create_otel_collector_template
         from unittest.mock import patch
         
         mock_config = {
@@ -134,8 +134,8 @@ service:
         
         mock_yaml_content = "test: config"
         
-        with patch('demo_otel_collector.load_otel_config', return_value=mock_config), \
-             patch('demo_otel_collector.load_default_otel_yaml', return_value=mock_yaml_content):
+        with patch('lakerunner_otel_collector_service.load_otel_config', return_value=mock_config), \
+             patch('lakerunner_otel_collector_service.load_default_otel_yaml', return_value=mock_yaml_content):
             
             template = create_otel_collector_template()
             yaml_output = template.to_yaml()
@@ -153,7 +153,7 @@ service:
 
     def test_template_has_required_outputs(self):
         """Test that the template has all required outputs"""
-        from demo_otel_collector import create_otel_collector_template
+        from lakerunner_otel_collector_service import create_otel_collector_template
         from unittest.mock import patch
         
         mock_config = {
@@ -172,8 +172,8 @@ service:
         
         mock_yaml_content = "test: config"
         
-        with patch('demo_otel_collector.load_otel_config', return_value=mock_config), \
-             patch('demo_otel_collector.load_default_otel_yaml', return_value=mock_yaml_content):
+        with patch('lakerunner_otel_collector_service.load_otel_config', return_value=mock_config), \
+             patch('lakerunner_otel_collector_service.load_default_otel_yaml', return_value=mock_yaml_content):
             
             template = create_otel_collector_template()
             yaml_output = template.to_yaml()
