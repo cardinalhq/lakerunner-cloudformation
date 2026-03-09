@@ -532,14 +532,14 @@ Resources:
       SourceSecurityGroupId: !Ref 'TaskSG'
       ToPort: 7101
     Type: AWS::EC2::SecurityGroupIngress
-  TaskSG8081Self:
+  TaskSGAllSelf:
     Properties:
-      Description: task-to-task 8081 (query-api to query-worker)
-      FromPort: 8081
+      Description: task-to-task all ports
+      FromPort: 0
       GroupId: !Ref 'TaskSG'
       IpProtocol: tcp
       SourceSecurityGroupId: !Ref 'TaskSG'
-      ToPort: 8081
+      ToPort: 65535
     Type: AWS::EC2::SecurityGroupIngress
   TaskSGDbSelf:
     Properties:

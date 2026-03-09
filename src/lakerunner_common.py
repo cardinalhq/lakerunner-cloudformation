@@ -183,15 +183,15 @@ t.add_resource(SecurityGroupIngress(
     Description="task-to-task 7101",
 ))
 
-# Allow tasks to communicate with each other on port 8081 (query-api to query-worker)
+# Allow tasks to communicate with each other on all ports
 t.add_resource(SecurityGroupIngress(
-    "TaskSG8081Self",
+    "TaskSGAllSelf",
     GroupId=Ref(TaskSG),
     IpProtocol="tcp",
-    FromPort=8081,
-    ToPort=8081,
+    FromPort=0,
+    ToPort=65535,
     SourceSecurityGroupId=Ref(TaskSG),
-    Description="task-to-task 8081 (query-api to query-worker)",
+    Description="task-to-task all ports",
 ))
 
 # Allow tasks to connect to PostgreSQL database
