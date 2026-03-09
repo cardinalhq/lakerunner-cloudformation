@@ -262,6 +262,15 @@ def create_services_template():
     ))
 
 
+    # Admin initial API key toggle
+    EnableAdminInitialKey = t.add_parameter(Parameter(
+        "EnableAdminInitialKey",
+        Type="String",
+        AllowedValues=["Yes", "No"],
+        Default="Yes",
+        Description="Inject the bootstrap admin API key into admin-api. Set to No after creating permanent keys."
+    ))
+
     # -----------------------
     # Service Configuration Parameters
     # -----------------------
@@ -415,6 +424,7 @@ def create_services_template():
     param_labels = {
         "CommonInfraStackName": {"default": "Common Infra Stack Name"},
         "AlbScheme": {"default": "ALB Scheme"},
+        "EnableAdminInitialKey": {"default": "Enable Admin Bootstrap Key"},
         "EnableLogs": {"default": "Enable Logs"},
         "EnableMetrics": {"default": "Enable Metrics"},
         "EnableTraces": {"default": "Enable Traces"},
@@ -449,7 +459,7 @@ def create_services_template():
             "ParameterGroups": [
                 {
                     "Label": {"default": "Infrastructure"},
-                    "Parameters": ["CommonInfraStackName", "AlbScheme"]
+                    "Parameters": ["CommonInfraStackName", "AlbScheme", "EnableAdminInitialKey"]
                 },
                 {
                     "Label": {"default": "Signal Types"},
@@ -538,6 +548,7 @@ def create_services_template():
     # Admin API is enabled when replicas > 0 (only if admin-api service is defined)
     if 'lakerunner-admin-api' in service_params:
         t.add_condition("EnableAdminApi", Not(Equals(Ref(service_params['lakerunner-admin-api']['replicas']), "0")))
+    t.add_condition("InjectAdminInitialKey", Equals(Ref(EnableAdminInitialKey), "Yes"))
     # Alert Evaluator is enabled when replicas > 0
     if 'lakerunner-alert-evaluator' in service_params:
         t.add_condition("EnableAlertEvaluator", Not(Equals(Ref(service_params['lakerunner-alert-evaluator']['replicas']), "0")))
@@ -1172,7 +1183,14 @@ def create_services_template():
 
         # Add initial admin API key for admin-api (bootstrap key for first access)
         if service_name == "lakerunner-admin-api":
-            secrets.append(EcsSecret(Name="ADMIN_INITIAL_API_KEY", ValueFrom=AdminInitialAPIKeySecretArnValue))
+            base_env.append(Environment(
+                Name="ADMIN_INITIAL_API_KEY",
+                Value=If(
+                    "InjectAdminInitialKey",
+                    Sub("{{resolve:secretsmanager:${SecretArn}}}", SecretArn=AdminInitialAPIKeySecretArnValue),
+                    ""
+                )
+            ))
 
         # Build mount points
         mount_points = [MountPoint(

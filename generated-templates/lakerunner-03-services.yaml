@@ -58,6 +58,9 @@ Conditions:
     - !Equals
       - !Ref 'OtelEndpoint'
       - ''
+  InjectAdminInitialKey: !Equals
+    - !Ref 'EnableAdminInitialKey'
+    - 'Yes'
   IsInternetFacing: !Equals
     - !Ref 'AlbScheme'
     - internet-facing
@@ -70,6 +73,7 @@ Metadata:
         Parameters:
           - CommonInfraStackName
           - AlbScheme
+          - EnableAdminInitialKey
       - Label:
           default: Signal Types
         Parameters:
@@ -163,6 +167,8 @@ Metadata:
         default: Compact Traces Memory (MiB)
       CompactTracesReplicas:
         default: Compact Traces Max Replicas
+      EnableAdminInitialKey:
+        default: Enable Admin Bootstrap Key
       EnableLogs:
         default: Enable Logs
       EnableMetrics:
@@ -412,6 +418,13 @@ Parameters:
     MaxValue: 50
     MinValue: 1
     Type: Number
+  EnableAdminInitialKey:
+    AllowedValues:
+      - 'Yes'
+      - 'No'
+    Default: 'Yes'
+    Description: Inject the bootstrap admin API key into admin-api. Set to No after creating permanent keys.
+    Type: String
   EnableLogs:
     AllowedValues:
       - 'Yes'
@@ -434,7 +447,7 @@ Parameters:
     Description: Enable trace processing services (ingest-traces, compact-traces)
     Type: String
   GoServicesImage:
-    Default: ghcr.io/cardinalhq/lakerunner:v1.15.0-rc11
+    Default: ghcr.io/cardinalhq/lakerunner:v1.15.0
     Description: Container image for all Go services (pubsub, ingest, compact, query-api, query-worker, etc.)
     Type: String
   IngestLogsMemory:
@@ -2504,6 +2517,16 @@ Resources:
               Value: 384MiB
             - Name: GOGC
               Value: '50'
+            - Name: ADMIN_INITIAL_API_KEY
+              Value: !If
+                - InjectAdminInitialKey
+                - !Sub
+                  - '{{resolve:secretsmanager:${SecretArn}}}'
+                  - SecretArn: !ImportValue
+                      Fn::Sub:
+                        - ${CommonInfraStackName}-AdminInitialAPIKeySecretArn
+                        - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                - ''
           HealthCheck:
             Command:
               - /app/bin/lakerunner
@@ -2568,11 +2591,6 @@ Resources:
                     Fn::Sub:
                       - ${CommonInfraStackName}-MSKCredentialsArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: ADMIN_INITIAL_API_KEY
-              ValueFrom: !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-AdminInitialAPIKeySecretArn
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
           User: '0'
       Cpu: '256'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
