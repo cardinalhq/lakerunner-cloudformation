@@ -387,8 +387,20 @@ InternalServiceKeysSecret = t.add_resource(Secret(
     ),
 ))
 
+# -----------------------
+# Admin initial API key (bootstrap key for admin-api first access)
+# -----------------------
+AdminInitialAPIKeySecret = t.add_resource(Secret(
+    "AdminInitialAPIKeySecret",
+    GenerateSecretString=GenerateSecretString(
+        ExcludePunctuation=True,
+        PasswordLength=64,
+    ),
+))
+
 t.add_output(Output("DbSecretArnOut", Value=DbSecretArnValue, Export=Export(name=Sub("${AWS::StackName}-DbSecretArn"))))
 t.add_output(Output("InternalServiceKeysSecretArn", Value=Ref(InternalServiceKeysSecret), Export=Export(name=Sub("${AWS::StackName}-InternalServiceKeysSecretArn"))))
+t.add_output(Output("AdminInitialAPIKeySecretArn", Value=Ref(AdminInitialAPIKeySecret), Export=Export(name=Sub("${AWS::StackName}-AdminInitialAPIKeySecretArn"))))
 
 # -----------------------
 # MSK Cluster and associated resources

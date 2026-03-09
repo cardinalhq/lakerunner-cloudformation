@@ -70,7 +70,6 @@ Metadata:
         Parameters:
           - CommonInfraStackName
           - AlbScheme
-          - LicenseData
       - Label:
           default: Signal Types
         Parameters:
@@ -184,8 +183,6 @@ Metadata:
         default: Ingest Traces Memory (MiB)
       IngestTracesReplicas:
         default: Ingest Traces Max Replicas
-      LicenseData:
-        default: License Data (JSON)
       MSKBrokers:
         default: MSK Broker Endpoints
       NotificationSenderReplicas:
@@ -211,12 +208,14 @@ Metadata:
       RollupMetricsReplicas:
         default: Rollup Metrics Max Replicas
 Outputs:
-  AdminApiNlbDNS:
+  AdminApiURL:
     Condition: EnableAdminApi
-    Description: Admin API NLB DNS name (GRPC on port 9091)
+    Description: Admin API URL (HTTP on port 9091)
     Export:
-      Name: !Sub '${AWS::StackName}-AdminApiNlbDNS'
-    Value: !GetAtt 'AdminApiNlb.DNSName'
+      Name: !Sub '${AWS::StackName}-AdminApiURL'
+    Value: !Sub
+      - http://${AlbDns}:9091
+      - AlbDns: !GetAtt 'Alb.DNSName'
   AlbArn:
     Export:
       Name: !Sub '${AWS::StackName}-AlbArn'
@@ -435,7 +434,7 @@ Parameters:
     Description: Enable trace processing services (ingest-traces, compact-traces)
     Type: String
   GoServicesImage:
-    Default: ghcr.io/cardinalhq/lakerunner:v1.14.0
+    Default: ghcr.io/cardinalhq/lakerunner:v1.15.0-rc11
     Description: Container image for all Go services (pubsub, ingest, compact, query-api, query-worker, etc.)
     Type: String
   IngestLogsMemory:
@@ -492,9 +491,6 @@ Parameters:
     MaxValue: 50
     MinValue: 1
     Type: Number
-  LicenseData:
-    Description: 'REQUIRED: License JSON content. Changes to this value trigger service redeployment.'
-    Type: String
   MSKBrokers:
     Default: ''
     Description: 'REQUIRED: Comma-separated list of MSK broker endpoints (hostname:port)'
@@ -670,29 +666,6 @@ Parameters:
     MinValue: 1
     Type: Number
 Resources:
-  AdminApiNlb:
-    Condition: EnableAdminApi
-    Properties:
-      Scheme: !Ref 'AlbScheme'
-      Subnets: !If
-        - IsInternetFacing
-        - !Split
-          - ','
-          - !ImportValue
-            Fn::Sub:
-              - ${CommonInfraStackName}-PublicSubnets
-              - CommonInfraStackName: !Ref 'CommonInfraStackName'
-        - !Split
-          - ','
-          - !ImportValue
-            Fn::Sub:
-              - ${CommonInfraStackName}-PrivateSubnets
-              - CommonInfraStackName: !Ref 'CommonInfraStackName'
-      Tags:
-        - Key: Name
-          Value: !Sub '${AWS::StackName}-admin-api-nlb'
-      Type: network
-    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
   Alb:
     Properties:
       Scheme: !Ref 'AlbScheme'
@@ -722,6 +695,16 @@ Resources:
       GroupId: !Ref 'AlbSecurityGroup'
       IpProtocol: tcp
       ToPort: 7101
+    Type: AWS::EC2::SecurityGroupIngress
+  Alb9091Open:
+    Condition: EnableAdminApi
+    Properties:
+      CidrIp: '0.0.0.0/0'
+      Description: HTTP 9091 (admin-api)
+      FromPort: 9091
+      GroupId: !Ref 'AlbSecurityGroup'
+      IpProtocol: tcp
+      ToPort: 9091
     Type: AWS::EC2::SecurityGroupIngress
   AlbSecurityGroup:
     Properties:
@@ -785,6 +768,12 @@ Resources:
                         Fn::Sub:
                           - ${CommonInfraStackName}-InternalServiceKeysSecretArn
                           - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                  - !Sub
+                    - ${SecretArn}*
+                    - SecretArn: !ImportValue
+                        Fn::Sub:
+                          - ${CommonInfraStackName}-AdminInitialAPIKeySecretArn
+                          - CommonInfraStackName: !Ref 'CommonInfraStackName'
                   - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*'
               - Action:
                   - kms:Decrypt
@@ -813,9 +802,9 @@ Resources:
       DefaultActions:
         - TargetGroupArn: !Ref 'Tg9091'
           Type: forward
-      LoadBalancerArn: !Ref 'AdminApiNlb'
+      LoadBalancerArn: !Ref 'Alb'
       Port: '9091'
-      Protocol: TCP
+      Protocol: HTTP
     Type: AWS::ElasticLoadBalancingV2::Listener
   LogGroupLakerunnerAdminApi:
     Condition: EnableAdminApi
@@ -958,6 +947,12 @@ Resources:
                         Fn::Sub:
                           - ${CommonInfraStackName}-InternalServiceKeysSecretArn
                           - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                  - !Sub
+                    - ${SecretArn}*
+                    - SecretArn: !ImportValue
+                        Fn::Sub:
+                          - ${CommonInfraStackName}-AdminInitialAPIKeySecretArn
+                          - CommonInfraStackName: !Ref 'CommonInfraStackName'
                   - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*'
               - Action:
                   - kms:Decrypt
@@ -1042,6 +1037,12 @@ Resources:
                     - SecretArn: !ImportValue
                         Fn::Sub:
                           - ${CommonInfraStackName}-InternalServiceKeysSecretArn
+                          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                  - !Sub
+                    - ${SecretArn}*
+                    - SecretArn: !ImportValue
+                        Fn::Sub:
+                          - ${CommonInfraStackName}-AdminInitialAPIKeySecretArn
                           - CommonInfraStackName: !Ref 'CommonInfraStackName'
                   - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*'
               - Action:
@@ -2479,8 +2480,6 @@ Resources:
               Value: 'true'
             - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
               Value: SCRAM-SHA-512
-            - Name: LICENSE_DATA
-              Value: !Ref 'LicenseData'
             - Name: LICENSE_FILE
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
@@ -2537,6 +2536,10 @@ Resources:
               ValueFrom: !Sub
                 - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/api_keys
                 - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LICENSE_DATA
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/license
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_PASSWORD
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
@@ -2565,6 +2568,11 @@ Resources:
                     Fn::Sub:
                       - ${CommonInfraStackName}-MSKCredentialsArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: ADMIN_INITIAL_API_KEY
+              ValueFrom: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-AdminInitialAPIKeySecretArn
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
           User: '0'
       Cpu: '256'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
@@ -2645,8 +2653,6 @@ Resources:
               Value: 'true'
             - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
               Value: SCRAM-SHA-512
-            - Name: LICENSE_DATA
-              Value: !Ref 'LicenseData'
             - Name: LICENSE_FILE
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
@@ -2700,6 +2706,10 @@ Resources:
             - Name: API_KEYS_ENV
               ValueFrom: !Sub
                 - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/api_keys
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LICENSE_DATA
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/license
                 - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_PASSWORD
               ValueFrom: !Sub
@@ -2814,8 +2824,6 @@ Resources:
               Value: 'true'
             - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
               Value: SCRAM-SHA-512
-            - Name: LICENSE_DATA
-              Value: !Ref 'LicenseData'
             - Name: LICENSE_FILE
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
@@ -2865,6 +2873,10 @@ Resources:
             - Name: API_KEYS_ENV
               ValueFrom: !Sub
                 - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/api_keys
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LICENSE_DATA
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/license
                 - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_PASSWORD
               ValueFrom: !Sub
@@ -2974,8 +2986,6 @@ Resources:
               Value: 'true'
             - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
               Value: SCRAM-SHA-512
-            - Name: LICENSE_DATA
-              Value: !Ref 'LicenseData'
             - Name: LICENSE_FILE
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
@@ -3029,6 +3039,10 @@ Resources:
             - Name: API_KEYS_ENV
               ValueFrom: !Sub
                 - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/api_keys
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LICENSE_DATA
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/license
                 - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_PASSWORD
               ValueFrom: !Sub
@@ -3138,8 +3152,6 @@ Resources:
               Value: 'true'
             - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
               Value: SCRAM-SHA-512
-            - Name: LICENSE_DATA
-              Value: !Ref 'LicenseData'
             - Name: LICENSE_FILE
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
@@ -3193,6 +3205,10 @@ Resources:
             - Name: API_KEYS_ENV
               ValueFrom: !Sub
                 - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/api_keys
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LICENSE_DATA
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/license
                 - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_PASSWORD
               ValueFrom: !Sub
@@ -3302,8 +3318,6 @@ Resources:
               Value: 'true'
             - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
               Value: SCRAM-SHA-512
-            - Name: LICENSE_DATA
-              Value: !Ref 'LicenseData'
             - Name: LICENSE_FILE
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
@@ -3357,6 +3371,10 @@ Resources:
             - Name: API_KEYS_ENV
               ValueFrom: !Sub
                 - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/api_keys
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LICENSE_DATA
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/license
                 - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_PASSWORD
               ValueFrom: !Sub
@@ -3466,8 +3484,6 @@ Resources:
               Value: 'true'
             - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
               Value: SCRAM-SHA-512
-            - Name: LICENSE_DATA
-              Value: !Ref 'LicenseData'
             - Name: LICENSE_FILE
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
@@ -3521,6 +3537,10 @@ Resources:
             - Name: API_KEYS_ENV
               ValueFrom: !Sub
                 - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/api_keys
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LICENSE_DATA
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/license
                 - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_PASSWORD
               ValueFrom: !Sub
@@ -3630,8 +3650,6 @@ Resources:
               Value: 'true'
             - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
               Value: SCRAM-SHA-512
-            - Name: LICENSE_DATA
-              Value: !Ref 'LicenseData'
             - Name: LICENSE_FILE
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
@@ -3685,6 +3703,10 @@ Resources:
             - Name: API_KEYS_ENV
               ValueFrom: !Sub
                 - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/api_keys
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LICENSE_DATA
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/license
                 - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_PASSWORD
               ValueFrom: !Sub
@@ -3794,8 +3816,6 @@ Resources:
               Value: 'true'
             - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
               Value: SCRAM-SHA-512
-            - Name: LICENSE_DATA
-              Value: !Ref 'LicenseData'
             - Name: LICENSE_FILE
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
@@ -3849,6 +3869,10 @@ Resources:
             - Name: API_KEYS_ENV
               ValueFrom: !Sub
                 - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/api_keys
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LICENSE_DATA
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/license
                 - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_PASSWORD
               ValueFrom: !Sub
@@ -3959,8 +3983,6 @@ Resources:
               Value: 'true'
             - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
               Value: SCRAM-SHA-512
-            - Name: LICENSE_DATA
-              Value: !Ref 'LicenseData'
             - Name: LICENSE_FILE
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
@@ -4012,6 +4034,10 @@ Resources:
             - Name: API_KEYS_ENV
               ValueFrom: !Sub
                 - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/api_keys
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LICENSE_DATA
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/license
                 - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_PASSWORD
               ValueFrom: !Sub
@@ -4121,8 +4147,6 @@ Resources:
               Value: 'true'
             - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
               Value: SCRAM-SHA-512
-            - Name: LICENSE_DATA
-              Value: !Ref 'LicenseData'
             - Name: LICENSE_FILE
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
@@ -4172,6 +4196,10 @@ Resources:
             - Name: API_KEYS_ENV
               ValueFrom: !Sub
                 - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/api_keys
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LICENSE_DATA
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/license
                 - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_PASSWORD
               ValueFrom: !Sub
@@ -4281,8 +4309,6 @@ Resources:
               Value: 'true'
             - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
               Value: SCRAM-SHA-512
-            - Name: LICENSE_DATA
-              Value: !Ref 'LicenseData'
             - Name: LICENSE_FILE
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
@@ -4332,6 +4358,10 @@ Resources:
             - Name: API_KEYS_ENV
               ValueFrom: !Sub
                 - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/api_keys
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LICENSE_DATA
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/license
                 - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_PASSWORD
               ValueFrom: !Sub
@@ -4440,8 +4470,6 @@ Resources:
               Value: 'true'
             - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
               Value: SCRAM-SHA-512
-            - Name: LICENSE_DATA
-              Value: !Ref 'LicenseData'
             - Name: LICENSE_FILE
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
@@ -4502,6 +4530,10 @@ Resources:
             - Name: API_KEYS_ENV
               ValueFrom: !Sub
                 - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/api_keys
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LICENSE_DATA
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/license
                 - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_PASSWORD
               ValueFrom: !Sub
@@ -4615,8 +4647,6 @@ Resources:
               Value: 'true'
             - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
               Value: SCRAM-SHA-512
-            - Name: LICENSE_DATA
-              Value: !Ref 'LicenseData'
             - Name: LICENSE_FILE
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
@@ -4676,6 +4706,10 @@ Resources:
             - Name: API_KEYS_ENV
               ValueFrom: !Sub
                 - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/api_keys
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LICENSE_DATA
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/license
                 - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_PASSWORD
               ValueFrom: !Sub
@@ -4787,8 +4821,6 @@ Resources:
               Value: 'true'
             - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
               Value: SCRAM-SHA-512
-            - Name: LICENSE_DATA
-              Value: !Ref 'LicenseData'
             - Name: LICENSE_FILE
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
@@ -4842,6 +4874,10 @@ Resources:
             - Name: API_KEYS_ENV
               ValueFrom: !Sub
                 - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/api_keys
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LICENSE_DATA
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/license
                 - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_PASSWORD
               ValueFrom: !Sub
@@ -4950,8 +4986,6 @@ Resources:
               Value: 'true'
             - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
               Value: SCRAM-SHA-512
-            - Name: LICENSE_DATA
-              Value: !Ref 'LicenseData'
             - Name: LICENSE_FILE
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
@@ -5001,6 +5035,10 @@ Resources:
             - Name: API_KEYS_ENV
               ValueFrom: !Sub
                 - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/api_keys
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LICENSE_DATA
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/license
                 - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LRDB_PASSWORD
               ValueFrom: !Sub
@@ -5069,17 +5107,17 @@ Resources:
       SourceSecurityGroupId: !Ref 'AlbSecurityGroup'
       ToPort: 8090
     Type: AWS::EC2::SecurityGroupIngress
-  TaskFromNlb9091:
+  TaskFromAlb9091:
     Condition: EnableAdminApi
     Properties:
-      CidrIp: '0.0.0.0/0'
-      Description: NLB to admin-api GRPC port
+      Description: ALB to admin-api port
       FromPort: 9091
       GroupId: !ImportValue
         Fn::Sub:
           - ${CommonInfraStackName}-TaskSGId
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
       IpProtocol: tcp
+      SourceSecurityGroupId: !Ref 'AlbSecurityGroup'
       ToPort: 9091
     Type: AWS::EC2::SecurityGroupIngress
   TaskRole:
@@ -5140,6 +5178,12 @@ Resources:
                         Fn::Sub:
                           - ${CommonInfraStackName}-InternalServiceKeysSecretArn
                           - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                  - !Sub
+                    - ${SecretArn}*
+                    - SecretArn: !ImportValue
+                        Fn::Sub:
+                          - ${CommonInfraStackName}-AdminInitialAPIKeySecretArn
+                          - CommonInfraStackName: !Ref 'CommonInfraStackName'
                   - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*'
               - Action:
                   - kms:Decrypt
@@ -5194,14 +5238,19 @@ Resources:
   Tg9091:
     Condition: EnableAdminApi
     Properties:
-      HealthCheckIntervalSeconds: 30
+      HealthCheckIntervalSeconds: 5
+      HealthCheckPath: /healthz
       HealthCheckPort: '9091'
-      HealthCheckProtocol: TCP
-      HealthCheckTimeoutSeconds: 10
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 2
       HealthyThresholdCount: 2
+      Matcher:
+        HttpCode: '200'
       Port: 9091
-      Protocol: TCP
+      Protocol: HTTP
       TargetGroupAttributes:
+        - Key: stickiness.enabled
+          Value: 'false'
         - Key: deregistration_delay.timeout_seconds
           Value: '5'
       TargetType: ip

@@ -91,16 +91,10 @@ MSKBrokers = t.add_parameter(Parameter(
     Description="REQUIRED: Comma-separated list of MSK broker endpoints (hostname:port)"
 ))
 
-LicenseData = t.add_parameter(Parameter(
-    "LicenseData", Type="String",
-    Description="REQUIRED: License JSON content."
-))
-
 t.set_metadata({
     "AWS::CloudFormation::Interface": {
         "ParameterGroups": [
             {"Label": {"default": "CommonInfra Stack"}, "Parameters": ["CommonInfraStackName"]},
-            {"Label": {"default": "License"}, "Parameters": ["LicenseData"]},
             {"Label": {"default": "MSK Configuration"}, "Parameters": ["MSKBrokers"]},
             {"Label": {"default": "Task Sizing"}, "Parameters": ["Cpu", "MemoryMiB"]},
             {"Label": {"default": "Container Image"}, "Parameters": ["ContainerImage"]},
@@ -111,7 +105,6 @@ t.set_metadata({
             "Cpu": {"default": "Fargate CPU"},
             "MemoryMiB": {"default": "Fargate Memory (MiB)"},
             "ContainerImage": {"default": "Migration Image"},
-            "LicenseData": {"default": "License Data (JSON)"},
         }
     }
 })
@@ -211,7 +204,8 @@ ExecutionRole = t.add_resource(Role(
                         "Action": ["ssm:GetParameters", "ssm:GetParameter"],
                         "Resource": [
                             Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/api_keys", CommonInfraStackName=Ref(CommonInfraStackName)),
-                            Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/storage_profiles", CommonInfraStackName=Ref(CommonInfraStackName))
+                            Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/storage_profiles", CommonInfraStackName=Ref(CommonInfraStackName)),
+                            Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/license", CommonInfraStackName=Ref(CommonInfraStackName))
                         ]
                     },
                     {
@@ -270,7 +264,6 @@ TaskDef = t.add_resource(TaskDefinition(
                 Environment(Name="LAKERUNNER_KAFKA_SASL_MECHANISM", Value="SCRAM-SHA-512"),
                 Environment(Name="LAKERUNNER_KAFKA_TOPICS_DEFAULTS_REPLICATIONFACTOR", Value="2"),
                 # License configuration
-                Environment(Name="LICENSE_DATA", Value=Ref(LicenseData)),
                 Environment(Name="LICENSE_FILE", Value="env:LICENSE_DATA"),
                 Environment(Name="SOFT_LICENSE_CHECK", Value="true"),
             ],
@@ -279,6 +272,7 @@ TaskDef = t.add_resource(TaskDefinition(
                 EcsSecret(Name="CONFIGDB_PASSWORD", ValueFrom=Sub("${S}:password::", S=DbSecretArnValue)),
                 EcsSecret(Name="API_KEYS_ENV", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/api_keys", CommonInfraStackName=Ref(CommonInfraStackName))),
                 EcsSecret(Name="STORAGE_PROFILES_ENV", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/storage_profiles", CommonInfraStackName=Ref(CommonInfraStackName))),
+                EcsSecret(Name="LICENSE_DATA", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/license", CommonInfraStackName=Ref(CommonInfraStackName))),
                 # MSK SASL/SCRAM Credentials
                 EcsSecret(Name="LAKERUNNER_KAFKA_SASL_USERNAME", ValueFrom=Sub("${S}:username::", S=MSKCredentialsArnValue)),
                 EcsSecret(Name="LAKERUNNER_KAFKA_SASL_PASSWORD", ValueFrom=Sub("${S}:password::", S=MSKCredentialsArnValue))

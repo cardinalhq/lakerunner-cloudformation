@@ -20,9 +20,9 @@ storage_profiles:
 
 # Container Images configuration
 images:
-  migration: "ghcr.io/cardinalhq/lakerunner:v1.14.0"
-  utility: "ghcr.io/cardinalhq/lakerunner:v1.14.0"
-  go_services: "ghcr.io/cardinalhq/lakerunner:v1.14.0"
+  migration: "ghcr.io/cardinalhq/lakerunner:v1.15.0-rc11"
+  utility: "ghcr.io/cardinalhq/lakerunner:v1.15.0-rc11"
+  go_services: "ghcr.io/cardinalhq/lakerunner:v1.15.0-rc11"
 
 # MSK configuration
 msk:
@@ -221,8 +221,8 @@ services:
       port: 9091
       container_port: 9091
       attach_alb: true
-      protocol: GRPC
-      health_check_path: "/grpc.health.v1.Health/Check"
+      protocol: HTTP
+      health_check_path: "/healthz"
     health_check:
       type: "go"
       command: ["/app/bin/lakerunner", "sysinfo"]

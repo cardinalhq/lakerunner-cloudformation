@@ -223,12 +223,6 @@ def create_services_template():
         Description="OPTIONAL: SNS Topic ARN for CloudWatch alarms. Leave blank to disable task count alarms. Deploy the Alerting stack first to create a topic."
     ))
 
-    # License Data
-    LicenseData = t.add_parameter(Parameter(
-        "LicenseData", Type="String",
-        Description="REQUIRED: License JSON content. Changes to this value trigger service redeployment."
-    ))
-
     # MSK Configuration
     MSKBrokers = t.add_parameter(Parameter(
         "MSKBrokers", Type="String", Default="",
@@ -421,7 +415,6 @@ def create_services_template():
     param_labels = {
         "CommonInfraStackName": {"default": "Common Infra Stack Name"},
         "AlbScheme": {"default": "ALB Scheme"},
-        "LicenseData": {"default": "License Data (JSON)"},
         "EnableLogs": {"default": "Enable Logs"},
         "EnableMetrics": {"default": "Enable Metrics"},
         "EnableTraces": {"default": "Enable Traces"},
@@ -456,7 +449,7 @@ def create_services_template():
             "ParameterGroups": [
                 {
                     "Label": {"default": "Infrastructure"},
-                    "Parameters": ["CommonInfraStackName", "AlbScheme", "LicenseData"]
+                    "Parameters": ["CommonInfraStackName", "AlbScheme"]
                 },
                 {
                     "Label": {"default": "Signal Types"},
@@ -523,6 +516,7 @@ def create_services_template():
     DbPortValue = ImportValue(ci_export("DbPort"))
     MSKCredentialsArnValue = ImportValue(ci_export("MSKCredentialsArn"))
     InternalServiceKeysSecretArnValue = ImportValue(ci_export("InternalServiceKeysSecretArn"))
+    AdminInitialAPIKeySecretArnValue = ImportValue(ci_export("AdminInitialAPIKeySecretArn"))
     MSKSecretsKeyArnValue = ImportValue(ci_export("MSKSecretsKeyArn"))
     TaskSecurityGroupIdValue = ImportValue(ci_export("TaskSGId"))
     VpcIdValue = ImportValue(ci_export("VpcId"))
@@ -575,6 +569,17 @@ def create_services_template():
         Description="HTTP 7101",
     ))
 
+    if 'lakerunner-admin-api' in service_params:
+        t.add_resource(SecurityGroupIngress(
+            "Alb9091Open",
+            Condition="EnableAdminApi",
+            GroupId=Ref(AlbSG),
+            IpProtocol="tcp",
+            FromPort=9091, ToPort=9091,
+            CidrIp="0.0.0.0/0",
+            Description="HTTP 9091 (admin-api)",
+        ))
+
 
     # Add ingress rules to task security group to allow ALB traffic
     # Allow ALB to reach query-api on port 8080 (application port)
@@ -597,18 +602,16 @@ def create_services_template():
         Description="ALB health checks",
     ))
 
-    # Allow NLB to reach admin-api on port 9091 (GRPC) - conditional
-    # NLB doesn't have security groups, so we allow from 0.0.0.0/0
-    # (NLB preserves client IP, so traffic appears to come from clients)
+    # Allow ALB to reach admin-api on port 9091 - conditional
     if 'lakerunner-admin-api' in service_params:
         t.add_resource(SecurityGroupIngress(
-            "TaskFromNlb9091",
+            "TaskFromAlb9091",
             Condition="EnableAdminApi",
             GroupId=TaskSecurityGroupIdValue,
             IpProtocol="tcp",
             FromPort=9091, ToPort=9091,
-            CidrIp="0.0.0.0/0",
-            Description="NLB to admin-api GRPC port",
+            SourceSecurityGroupId=Ref(AlbSG),
+            Description="ALB to admin-api port",
         ))
 
     # -----------------------
@@ -653,38 +656,26 @@ def create_services_template():
         DefaultActions=[AlbAction(Type="forward", TargetGroupArn=Ref(Tg7101))]
     ))
 
-    # Admin API NLB for GRPC (TCP passthrough, no TLS required)
-    # Using NLB because ALB requires HTTPS for GRPC protocol
-    AdminApiNlb = None
+    # Admin API target group and listener on the shared ALB
     Tg9091 = None
     if 'lakerunner-admin-api' in service_params:
-        AdminApiNlb = t.add_resource(LoadBalancer(
-            "AdminApiNlb",
-            Condition="EnableAdminApi",
-            Scheme=Ref(AlbScheme),
-            Subnets=If(
-                "IsInternetFacing",
-                PublicSubnetsValue,
-                PrivateSubnetsValue
-            ),
-            Type="network",
-            Tags=Tags(Name=Sub("${AWS::StackName}-admin-api-nlb"))
-        ))
-
         Tg9091 = t.add_resource(TargetGroup(
             "Tg9091",
             Condition="EnableAdminApi",
             Port=9091,
-            Protocol="TCP",
+            Protocol="HTTP",
             VpcId=VpcIdValue,
             TargetType="ip",
-            HealthCheckProtocol="TCP",
+            HealthCheckPath="/healthz",
             HealthCheckPort="9091",
-            HealthCheckIntervalSeconds=30,
-            HealthCheckTimeoutSeconds=10,
+            HealthCheckProtocol="HTTP",
+            HealthCheckIntervalSeconds=5,
+            HealthCheckTimeoutSeconds=2,
             HealthyThresholdCount=2,
             UnhealthyThresholdCount=2,
+            Matcher=Matcher(HttpCode="200"),
             TargetGroupAttributes=[
+                TargetGroupAttribute(Key="stickiness.enabled", Value="false"),
                 TargetGroupAttribute(Key="deregistration_delay.timeout_seconds", Value="5")
             ]
         ))
@@ -692,9 +683,9 @@ def create_services_template():
         t.add_resource(Listener(
             "Listener9091",
             Condition="EnableAdminApi",
-            LoadBalancerArn=Ref(AdminApiNlb),
+            LoadBalancerArn=Ref(Alb),
             Port="9091",
-            Protocol="TCP",
+            Protocol="HTTP",
             DefaultActions=[AlbAction(Type="forward", TargetGroupArn=Ref(Tg9091))]
         ))
 
@@ -752,6 +743,7 @@ def create_services_template():
                                 Sub("${SecretArn}*", SecretArn=DbSecretArnValue),
                                 Sub("${SecretArn}*", SecretArn=MSKCredentialsArnValue),
                                 Sub("${SecretArn}*", SecretArn=InternalServiceKeysSecretArnValue),
+                                Sub("${SecretArn}*", SecretArn=AdminInitialAPIKeySecretArnValue),
                                 Sub("arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*")
                             ]
                         },
@@ -824,6 +816,7 @@ def create_services_template():
                                 Sub("${SecretArn}*", SecretArn=DbSecretArnValue),
                                 Sub("${SecretArn}*", SecretArn=MSKCredentialsArnValue),
                                 Sub("${SecretArn}*", SecretArn=InternalServiceKeysSecretArnValue),
+                                Sub("${SecretArn}*", SecretArn=AdminInitialAPIKeySecretArnValue),
                                 Sub("arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*")
                             ]
                         },
@@ -901,6 +894,7 @@ def create_services_template():
                                 Sub("${SecretArn}*", SecretArn=DbSecretArnValue),
                                 Sub("${SecretArn}*", SecretArn=MSKCredentialsArnValue),
                                 Sub("${SecretArn}*", SecretArn=InternalServiceKeysSecretArnValue),
+                                Sub("${SecretArn}*", SecretArn=AdminInitialAPIKeySecretArnValue),
                                 Sub("arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*")
                             ]
                         },
@@ -988,6 +982,7 @@ def create_services_template():
                                 Sub("${SecretArn}*", SecretArn=DbSecretArnValue),
                                 Sub("${SecretArn}*", SecretArn=MSKCredentialsArnValue),
                                 Sub("${SecretArn}*", SecretArn=InternalServiceKeysSecretArnValue),
+                                Sub("${SecretArn}*", SecretArn=AdminInitialAPIKeySecretArnValue),
                                 Sub("arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*")
                             ]
                         },
@@ -1095,7 +1090,6 @@ def create_services_template():
             Environment(Name="LAKERUNNER_KAFKA_SASL_ENABLED", Value="true"),
             Environment(Name="LAKERUNNER_KAFKA_SASL_MECHANISM", Value="SCRAM-SHA-512"),
             # License configuration
-            Environment(Name="LICENSE_DATA", Value=Ref(LicenseData)),
             Environment(Name="LICENSE_FILE", Value="env:LICENSE_DATA"),
             Environment(Name="SOFT_LICENSE_CHECK", Value="true"),
         ]
@@ -1164,6 +1158,7 @@ def create_services_template():
         secrets = [
             EcsSecret(Name="STORAGE_PROFILES_ENV", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/storage_profiles", CommonInfraStackName=Ref(CommonInfraStackName))),
             EcsSecret(Name="API_KEYS_ENV", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/api_keys", CommonInfraStackName=Ref(CommonInfraStackName))),
+            EcsSecret(Name="LICENSE_DATA", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/license", CommonInfraStackName=Ref(CommonInfraStackName))),
             EcsSecret(Name="LRDB_PASSWORD", ValueFrom=Sub("${SecretArn}:password::", SecretArn=DbSecretArnValue)),
             EcsSecret(Name="CONFIGDB_PASSWORD", ValueFrom=Sub("${SecretArn}:password::", SecretArn=DbSecretArnValue)),
             # MSK SASL/SCRAM Credentials
@@ -1174,6 +1169,10 @@ def create_services_template():
         # Add internal service keys for alert-evaluator and query-api
         if service_name in ("lakerunner-alert-evaluator", "lakerunner-query-api"):
             secrets.append(EcsSecret(Name="INTERNAL_SERVICE_KEYS", ValueFrom=InternalServiceKeysSecretArnValue))
+
+        # Add initial admin API key for admin-api (bootstrap key for first access)
+        if service_name == "lakerunner-admin-api":
+            secrets.append(EcsSecret(Name="ADMIN_INITIAL_API_KEY", ValueFrom=AdminInitialAPIKeySecretArnValue))
 
         # Build mount points
         mount_points = [MountPoint(
@@ -1546,14 +1545,14 @@ def create_services_template():
         Export=Export(name=Sub("${AWS::StackName}-Tg7101Arn"))
     ))
 
-    # Admin API NLB Output (conditional)
-    if AdminApiNlb is not None:
+    # Admin API URL Output (conditional) - uses the shared ALB
+    if Tg9091 is not None:
         t.add_output(Output(
-            "AdminApiNlbDNS",
+            "AdminApiURL",
             Condition="EnableAdminApi",
-            Value=GetAtt(AdminApiNlb, "DNSName"),
-            Export=Export(name=Sub("${AWS::StackName}-AdminApiNlbDNS")),
-            Description="Admin API NLB DNS name (GRPC on port 9091)"
+            Value=Sub("http://${AlbDns}:9091", AlbDns=GetAtt(Alb, "DNSName")),
+            Export=Export(name=Sub("${AWS::StackName}-AdminApiURL")),
+            Description="Admin API URL (HTTP on port 9091)"
         ))
 
     # Service Outputs

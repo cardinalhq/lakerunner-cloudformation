@@ -7,10 +7,6 @@ Metadata:
         Parameters:
           - CommonInfraStackName
       - Label:
-          default: License
-        Parameters:
-          - LicenseData
-      - Label:
           default: MSK Configuration
         Parameters:
           - MSKBrokers
@@ -30,8 +26,6 @@ Metadata:
         default: Migration Image
       Cpu:
         default: Fargate CPU
-      LicenseData:
-        default: License Data (JSON)
       MSKBrokers:
         default: MSK Broker Endpoints
       MemoryMiB:
@@ -59,15 +53,12 @@ Parameters:
     Description: 'REQUIRED: Name of the CommonInfra stack to import values from.'
     Type: String
   ContainerImage:
-    Default: ghcr.io/cardinalhq/lakerunner:v1.14.0
+    Default: ghcr.io/cardinalhq/lakerunner:v1.15.0-rc11
     Description: Migration container image.
     Type: String
   Cpu:
     Default: '512'
     Description: Fargate CPU units (e.g., 256/512/1024).
-    Type: String
-  LicenseData:
-    Description: 'REQUIRED: License JSON content.'
     Type: String
   MSKBrokers:
     Default: ''
@@ -126,8 +117,6 @@ Resources:
               Value: SCRAM-SHA-512
             - Name: LAKERUNNER_KAFKA_TOPICS_DEFAULTS_REPLICATIONFACTOR
               Value: '2'
-            - Name: LICENSE_DATA
-              Value: !Ref 'LicenseData'
             - Name: LICENSE_FILE
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
@@ -158,6 +147,10 @@ Resources:
             - Name: STORAGE_PROFILES_ENV
               ValueFrom: !Sub
                 - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/storage_profiles
+                - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: LICENSE_DATA
+              ValueFrom: !Sub
+                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/license
                 - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: LAKERUNNER_KAFKA_SASL_USERNAME
               ValueFrom: !Sub
@@ -402,6 +395,9 @@ Resources:
                     - CommonInfraStackName: !Ref 'CommonInfraStackName'
                   - !Sub
                     - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/storage_profiles
+                    - CommonInfraStackName: !Ref 'CommonInfraStackName'
+                  - !Sub
+                    - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/license
                     - CommonInfraStackName: !Ref 'CommonInfraStackName'
               - Action:
                   - kms:Decrypt

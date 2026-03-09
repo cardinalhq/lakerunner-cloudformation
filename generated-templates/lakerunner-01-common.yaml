@@ -52,6 +52,10 @@ Metadata:
       VpcId:
         default: VPC Id
 Outputs:
+  AdminInitialAPIKeySecretArn:
+    Export:
+      Name: !Sub '${AWS::StackName}-AdminInitialAPIKeySecretArn'
+    Value: !Ref 'AdminInitialAPIKeySecret'
   BucketArn:
     Export:
       Name: !Sub '${AWS::StackName}-BucketArn'
@@ -199,6 +203,12 @@ Parameters:
     Description: 'REQUIRED: VPC where resources will be created.'
     Type: AWS::EC2::VPC::Id
 Resources:
+  AdminInitialAPIKeySecret:
+    Properties:
+      GenerateSecretString:
+        ExcludePunctuation: true
+        PasswordLength: 64
+    Type: AWS::SecretsManager::Secret
   ApiKeysParam:
     Properties:
       Description: API keys configuration
