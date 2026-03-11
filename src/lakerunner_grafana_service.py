@@ -17,7 +17,7 @@ import yaml
 import os
 from troposphere import (
     Template, Parameter, Ref, Sub, GetAtt, If, Equals, Export, Output,
-    ImportValue, Split, Tags, Not
+    ImportValue, Split, Tags
 )
 from troposphere.ecs import (
     Service, TaskDefinition, ContainerDefinition, Environment,
@@ -114,11 +114,17 @@ def create_grafana_template():
     ))
 
     # AI Configuration parameters
-    OpenAiApiKey = t.add_parameter(Parameter(
-        "OpenAiApiKey", Type="String",
-        Default="",
-        NoEcho=True,
-        Description="OPTIONAL: OpenAI API key for AI features. Leave blank to use only AWS Bedrock."
+    BedrockModel = t.add_parameter(Parameter(
+        "BedrockModel", Type="String",
+        Default="us.anthropic.claude-sonnet-4-6",
+        AllowedValues=[
+            "us.anthropic.claude-sonnet-4-6",
+            "eu.anthropic.claude-sonnet-4-6",
+            "au.anthropic.claude-sonnet-4-6",
+            "jp.anthropic.claude-sonnet-4-6",
+            "global.anthropic.claude-sonnet-4-6",
+        ],
+        Description="Bedrock model inference profile for AI features. Choose a geographic profile to control where requests are routed."
     ))
 
     LakerunnerApiKey = t.add_parameter(Parameter(
@@ -137,7 +143,7 @@ def create_grafana_template():
                 },
                 {
                     "Label": {"default": "AI Configuration"},
-                    "Parameters": ["OpenAiApiKey", "LakerunnerApiKey"]
+                    "Parameters": ["BedrockModel", "LakerunnerApiKey"]
                 },
                 {
                     "Label": {"default": "Container Images"},
@@ -151,7 +157,7 @@ def create_grafana_template():
                 "CommonInfraStackName": {"default": "Common Infra Stack Name"},
                 "QueryApiUrl": {"default": "Query API URL"},
                 "AlbScheme": {"default": "ALB Scheme"},
-                "OpenAiApiKey": {"default": "OpenAI API Key"},
+                "BedrockModel": {"default": "Bedrock Model"},
                 "LakerunnerApiKey": {"default": "Lakerunner API Key"},
                 "GrafanaImage": {"default": "Grafana Image"},
                 "GrafanaInitImage": {"default": "Grafana Init Image"},
@@ -178,7 +184,6 @@ def create_grafana_template():
 
     # Conditions
     t.add_condition("IsInternetFacing", Equals(Ref(AlbScheme), "internet-facing"))
-    t.add_condition("HasOpenAiKey", Not(Equals(Ref(OpenAiApiKey), "")))
 
     # -----------------------
     # ALB Security Group
@@ -337,15 +342,6 @@ def create_grafana_template():
         Name=Sub("${AWS::StackName}-lakerunner-api-key"),
         Description="Lakerunner API key for AI services",
         SecretString=Ref(LakerunnerApiKey)
-    ))
-
-    # OpenAI API key (optional, stored in Secrets Manager)
-    openai_api_key_secret = t.add_resource(Secret(
-        "OpenAiApiKeySecret",
-        Condition="HasOpenAiKey",
-        Name=Sub("${AWS::StackName}-openai-api-key"),
-        Description="OpenAI API key for AI features",
-        SecretString=Ref(OpenAiApiKey)
     ))
 
     t.add_output(Output(
@@ -601,7 +597,9 @@ def create_grafana_template():
 
     # -- Conductor Server sidecar --
     conductor_port = conductor_config.get('port', 4100)
-    conductor_env = []
+    conductor_env = [
+        Environment(Name="AWS_BEDROCK_MODEL", Value=Ref(BedrockModel)),
+    ]
     for key, value in conductor_config.get('environment', {}).items():
         conductor_env.append(Environment(Name=key, Value=str(value)))
 

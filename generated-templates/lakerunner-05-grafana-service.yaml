@@ -1,8 +1,4 @@
 Conditions:
-  HasOpenAiKey: !Not
-    - !Equals
-      - !Ref 'OpenAiApiKey'
-      - ''
   IsInternetFacing: !Equals
     - !Ref 'AlbScheme'
     - internet-facing
@@ -19,7 +15,7 @@ Metadata:
       - Label:
           default: AI Configuration
         Parameters:
-          - OpenAiApiKey
+          - BedrockModel
           - LakerunnerApiKey
       - Label:
           default: Container Images
@@ -32,6 +28,8 @@ Metadata:
     ParameterLabels:
       AlbScheme:
         default: ALB Scheme
+      BedrockModel:
+        default: Bedrock Model
       CommonInfraStackName:
         default: Common Infra Stack Name
       ConductorServerImage:
@@ -46,8 +44,6 @@ Metadata:
         default: Lakerunner API Key
       McpGatewayImage:
         default: MCP Gateway Image
-      OpenAiApiKey:
-        default: OpenAI API Key
       QueryApiUrl:
         default: Query API URL
 Outputs:
@@ -81,11 +77,21 @@ Parameters:
     Default: internal
     Description: 'Load balancer scheme: ''internet-facing'' for external access or ''internal'' for internal access only.'
     Type: String
+  BedrockModel:
+    AllowedValues:
+      - us.anthropic.claude-sonnet-4-6
+      - eu.anthropic.claude-sonnet-4-6
+      - au.anthropic.claude-sonnet-4-6
+      - jp.anthropic.claude-sonnet-4-6
+      - global.anthropic.claude-sonnet-4-6
+    Default: us.anthropic.claude-sonnet-4-6
+    Description: Bedrock model inference profile for AI features. Choose a geographic profile to control where requests are routed.
+    Type: String
   CommonInfraStackName:
     Description: 'REQUIRED: Name of the CommonInfra stack to import infrastructure values from.'
     Type: String
   ConductorServerImage:
-    Default: public.ecr.aws/cardinalhq.io/conductor-server:latest
+    Default: ghcr.io/cardinalhq/conductor-server:v0.1.7
     Description: Container image for Conductor Server sidecar
     Type: String
   GrafanaImage:
@@ -105,13 +111,8 @@ Parameters:
     Description: API key for Lakerunner services. Defaults to the standard key.
     Type: String
   McpGatewayImage:
-    Default: public.ecr.aws/cardinalhq.io/mcp-gateway:v0.2.0
+    Default: ghcr.io/cardinalhq/mcp-gateway:v0.2.0
     Description: Container image for MCP Gateway sidecar
-    Type: String
-  OpenAiApiKey:
-    Default: ''
-    Description: 'OPTIONAL: OpenAI API key for AI features. Leave blank to use only AWS Bedrock.'
-    NoEcho: true
     Type: String
   QueryApiUrl:
     Description: 'REQUIRED: Full URL to the Query API endpoint (e.g., http://alb-dns-name.region.elb.amazonaws.com:7101)'
@@ -416,10 +417,10 @@ Resources:
             - Condition: HEALTHY
               ContainerName: McpGateway
           Environment:
+            - Name: AWS_BEDROCK_MODEL
+              Value: !Ref 'BedrockModel'
             - Name: MCP_GATEWAY_URL
               Value: http://localhost:8080
-            - Name: AWS_BEDROCK_MODEL
-              Value: us.anthropic.claude-sonnet-4-5-20250929-v1:0
           Essential: true
           HealthCheck:
             Command:
@@ -611,13 +612,6 @@ Resources:
       LogGroupName: !Sub '/ecs/${AWS::StackName}/mcp-gateway'
       RetentionInDays: 14
     Type: AWS::Logs::LogGroup
-  OpenAiApiKeySecret:
-    Condition: HasOpenAiKey
-    Properties:
-      Description: OpenAI API key for AI features
-      Name: !Sub '${AWS::StackName}-openai-api-key'
-      SecretString: !Ref 'OpenAiApiKey'
-    Type: AWS::SecretsManager::Secret
   TaskFromGrafanaAlb3000:
     Properties:
       Description: Grafana ALB to tasks 3000

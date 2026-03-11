@@ -10,8 +10,8 @@ database:
 images:
   grafana: "grafana/grafana:latest"
   grafana_init: "ghcr.io/cardinalhq/initcontainer-grafana:latest"
-  mcp_gateway: "public.ecr.aws/cardinalhq.io/mcp-gateway:v0.2.0"
-  conductor_server: "public.ecr.aws/cardinalhq.io/conductor-server:latest"
+  mcp_gateway: "ghcr.io/cardinalhq/mcp-gateway:v0.2.0"
+  conductor_server: "ghcr.io/cardinalhq/conductor-server:v0.1.7"
 
 # Task-level resource allocation (shared by all containers)
 task:
@@ -54,7 +54,6 @@ conductor_server:
   port: 4100
   environment:
     MCP_GATEWAY_URL: "http://localhost:8080"
-    AWS_BEDROCK_MODEL: "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
 
 # API Keys configuration (for datasource setup)
 api_keys:

@@ -53,8 +53,8 @@ MOCK_CONFIG = {
     },
     "images": {
         "grafana": "test:latest",
-        "mcp_gateway": "mcp-gw:latest",
-        "conductor_server": "conductor:latest"
+        "mcp_gateway": "ghcr.io/cardinalhq/mcp-gateway:v0.2.0",
+        "conductor_server": "ghcr.io/cardinalhq/conductor-server:v0.1.7"
     },
     "api_keys": [{"keys": ["test-key"]}]
 }
@@ -161,7 +161,7 @@ class TestGrafanaTemplateSimple(unittest.TestCase):
         assert "ConductorServerImage" in parameters
 
         # AI configuration parameters
-        assert "OpenAiApiKey" in parameters
+        assert "BedrockModel" in parameters
         assert "LakerunnerApiKey" in parameters
 
     @patch('lakerunner_grafana_service.load_grafana_config')
@@ -297,7 +297,6 @@ class TestGrafanaTemplateSimple(unittest.TestCase):
 
         conditions = template_dict["Conditions"]
         assert "IsInternetFacing" in conditions
-        assert "HasOpenAiKey" in conditions
 
     @patch('lakerunner_grafana_service.load_grafana_config')
     def test_ai_containers_run_as_nonroot(self, mock_load_config):
@@ -319,8 +318,8 @@ class TestGrafanaTemplateSimple(unittest.TestCase):
         assert conductor["User"] == "65532"
 
     @patch('lakerunner_grafana_service.load_grafana_config')
-    def test_openai_secret_is_conditional(self, mock_load_config):
-        """Test that OpenAI API key secret is conditionally created"""
+    def test_bedrock_model_parameter_has_allowed_values(self, mock_load_config):
+        """Test that BedrockModel parameter has regional AllowedValues"""
         mock_load_config.return_value = MOCK_CONFIG
 
         from lakerunner_grafana_service import create_grafana_template
@@ -328,8 +327,12 @@ class TestGrafanaTemplateSimple(unittest.TestCase):
         template = create_grafana_template()
         template_dict = json.loads(template.to_json())
 
-        openai_secret = template_dict["Resources"]["OpenAiApiKeySecret"]
-        assert openai_secret.get("Condition") == "HasOpenAiKey"
+        bedrock_param = template_dict["Parameters"]["BedrockModel"]
+        allowed = bedrock_param["AllowedValues"]
+        assert "us.anthropic.claude-sonnet-4-6" in allowed
+        assert "eu.anthropic.claude-sonnet-4-6" in allowed
+        assert "global.anthropic.claude-sonnet-4-6" in allowed
+        assert bedrock_param["Default"] == "us.anthropic.claude-sonnet-4-6"
 
 
 if __name__ == '__main__':
