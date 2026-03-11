@@ -58,6 +58,10 @@ echo "06. Generating Lakerunner OTEL Collector Service..."
 python3 src/lakerunner_otel_collector_service.py > generated-templates/lakerunner-06-otel-collector-service.yaml
 cfn-lint generated-templates/lakerunner-06-otel-collector-service.yaml
 
+echo "98. Generating Lakerunner Bedrock Setup..."
+python3 src/lakerunner_bedrock_setup.py > generated-templates/lakerunner-98-bedrock-setup.yaml
+cfn-lint generated-templates/lakerunner-98-bedrock-setup.yaml
+
 echo "99. Generating Lakerunner Debug Utility..."
 python3 src/lakerunner_debug_utility.py > generated-templates/lakerunner-99-debug-utility.yaml
 cfn-lint generated-templates/lakerunner-99-debug-utility.yaml

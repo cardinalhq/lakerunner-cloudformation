@@ -1,0 +1,108 @@
+Description: 'Lakerunner Bedrock Setup: accepts Marketplace model agreements. Deploy once per account/region before using AI features.'
+Outputs:
+  ModelId:
+    Description: Bedrock model ID with access enabled
+    Value: !Ref 'ModelId'
+Parameters:
+  ModelId:
+    Default: anthropic.claude-sonnet-4-6
+    Description: Bedrock foundation model ID to enable access for.
+    Type: String
+Resources:
+  BedrockSetupFunction:
+    Properties:
+      Code:
+        ZipFile: |2
+
+          import json, urllib.request, boto3
+
+          bedrock = boto3.client("bedrock")
+
+          def send(event, context, status, data=None, reason=""):
+              resp = {
+                  "Status": status,
+                  "Reason": f"{reason} See CloudWatch Logs: {context.log_stream_name}",
+                  "PhysicalResourceId": event.get("PhysicalResourceId") or "EnableBedrockModel",
+                  "StackId": event["StackId"],
+                  "RequestId": event["RequestId"],
+                  "LogicalResourceId": event["LogicalResourceId"],
+                  "NoEcho": False,
+                  "Data": data or {}
+              }
+              body = json.dumps(resp).encode("utf-8")
+              req = urllib.request.Request(event["ResponseURL"], data=body, method="PUT")
+              req.add_header("content-type", "")
+              req.add_header("content-length", str(len(body)))
+              try:
+                  with urllib.request.urlopen(req) as r:
+                      r.read()
+              except Exception as e:
+                  print("Failed to send response:", e)
+
+          def handler(event, context):
+              print("Event:", json.dumps(event))
+              if event["RequestType"] == "Delete":
+                  send(event, context, "SUCCESS", {"Message": "Delete no-op"})
+                  return
+
+              model_id = event["ResourceProperties"]["ModelId"]
+              try:
+                  offers = bedrock.list_foundation_model_agreement_offers(modelId=model_id)
+                  if not offers.get("offers"):
+                      print("No offers found -- model may already be enabled")
+                      send(event, context, "SUCCESS", {"Message": "No agreement required"})
+                      return
+
+                  offer_token = offers["offers"][0]["offerToken"]
+                  bedrock.create_foundation_model_agreement(
+                      modelId=model_id, offerToken=offer_token
+                  )
+                  print(f"Model agreement accepted for {model_id}")
+                  send(event, context, "SUCCESS", {"Message": f"Model {model_id} enabled"})
+
+              except bedrock.exceptions.ConflictException:
+                  print(f"Model {model_id} already has an active agreement")
+                  send(event, context, "SUCCESS", {"Message": "Already enabled"})
+              except Exception as e:
+                  print("Exception:", e)
+                  send(event, context, "FAILED", {"Error": str(e)}, reason=str(e))
+      Handler: index.handler
+      Role: !GetAtt 'BedrockSetupLambdaRole.Arn'
+      Runtime: python3.13
+      Timeout: 30
+    Type: AWS::Lambda::Function
+  BedrockSetupLambdaRole:
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+        Version: '2012-10-17'
+      Policies:
+        - PolicyDocument:
+            Statement:
+              - Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Effect: Allow
+                Resource: '*'
+              - Action:
+                  - bedrock:ListFoundationModelAgreementOffers
+                  - bedrock:CreateFoundationModelAgreement
+                  - bedrock:GetFoundationModelAvailability
+                  - aws-marketplace:ViewSubscriptions
+                  - aws-marketplace:Subscribe
+                Effect: Allow
+                Resource: '*'
+            Version: '2012-10-17'
+          PolicyName: BedrockSetup
+    Type: AWS::IAM::Role
+  EnableBedrockModelAccess:
+    Properties:
+      ModelId: !Ref 'ModelId'
+      ServiceToken: !GetAtt 'BedrockSetupFunction.Arn'
+    Type: Custom::EnableBedrockModel
+
