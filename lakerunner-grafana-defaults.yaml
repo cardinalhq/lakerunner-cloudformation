@@ -54,6 +54,7 @@ conductor_server:
   port: 4100
   environment:
     MCP_GATEWAY_URL: "http://localhost:8080"
+    AWS_BEDROCK_MODEL: "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
 
 # API Keys configuration (for datasource setup)
 api_keys:

@@ -418,6 +418,8 @@ Resources:
           Environment:
             - Name: MCP_GATEWAY_URL
               Value: http://localhost:8080
+            - Name: AWS_BEDROCK_MODEL
+              Value: us.anthropic.claude-sonnet-4-5-20250929-v1:0
           Essential: true
           HealthCheck:
             Command:
