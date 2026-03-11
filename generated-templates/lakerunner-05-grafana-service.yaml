@@ -1,8 +1,12 @@
 Conditions:
+  HasOpenAiKey: !Not
+    - !Equals
+      - !Ref 'OpenAiApiKey'
+      - ''
   IsInternetFacing: !Equals
     - !Ref 'AlbScheme'
     - internet-facing
-Description: 'Lakerunner Grafana Service: Grafana service with ALB, PostgreSQL storage, and datasource configuration'
+Description: 'Lakerunner Grafana + AI: Grafana with MCP Gateway and Conductor Server sidecars, ALB, PostgreSQL storage, and pre-configured plugins'
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
@@ -13,22 +17,37 @@ Metadata:
           - QueryApiUrl
           - AlbScheme
       - Label:
+          default: AI Configuration
+        Parameters:
+          - OpenAiApiKey
+          - LakerunnerApiKey
+      - Label:
           default: Container Images
         Parameters:
           - GrafanaImage
           - GrafanaInitImage
           - GrafanaResetToken
+          - McpGatewayImage
+          - ConductorServerImage
     ParameterLabels:
       AlbScheme:
         default: ALB Scheme
       CommonInfraStackName:
         default: Common Infra Stack Name
+      ConductorServerImage:
+        default: Conductor Server Image
       GrafanaImage:
         default: Grafana Image
       GrafanaInitImage:
         default: Grafana Init Image
       GrafanaResetToken:
         default: Grafana Reset Token
+      LakerunnerApiKey:
+        default: Lakerunner API Key
+      McpGatewayImage:
+        default: MCP Gateway Image
+      OpenAiApiKey:
+        default: OpenAI API Key
       QueryApiUrl:
         default: Query API URL
 Outputs:
@@ -65,6 +84,10 @@ Parameters:
   CommonInfraStackName:
     Description: 'REQUIRED: Name of the CommonInfra stack to import infrastructure values from.'
     Type: String
+  ConductorServerImage:
+    Default: public.ecr.aws/cardinalhq.io/conductor-server:latest
+    Description: Container image for Conductor Server sidecar
+    Type: String
   GrafanaImage:
     Default: grafana/grafana:latest
     Description: Container image for Grafana service
@@ -77,10 +100,38 @@ Parameters:
     Default: change-to-reset-grafana
     Description: Reset token for Grafana data wipe. Changing this value will wipe all Grafana data on next deployment.
     Type: String
+  LakerunnerApiKey:
+    Default: f70603aa00e6f67999cc66e336134887
+    Description: API key for Lakerunner services. Defaults to the standard key.
+    Type: String
+  McpGatewayImage:
+    Default: public.ecr.aws/cardinalhq.io/mcp-gateway:v0.2.0
+    Description: Container image for MCP Gateway sidecar
+    Type: String
+  OpenAiApiKey:
+    Default: ''
+    Description: 'OPTIONAL: OpenAI API key for AI features. Leave blank to use only AWS Bedrock.'
+    NoEcho: true
+    Type: String
   QueryApiUrl:
     Description: 'REQUIRED: Full URL to the Query API endpoint (e.g., http://alb-dns-name.region.elb.amazonaws.com:7101)'
     Type: String
 Resources:
+  AiInternalSecret:
+    Properties:
+      Description: Internal API key for communication between AI services
+      GenerateSecretString:
+        ExcludePunctuation: true
+        GenerateStringKey: api_key
+        PasswordLength: 48
+        SecretStringTemplate: '{}'
+      Name: !Sub '${AWS::StackName}-ai-internal'
+    Type: AWS::SecretsManager::Secret
+  ConductorServerLogGroup:
+    Properties:
+      LogGroupName: !Sub '/ecs/${AWS::StackName}/conductor-server'
+      RetentionInDays: 14
+    Type: AWS::Logs::LogGroup
   GrafanaAlb:
     Properties:
       Scheme: !Ref 'AlbScheme'
@@ -206,7 +257,7 @@ Resources:
     Type: AWS::ElasticLoadBalancingV2::Listener
   GrafanaLogGroup:
     Properties:
-      LogGroupName: !Sub '/ecs/grafana'
+      LogGroupName: !Sub '/ecs/${AWS::StackName}/grafana'
       RetentionInDays: 14
     Type: AWS::Logs::LogGroup
   GrafanaSecret:
@@ -249,7 +300,7 @@ Resources:
                 - ${CommonInfraStackName}-PrivateSubnets
                 - CommonInfraStackName: !Ref 'CommonInfraStackName'
       PropagateTags: SERVICE
-      ServiceName: grafana
+      ServiceName: !Sub '${AWS::StackName}-grafana'
       Tags:
         - Key: Component
           Value: Service
@@ -323,6 +374,84 @@ Resources:
             - Condition: SUCCESS
               ContainerName: GrafanaInit
           Environment:
+            - Name: LAKERUNNER_API_URL
+              Value: !Ref 'QueryApiUrl'
+            - Name: HOME
+              Value: /tmp
+            - Name: AWS_REGION
+              Value: us-east-1
+          Essential: true
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - wget --no-verbose --tries=1 --spider http://localhost:8080/healthz || exit 1
+            Interval: 30
+            Retries: 3
+            StartPeriod: 30
+            Timeout: 5
+          Image: !Ref 'McpGatewayImage'
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref 'McpGatewayLogGroup'
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: mcp-gateway
+          Name: McpGateway
+          PortMappings:
+            - ContainerPort: 8080
+              Protocol: tcp
+          Secrets:
+            - Name: LAKERUNNER_API_KEY
+              ValueFrom: !Ref 'LakerunnerApiKeySecret'
+            - Name: CARDINALHQ_API_KEY
+              ValueFrom: !Ref 'LakerunnerApiKeySecret'
+            - Name: MCP_API_KEY
+              ValueFrom: !Sub
+                - '${SecretArn}:api_key::'
+                - SecretArn: !Ref 'AiInternalSecret'
+          User: '65532'
+        - DependsOn:
+            - Condition: SUCCESS
+              ContainerName: GrafanaInit
+            - Condition: HEALTHY
+              ContainerName: McpGateway
+          Environment:
+            - Name: MCP_GATEWAY_URL
+              Value: http://localhost:8080
+          Essential: true
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - wget --no-verbose --tries=1 --spider http://localhost:4100/api/health || exit 1
+            Interval: 30
+            Retries: 3
+            StartPeriod: 30
+            Timeout: 10
+          Image: !Ref 'ConductorServerImage'
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref 'ConductorServerLogGroup'
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: conductor-server
+          Name: ConductorServer
+          PortMappings:
+            - ContainerPort: 4100
+              Protocol: tcp
+          Secrets:
+            - Name: LAKERUNNER_API_KEY
+              ValueFrom: !Ref 'LakerunnerApiKeySecret'
+            - Name: CARDINALHQ_API_KEY
+              ValueFrom: !Ref 'LakerunnerApiKeySecret'
+            - Name: MCP_API_KEY
+              ValueFrom: !Sub
+                - '${SecretArn}:api_key::'
+                - SecretArn: !Ref 'AiInternalSecret'
+          User: '65532'
+        - DependsOn:
+            - Condition: SUCCESS
+              ContainerName: GrafanaInit
+          Environment:
             - Name: BUMP_REVISION
               Value: '1'
             - Name: OTEL_SERVICE_NAME
@@ -352,7 +481,8 @@ Resources:
             - Name: GF_SERVER_ROOT_URL
               Value: '%(protocol)s://%(domain)s:%(http_port)s'
             - Name: GF_INSTALL_PLUGINS
-              Value: https://github.com/cardinalhq/cardinalhq-lakerunner-datasource/releases/download/v2.4.0/cardinalhq-lakerunner-datasource.zip;cardinalhq-lakerunner-datasource
+              Value: >-
+                https://github.com/cardinalhq/cardinalhq-lakerunner-datasource/releases/download/v2.4.0/cardinalhq-lakerunner-datasource.zip;cardinalhq-lakerunner-datasource,https://github.com/cardinalhq/cardinalhq-cardinal-app/releases/download/v0.1.8/cardinalhq-cardinal-app.zip;cardinalhq-cardinal-app
             - Name: GF_PATHS_PROVISIONING
               Value: /etc/grafana/provisioning
             - Name: GF_SECURITY_ALLOW_EMBEDDING
@@ -361,6 +491,7 @@ Resources:
               Value: postgres
             - Name: GF_DATABASE_SSL_MODE
               Value: require
+          Essential: true
           HealthCheck:
             Command:
               - CMD-SHELL
@@ -396,10 +527,10 @@ Resources:
             - Name: GRAFANA_DATASOURCE_CONFIG
               ValueFrom: !Ref 'GrafanaDatasourceConfig'
           User: '0'
-      Cpu: '512'
+      Cpu: '2048'
       ExecutionRoleArn: !GetAtt 'GrafanaExecRole.Arn'
-      Family: grafana-task
-      Memory: '1024'
+      Family: !Sub '${AWS::StackName}-grafana-ai'
+      Memory: '4096'
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE
@@ -429,6 +560,15 @@ Resources:
                 Resource: '*'
             Version: '2012-10-17'
           PolicyName: LogAccess
+        - PolicyDocument:
+            Statement:
+              - Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Effect: Allow
+                Resource: '*'
+            Version: '2012-10-17'
+          PolicyName: BedrockAccess
       RoleName: !Sub '${AWS::StackName}-task-role'
     Type: AWS::IAM::Role
   GrafanaTg:
@@ -458,6 +598,24 @@ Resources:
           - ${CommonInfraStackName}-VpcId
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
+  LakerunnerApiKeySecret:
+    Properties:
+      Description: Lakerunner API key for AI services
+      Name: !Sub '${AWS::StackName}-lakerunner-api-key'
+      SecretString: !Ref 'LakerunnerApiKey'
+    Type: AWS::SecretsManager::Secret
+  McpGatewayLogGroup:
+    Properties:
+      LogGroupName: !Sub '/ecs/${AWS::StackName}/mcp-gateway'
+      RetentionInDays: 14
+    Type: AWS::Logs::LogGroup
+  OpenAiApiKeySecret:
+    Condition: HasOpenAiKey
+    Properties:
+      Description: OpenAI API key for AI features
+      Name: !Sub '${AWS::StackName}-openai-api-key'
+      SecretString: !Ref 'OpenAiApiKey'
+    Type: AWS::SecretsManager::Secret
   TaskFromGrafanaAlb3000:
     Properties:
       Description: Grafana ALB to tasks 3000

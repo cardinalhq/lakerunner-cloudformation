@@ -447,7 +447,7 @@ Parameters:
     Description: Enable trace processing services (ingest-traces, compact-traces)
     Type: String
   GoServicesImage:
-    Default: ghcr.io/cardinalhq/lakerunner:v1.15.1
+    Default: ghcr.io/cardinalhq/lakerunner:v1.15.2
     Description: Container image for all Go services (pubsub, ingest, compact, query-api, query-worker, etc.)
     Type: String
   IngestLogsMemory:

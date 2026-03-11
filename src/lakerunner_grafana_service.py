@@ -17,7 +17,7 @@ import yaml
 import os
 from troposphere import (
     Template, Parameter, Ref, Sub, GetAtt, If, Equals, Export, Output,
-    ImportValue, Split, Tags
+    ImportValue, Split, Tags, Not
 )
 from troposphere.ecs import (
     Service, TaskDefinition, ContainerDefinition, Environment,
@@ -42,14 +42,20 @@ def load_grafana_config(config_file="lakerunner-grafana-defaults.yaml"):
         return yaml.safe_load(f)
 
 def create_grafana_template():
-    """Create CloudFormation template for Grafana stack"""
+    """Create CloudFormation template for Grafana + AI stack"""
 
     t = Template()
-    t.set_description("Lakerunner Grafana Service: Grafana service with ALB, PostgreSQL storage, and datasource configuration")
+    t.set_description(
+        "Lakerunner Grafana + AI: Grafana with MCP Gateway and Conductor Server"
+        " sidecars, ALB, PostgreSQL storage, and pre-configured plugins"
+    )
 
-    # Load Grafana configuration
+    # Load configuration
     config = load_grafana_config()
     grafana_config = config.get('grafana', {})
+    mcp_gw_config = config.get('mcp_gateway', {})
+    conductor_config = config.get('conductor_server', {})
+    task_config = config.get('task', {})
     images = config.get('images', {})
     api_keys = config.get('api_keys', [])
 
@@ -66,7 +72,6 @@ def create_grafana_template():
         Description="REQUIRED: Full URL to the Query API endpoint (e.g., http://alb-dns-name.region.elb.amazonaws.com:7101)"
     ))
 
-
     # Container image overrides for air-gapped deployments
     GrafanaImage = t.add_parameter(Parameter(
         "GrafanaImage", Type="String",
@@ -78,6 +83,18 @@ def create_grafana_template():
         "GrafanaInitImage", Type="String",
         Default=images.get('grafana_init', 'lakerunner-grafana-init:latest'),
         Description="Container image for Grafana init container (datasource provisioning and database setup)"
+    ))
+
+    McpGatewayImage = t.add_parameter(Parameter(
+        "McpGatewayImage", Type="String",
+        Default=images.get('mcp_gateway', 'public.ecr.aws/cardinalhq.io/mcp-gateway:v0.2.0'),
+        Description="Container image for MCP Gateway sidecar"
+    ))
+
+    ConductorServerImage = t.add_parameter(Parameter(
+        "ConductorServerImage", Type="String",
+        Default=images.get('conductor_server', 'public.ecr.aws/cardinalhq.io/conductor-server:latest'),
+        Description="Container image for Conductor Server sidecar"
     ))
 
     # Grafana Reset Token Configuration
@@ -96,6 +113,20 @@ def create_grafana_template():
         Description="Load balancer scheme: 'internet-facing' for external access or 'internal' for internal access only."
     ))
 
+    # AI Configuration parameters
+    OpenAiApiKey = t.add_parameter(Parameter(
+        "OpenAiApiKey", Type="String",
+        Default="",
+        NoEcho=True,
+        Description="OPTIONAL: OpenAI API key for AI features. Leave blank to use only AWS Bedrock."
+    ))
+
+    LakerunnerApiKey = t.add_parameter(Parameter(
+        "LakerunnerApiKey", Type="String",
+        Default=api_keys[0]['keys'][0] if api_keys and api_keys[0].get('keys') else "",
+        Description="API key for Lakerunner services. Defaults to the standard key."
+    ))
+
     # Parameter groups for console
     t.set_metadata({
         "AWS::CloudFormation::Interface": {
@@ -105,17 +136,28 @@ def create_grafana_template():
                     "Parameters": ["CommonInfraStackName", "QueryApiUrl", "AlbScheme"]
                 },
                 {
+                    "Label": {"default": "AI Configuration"},
+                    "Parameters": ["OpenAiApiKey", "LakerunnerApiKey"]
+                },
+                {
                     "Label": {"default": "Container Images"},
-                    "Parameters": ["GrafanaImage", "GrafanaInitImage", "GrafanaResetToken"]
+                    "Parameters": [
+                        "GrafanaImage", "GrafanaInitImage", "GrafanaResetToken",
+                        "McpGatewayImage", "ConductorServerImage"
+                    ]
                 }
             ],
             "ParameterLabels": {
                 "CommonInfraStackName": {"default": "Common Infra Stack Name"},
                 "QueryApiUrl": {"default": "Query API URL"},
                 "AlbScheme": {"default": "ALB Scheme"},
+                "OpenAiApiKey": {"default": "OpenAI API Key"},
+                "LakerunnerApiKey": {"default": "Lakerunner API Key"},
                 "GrafanaImage": {"default": "Grafana Image"},
                 "GrafanaInitImage": {"default": "Grafana Init Image"},
                 "GrafanaResetToken": {"default": "Grafana Reset Token"},
+                "McpGatewayImage": {"default": "MCP Gateway Image"},
+                "ConductorServerImage": {"default": "Conductor Server Image"},
             }
         }
     })
@@ -136,6 +178,7 @@ def create_grafana_template():
 
     # Conditions
     t.add_condition("IsInternetFacing", Equals(Ref(AlbScheme), "internet-facing"))
+    t.add_condition("HasOpenAiKey", Not(Equals(Ref(OpenAiApiKey), "")))
 
     # -----------------------
     # ALB Security Group
@@ -247,7 +290,73 @@ def create_grafana_template():
     ))
 
     # -----------------------
-    # Task Execution Role (for Grafana)
+    # Secrets
+    # -----------------------
+    # Grafana admin password
+    grafana_secret = t.add_resource(Secret(
+        "GrafanaSecret",
+        Name=Sub("${AWS::StackName}-grafana-admin"),
+        Description="Grafana admin password",
+        GenerateSecretString=GenerateSecretString(
+            SecretStringTemplate='{"username": "lakerunner"}',
+            GenerateStringKey='password',
+            ExcludeCharacters=' !"#$%&\'()*+,./:;<=>?@[\\]^`{|}~',
+            PasswordLength=32
+        )
+    ))
+
+    # Grafana database user password
+    grafana_db_secret = t.add_resource(Secret(
+        "GrafanaDbSecret",
+        Name=Sub("${AWS::StackName}-grafana-db"),
+        Description="Grafana database user password",
+        GenerateSecretString=GenerateSecretString(
+            SecretStringTemplate='{"username": "grafana"}',
+            GenerateStringKey='password',
+            ExcludeCharacters=' !"#$%&\'()*+,./:;<=>?@[\\]^`{|}~',
+            PasswordLength=32
+        )
+    ))
+
+    # Internal API key shared between AI services (auto-generated)
+    ai_internal_secret = t.add_resource(Secret(
+        "AiInternalSecret",
+        Name=Sub("${AWS::StackName}-ai-internal"),
+        Description="Internal API key for communication between AI services",
+        GenerateSecretString=GenerateSecretString(
+            SecretStringTemplate='{}',
+            GenerateStringKey='api_key',
+            ExcludePunctuation=True,
+            PasswordLength=48
+        )
+    ))
+
+    # Lakerunner API key (stored in Secrets Manager for ECS secret injection)
+    lakerunner_api_key_secret = t.add_resource(Secret(
+        "LakerunnerApiKeySecret",
+        Name=Sub("${AWS::StackName}-lakerunner-api-key"),
+        Description="Lakerunner API key for AI services",
+        SecretString=Ref(LakerunnerApiKey)
+    ))
+
+    # OpenAI API key (optional, stored in Secrets Manager)
+    openai_api_key_secret = t.add_resource(Secret(
+        "OpenAiApiKeySecret",
+        Condition="HasOpenAiKey",
+        Name=Sub("${AWS::StackName}-openai-api-key"),
+        Description="OpenAI API key for AI features",
+        SecretString=Ref(OpenAiApiKey)
+    ))
+
+    t.add_output(Output(
+        "GrafanaAdminSecretArn",
+        Description="ARN of the Grafana admin password secret. Use AWS CLI to retrieve: aws secretsmanager get-secret-value --secret-id <ARN>",
+        Value=Ref(grafana_secret),
+        Export=Export(Sub("${AWS::StackName}-GrafanaAdminSecretArn"))
+    ))
+
+    # -----------------------
+    # Task Execution Role
     # -----------------------
     ExecutionRole = t.add_resource(Role(
         "GrafanaExecRole",
@@ -308,7 +417,7 @@ def create_grafana_template():
     ))
 
     # -----------------------
-    # Task Role (for Grafana)
+    # Task Role (Grafana + AI services)
     # -----------------------
     TaskRole = t.add_resource(Role(
         "GrafanaTaskRole",
@@ -337,133 +446,60 @@ def create_grafana_template():
                         }
                     ]
                 }
+            ),
+            Policy(
+                PolicyName="BedrockAccess",
+                PolicyDocument={
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Action": [
+                                "bedrock:InvokeModel",
+                                "bedrock:InvokeModelWithResponseStream"
+                            ],
+                            "Resource": "*"
+                        }
+                    ]
+                }
             )
         ]
     ))
 
     # -----------------------
-    # Grafana admin password secret
+    # Log Groups
     # -----------------------
-    grafana_secret = t.add_resource(Secret(
-        "GrafanaSecret",
-        Name=Sub("${AWS::StackName}-grafana-admin"),
-        Description="Grafana admin password",
-        GenerateSecretString=GenerateSecretString(
-            SecretStringTemplate='{"username": "lakerunner"}',
-            GenerateStringKey='password',
-            ExcludeCharacters=' !"#$%&\'()*+,./:;<=>?@[\\]^`{|}~',
-            PasswordLength=32
-        )
-    ))
-
-    # -----------------------
-    # Grafana database user secret
-    # -----------------------
-    grafana_db_secret = t.add_resource(Secret(
-        "GrafanaDbSecret",
-        Name=Sub("${AWS::StackName}-grafana-db"),
-        Description="Grafana database user password",
-        GenerateSecretString=GenerateSecretString(
-            SecretStringTemplate='{"username": "grafana"}',
-            GenerateStringKey='password',
-            ExcludeCharacters=' !"#$%&\'()*+,./:;<=>?@[\\]^`{|}~',
-            PasswordLength=32
-        )
-    ))
-
-    # Output the Grafana admin password secret ARN so users can retrieve it
-    t.add_output(Output(
-        "GrafanaAdminSecretArn",
-        Description="ARN of the Grafana admin password secret. Use AWS CLI to retrieve: aws secretsmanager get-secret-value --secret-id <ARN>",
-        Value=Ref(grafana_secret),
-        Export=Export(Sub("${AWS::StackName}-GrafanaAdminSecretArn"))
-    ))
-
-    # -----------------------
-    # PostgreSQL Database Configuration
-    # -----------------------
-    # Database connection is handled via environment variables and secrets
-    # No additional resources needed here as database is managed by setup stack
-
-    # -----------------------
-    # Grafana Service
-    # -----------------------
-    # Create log group
-    log_group = t.add_resource(LogGroup(
+    grafana_log_group = t.add_resource(LogGroup(
         "GrafanaLogGroup",
-        LogGroupName=Sub("/ecs/grafana"),
+        LogGroupName=Sub("/ecs/${AWS::StackName}/grafana"),
         RetentionInDays=14
     ))
 
-    # Build volumes list
+    mcp_gw_log_group = t.add_resource(LogGroup(
+        "McpGatewayLogGroup",
+        LogGroupName=Sub("/ecs/${AWS::StackName}/mcp-gateway"),
+        RetentionInDays=14
+    ))
+
+    conductor_log_group = t.add_resource(LogGroup(
+        "ConductorServerLogGroup",
+        LogGroupName=Sub("/ecs/${AWS::StackName}/conductor-server"),
+        RetentionInDays=14
+    ))
+
+    # -----------------------
+    # Volumes
+    # -----------------------
     volumes = [
         Volume(Name="scratch")
     ]
 
-    # Build environment variables
-    base_env = [
-        Environment(Name="BUMP_REVISION", Value="1"),
-        Environment(Name="OTEL_SERVICE_NAME", Value="grafana"),
-        Environment(Name="TMPDIR", Value="/scratch"),
-        Environment(Name="HOME", Value="/scratch")
-    ]
-
-    # Add database connection environment variables
-    base_env.extend([
-        Environment(Name="GF_DATABASE_HOST", Value=ImportValue(Sub("${CommonInfraStackName}-DbEndpoint", CommonInfraStackName=Ref(CommonInfraStackName)))),
-        Environment(Name="GF_DATABASE_PORT", Value=ImportValue(Sub("${CommonInfraStackName}-DbPort", CommonInfraStackName=Ref(CommonInfraStackName)))),
-        Environment(Name="GF_DATABASE_NAME", Value="grafana"),
-        Environment(Name="GF_DATABASE_USER", Value="grafana"),
-    ])
-
-    # Add Grafana-specific environment variables (excluding sensitive ones)
-    env_config = grafana_config.get('environment', {})
-    sensitive_keys = {'GF_SECURITY_ADMIN_PASSWORD', 'GF_DATABASE_USER', 'GF_DATABASE_PASSWORD'}
-    for key, value in env_config.items():
-        if key not in sensitive_keys:
-            base_env.append(Environment(Name=key, Value=value))
-
-    # Build secrets
-    secrets = [
-        EcsSecret(
-            Name="GF_SECURITY_ADMIN_PASSWORD",
-            ValueFrom=Sub("${SecretArn}:password::", SecretArn=Ref(grafana_secret))
-        ),
-        EcsSecret(
-            Name="GF_DATABASE_PASSWORD",
-            ValueFrom=Sub("${SecretArn}:password::", SecretArn=Ref(grafana_db_secret))
-        ),
-        EcsSecret(
-            Name="GRAFANA_DATASOURCE_CONFIG",
-            ValueFrom=Ref(grafana_datasource_param)
-        )
-    ]
-
-    # Build mount points
-    mount_points = [
-        MountPoint(
-            ContainerPath="/scratch",
-            SourceVolume="scratch",
-            ReadOnly=False
-        )
-    ]
-
-    # Build health check
-    health_check = HealthCheck(
-        Command=["CMD-SHELL", "curl -f http://localhost:3000/api/health"],
-        Interval=30,
-        Timeout=5,
-        Retries=3,
-        StartPeriod=60
-    )
-
-    # Port mappings
-    port_mappings = [PortMapping(ContainerPort=3000, Protocol="tcp")]
-
-    # Build container definitions - init container + main container
+    # -----------------------
+    # Container Definitions
+    # -----------------------
     container_definitions = []
 
-    # Init container for database setup
+    # -- Init container for database setup --
     init_container = ContainerDefinition(
         Name="GrafanaInit",
         Image=Ref(GrafanaInitImage),
@@ -473,10 +509,10 @@ def create_grafana_template():
             Environment(Name="GRAFANA_DB_USER", Value="grafana"),
             Environment(Name="PGHOST", Value=ImportValue(Sub("${CommonInfraStackName}-DbEndpoint", CommonInfraStackName=Ref(CommonInfraStackName)))),
             Environment(Name="PGPORT", Value=ImportValue(Sub("${CommonInfraStackName}-DbPort", CommonInfraStackName=Ref(CommonInfraStackName)))),
-            Environment(Name="PGDATABASE", Value="postgres"),  # Connect to default postgres db first
+            Environment(Name="PGDATABASE", Value="postgres"),
             Environment(Name="PGSSLMODE", Value="require"),
             Environment(Name="RESET_TOKEN", Value=Ref(GrafanaResetToken)),
-            Environment(Name="GF_SECURITY_ADMIN_USER", Value="lakerunner")  # Needed for password reset
+            Environment(Name="GF_SECURITY_ADMIN_USER", Value="lakerunner")
         ],
         Secrets=[
             EcsSecret(
@@ -505,7 +541,7 @@ def create_grafana_template():
         LogConfiguration=LogConfiguration(
             LogDriver="awslogs",
             Options={
-                "awslogs-group": Ref(log_group),
+                "awslogs-group": Ref(grafana_log_group),
                 "awslogs-region": Ref("AWS::Region"),
                 "awslogs-stream-prefix": "grafana-init"
             }
@@ -513,21 +549,168 @@ def create_grafana_template():
     )
     container_definitions.append(init_container)
 
-    # Main Grafana container
+    # -- MCP Gateway sidecar --
+    mcp_gw_port = mcp_gw_config.get('port', 8080)
+    mcp_gw_env = [
+        Environment(Name="LAKERUNNER_API_URL", Value=Ref(QueryApiUrl)),
+    ]
+    for key, value in mcp_gw_config.get('environment', {}).items():
+        mcp_gw_env.append(Environment(Name=key, Value=str(value)))
+
+    mcp_gw_secrets = [
+        EcsSecret(
+            Name="LAKERUNNER_API_KEY",
+            ValueFrom=Ref(lakerunner_api_key_secret)
+        ),
+        EcsSecret(
+            Name="CARDINALHQ_API_KEY",
+            ValueFrom=Ref(lakerunner_api_key_secret)
+        ),
+        EcsSecret(
+            Name="MCP_API_KEY",
+            ValueFrom=Sub("${SecretArn}:api_key::", SecretArn=Ref(ai_internal_secret))
+        ),
+    ]
+
+    mcp_gateway_container = ContainerDefinition(
+        Name="McpGateway",
+        Image=Ref(McpGatewayImage),
+        Essential=True,
+        User="65532",
+        PortMappings=[PortMapping(ContainerPort=mcp_gw_port, Protocol="tcp")],
+        Environment=mcp_gw_env,
+        Secrets=mcp_gw_secrets,
+        HealthCheck=HealthCheck(
+            Command=["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:%d/healthz || exit 1" % mcp_gw_port],
+            Interval=30,
+            Timeout=5,
+            Retries=3,
+            StartPeriod=30
+        ),
+        DependsOn=[{"ContainerName": "GrafanaInit", "Condition": "SUCCESS"}],
+        LogConfiguration=LogConfiguration(
+            LogDriver="awslogs",
+            Options={
+                "awslogs-group": Ref(mcp_gw_log_group),
+                "awslogs-region": Ref("AWS::Region"),
+                "awslogs-stream-prefix": "mcp-gateway"
+            }
+        )
+    )
+    container_definitions.append(mcp_gateway_container)
+
+    # -- Conductor Server sidecar --
+    conductor_port = conductor_config.get('port', 4100)
+    conductor_env = []
+    for key, value in conductor_config.get('environment', {}).items():
+        conductor_env.append(Environment(Name=key, Value=str(value)))
+
+    conductor_secrets = [
+        EcsSecret(
+            Name="LAKERUNNER_API_KEY",
+            ValueFrom=Ref(lakerunner_api_key_secret)
+        ),
+        EcsSecret(
+            Name="CARDINALHQ_API_KEY",
+            ValueFrom=Ref(lakerunner_api_key_secret)
+        ),
+        EcsSecret(
+            Name="MCP_API_KEY",
+            ValueFrom=Sub("${SecretArn}:api_key::", SecretArn=Ref(ai_internal_secret))
+        ),
+    ]
+
+    conductor_container = ContainerDefinition(
+        Name="ConductorServer",
+        Image=Ref(ConductorServerImage),
+        Essential=True,
+        User="65532",
+        PortMappings=[PortMapping(ContainerPort=conductor_port, Protocol="tcp")],
+        Environment=conductor_env,
+        Secrets=conductor_secrets,
+        HealthCheck=HealthCheck(
+            Command=["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:%d/api/health || exit 1" % conductor_port],
+            Interval=30,
+            Timeout=10,
+            Retries=3,
+            StartPeriod=30
+        ),
+        DependsOn=[
+            {"ContainerName": "GrafanaInit", "Condition": "SUCCESS"},
+            {"ContainerName": "McpGateway", "Condition": "HEALTHY"}
+        ],
+        LogConfiguration=LogConfiguration(
+            LogDriver="awslogs",
+            Options={
+                "awslogs-group": Ref(conductor_log_group),
+                "awslogs-region": Ref("AWS::Region"),
+                "awslogs-stream-prefix": "conductor-server"
+            }
+        )
+    )
+    container_definitions.append(conductor_container)
+
+    # -- Main Grafana container --
+    base_env = [
+        Environment(Name="BUMP_REVISION", Value="1"),
+        Environment(Name="OTEL_SERVICE_NAME", Value="grafana"),
+        Environment(Name="TMPDIR", Value="/scratch"),
+        Environment(Name="HOME", Value="/scratch"),
+        Environment(Name="GF_DATABASE_HOST", Value=ImportValue(Sub("${CommonInfraStackName}-DbEndpoint", CommonInfraStackName=Ref(CommonInfraStackName)))),
+        Environment(Name="GF_DATABASE_PORT", Value=ImportValue(Sub("${CommonInfraStackName}-DbPort", CommonInfraStackName=Ref(CommonInfraStackName)))),
+        Environment(Name="GF_DATABASE_NAME", Value="grafana"),
+        Environment(Name="GF_DATABASE_USER", Value="grafana"),
+    ]
+
+    # Add Grafana-specific environment variables (excluding sensitive ones)
+    env_config = grafana_config.get('environment', {})
+    sensitive_keys = {'GF_SECURITY_ADMIN_PASSWORD', 'GF_DATABASE_USER', 'GF_DATABASE_PASSWORD'}
+    for key, value in env_config.items():
+        if key not in sensitive_keys:
+            base_env.append(Environment(Name=key, Value=value))
+
+    grafana_secrets = [
+        EcsSecret(
+            Name="GF_SECURITY_ADMIN_PASSWORD",
+            ValueFrom=Sub("${SecretArn}:password::", SecretArn=Ref(grafana_secret))
+        ),
+        EcsSecret(
+            Name="GF_DATABASE_PASSWORD",
+            ValueFrom=Sub("${SecretArn}:password::", SecretArn=Ref(grafana_db_secret))
+        ),
+        EcsSecret(
+            Name="GRAFANA_DATASOURCE_CONFIG",
+            ValueFrom=Ref(grafana_datasource_param)
+        )
+    ]
+
     grafana_container = ContainerDefinition(
         Name="GrafanaContainer",
         Image=Ref(GrafanaImage),
+        Essential=True,
         Environment=base_env,
-        Secrets=secrets,
-        MountPoints=mount_points,
-        PortMappings=port_mappings,
-        HealthCheck=health_check,
+        Secrets=grafana_secrets,
+        MountPoints=[
+            MountPoint(
+                ContainerPath="/scratch",
+                SourceVolume="scratch",
+                ReadOnly=False
+            )
+        ],
+        PortMappings=[PortMapping(ContainerPort=3000, Protocol="tcp")],
+        HealthCheck=HealthCheck(
+            Command=["CMD-SHELL", "curl -f http://localhost:3000/api/health"],
+            Interval=30,
+            Timeout=5,
+            Retries=3,
+            StartPeriod=60
+        ),
         User="0",
         DependsOn=[{"ContainerName": "GrafanaInit", "Condition": "SUCCESS"}],
         LogConfiguration=LogConfiguration(
             LogDriver="awslogs",
             Options={
-                "awslogs-group": Ref(log_group),
+                "awslogs-group": Ref(grafana_log_group),
                 "awslogs-region": Ref("AWS::Region"),
                 "awslogs-stream-prefix": "grafana"
             }
@@ -535,12 +718,14 @@ def create_grafana_template():
     )
     container_definitions.append(grafana_container)
 
-    # Create task definition
+    # -----------------------
+    # Task Definition
+    # -----------------------
     task_def = t.add_resource(TaskDefinition(
         "GrafanaTaskDef",
-        Family="grafana-task",
-        Cpu=str(grafana_config.get('cpu', 512)),
-        Memory=str(grafana_config.get('memory_mib', 1024)),
+        Family=Sub("${AWS::StackName}-grafana-ai"),
+        Cpu=str(task_config.get('cpu', 2048)),
+        Memory=str(task_config.get('memory_mib', 4096)),
         NetworkMode="awsvpc",
         RequiresCompatibilities=["FARGATE"],
         ExecutionRoleArn=GetAtt(ExecutionRole, "Arn"),
@@ -553,12 +738,14 @@ def create_grafana_template():
         )
     ))
 
-    # Create ECS service
+    # -----------------------
+    # ECS Service
+    # -----------------------
     desired_count = str(grafana_config.get('replicas', 1))
 
     grafana_service = t.add_resource(Service(
         "GrafanaService",
-        ServiceName="grafana",
+        ServiceName=Sub("${AWS::StackName}-grafana"),
         Cluster=ClusterArnValue,
         TaskDefinition=Ref(task_def),
         LaunchType="FARGATE",
