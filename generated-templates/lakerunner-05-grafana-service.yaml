@@ -483,9 +483,9 @@ Resources:
               Value: '3000'
             - Name: GF_SERVER_ROOT_URL
               Value: '%(protocol)s://%(domain)s:%(http_port)s'
-            - Name: GF_INSTALL_PLUGINS
+            - Name: GF_PLUGINS_PREINSTALL_SYNC
               Value: >-
-                https://github.com/cardinalhq/cardinalhq-lakerunner-datasource/releases/download/v2.4.0/cardinalhq-lakerunner-datasource.zip;cardinalhq-lakerunner-datasource,https://github.com/cardinalhq/cardinalhq-cardinal-app/releases/download/v0.1.8/cardinalhq-cardinal-app.zip;cardinalhq-cardinal-app
+                cardinalhq-lakerunner-datasource@2.4.0@https://github.com/cardinalhq/cardinalhq-lakerunner-datasource/releases/download/v2.4.0/cardinalhq-lakerunner-datasource.zip,cardinalhq-cardinal-app@0.1.8@https://github.com/cardinalhq/cardinalhq-cardinal-app/releases/download/v0.1.8/cardinalhq-cardinal-app.zip
             - Name: GF_PATHS_PROVISIONING
               Value: /etc/grafana/provisioning
             - Name: GF_SECURITY_ALLOW_EMBEDDING

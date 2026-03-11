@@ -28,7 +28,7 @@ MOCK_CONFIG = {
         "environment": {
             "GF_SECURITY_ADMIN_USER": "lakerunner",
             "GF_SERVER_HTTP_PORT": "3000",
-            "GF_INSTALL_PLUGINS": "test-plugin.zip;test-plugin",
+            "GF_PLUGINS_PREINSTALL_SYNC": "test-plugin@1.0.0@https://example.com/test-plugin.zip",
         },
         "health_check": {
             "command": ["curl", "-f", "http://localhost:3000/api/health"]
