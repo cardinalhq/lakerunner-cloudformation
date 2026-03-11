@@ -53,6 +53,7 @@ MOCK_CONFIG = {
     },
     "images": {
         "grafana": "test:latest",
+        "grafana_init": "ghcr.io/cardinalhq/initcontainer-grafana:test",
         "mcp_gateway": "ghcr.io/cardinalhq/mcp-gateway:v0.2.0",
         "conductor_server": "ghcr.io/cardinalhq/conductor-server:v0.1.7"
     },
@@ -154,15 +155,16 @@ class TestGrafanaTemplateSimple(unittest.TestCase):
         assert "QueryApiUrl" in parameters
         assert "AlbScheme" in parameters
 
-        # Container image parameters
-        assert "GrafanaImage" in parameters
-        assert "GrafanaInitImage" in parameters
-        assert "McpGatewayImage" in parameters
-        assert "ConductorServerImage" in parameters
-
         # AI configuration parameters
         assert "BedrockModel" in parameters
         assert "LakerunnerApiKey" in parameters
+        assert "GrafanaResetToken" in parameters
+
+        # Grafana images are fixed from config and not exposed as install parameters
+        assert "GrafanaImage" not in parameters
+        assert "GrafanaInitImage" not in parameters
+        assert "McpGatewayImage" not in parameters
+        assert "ConductorServerImage" not in parameters
 
     @patch('lakerunner_grafana_service.load_grafana_config')
     def test_grafana_resources_exist(self, mock_load_config):
@@ -223,6 +225,26 @@ class TestGrafanaTemplateSimple(unittest.TestCase):
         task_def = template_dict["Resources"]["GrafanaTaskDef"]["Properties"]
         assert task_def["Cpu"] == "2048"
         assert task_def["Memory"] == "4096"
+
+    @patch('lakerunner_grafana_service.load_grafana_config')
+    def test_task_definition_uses_literal_images(self, mock_load_config):
+        """Test that Grafana task definition uses literal image strings, not parameters"""
+        mock_load_config.return_value = MOCK_CONFIG
+
+        from lakerunner_grafana_service import create_grafana_template
+
+        template = create_grafana_template()
+        template_dict = json.loads(template.to_json())
+
+        containers = template_dict["Resources"]["GrafanaTaskDef"]["Properties"]["ContainerDefinitions"]
+        images_by_name = {container["Name"]: container["Image"] for container in containers}
+        for container_name in ["GrafanaInit", "McpGateway", "ConductorServer", "GrafanaContainer"]:
+            image = images_by_name[container_name]
+            assert isinstance(image, str)
+            assert image
+            assert "Ref" not in image
+            assert "Fn::" not in image
+            assert ":" in image
 
     @patch('lakerunner_grafana_service.load_grafana_config')
     def test_conductor_depends_on_mcp_gateway(self, mock_load_config):

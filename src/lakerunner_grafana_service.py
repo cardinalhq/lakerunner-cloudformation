@@ -72,30 +72,10 @@ def create_grafana_template():
         Description="REQUIRED: Full URL to the Query API endpoint (e.g., http://alb-dns-name.region.elb.amazonaws.com:7101)"
     ))
 
-    # Container image overrides for air-gapped deployments
-    GrafanaImage = t.add_parameter(Parameter(
-        "GrafanaImage", Type="String",
-        Default=images.get('grafana', 'grafana/grafana:latest'),
-        Description="Container image for Grafana service"
-    ))
-
-    GrafanaInitImage = t.add_parameter(Parameter(
-        "GrafanaInitImage", Type="String",
-        Default=images.get('grafana_init', 'lakerunner-grafana-init:latest'),
-        Description="Container image for Grafana init container (datasource provisioning and database setup)"
-    ))
-
-    McpGatewayImage = t.add_parameter(Parameter(
-        "McpGatewayImage", Type="String",
-        Default=images.get('mcp_gateway', 'public.ecr.aws/cardinalhq.io/mcp-gateway:v0.2.0'),
-        Description="Container image for MCP Gateway sidecar"
-    ))
-
-    ConductorServerImage = t.add_parameter(Parameter(
-        "ConductorServerImage", Type="String",
-        Default=images.get('conductor_server', 'public.ecr.aws/cardinalhq.io/conductor-server:latest'),
-        Description="Container image for Conductor Server sidecar"
-    ))
+    grafana_image = images.get('grafana', 'grafana/grafana:latest')
+    grafana_init_image = images.get('grafana_init', 'lakerunner-grafana-init:latest')
+    mcp_gateway_image = images.get('mcp_gateway', 'public.ecr.aws/cardinalhq.io/mcp-gateway:v0.2.0')
+    conductor_server_image = images.get('conductor_server', 'public.ecr.aws/cardinalhq.io/conductor-server:latest')
 
     # Grafana Reset Token Configuration
     GrafanaResetToken = t.add_parameter(Parameter(
@@ -146,11 +126,8 @@ def create_grafana_template():
                     "Parameters": ["BedrockModel", "LakerunnerApiKey"]
                 },
                 {
-                    "Label": {"default": "Container Images"},
-                    "Parameters": [
-                        "GrafanaImage", "GrafanaInitImage", "GrafanaResetToken",
-                        "McpGatewayImage", "ConductorServerImage"
-                    ]
+                    "Label": {"default": "Grafana Maintenance"},
+                    "Parameters": ["GrafanaResetToken"]
                 }
             ],
             "ParameterLabels": {
@@ -159,11 +136,7 @@ def create_grafana_template():
                 "AlbScheme": {"default": "ALB Scheme"},
                 "BedrockModel": {"default": "Bedrock Model"},
                 "LakerunnerApiKey": {"default": "Lakerunner API Key"},
-                "GrafanaImage": {"default": "Grafana Image"},
-                "GrafanaInitImage": {"default": "Grafana Init Image"},
                 "GrafanaResetToken": {"default": "Grafana Reset Token"},
-                "McpGatewayImage": {"default": "MCP Gateway Image"},
-                "ConductorServerImage": {"default": "Conductor Server Image"},
             }
         }
     })
@@ -498,7 +471,7 @@ def create_grafana_template():
     # -- Init container for database setup --
     init_container = ContainerDefinition(
         Name="GrafanaInit",
-        Image=Ref(GrafanaInitImage),
+        Image=grafana_init_image,
         Essential=False,
         Environment=[
             Environment(Name="GRAFANA_DB_NAME", Value="grafana"),
@@ -570,7 +543,7 @@ def create_grafana_template():
 
     mcp_gateway_container = ContainerDefinition(
         Name="McpGateway",
-        Image=Ref(McpGatewayImage),
+        Image=mcp_gateway_image,
         Essential=True,
         User="65532",
         PortMappings=[PortMapping(ContainerPort=mcp_gw_port, Protocol="tcp")],
@@ -620,7 +593,7 @@ def create_grafana_template():
 
     conductor_container = ContainerDefinition(
         Name="ConductorServer",
-        Image=Ref(ConductorServerImage),
+        Image=conductor_server_image,
         Essential=True,
         User="65532",
         PortMappings=[PortMapping(ContainerPort=conductor_port, Protocol="tcp")],
@@ -684,7 +657,7 @@ def create_grafana_template():
 
     grafana_container = ContainerDefinition(
         Name="GrafanaContainer",
-        Image=Ref(GrafanaImage),
+        Image=grafana_image,
         Essential=True,
         Environment=base_env,
         Secrets=grafana_secrets,

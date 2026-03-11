@@ -139,7 +139,7 @@ Optional parameters:
   - **GoServicesImage** – Image for Go services (default: public.ecr.aws/cardinalhq.io/lakerunner:latest)
   - **QueryApiImage** – Image for query-api (default: public.ecr.aws/cardinalhq.io/lakerunner/query-api:latest)
   - **QueryWorkerImage** – Image for query-worker (default: public.ecr.aws/cardinalhq.io/lakerunner/query-worker:latest)
-  - **GrafanaImage** – Image for Grafana (default: grafana/grafana:latest)
+  - Grafana stack images are fixed from `lakerunner-grafana-defaults.yaml` and are not exposed as CloudFormation parameters
 
 **Example AWS CLI deployment:**
 
@@ -631,8 +631,6 @@ aws cloudformation create-stack --stack-name lakerunner-grafana \
 | `CommonInfraStackName` | String | Yes | - | Name of the CommonInfra stack to import values from |
 | `QueryApiUrl` | String | Yes | - | Full URL to the Query API endpoint (e.g., http://alb-dns.region.elb.amazonaws.com:7101) |
 | `AlbScheme` | String | No | "internal" | Load balancer scheme: "internet-facing" or "internal" |
-| `GrafanaImage` | String | No | grafana/grafana:latest | Container image for Grafana service |
-| `GrafanaInitImage` | String | No | public.ecr.aws/cardinalhq.io/lakerunner/initcontainer-grafana:latest | Container image for Grafana init container |
 | `GrafanaResetToken` | String | No | "change-to-reset-grafana" | Change this value to reset Grafana data |
 
 ### OTEL Collector Stack Parameters

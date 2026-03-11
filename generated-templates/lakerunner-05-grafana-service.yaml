@@ -18,13 +18,9 @@ Metadata:
           - BedrockModel
           - LakerunnerApiKey
       - Label:
-          default: Container Images
+          default: Grafana Maintenance
         Parameters:
-          - GrafanaImage
-          - GrafanaInitImage
           - GrafanaResetToken
-          - McpGatewayImage
-          - ConductorServerImage
     ParameterLabels:
       AlbScheme:
         default: ALB Scheme
@@ -32,18 +28,10 @@ Metadata:
         default: Bedrock Model
       CommonInfraStackName:
         default: Common Infra Stack Name
-      ConductorServerImage:
-        default: Conductor Server Image
-      GrafanaImage:
-        default: Grafana Image
-      GrafanaInitImage:
-        default: Grafana Init Image
       GrafanaResetToken:
         default: Grafana Reset Token
       LakerunnerApiKey:
         default: Lakerunner API Key
-      McpGatewayImage:
-        default: MCP Gateway Image
       QueryApiUrl:
         default: Query API URL
 Outputs:
@@ -90,18 +78,6 @@ Parameters:
   CommonInfraStackName:
     Description: 'REQUIRED: Name of the CommonInfra stack to import infrastructure values from.'
     Type: String
-  ConductorServerImage:
-    Default: ghcr.io/cardinalhq/conductor-server:v0.1.7
-    Description: Container image for Conductor Server sidecar
-    Type: String
-  GrafanaImage:
-    Default: grafana/grafana:latest
-    Description: Container image for Grafana service
-    Type: String
-  GrafanaInitImage:
-    Default: ghcr.io/cardinalhq/initcontainer-grafana:latest
-    Description: Container image for Grafana init container (datasource provisioning and database setup)
-    Type: String
   GrafanaResetToken:
     Default: change-to-reset-grafana
     Description: Reset token for Grafana data wipe. Changing this value will wipe all Grafana data on next deployment.
@@ -109,10 +85,6 @@ Parameters:
   LakerunnerApiKey:
     Default: f70603aa00e6f67999cc66e336134887
     Description: API key for Lakerunner services. Defaults to the standard key.
-    Type: String
-  McpGatewayImage:
-    Default: ghcr.io/cardinalhq/mcp-gateway:v0.2.0
-    Description: Container image for MCP Gateway sidecar
     Type: String
   QueryApiUrl:
     Description: 'REQUIRED: Full URL to the Query API endpoint (e.g., http://alb-dns-name.region.elb.amazonaws.com:7101)'
@@ -340,7 +312,7 @@ Resources:
             - Name: GF_SECURITY_ADMIN_USER
               Value: lakerunner
           Essential: false
-          Image: !Ref 'GrafanaInitImage'
+          Image: ghcr.io/cardinalhq/initcontainer-grafana:latest
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -390,7 +362,7 @@ Resources:
             Retries: 3
             StartPeriod: 30
             Timeout: 5
-          Image: !Ref 'McpGatewayImage'
+          Image: ghcr.io/cardinalhq/mcp-gateway:v0.2.4
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -430,7 +402,7 @@ Resources:
             Retries: 3
             StartPeriod: 30
             Timeout: 10
-          Image: !Ref 'ConductorServerImage'
+          Image: ghcr.io/cardinalhq/conductor-server:v0.1.11
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -485,7 +457,7 @@ Resources:
               Value: '%(protocol)s://%(domain)s:%(http_port)s'
             - Name: GF_PLUGINS_PREINSTALL_SYNC
               Value: >-
-                cardinalhq-lakerunner-datasource@2.4.0@https://github.com/cardinalhq/cardinalhq-lakerunner-datasource/releases/download/v2.4.0/cardinalhq-lakerunner-datasource.zip,cardinalhq-cardinal-app@0.2.4@https://github.com/cardinalhq/cardinalhq-cardinal-app/releases/download/v0.2.4/cardinalhq-cardinal-app.zip
+                cardinalhq-lakerunner-datasource@2.4.0@https://github.com/cardinalhq/cardinalhq-lakerunner-datasource/releases/download/v2.4.0/cardinalhq-lakerunner-datasource.zip,cardinalhq-cardinal-app@0.2.7@https://github.com/cardinalhq/cardinalhq-cardinal-app/releases/download/v0.2.7/cardinalhq-cardinal-app.zip
             - Name: GF_PATHS_PROVISIONING
               Value: /etc/grafana/provisioning
             - Name: GF_DATABASE_TYPE
@@ -501,7 +473,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: !Ref 'GrafanaImage'
+          Image: grafana/grafana:latest
           LogConfiguration:
             LogDriver: awslogs
             Options:

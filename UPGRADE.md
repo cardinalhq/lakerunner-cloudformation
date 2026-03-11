@@ -27,7 +27,7 @@ For container image updates or configuration changes that don't require new temp
 
 **Common parameter updates:**
 
-- Container images: `GoServicesImage`, `GrafanaImage`
+- Container images: `GoServicesImage` (`Grafana` images are now fixed in `lakerunner-grafana-defaults.yaml`)
 - ALB configuration: `AlbScheme` (internal ↔ internet-facing)
 - Resource sizing: `Cpu`, `MemoryMiB`
 - Telemetry: `OtelEndpoint`
