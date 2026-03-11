@@ -139,12 +139,14 @@ def handler(event, context):
         print(f"Model agreement accepted for {model_id}")
         send(event, context, "SUCCESS", {"Message": f"Model {model_id} enabled"})
 
-    except bedrock.exceptions.ConflictException:
-        print(f"Model {model_id} already has an active agreement")
-        send(event, context, "SUCCESS", {"Message": "Already enabled"})
     except Exception as e:
-        print("Exception:", e)
-        send(event, context, "FAILED", {"Error": str(e)}, reason=str(e))
+        msg = str(e)
+        if "already exists" in msg.lower() or "ConflictException" in type(e).__name__:
+            print(f"Model {model_id} already has an active agreement")
+            send(event, context, "SUCCESS", {"Message": "Already enabled"})
+        else:
+            print("Exception:", e)
+            send(event, context, "FAILED", {"Error": msg}, reason=msg)
 '''
 
 SetupFn = t.add_resource(Function(
