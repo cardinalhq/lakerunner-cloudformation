@@ -10,8 +10,8 @@ database:
 images:
   grafana: "grafana/grafana:latest"
   grafana_init: "ghcr.io/cardinalhq/initcontainer-grafana:latest"
-  mcp_gateway: "ghcr.io/cardinalhq/mcp-gateway:v0.2.0"
-  conductor_server: "ghcr.io/cardinalhq/conductor-server:v0.1.7"
+  mcp_gateway: "ghcr.io/cardinalhq/mcp-gateway:v0.2.4"
+  conductor_server: "ghcr.io/cardinalhq/conductor-server:v0.1.11"
 
 # Task-level resource allocation (shared by all containers)
 task:
@@ -29,7 +29,7 @@ grafana:
     GF_SECURITY_ADMIN_PASSWORD: "from_secret"
     GF_SERVER_HTTP_PORT: "3000"
     GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s:%(http_port)s"
-    GF_PLUGINS_PREINSTALL_SYNC: "cardinalhq-lakerunner-datasource@2.4.0@https://github.com/cardinalhq/cardinalhq-lakerunner-datasource/releases/download/v2.4.0/cardinalhq-lakerunner-datasource.zip,cardinalhq-cardinal-app@0.2.4@https://github.com/cardinalhq/cardinalhq-cardinal-app/releases/download/v0.2.4/cardinalhq-cardinal-app.zip"
+    GF_PLUGINS_PREINSTALL_SYNC: "cardinalhq-lakerunner-datasource@2.4.0@https://github.com/cardinalhq/cardinalhq-lakerunner-datasource/releases/download/v2.4.0/cardinalhq-lakerunner-datasource.zip,cardinalhq-cardinal-app@0.2.7@https://github.com/cardinalhq/cardinalhq-cardinal-app/releases/download/v0.2.7/cardinalhq-cardinal-app.zip"
     GF_PATHS_PROVISIONING: "/etc/grafana/provisioning"
     # PostgreSQL database configuration
     GF_DATABASE_TYPE: "postgres"
