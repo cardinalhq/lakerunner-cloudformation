@@ -485,11 +485,9 @@ Resources:
               Value: '%(protocol)s://%(domain)s:%(http_port)s'
             - Name: GF_PLUGINS_PREINSTALL_SYNC
               Value: >-
-                cardinalhq-lakerunner-datasource@2.4.0@https://github.com/cardinalhq/cardinalhq-lakerunner-datasource/releases/download/v2.4.0/cardinalhq-lakerunner-datasource.zip,cardinalhq-cardinal-app@0.2.1@https://github.com/cardinalhq/cardinalhq-cardinal-app/releases/download/v0.2.1/cardinalhq-cardinal-app.zip
+                cardinalhq-lakerunner-datasource@2.4.0@https://github.com/cardinalhq/cardinalhq-lakerunner-datasource/releases/download/v2.4.0/cardinalhq-lakerunner-datasource.zip,cardinalhq-cardinal-app@0.2.4@https://github.com/cardinalhq/cardinalhq-cardinal-app/releases/download/v0.2.4/cardinalhq-cardinal-app.zip
             - Name: GF_PATHS_PROVISIONING
               Value: /etc/grafana/provisioning
-            - Name: GF_SECURITY_ALLOW_EMBEDDING
-              Value: 'true'
             - Name: GF_DATABASE_TYPE
               Value: postgres
             - Name: GF_DATABASE_SSL_MODE

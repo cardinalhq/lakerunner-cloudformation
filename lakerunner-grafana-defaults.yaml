@@ -29,9 +29,8 @@ grafana:
     GF_SECURITY_ADMIN_PASSWORD: "from_secret"
     GF_SERVER_HTTP_PORT: "3000"
     GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s:%(http_port)s"
-    GF_PLUGINS_PREINSTALL_SYNC: "cardinalhq-lakerunner-datasource@2.4.0@https://github.com/cardinalhq/cardinalhq-lakerunner-datasource/releases/download/v2.4.0/cardinalhq-lakerunner-datasource.zip,cardinalhq-cardinal-app@0.2.1@https://github.com/cardinalhq/cardinalhq-cardinal-app/releases/download/v0.2.1/cardinalhq-cardinal-app.zip"
+    GF_PLUGINS_PREINSTALL_SYNC: "cardinalhq-lakerunner-datasource@2.4.0@https://github.com/cardinalhq/cardinalhq-lakerunner-datasource/releases/download/v2.4.0/cardinalhq-lakerunner-datasource.zip,cardinalhq-cardinal-app@0.2.4@https://github.com/cardinalhq/cardinalhq-cardinal-app/releases/download/v0.2.4/cardinalhq-cardinal-app.zip"
     GF_PATHS_PROVISIONING: "/etc/grafana/provisioning"
-    GF_SECURITY_ALLOW_EMBEDDING: "true"
     # PostgreSQL database configuration
     GF_DATABASE_TYPE: "postgres"
     GF_DATABASE_SSL_MODE: "require"
