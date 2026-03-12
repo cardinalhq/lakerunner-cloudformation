@@ -362,7 +362,7 @@ Resources:
             Retries: 3
             StartPeriod: 30
             Timeout: 5
-          Image: ghcr.io/cardinalhq/mcp-gateway:v0.2.4
+          Image: ghcr.io/cardinalhq/mcp-gateway:v0.2.7
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -402,7 +402,7 @@ Resources:
             Retries: 3
             StartPeriod: 30
             Timeout: 10
-          Image: ghcr.io/cardinalhq/conductor-server:v0.1.11
+          Image: ghcr.io/cardinalhq/conductor-server:v0.1.14
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -457,7 +457,7 @@ Resources:
               Value: '%(protocol)s://%(domain)s:%(http_port)s'
             - Name: GF_PLUGINS_PREINSTALL_SYNC
               Value: >-
-                cardinalhq-lakerunner-datasource@2.4.0@https://github.com/cardinalhq/cardinalhq-lakerunner-datasource/releases/download/v2.4.0/cardinalhq-lakerunner-datasource.zip,cardinalhq-cardinal-app@0.2.7@https://github.com/cardinalhq/cardinalhq-cardinal-app/releases/download/v0.2.7/cardinalhq-cardinal-app.zip
+                cardinalhq-lakerunner-datasource@2.4.0@https://github.com/cardinalhq/cardinalhq-lakerunner-datasource/releases/download/v2.4.0/cardinalhq-lakerunner-datasource.zip,cardinalhq-cardinal-app@0.3.1@https://github.com/cardinalhq/cardinalhq-cardinal-app/releases/download/v0.3.1/cardinalhq-cardinal-app.zip
             - Name: GF_PATHS_PROVISIONING
               Value: /etc/grafana/provisioning
             - Name: GF_DATABASE_TYPE
