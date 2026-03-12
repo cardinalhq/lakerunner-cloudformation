@@ -47,6 +47,13 @@ MOCK_CONFIG = {
             "MCP_GATEWAY_URL": "http://localhost:8080"
         }
     },
+    "maestro_server": {
+        "port": 3100,
+        "environment": {
+            "PORT": "3100",
+            "MCP_GATEWAY_URL": "http://localhost:8080"
+        }
+    },
     "task": {
         "cpu": 2048,
         "memory_mib": 4096
@@ -55,7 +62,8 @@ MOCK_CONFIG = {
         "grafana": "test:latest",
         "grafana_init": "ghcr.io/cardinalhq/initcontainer-grafana:test",
         "mcp_gateway": "ghcr.io/cardinalhq/mcp-gateway:v0.2.0",
-        "conductor_server": "ghcr.io/cardinalhq/conductor-server:v0.1.7"
+        "conductor_server": "ghcr.io/cardinalhq/conductor-server:v0.1.7",
+        "maestro_server": "ghcr.io/cardinalhq/maestro:v0.1.0"
     },
     "api_keys": [{"keys": ["test-key"]}]
 }
@@ -137,6 +145,7 @@ class TestGrafanaTemplateSimple(unittest.TestCase):
         assert "Grafana" in template_dict["Description"]
         assert "MCP Gateway" in template_dict["Description"]
         assert "Conductor Server" in template_dict["Description"]
+        assert "Maestro" in template_dict["Description"]
 
     @patch('lakerunner_grafana_service.load_grafana_config')
     def test_required_parameters_exist(self, mock_load_config):
@@ -189,12 +198,13 @@ class TestGrafanaTemplateSimple(unittest.TestCase):
         # AI-related resources
         assert "McpGatewayLogGroup" in resources
         assert "ConductorServerLogGroup" in resources
+        assert "MaestroServerLogGroup" in resources
         assert "AiInternalSecret" in resources
         assert "LakerunnerApiKeySecret" in resources
 
     @patch('lakerunner_grafana_service.load_grafana_config')
     def test_task_definition_has_all_containers(self, mock_load_config):
-        """Test that task definition includes all four containers"""
+        """Test that task definition includes all five containers"""
         mock_load_config.return_value = MOCK_CONFIG
 
         from lakerunner_grafana_service import create_grafana_template
@@ -209,8 +219,9 @@ class TestGrafanaTemplateSimple(unittest.TestCase):
         assert "GrafanaInit" in container_names
         assert "McpGateway" in container_names
         assert "ConductorServer" in container_names
+        assert "MaestroServer" in container_names
         assert "GrafanaContainer" in container_names
-        assert len(containers) == 4
+        assert len(containers) == 5
 
     @patch('lakerunner_grafana_service.load_grafana_config')
     def test_task_definition_resources(self, mock_load_config):
@@ -238,7 +249,7 @@ class TestGrafanaTemplateSimple(unittest.TestCase):
 
         containers = template_dict["Resources"]["GrafanaTaskDef"]["Properties"]["ContainerDefinitions"]
         images_by_name = {container["Name"]: container["Image"] for container in containers}
-        for container_name in ["GrafanaInit", "McpGateway", "ConductorServer", "GrafanaContainer"]:
+        for container_name in ["GrafanaInit", "McpGateway", "ConductorServer", "MaestroServer", "GrafanaContainer"]:
             image = images_by_name[container_name]
             assert isinstance(image, str)
             assert image
@@ -335,9 +346,11 @@ class TestGrafanaTemplateSimple(unittest.TestCase):
 
         mcp_gw = next(c for c in containers if c["Name"] == "McpGateway")
         conductor = next(c for c in containers if c["Name"] == "ConductorServer")
+        maestro = next(c for c in containers if c["Name"] == "MaestroServer")
 
         assert mcp_gw["User"] == "65532"
         assert conductor["User"] == "65532"
+        assert maestro["User"] == "65532"
 
     @patch('lakerunner_grafana_service.load_grafana_config')
     def test_bedrock_model_parameter_has_allowed_values(self, mock_load_config):

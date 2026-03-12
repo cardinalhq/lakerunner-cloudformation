@@ -46,8 +46,8 @@ def create_grafana_template():
 
     t = Template()
     t.set_description(
-        "Lakerunner Grafana + AI: Grafana with MCP Gateway and Conductor Server"
-        " sidecars, ALB, PostgreSQL storage, and pre-configured plugins"
+        "Lakerunner Grafana + AI: Grafana with MCP Gateway, Conductor Server,"
+        " and Maestro sidecars, ALB, PostgreSQL storage, and pre-configured plugins"
     )
 
     # Load configuration
@@ -55,6 +55,7 @@ def create_grafana_template():
     grafana_config = config.get('grafana', {})
     mcp_gw_config = config.get('mcp_gateway', {})
     conductor_config = config.get('conductor_server', {})
+    maestro_config = config.get('maestro_server', {})
     task_config = config.get('task', {})
     images = config.get('images', {})
     api_keys = config.get('api_keys', [])
@@ -76,6 +77,7 @@ def create_grafana_template():
     grafana_init_image = images.get('grafana_init', 'lakerunner-grafana-init:latest')
     mcp_gateway_image = images.get('mcp_gateway', 'public.ecr.aws/cardinalhq.io/mcp-gateway:v0.2.0')
     conductor_server_image = images.get('conductor_server', 'public.ecr.aws/cardinalhq.io/conductor-server:latest')
+    maestro_server_image = images.get('maestro_server', 'public.ecr.aws/cardinalhq.io/maestro:latest')
 
     # Grafana Reset Token Configuration
     GrafanaResetToken = t.add_parameter(Parameter(
@@ -456,6 +458,12 @@ def create_grafana_template():
         RetentionInDays=14
     ))
 
+    maestro_log_group = t.add_resource(LogGroup(
+        "MaestroServerLogGroup",
+        LogGroupName=Sub("/ecs/${AWS::StackName}/maestro-server"),
+        RetentionInDays=14
+    ))
+
     # -----------------------
     # Volumes
     # -----------------------
@@ -620,6 +628,59 @@ def create_grafana_template():
         )
     )
     container_definitions.append(conductor_container)
+
+    # -- Maestro Server sidecar --
+    maestro_port = maestro_config.get('port', 3100)
+    maestro_env = [
+        Environment(Name="AWS_BEDROCK_MODEL", Value=Ref(BedrockModel)),
+    ]
+    for key, value in maestro_config.get('environment', {}).items():
+        maestro_env.append(Environment(Name=key, Value=str(value)))
+
+    maestro_secrets = [
+        EcsSecret(
+            Name="LAKERUNNER_API_KEY",
+            ValueFrom=Ref(lakerunner_api_key_secret)
+        ),
+        EcsSecret(
+            Name="CARDINALHQ_API_KEY",
+            ValueFrom=Ref(lakerunner_api_key_secret)
+        ),
+        EcsSecret(
+            Name="MCP_API_KEY",
+            ValueFrom=Sub("${SecretArn}:api_key::", SecretArn=Ref(ai_internal_secret))
+        ),
+    ]
+
+    maestro_container = ContainerDefinition(
+        Name="MaestroServer",
+        Image=maestro_server_image,
+        Essential=True,
+        User="65532",
+        PortMappings=[PortMapping(ContainerPort=maestro_port, Protocol="tcp")],
+        Environment=maestro_env,
+        Secrets=maestro_secrets,
+        HealthCheck=HealthCheck(
+            Command=["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:%d/health || exit 1" % maestro_port],
+            Interval=30,
+            Timeout=10,
+            Retries=3,
+            StartPeriod=30
+        ),
+        DependsOn=[
+            {"ContainerName": "GrafanaInit", "Condition": "SUCCESS"},
+            {"ContainerName": "McpGateway", "Condition": "HEALTHY"}
+        ],
+        LogConfiguration=LogConfiguration(
+            LogDriver="awslogs",
+            Options={
+                "awslogs-group": Ref(maestro_log_group),
+                "awslogs-region": Ref("AWS::Region"),
+                "awslogs-stream-prefix": "maestro-server"
+            }
+        )
+    )
+    container_definitions.append(maestro_container)
 
     # -- Main Grafana container --
     base_env = [

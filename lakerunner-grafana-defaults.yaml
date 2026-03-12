@@ -12,6 +12,7 @@ images:
   grafana_init: "ghcr.io/cardinalhq/initcontainer-grafana:latest"
   mcp_gateway: "ghcr.io/cardinalhq/mcp-gateway:v0.2.7"
   conductor_server: "ghcr.io/cardinalhq/conductor-server:v0.1.14"
+  maestro_server: "ghcr.io/cardinalhq/maestro:v0.1.0"
 
 # Task-level resource allocation (shared by all containers)
 task:
@@ -52,6 +53,13 @@ mcp_gateway:
 conductor_server:
   port: 4100
   environment:
+    MCP_GATEWAY_URL: "http://localhost:8080"
+
+# Maestro Server configuration (sidecar container)
+maestro_server:
+  port: 3100
+  environment:
+    PORT: "3100"
     MCP_GATEWAY_URL: "http://localhost:8080"
 
 # API Keys configuration (for datasource setup)
