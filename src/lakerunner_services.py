@@ -223,28 +223,6 @@ def create_services_template():
         Description="REQUIRED: Comma-separated list of MSK broker endpoints (hostname:port)"
     ))
 
-    # Signal Type Configuration
-    EnableLogs = t.add_parameter(Parameter(
-        "EnableLogs", Type="String",
-        AllowedValues=["Yes", "No"],
-        Default="Yes",
-        Description="Enable log processing services (ingest-logs, compact-logs)"
-    ))
-
-    EnableMetrics = t.add_parameter(Parameter(
-        "EnableMetrics", Type="String",
-        AllowedValues=["Yes", "No"],
-        Default="Yes",
-        Description="Enable metrics processing services (ingest-metrics, compact-metrics, rollup-metrics)"
-    ))
-
-    EnableTraces = t.add_parameter(Parameter(
-        "EnableTraces", Type="String",
-        AllowedValues=["Yes", "No"],
-        Default="No",
-        Description="Enable trace processing services (ingest-traces, compact-traces)"
-    ))
-
     # ALB Configuration parameters
 
     AlbScheme = t.add_parameter(Parameter(
@@ -419,9 +397,6 @@ def create_services_template():
         "CommonInfraStackName": {"default": "Common Infra Stack Name"},
         "AlbScheme": {"default": "ALB Scheme"},
         "EnableAdminInitialKey": {"default": "Enable Admin Bootstrap Key"},
-        "EnableLogs": {"default": "Enable Logs"},
-        "EnableMetrics": {"default": "Enable Metrics"},
-        "EnableTraces": {"default": "Enable Traces"},
         "MSKBrokers": {"default": "MSK Broker Endpoints"},
         "OtelEndpoint": {"default": "OTEL Collector Endpoint"},
         "AlertTopicArn": {"default": "Alert SNS Topic ARN"},
@@ -453,10 +428,6 @@ def create_services_template():
                 {
                     "Label": {"default": "Infrastructure"},
                     "Parameters": ["CommonInfraStackName", "AlbScheme", "EnableAdminInitialKey"]
-                },
-                {
-                    "Label": {"default": "Signal Types"},
-                    "Parameters": ["EnableLogs", "EnableMetrics", "EnableTraces"]
                 },
                 {
                     "Label": {"default": "Query Services Configuration"},
@@ -531,9 +502,6 @@ def create_services_template():
     t.add_condition("EnableOtlp", Not(Equals(Ref(OtelEndpoint), "")))
     t.add_condition("EnableAlarms", Not(Equals(Ref(AlertTopicArn), "")))
     t.add_condition("IsInternetFacing", Equals(Ref(AlbScheme), "internet-facing"))
-    t.add_condition("CreateLogsServices", Equals(Ref(EnableLogs), "Yes"))
-    t.add_condition("CreateMetricsServices", Equals(Ref(EnableMetrics), "Yes"))
-    t.add_condition("CreateTracesServices", Equals(Ref(EnableTraces), "Yes"))
     # Admin API is enabled when replicas > 0 (only if admin-api service is defined)
     if 'lakerunner-admin-api' in service_params:
         t.add_condition("EnableAdminApi", Not(Equals(Ref(service_params['lakerunner-admin-api']['replicas']), "0")))
@@ -1034,16 +1002,10 @@ def create_services_template():
     for service_name, service_config in services.items():
         title_name = ''.join(word.capitalize() for word in service_name.replace('-', '_').split('_'))
 
-        # Determine the condition for this service based on signal type or service-specific enablement
+        # Determine the condition for this service based on service-specific enablement
         signal_type = service_config.get('signal_type', 'common')
         condition_name = None
-        if signal_type == 'logs':
-            condition_name = "CreateLogsServices"
-        elif signal_type == 'metrics':
-            condition_name = "CreateMetricsServices"
-        elif signal_type == 'traces':
-            condition_name = "CreateTracesServices"
-        elif service_name == 'lakerunner-admin-api':
+        if service_name == 'lakerunner-admin-api':
             condition_name = "EnableAdminApi"
         elif service_name == 'lakerunner-alert-evaluator':
             condition_name = "EnableAlertEvaluator"
@@ -1394,72 +1356,59 @@ def create_services_template():
         # Worker services always have auto-scaling enabled (min=1, max=replicas param)
         # -----------------------
         if service_name in AUTOSCALING_SERVICES:
-            # Determine the condition based on signal type (same as service creation)
-            autoscale_condition = None
-            if signal_type == 'logs':
-                autoscale_condition = "CreateLogsServices"
-            elif signal_type == 'metrics':
-                autoscale_condition = "CreateMetricsServices"
-            elif signal_type == 'traces':
-                autoscale_condition = "CreateTracesServices"
+            # Create ScalableTarget - registers the ECS service with Application Auto Scaling
+            # MinCapacity is always 1, MaxCapacity comes from the service's replicas param
+            scalable_target = t.add_resource(ScalableTarget(
+                f"ScalableTarget{title_name}",
+                MaxCapacity=Ref(service_params[service_name]['replicas']),
+                MinCapacity=1,
+                ResourceId=Sub(
+                    "service/${ClusterName}/" + service_name,
+                    ClusterName=ImportValue(ci_export("ClusterName"))
+                ),
+                ScalableDimension="ecs:service:DesiredCount",
+                ServiceNamespace="ecs",
+                DependsOn=[f"Service{title_name}"]
+            ))
 
-            if autoscale_condition:
-                # Create ScalableTarget - registers the ECS service with Application Auto Scaling
-                # MinCapacity is always 1, MaxCapacity comes from the service's replicas param
-                scalable_target = t.add_resource(ScalableTarget(
-                    f"ScalableTarget{title_name}",
-                    Condition=autoscale_condition,
-                    MaxCapacity=Ref(service_params[service_name]['replicas']),
-                    MinCapacity=1,
-                    ResourceId=Sub(
-                        "service/${ClusterName}/" + service_name,
-                        ClusterName=ImportValue(ci_export("ClusterName"))
+            # Create CPU-based Target Tracking Scaling Policy
+            t.add_resource(ScalingPolicy(
+                f"ScalingPolicyCpu{title_name}",
+                PolicyName=f"{service_name}-cpu-scaling",
+                PolicyType="TargetTrackingScaling",
+                ScalingTargetId=Ref(scalable_target),
+                TargetTrackingScalingPolicyConfiguration=TargetTrackingScalingPolicyConfiguration(
+                    TargetValue=Ref(AutoScalingCPUTarget),
+                    PredefinedMetricSpecification=PredefinedMetricSpecification(
+                        PredefinedMetricType="ECSServiceAverageCPUUtilization"
                     ),
-                    ScalableDimension="ecs:service:DesiredCount",
-                    ServiceNamespace="ecs",
-                    DependsOn=[f"Service{title_name}"]
-                ))
+                    ScaleInCooldown=Ref(AutoScalingScaleInCooldown),
+                    ScaleOutCooldown=Ref(AutoScalingScaleOutCooldown)
+                )
+            ))
 
-                # Create CPU-based Target Tracking Scaling Policy
-                t.add_resource(ScalingPolicy(
-                    f"ScalingPolicyCpu{title_name}",
-                    Condition=autoscale_condition,
-                    PolicyName=f"{service_name}-cpu-scaling",
-                    PolicyType="TargetTrackingScaling",
-                    ScalingTargetId=Ref(scalable_target),
-                    TargetTrackingScalingPolicyConfiguration=TargetTrackingScalingPolicyConfiguration(
-                        TargetValue=Ref(AutoScalingCPUTarget),
-                        PredefinedMetricSpecification=PredefinedMetricSpecification(
-                            PredefinedMetricType="ECSServiceAverageCPUUtilization"
-                        ),
-                        ScaleInCooldown=Ref(AutoScalingScaleInCooldown),
-                        ScaleOutCooldown=Ref(AutoScalingScaleOutCooldown)
-                    )
-                ))
-
-                # Create Workqueue Lag-based Target Tracking Scaling Policy
-                # task_name dimension is the service name without "lakerunner-" prefix
-                task_name_dimension = service_name.replace("lakerunner-", "")
-                t.add_resource(ScalingPolicy(
-                    f"ScalingPolicyLag{title_name}",
-                    Condition=autoscale_condition,
-                    PolicyName=f"{service_name}-lag-scaling",
-                    PolicyType="TargetTrackingScaling",
-                    ScalingTargetId=Ref(scalable_target),
-                    TargetTrackingScalingPolicyConfiguration=TargetTrackingScalingPolicyConfiguration(
-                        TargetValue=50,  # Scale when workqueue lag exceeds 50 items
-                        CustomizedMetricSpecification=CustomizedMetricSpecification(
-                            MetricName="lakerunner.workqueue.lag",
-                            Namespace="Lakerunner",
-                            Statistic="Average",
-                            Dimensions=[
-                                AutoScalingMetricDimension(Name="task_name", Value=task_name_dimension)
-                            ]
-                        ),
-                        ScaleInCooldown=Ref(AutoScalingScaleInCooldown),
-                        ScaleOutCooldown=Ref(AutoScalingScaleOutCooldown)
-                    )
-                ))
+            # Create Workqueue Lag-based Target Tracking Scaling Policy
+            # task_name dimension is the service name without "lakerunner-" prefix
+            task_name_dimension = service_name.replace("lakerunner-", "")
+            t.add_resource(ScalingPolicy(
+                f"ScalingPolicyLag{title_name}",
+                PolicyName=f"{service_name}-lag-scaling",
+                PolicyType="TargetTrackingScaling",
+                ScalingTargetId=Ref(scalable_target),
+                TargetTrackingScalingPolicyConfiguration=TargetTrackingScalingPolicyConfiguration(
+                    TargetValue=50,  # Scale when workqueue lag exceeds 50 items
+                    CustomizedMetricSpecification=CustomizedMetricSpecification(
+                        MetricName="lakerunner.workqueue.lag",
+                        Namespace="Lakerunner",
+                        Statistic="Average",
+                        Dimensions=[
+                            AutoScalingMetricDimension(Name="task_name", Value=task_name_dimension)
+                        ]
+                    ),
+                    ScaleInCooldown=Ref(AutoScalingScaleInCooldown),
+                    ScaleOutCooldown=Ref(AutoScalingScaleOutCooldown)
+                )
+            ))
 
         # -----------------------
         # CloudWatch Alarm for Task Count (requires Container Insights)
@@ -1579,15 +1528,8 @@ def create_services_template():
     for service_name, service_config in services.items():
         title_name = ''.join(word.capitalize() for word in service_name.replace('-', '_').split('_'))
         # Determine the condition for this service
-        signal_type = service_config.get('signal_type', 'common')
         condition_name = None
-        if signal_type == 'logs':
-            condition_name = "CreateLogsServices"
-        elif signal_type == 'metrics':
-            condition_name = "CreateMetricsServices"
-        elif signal_type == 'traces':
-            condition_name = "CreateTracesServices"
-        elif service_name == 'lakerunner-admin-api':
+        if service_name == 'lakerunner-admin-api':
             condition_name = "EnableAdminApi"
         elif service_name == 'lakerunner-alert-evaluator':
             condition_name = "EnableAlertEvaluator"
