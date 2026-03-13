@@ -201,13 +201,7 @@ def create_services_template():
         Description="REQUIRED: Name of the CommonInfra stack to import infrastructure values from."
     ))
 
-    # Container image overrides for air-gapped deployments
-    GoServicesImage = t.add_parameter(Parameter(
-        "GoServicesImage", Type="String",
-        Default=images.get('go_services', 'public.ecr.aws/cardinalhq.io/lakerunner:latest'),
-        Description="Container image for all Go services (pubsub, ingest, compact, query-api, query-worker, etc.)"
-    ))
-
+    GoServicesImage = images.get('go_services', 'public.ecr.aws/cardinalhq.io/lakerunner:latest')
 
     # OTLP Telemetry configuration
     OtelEndpoint = t.add_parameter(Parameter(
@@ -429,7 +423,6 @@ def create_services_template():
         "EnableMetrics": {"default": "Enable Metrics"},
         "EnableTraces": {"default": "Enable Traces"},
         "MSKBrokers": {"default": "MSK Broker Endpoints"},
-        "GoServicesImage": {"default": "Go Services Image"},
         "OtelEndpoint": {"default": "OTEL Collector Endpoint"},
         "AlertTopicArn": {"default": "Alert SNS Topic ARN"},
         "AutoScalingCPUTarget": {"default": "CPU Target % (Auto-Scaling)"},
@@ -484,10 +477,6 @@ def create_services_template():
                 {
                     "Label": {"default": "MSK Configuration"},
                     "Parameters": ["MSKBrokers"]
-                },
-                {
-                    "Label": {"default": "Container Images"},
-                    "Parameters": ["GoServicesImage"]
                 },
                 {
                     "Label": {"default": "Telemetry"},
@@ -1231,8 +1220,8 @@ def create_services_template():
                 Protocol="tcp"
             ))
 
-        # All services now use Go services image
-        container_image = Ref(GoServicesImage)
+        # All services use Go services image from defaults
+        container_image = GoServicesImage
 
         # Get base container command from service config
         container_command = service_config.get('command', [])

@@ -121,11 +121,8 @@ class TestServicesTemplateSimple:
 
         parameters = template_dict["Parameters"]
 
-        # Should have image override parameters (Grafana moved to separate stack)
-        # All services now use unified GoServicesImage parameter
-        expected_image_params = ["GoServicesImage"]
-        for param in expected_image_params:
-            assert param in parameters, f"Image parameter {param} not found"
+        # Image is now hard-coded from defaults, not a parameter
+        assert "GoServicesImage" not in parameters, "GoServicesImage should not be a parameter"
 
     @patch('lakerunner_services.load_service_config')
     def test_signal_type_parameters_exist(self, mock_load_config):

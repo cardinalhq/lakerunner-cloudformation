@@ -10,8 +10,8 @@ database:
 images:
   grafana: "grafana/grafana:latest"
   grafana_init: "ghcr.io/cardinalhq/initcontainer-grafana:latest"
-  mcp_gateway: "ghcr.io/cardinalhq/mcp-gateway:v0.2.7"
-  conductor_server: "ghcr.io/cardinalhq/conductor-server:v0.1.14"
+  mcp_gateway: "ghcr.io/cardinalhq/mcp-gateway:v0.2.8"
+  conductor_server: "ghcr.io/cardinalhq/conductor-server:v0.1.15"
   maestro_server: "ghcr.io/cardinalhq/maestro:v0.1.0"
 
 # Task-level resource allocation (shared by all containers)
@@ -30,7 +30,8 @@ grafana:
     GF_SECURITY_ADMIN_PASSWORD: "from_secret"
     GF_SERVER_HTTP_PORT: "3000"
     GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s:%(http_port)s"
-    GF_PLUGINS_PREINSTALL_SYNC: "cardinalhq-lakerunner-datasource@2.4.0@https://github.com/cardinalhq/cardinalhq-lakerunner-datasource/releases/download/v2.4.0/cardinalhq-lakerunner-datasource.zip,cardinalhq-cardinal-app@0.3.1@https://github.com/cardinalhq/cardinalhq-cardinal-app/releases/download/v0.3.1/cardinalhq-cardinal-app.zip"
+    GF_PLUGINS_PREINSTALL_SYNC: "cardinalhq-lakerunner-datasource@2.4.3@https://github.com/cardinalhq/cardinalhq-lakerunner-datasource/releases/download/v2.4.3/cardinalhq-lakerunner-datasource.zip,cardinalhq-cardinal-app@0.3.3@https://github.com/cardinalhq/cardinalhq-cardinal-app/releases/download/v0.3.3/cardinalhq-cardinal-app.zip"
+    GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS: "cardinalhq-lakerunner-datasource,cardinalhq-cardinal-app"
     GF_PATHS_PROVISIONING: "/etc/grafana/provisioning"
     # PostgreSQL database configuration
     GF_DATABASE_TYPE: "postgres"
@@ -54,6 +55,7 @@ conductor_server:
   port: 4100
   environment:
     MCP_GATEWAY_URL: "http://localhost:8080"
+    WORKFLOW_LLM_PROVIDER: "bedrock"
 
 # Maestro Server configuration (sidecar container)
 maestro_server:
@@ -61,6 +63,7 @@ maestro_server:
   environment:
     PORT: "3100"
     MCP_GATEWAY_URL: "http://localhost:8080"
+    WORKFLOW_LLM_PROVIDER: "bedrock"
 
 # API Keys configuration (for datasource setup)
 api_keys:

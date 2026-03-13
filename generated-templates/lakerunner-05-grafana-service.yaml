@@ -2,7 +2,7 @@ Conditions:
   IsInternetFacing: !Equals
     - !Ref 'AlbScheme'
     - internet-facing
-Description: 'Lakerunner Grafana + AI: Grafana with MCP Gateway and Conductor Server sidecars, ALB, PostgreSQL storage, and pre-configured plugins'
+Description: 'Lakerunner Grafana + AI: Grafana with MCP Gateway, Conductor Server, and Maestro sidecars, ALB, PostgreSQL storage, and pre-configured plugins'
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
@@ -362,7 +362,7 @@ Resources:
             Retries: 3
             StartPeriod: 30
             Timeout: 5
-          Image: ghcr.io/cardinalhq/mcp-gateway:v0.2.7
+          Image: ghcr.io/cardinalhq/mcp-gateway:v0.2.8
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -391,8 +391,14 @@ Resources:
           Environment:
             - Name: AWS_BEDROCK_MODEL
               Value: !Ref 'BedrockModel'
+            - Name: WORKFLOW_BEDROCK_INFERENCE_MODEL
+              Value: !Ref 'BedrockModel'
+            - Name: AWS_REGION
+              Value: !Ref 'AWS::Region'
             - Name: MCP_GATEWAY_URL
               Value: http://localhost:8080
+            - Name: WORKFLOW_LLM_PROVIDER
+              Value: bedrock
           Essential: true
           HealthCheck:
             Command:
@@ -402,7 +408,7 @@ Resources:
             Retries: 3
             StartPeriod: 30
             Timeout: 10
-          Image: ghcr.io/cardinalhq/conductor-server:v0.1.14
+          Image: ghcr.io/cardinalhq/conductor-server:v0.1.15
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -412,6 +418,54 @@ Resources:
           Name: ConductorServer
           PortMappings:
             - ContainerPort: 4100
+              Protocol: tcp
+          Secrets:
+            - Name: LAKERUNNER_API_KEY
+              ValueFrom: !Ref 'LakerunnerApiKeySecret'
+            - Name: CARDINALHQ_API_KEY
+              ValueFrom: !Ref 'LakerunnerApiKeySecret'
+            - Name: MCP_API_KEY
+              ValueFrom: !Sub
+                - '${SecretArn}:api_key::'
+                - SecretArn: !Ref 'AiInternalSecret'
+          User: '65532'
+        - DependsOn:
+            - Condition: SUCCESS
+              ContainerName: GrafanaInit
+            - Condition: HEALTHY
+              ContainerName: McpGateway
+          Environment:
+            - Name: AWS_BEDROCK_MODEL
+              Value: !Ref 'BedrockModel'
+            - Name: WORKFLOW_BEDROCK_INFERENCE_MODEL
+              Value: !Ref 'BedrockModel'
+            - Name: AWS_REGION
+              Value: !Ref 'AWS::Region'
+            - Name: PORT
+              Value: '3100'
+            - Name: MCP_GATEWAY_URL
+              Value: http://localhost:8080
+            - Name: WORKFLOW_LLM_PROVIDER
+              Value: bedrock
+          Essential: true
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - wget --no-verbose --tries=1 --spider http://localhost:3100/health || exit 1
+            Interval: 30
+            Retries: 3
+            StartPeriod: 30
+            Timeout: 10
+          Image: ghcr.io/cardinalhq/maestro:v0.1.0
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref 'MaestroServerLogGroup'
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: maestro-server
+          Name: MaestroServer
+          PortMappings:
+            - ContainerPort: 3100
               Protocol: tcp
           Secrets:
             - Name: LAKERUNNER_API_KEY
@@ -457,7 +511,9 @@ Resources:
               Value: '%(protocol)s://%(domain)s:%(http_port)s'
             - Name: GF_PLUGINS_PREINSTALL_SYNC
               Value: >-
-                cardinalhq-lakerunner-datasource@2.4.0@https://github.com/cardinalhq/cardinalhq-lakerunner-datasource/releases/download/v2.4.0/cardinalhq-lakerunner-datasource.zip,cardinalhq-cardinal-app@0.3.1@https://github.com/cardinalhq/cardinalhq-cardinal-app/releases/download/v0.3.1/cardinalhq-cardinal-app.zip
+                cardinalhq-lakerunner-datasource@2.4.3@https://github.com/cardinalhq/cardinalhq-lakerunner-datasource/releases/download/v2.4.3/cardinalhq-lakerunner-datasource.zip,cardinalhq-cardinal-app@0.3.3@https://github.com/cardinalhq/cardinalhq-cardinal-app/releases/download/v0.3.3/cardinalhq-cardinal-app.zip
+            - Name: GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS
+              Value: cardinalhq-lakerunner-datasource,cardinalhq-cardinal-app
             - Name: GF_PATHS_PROVISIONING
               Value: /etc/grafana/provisioning
             - Name: GF_DATABASE_TYPE
@@ -577,6 +633,11 @@ Resources:
       Name: !Sub '${AWS::StackName}-lakerunner-api-key'
       SecretString: !Ref 'LakerunnerApiKey'
     Type: AWS::SecretsManager::Secret
+  MaestroServerLogGroup:
+    Properties:
+      LogGroupName: !Sub '/ecs/${AWS::StackName}/maestro-server'
+      RetentionInDays: 14
+    Type: AWS::Logs::LogGroup
   McpGatewayLogGroup:
     Properties:
       LogGroupName: !Sub '/ecs/${AWS::StackName}/mcp-gateway'
