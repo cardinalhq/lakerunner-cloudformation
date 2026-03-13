@@ -5,39 +5,9 @@ Conditions:
   CreateAlarmLakerunnerAlertEvaluator: !And
     - !Condition 'EnableAlarms'
     - !Condition 'EnableAlertEvaluator'
-  CreateAlarmLakerunnerCompactLogs: !And
-    - !Condition 'EnableAlarms'
-    - !Condition 'CreateLogsServices'
-  CreateAlarmLakerunnerCompactMetrics: !And
-    - !Condition 'EnableAlarms'
-    - !Condition 'CreateMetricsServices'
-  CreateAlarmLakerunnerCompactTraces: !And
-    - !Condition 'EnableAlarms'
-    - !Condition 'CreateTracesServices'
-  CreateAlarmLakerunnerIngestLogs: !And
-    - !Condition 'EnableAlarms'
-    - !Condition 'CreateLogsServices'
-  CreateAlarmLakerunnerIngestMetrics: !And
-    - !Condition 'EnableAlarms'
-    - !Condition 'CreateMetricsServices'
-  CreateAlarmLakerunnerIngestTraces: !And
-    - !Condition 'EnableAlarms'
-    - !Condition 'CreateTracesServices'
   CreateAlarmLakerunnerNotificationSender: !And
     - !Condition 'EnableAlarms'
     - !Condition 'EnableNotificationSender'
-  CreateAlarmLakerunnerRollupMetrics: !And
-    - !Condition 'EnableAlarms'
-    - !Condition 'CreateMetricsServices'
-  CreateLogsServices: !Equals
-    - !Ref 'EnableLogs'
-    - 'Yes'
-  CreateMetricsServices: !Equals
-    - !Ref 'EnableMetrics'
-    - 'Yes'
-  CreateTracesServices: !Equals
-    - !Ref 'EnableTraces'
-    - 'Yes'
   EnableAdminApi: !Not
     - !Equals
       - !Ref 'AdminApiReplicas'
@@ -74,12 +44,6 @@ Metadata:
           - CommonInfraStackName
           - AlbScheme
           - EnableAdminInitialKey
-      - Label:
-          default: Signal Types
-        Parameters:
-          - EnableLogs
-          - EnableMetrics
-          - EnableTraces
       - Label:
           default: Query Services Configuration
         Parameters:
@@ -165,12 +129,6 @@ Metadata:
         default: Compact Traces Max Replicas
       EnableAdminInitialKey:
         default: Enable Admin Bootstrap Key
-      EnableLogs:
-        default: Enable Logs
-      EnableMetrics:
-        default: Enable Metrics
-      EnableTraces:
-        default: Enable Traces
       IngestLogsMemory:
         default: Ingest Logs Memory (MiB)
       IngestLogsReplicas:
@@ -243,32 +201,26 @@ Outputs:
       Name: !Sub '${AWS::StackName}-lakerunner-boxer-common-ServiceArn'
     Value: !Ref 'ServiceLakerunnerBoxerCommon'
   ServiceLakerunnerCompactLogsArn:
-    Condition: CreateLogsServices
     Export:
       Name: !Sub '${AWS::StackName}-lakerunner-compact-logs-ServiceArn'
     Value: !Ref 'ServiceLakerunnerCompactLogs'
   ServiceLakerunnerCompactMetricsArn:
-    Condition: CreateMetricsServices
     Export:
       Name: !Sub '${AWS::StackName}-lakerunner-compact-metrics-ServiceArn'
     Value: !Ref 'ServiceLakerunnerCompactMetrics'
   ServiceLakerunnerCompactTracesArn:
-    Condition: CreateTracesServices
     Export:
       Name: !Sub '${AWS::StackName}-lakerunner-compact-traces-ServiceArn'
     Value: !Ref 'ServiceLakerunnerCompactTraces'
   ServiceLakerunnerIngestLogsArn:
-    Condition: CreateLogsServices
     Export:
       Name: !Sub '${AWS::StackName}-lakerunner-ingest-logs-ServiceArn'
     Value: !Ref 'ServiceLakerunnerIngestLogs'
   ServiceLakerunnerIngestMetricsArn:
-    Condition: CreateMetricsServices
     Export:
       Name: !Sub '${AWS::StackName}-lakerunner-ingest-metrics-ServiceArn'
     Value: !Ref 'ServiceLakerunnerIngestMetrics'
   ServiceLakerunnerIngestTracesArn:
-    Condition: CreateTracesServices
     Export:
       Name: !Sub '${AWS::StackName}-lakerunner-ingest-traces-ServiceArn'
     Value: !Ref 'ServiceLakerunnerIngestTraces'
@@ -294,7 +246,6 @@ Outputs:
       Name: !Sub '${AWS::StackName}-lakerunner-query-worker-ServiceArn'
     Value: !Ref 'ServiceLakerunnerQueryWorker'
   ServiceLakerunnerRollupMetricsArn:
-    Condition: CreateMetricsServices
     Export:
       Name: !Sub '${AWS::StackName}-lakerunner-rollup-metrics-ServiceArn'
     Value: !Ref 'ServiceLakerunnerRollupMetrics'
@@ -418,27 +369,6 @@ Parameters:
       - 'No'
     Default: 'Yes'
     Description: Inject the bootstrap admin API key into admin-api. Set to No after creating permanent keys.
-    Type: String
-  EnableLogs:
-    AllowedValues:
-      - 'Yes'
-      - 'No'
-    Default: 'Yes'
-    Description: Enable log processing services (ingest-logs, compact-logs)
-    Type: String
-  EnableMetrics:
-    AllowedValues:
-      - 'Yes'
-      - 'No'
-    Default: 'Yes'
-    Description: Enable metrics processing services (ingest-metrics, compact-metrics, rollup-metrics)
-    Type: String
-  EnableTraces:
-    AllowedValues:
-      - 'Yes'
-      - 'No'
-    Default: 'No'
-    Description: Enable trace processing services (ingest-traces, compact-traces)
     Type: String
   IngestLogsMemory:
     AllowedValues:
@@ -827,37 +757,31 @@ Resources:
       RetentionInDays: 14
     Type: AWS::Logs::LogGroup
   LogGroupLakerunnerCompactLogs:
-    Condition: CreateLogsServices
     Properties:
       LogGroupName: !Sub '/ecs/lakerunner-compact-logs'
       RetentionInDays: 14
     Type: AWS::Logs::LogGroup
   LogGroupLakerunnerCompactMetrics:
-    Condition: CreateMetricsServices
     Properties:
       LogGroupName: !Sub '/ecs/lakerunner-compact-metrics'
       RetentionInDays: 14
     Type: AWS::Logs::LogGroup
   LogGroupLakerunnerCompactTraces:
-    Condition: CreateTracesServices
     Properties:
       LogGroupName: !Sub '/ecs/lakerunner-compact-traces'
       RetentionInDays: 14
     Type: AWS::Logs::LogGroup
   LogGroupLakerunnerIngestLogs:
-    Condition: CreateLogsServices
     Properties:
       LogGroupName: !Sub '/ecs/lakerunner-ingest-logs'
       RetentionInDays: 14
     Type: AWS::Logs::LogGroup
   LogGroupLakerunnerIngestMetrics:
-    Condition: CreateMetricsServices
     Properties:
       LogGroupName: !Sub '/ecs/lakerunner-ingest-metrics'
       RetentionInDays: 14
     Type: AWS::Logs::LogGroup
   LogGroupLakerunnerIngestTraces:
-    Condition: CreateTracesServices
     Properties:
       LogGroupName: !Sub '/ecs/lakerunner-ingest-traces'
       RetentionInDays: 14
@@ -889,7 +813,6 @@ Resources:
       RetentionInDays: 14
     Type: AWS::Logs::LogGroup
   LogGroupLakerunnerRollupMetrics:
-    Condition: CreateMetricsServices
     Properties:
       LogGroupName: !Sub '/ecs/lakerunner-rollup-metrics'
       RetentionInDays: 14
@@ -1075,7 +998,6 @@ Resources:
       RoleName: !Sub '${AWS::StackName}-query-worker-task-role'
     Type: AWS::IAM::Role
   ScalableTargetLakerunnerCompactLogs:
-    Condition: CreateLogsServices
     DependsOn:
       - ServiceLakerunnerCompactLogs
     Properties:
@@ -1091,7 +1013,6 @@ Resources:
       ServiceNamespace: ecs
     Type: AWS::ApplicationAutoScaling::ScalableTarget
   ScalableTargetLakerunnerCompactMetrics:
-    Condition: CreateMetricsServices
     DependsOn:
       - ServiceLakerunnerCompactMetrics
     Properties:
@@ -1107,7 +1028,6 @@ Resources:
       ServiceNamespace: ecs
     Type: AWS::ApplicationAutoScaling::ScalableTarget
   ScalableTargetLakerunnerCompactTraces:
-    Condition: CreateTracesServices
     DependsOn:
       - ServiceLakerunnerCompactTraces
     Properties:
@@ -1123,7 +1043,6 @@ Resources:
       ServiceNamespace: ecs
     Type: AWS::ApplicationAutoScaling::ScalableTarget
   ScalableTargetLakerunnerIngestLogs:
-    Condition: CreateLogsServices
     DependsOn:
       - ServiceLakerunnerIngestLogs
     Properties:
@@ -1139,7 +1058,6 @@ Resources:
       ServiceNamespace: ecs
     Type: AWS::ApplicationAutoScaling::ScalableTarget
   ScalableTargetLakerunnerIngestMetrics:
-    Condition: CreateMetricsServices
     DependsOn:
       - ServiceLakerunnerIngestMetrics
     Properties:
@@ -1155,7 +1073,6 @@ Resources:
       ServiceNamespace: ecs
     Type: AWS::ApplicationAutoScaling::ScalableTarget
   ScalableTargetLakerunnerIngestTraces:
-    Condition: CreateTracesServices
     DependsOn:
       - ServiceLakerunnerIngestTraces
     Properties:
@@ -1171,7 +1088,6 @@ Resources:
       ServiceNamespace: ecs
     Type: AWS::ApplicationAutoScaling::ScalableTarget
   ScalableTargetLakerunnerRollupMetrics:
-    Condition: CreateMetricsServices
     DependsOn:
       - ServiceLakerunnerRollupMetrics
     Properties:
@@ -1187,7 +1103,6 @@ Resources:
       ServiceNamespace: ecs
     Type: AWS::ApplicationAutoScaling::ScalableTarget
   ScalingPolicyCpuLakerunnerCompactLogs:
-    Condition: CreateLogsServices
     Properties:
       PolicyName: lakerunner-compact-logs-cpu-scaling
       PolicyType: TargetTrackingScaling
@@ -1200,7 +1115,6 @@ Resources:
         TargetValue: !Ref 'AutoScalingCPUTarget'
     Type: AWS::ApplicationAutoScaling::ScalingPolicy
   ScalingPolicyCpuLakerunnerCompactMetrics:
-    Condition: CreateMetricsServices
     Properties:
       PolicyName: lakerunner-compact-metrics-cpu-scaling
       PolicyType: TargetTrackingScaling
@@ -1213,7 +1127,6 @@ Resources:
         TargetValue: !Ref 'AutoScalingCPUTarget'
     Type: AWS::ApplicationAutoScaling::ScalingPolicy
   ScalingPolicyCpuLakerunnerCompactTraces:
-    Condition: CreateTracesServices
     Properties:
       PolicyName: lakerunner-compact-traces-cpu-scaling
       PolicyType: TargetTrackingScaling
@@ -1226,7 +1139,6 @@ Resources:
         TargetValue: !Ref 'AutoScalingCPUTarget'
     Type: AWS::ApplicationAutoScaling::ScalingPolicy
   ScalingPolicyCpuLakerunnerIngestLogs:
-    Condition: CreateLogsServices
     Properties:
       PolicyName: lakerunner-ingest-logs-cpu-scaling
       PolicyType: TargetTrackingScaling
@@ -1239,7 +1151,6 @@ Resources:
         TargetValue: !Ref 'AutoScalingCPUTarget'
     Type: AWS::ApplicationAutoScaling::ScalingPolicy
   ScalingPolicyCpuLakerunnerIngestMetrics:
-    Condition: CreateMetricsServices
     Properties:
       PolicyName: lakerunner-ingest-metrics-cpu-scaling
       PolicyType: TargetTrackingScaling
@@ -1252,7 +1163,6 @@ Resources:
         TargetValue: !Ref 'AutoScalingCPUTarget'
     Type: AWS::ApplicationAutoScaling::ScalingPolicy
   ScalingPolicyCpuLakerunnerIngestTraces:
-    Condition: CreateTracesServices
     Properties:
       PolicyName: lakerunner-ingest-traces-cpu-scaling
       PolicyType: TargetTrackingScaling
@@ -1265,7 +1175,6 @@ Resources:
         TargetValue: !Ref 'AutoScalingCPUTarget'
     Type: AWS::ApplicationAutoScaling::ScalingPolicy
   ScalingPolicyCpuLakerunnerRollupMetrics:
-    Condition: CreateMetricsServices
     Properties:
       PolicyName: lakerunner-rollup-metrics-cpu-scaling
       PolicyType: TargetTrackingScaling
@@ -1278,7 +1187,6 @@ Resources:
         TargetValue: !Ref 'AutoScalingCPUTarget'
     Type: AWS::ApplicationAutoScaling::ScalingPolicy
   ScalingPolicyLagLakerunnerCompactLogs:
-    Condition: CreateLogsServices
     Properties:
       PolicyName: lakerunner-compact-logs-lag-scaling
       PolicyType: TargetTrackingScaling
@@ -1296,7 +1204,6 @@ Resources:
         TargetValue: 50
     Type: AWS::ApplicationAutoScaling::ScalingPolicy
   ScalingPolicyLagLakerunnerCompactMetrics:
-    Condition: CreateMetricsServices
     Properties:
       PolicyName: lakerunner-compact-metrics-lag-scaling
       PolicyType: TargetTrackingScaling
@@ -1314,7 +1221,6 @@ Resources:
         TargetValue: 50
     Type: AWS::ApplicationAutoScaling::ScalingPolicy
   ScalingPolicyLagLakerunnerCompactTraces:
-    Condition: CreateTracesServices
     Properties:
       PolicyName: lakerunner-compact-traces-lag-scaling
       PolicyType: TargetTrackingScaling
@@ -1332,7 +1238,6 @@ Resources:
         TargetValue: 50
     Type: AWS::ApplicationAutoScaling::ScalingPolicy
   ScalingPolicyLagLakerunnerIngestLogs:
-    Condition: CreateLogsServices
     Properties:
       PolicyName: lakerunner-ingest-logs-lag-scaling
       PolicyType: TargetTrackingScaling
@@ -1350,7 +1255,6 @@ Resources:
         TargetValue: 50
     Type: AWS::ApplicationAutoScaling::ScalingPolicy
   ScalingPolicyLagLakerunnerIngestMetrics:
-    Condition: CreateMetricsServices
     Properties:
       PolicyName: lakerunner-ingest-metrics-lag-scaling
       PolicyType: TargetTrackingScaling
@@ -1368,7 +1272,6 @@ Resources:
         TargetValue: 50
     Type: AWS::ApplicationAutoScaling::ScalingPolicy
   ScalingPolicyLagLakerunnerIngestTraces:
-    Condition: CreateTracesServices
     Properties:
       PolicyName: lakerunner-ingest-traces-lag-scaling
       PolicyType: TargetTrackingScaling
@@ -1386,7 +1289,6 @@ Resources:
         TargetValue: 50
     Type: AWS::ApplicationAutoScaling::ScalingPolicy
   ScalingPolicyLagLakerunnerRollupMetrics:
-    Condition: CreateMetricsServices
     Properties:
       PolicyName: lakerunner-rollup-metrics-lag-scaling
       PolicyType: TargetTrackingScaling
@@ -1520,7 +1422,6 @@ Resources:
       TaskDefinition: !Ref 'TaskDefLakerunnerBoxerCommon'
     Type: AWS::ECS::Service
   ServiceLakerunnerCompactLogs:
-    Condition: CreateLogsServices
     Properties:
       Cluster: !ImportValue
         Fn::Sub:
@@ -1557,7 +1458,6 @@ Resources:
       TaskDefinition: !Ref 'TaskDefLakerunnerCompactLogs'
     Type: AWS::ECS::Service
   ServiceLakerunnerCompactMetrics:
-    Condition: CreateMetricsServices
     Properties:
       Cluster: !ImportValue
         Fn::Sub:
@@ -1594,7 +1494,6 @@ Resources:
       TaskDefinition: !Ref 'TaskDefLakerunnerCompactMetrics'
     Type: AWS::ECS::Service
   ServiceLakerunnerCompactTraces:
-    Condition: CreateTracesServices
     Properties:
       Cluster: !ImportValue
         Fn::Sub:
@@ -1631,7 +1530,6 @@ Resources:
       TaskDefinition: !Ref 'TaskDefLakerunnerCompactTraces'
     Type: AWS::ECS::Service
   ServiceLakerunnerIngestLogs:
-    Condition: CreateLogsServices
     Properties:
       Cluster: !ImportValue
         Fn::Sub:
@@ -1668,7 +1566,6 @@ Resources:
       TaskDefinition: !Ref 'TaskDefLakerunnerIngestLogs'
     Type: AWS::ECS::Service
   ServiceLakerunnerIngestMetrics:
-    Condition: CreateMetricsServices
     Properties:
       Cluster: !ImportValue
         Fn::Sub:
@@ -1705,7 +1602,6 @@ Resources:
       TaskDefinition: !Ref 'TaskDefLakerunnerIngestMetrics'
     Type: AWS::ECS::Service
   ServiceLakerunnerIngestTraces:
-    Condition: CreateTracesServices
     Properties:
       Cluster: !ImportValue
         Fn::Sub:
@@ -1929,7 +1825,6 @@ Resources:
       TaskDefinition: !Ref 'TaskDefLakerunnerQueryWorker'
     Type: AWS::ECS::Service
   ServiceLakerunnerRollupMetrics:
-    Condition: CreateMetricsServices
     Properties:
       Cluster: !ImportValue
         Fn::Sub:
@@ -2080,7 +1975,7 @@ Resources:
       TreatMissingData: breaching
     Type: AWS::CloudWatch::Alarm
   TaskCountAlarmLakerunnerCompactLogs:
-    Condition: CreateAlarmLakerunnerCompactLogs
+    Condition: EnableAlarms
     Properties:
       AlarmActions:
         - !Ref 'AlertTopicArn'
@@ -2106,7 +2001,7 @@ Resources:
       TreatMissingData: breaching
     Type: AWS::CloudWatch::Alarm
   TaskCountAlarmLakerunnerCompactMetrics:
-    Condition: CreateAlarmLakerunnerCompactMetrics
+    Condition: EnableAlarms
     Properties:
       AlarmActions:
         - !Ref 'AlertTopicArn'
@@ -2132,7 +2027,7 @@ Resources:
       TreatMissingData: breaching
     Type: AWS::CloudWatch::Alarm
   TaskCountAlarmLakerunnerCompactTraces:
-    Condition: CreateAlarmLakerunnerCompactTraces
+    Condition: EnableAlarms
     Properties:
       AlarmActions:
         - !Ref 'AlertTopicArn'
@@ -2158,7 +2053,7 @@ Resources:
       TreatMissingData: breaching
     Type: AWS::CloudWatch::Alarm
   TaskCountAlarmLakerunnerIngestLogs:
-    Condition: CreateAlarmLakerunnerIngestLogs
+    Condition: EnableAlarms
     Properties:
       AlarmActions:
         - !Ref 'AlertTopicArn'
@@ -2184,7 +2079,7 @@ Resources:
       TreatMissingData: breaching
     Type: AWS::CloudWatch::Alarm
   TaskCountAlarmLakerunnerIngestMetrics:
-    Condition: CreateAlarmLakerunnerIngestMetrics
+    Condition: EnableAlarms
     Properties:
       AlarmActions:
         - !Ref 'AlertTopicArn'
@@ -2210,7 +2105,7 @@ Resources:
       TreatMissingData: breaching
     Type: AWS::CloudWatch::Alarm
   TaskCountAlarmLakerunnerIngestTraces:
-    Condition: CreateAlarmLakerunnerIngestTraces
+    Condition: EnableAlarms
     Properties:
       AlarmActions:
         - !Ref 'AlertTopicArn'
@@ -2366,7 +2261,7 @@ Resources:
       TreatMissingData: breaching
     Type: AWS::CloudWatch::Alarm
   TaskCountAlarmLakerunnerRollupMetrics:
-    Condition: CreateAlarmLakerunnerRollupMetrics
+    Condition: EnableAlarms
     Properties:
       AlarmActions:
         - !Ref 'AlertTopicArn'
@@ -2930,7 +2825,6 @@ Resources:
         - Name: scratch
     Type: AWS::ECS::TaskDefinition
   TaskDefLakerunnerCompactLogs:
-    Condition: CreateLogsServices
     Properties:
       ContainerDefinitions:
         - Command:
@@ -3096,7 +2990,6 @@ Resources:
         - Name: scratch
     Type: AWS::ECS::TaskDefinition
   TaskDefLakerunnerCompactMetrics:
-    Condition: CreateMetricsServices
     Properties:
       ContainerDefinitions:
         - Command:
@@ -3262,7 +3155,6 @@ Resources:
         - Name: scratch
     Type: AWS::ECS::TaskDefinition
   TaskDefLakerunnerCompactTraces:
-    Condition: CreateTracesServices
     Properties:
       ContainerDefinitions:
         - Command:
@@ -3428,7 +3320,6 @@ Resources:
         - Name: scratch
     Type: AWS::ECS::TaskDefinition
   TaskDefLakerunnerIngestLogs:
-    Condition: CreateLogsServices
     Properties:
       ContainerDefinitions:
         - Command:
@@ -3594,7 +3485,6 @@ Resources:
         - Name: scratch
     Type: AWS::ECS::TaskDefinition
   TaskDefLakerunnerIngestMetrics:
-    Condition: CreateMetricsServices
     Properties:
       ContainerDefinitions:
         - Command:
@@ -3760,7 +3650,6 @@ Resources:
         - Name: scratch
     Type: AWS::ECS::TaskDefinition
   TaskDefLakerunnerIngestTraces:
-    Condition: CreateTracesServices
     Properties:
       ContainerDefinitions:
         - Command:
@@ -4765,7 +4654,6 @@ Resources:
         - Name: scratch
     Type: AWS::ECS::TaskDefinition
   TaskDefLakerunnerRollupMetrics:
-    Condition: CreateMetricsServices
     Properties:
       ContainerDefinitions:
         - Command:
@@ -5269,7 +5157,7 @@ Resources:
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
   WorkqueueLagAlarmLakerunnerCompactLogs:
-    Condition: CreateAlarmLakerunnerCompactLogs
+    Condition: EnableAlarms
     Properties:
       AlarmActions:
         - !Ref 'AlertTopicArn'
@@ -5290,7 +5178,7 @@ Resources:
       TreatMissingData: notBreaching
     Type: AWS::CloudWatch::Alarm
   WorkqueueLagAlarmLakerunnerCompactMetrics:
-    Condition: CreateAlarmLakerunnerCompactMetrics
+    Condition: EnableAlarms
     Properties:
       AlarmActions:
         - !Ref 'AlertTopicArn'
@@ -5311,7 +5199,7 @@ Resources:
       TreatMissingData: notBreaching
     Type: AWS::CloudWatch::Alarm
   WorkqueueLagAlarmLakerunnerCompactTraces:
-    Condition: CreateAlarmLakerunnerCompactTraces
+    Condition: EnableAlarms
     Properties:
       AlarmActions:
         - !Ref 'AlertTopicArn'
@@ -5332,7 +5220,7 @@ Resources:
       TreatMissingData: notBreaching
     Type: AWS::CloudWatch::Alarm
   WorkqueueLagAlarmLakerunnerIngestLogs:
-    Condition: CreateAlarmLakerunnerIngestLogs
+    Condition: EnableAlarms
     Properties:
       AlarmActions:
         - !Ref 'AlertTopicArn'
@@ -5353,7 +5241,7 @@ Resources:
       TreatMissingData: notBreaching
     Type: AWS::CloudWatch::Alarm
   WorkqueueLagAlarmLakerunnerIngestMetrics:
-    Condition: CreateAlarmLakerunnerIngestMetrics
+    Condition: EnableAlarms
     Properties:
       AlarmActions:
         - !Ref 'AlertTopicArn'
@@ -5374,7 +5262,7 @@ Resources:
       TreatMissingData: notBreaching
     Type: AWS::CloudWatch::Alarm
   WorkqueueLagAlarmLakerunnerIngestTraces:
-    Condition: CreateAlarmLakerunnerIngestTraces
+    Condition: EnableAlarms
     Properties:
       AlarmActions:
         - !Ref 'AlertTopicArn'
@@ -5395,7 +5283,7 @@ Resources:
       TreatMissingData: notBreaching
     Type: AWS::CloudWatch::Alarm
   WorkqueueLagAlarmLakerunnerRollupMetrics:
-    Condition: CreateAlarmLakerunnerRollupMetrics
+    Condition: EnableAlarms
     Properties:
       AlarmActions:
         - !Ref 'AlertTopicArn'

@@ -125,8 +125,8 @@ class TestServicesTemplateSimple:
         assert "GoServicesImage" not in parameters, "GoServicesImage should not be a parameter"
 
     @patch('lakerunner_services.load_service_config')
-    def test_signal_type_parameters_exist(self, mock_load_config):
-        """Test that signal type parameters exist with correct defaults"""
+    def test_signal_type_parameters_removed(self, mock_load_config):
+        """Test that signal type parameters have been removed (all types always enabled)"""
         mock_load_config.return_value = {
             "services": {},
             "images": {
@@ -144,25 +144,14 @@ class TestServicesTemplateSimple:
 
         parameters = template_dict["Parameters"]
 
-        # Check that all signal type parameters exist
-        assert "EnableLogs" in parameters, "EnableLogs parameter not found"
-        assert "EnableMetrics" in parameters, "EnableMetrics parameter not found"
-        assert "EnableTraces" in parameters, "EnableTraces parameter not found"
-
-        # Check parameter types and allowed values
-        for param_name in ["EnableLogs", "EnableMetrics", "EnableTraces"]:
-            param = parameters[param_name]
-            assert param["Type"] == "String", f"{param_name} should be String type"
-            assert param["AllowedValues"] == ["Yes", "No"], f"{param_name} should have Yes/No values"
-
-        # Check defaults
-        assert parameters["EnableLogs"]["Default"] == "Yes", "EnableLogs should default to Yes"
-        assert parameters["EnableMetrics"]["Default"] == "Yes", "EnableMetrics should default to Yes"
-        assert parameters["EnableTraces"]["Default"] == "No", "EnableTraces should default to No"
+        # Signal type parameters should not exist
+        assert "EnableLogs" not in parameters
+        assert "EnableMetrics" not in parameters
+        assert "EnableTraces" not in parameters
 
     @patch('lakerunner_services.load_service_config')
-    def test_signal_type_conditions_exist(self, mock_load_config):
-        """Test that signal type conditions exist"""
+    def test_signal_type_conditions_removed(self, mock_load_config):
+        """Test that signal type conditions have been removed (all types always enabled)"""
         mock_load_config.return_value = {
             "services": {},
             "images": {
@@ -180,10 +169,10 @@ class TestServicesTemplateSimple:
 
         conditions = template_dict.get("Conditions", {})
 
-        # Check that all signal type conditions exist
-        assert "CreateLogsServices" in conditions, "CreateLogsServices condition not found"
-        assert "CreateMetricsServices" in conditions, "CreateMetricsServices condition not found"
-        assert "CreateTracesServices" in conditions, "CreateTracesServices condition not found"
+        # Signal type conditions should not exist
+        assert "CreateLogsServices" not in conditions
+        assert "CreateMetricsServices" not in conditions
+        assert "CreateTracesServices" not in conditions
 
     @patch('lakerunner_services.load_service_config')
     def test_signal_type_service_creation(self, mock_load_config):
@@ -251,31 +240,15 @@ class TestServicesTemplateSimple:
 
         resources = template_dict.get("Resources", {})
 
-        # Check that services with signal types have conditions
-        # LogGroups
-        assert resources["LogGroupTestLogsService"].get("Condition") == "CreateLogsServices"
-        assert resources["LogGroupTestMetricsService"].get("Condition") == "CreateMetricsServices"
-        assert resources["LogGroupTestTracesService"].get("Condition") == "CreateTracesServices"
-        assert "Condition" not in resources["LogGroupTestCommonService"]
+        # Signal-type services should have no conditions (always created)
+        for resource_prefix in ["LogGroup", "TaskDef", "Service"]:
+            for svc in ["TestLogsService", "TestMetricsService", "TestTracesService", "TestCommonService"]:
+                assert "Condition" not in resources[f"{resource_prefix}{svc}"]
 
-        # TaskDefinitions
-        assert resources["TaskDefTestLogsService"].get("Condition") == "CreateLogsServices"
-        assert resources["TaskDefTestMetricsService"].get("Condition") == "CreateMetricsServices"
-        assert resources["TaskDefTestTracesService"].get("Condition") == "CreateTracesServices"
-        assert "Condition" not in resources["TaskDefTestCommonService"]
-
-        # Services
-        assert resources["ServiceTestLogsService"].get("Condition") == "CreateLogsServices"
-        assert resources["ServiceTestMetricsService"].get("Condition") == "CreateMetricsServices"
-        assert resources["ServiceTestTracesService"].get("Condition") == "CreateTracesServices"
-        assert "Condition" not in resources["ServiceTestCommonService"]
-
-        # Outputs
+        # Outputs should have no conditions for signal-type services
         outputs = template_dict.get("Outputs", {})
-        assert outputs["ServiceTestLogsServiceArn"].get("Condition") == "CreateLogsServices"
-        assert outputs["ServiceTestMetricsServiceArn"].get("Condition") == "CreateMetricsServices"
-        assert outputs["ServiceTestTracesServiceArn"].get("Condition") == "CreateTracesServices"
-        assert "Condition" not in outputs["ServiceTestCommonServiceArn"]
+        for svc in ["TestLogsService", "TestMetricsService", "TestTracesService", "TestCommonService"]:
+            assert "Condition" not in outputs[f"Service{svc}Arn"]
 
     @patch('lakerunner_services.load_service_config')
     def test_query_services_have_cpu_memory_replicas_params(self, mock_load_config):
@@ -624,17 +597,14 @@ class TestServicesTemplateSimple:
         template_dict = json.loads(template.to_json())
         conditions = template_dict.get("Conditions", {})
 
-        # Auto-scaling now uses signal type conditions directly (always on)
-        # The separate AutoScalingEnabled and AutoScale* conditions no longer exist
+        # No signal-type or auto-scaling conditions should exist
         assert "AutoScalingEnabled" not in conditions
         assert "AutoScaleLogsServices" not in conditions
         assert "AutoScaleMetricsServices" not in conditions
         assert "AutoScaleTracesServices" not in conditions
-
-        # Signal type conditions still exist and are used for both services and auto-scaling
-        assert "CreateLogsServices" in conditions
-        assert "CreateMetricsServices" in conditions
-        assert "CreateTracesServices" in conditions
+        assert "CreateLogsServices" not in conditions
+        assert "CreateMetricsServices" not in conditions
+        assert "CreateTracesServices" not in conditions
 
     @patch('lakerunner_services.load_service_config')
     def test_autoscaling_resources_created_for_worker_services(self, mock_load_config):
@@ -687,25 +657,19 @@ class TestServicesTemplateSimple:
         template_dict = json.loads(template.to_json())
         resources = template_dict["Resources"]
 
-        # Check ScalableTarget resources exist with correct conditions (now uses Create*Services)
+        # Check ScalableTarget resources exist (no conditions, always created)
         assert "ScalableTargetLakerunnerIngestLogs" in resources
-        assert resources["ScalableTargetLakerunnerIngestLogs"]["Condition"] == "CreateLogsServices"
+        assert "Condition" not in resources["ScalableTargetLakerunnerIngestLogs"]
 
         assert "ScalableTargetLakerunnerCompactMetrics" in resources
-        assert resources["ScalableTargetLakerunnerCompactMetrics"]["Condition"] == "CreateMetricsServices"
-
         assert "ScalableTargetLakerunnerRollupMetrics" in resources
-        assert resources["ScalableTargetLakerunnerRollupMetrics"]["Condition"] == "CreateMetricsServices"
-
         assert "ScalableTargetLakerunnerIngestTraces" in resources
-        assert resources["ScalableTargetLakerunnerIngestTraces"]["Condition"] == "CreateTracesServices"
 
-        # Check ScalingPolicy resources exist with correct conditions
+        # Check ScalingPolicy resources exist (no conditions)
         assert "ScalingPolicyCpuLakerunnerIngestLogs" in resources
-        assert resources["ScalingPolicyCpuLakerunnerIngestLogs"]["Condition"] == "CreateLogsServices"
+        assert "Condition" not in resources["ScalingPolicyCpuLakerunnerIngestLogs"]
 
         assert "ScalingPolicyCpuLakerunnerCompactMetrics" in resources
-        assert resources["ScalingPolicyCpuLakerunnerCompactMetrics"]["Condition"] == "CreateMetricsServices"
 
     @patch('lakerunner_services.load_service_config')
     def test_autoscaling_not_created_for_non_worker_services(self, mock_load_config):
