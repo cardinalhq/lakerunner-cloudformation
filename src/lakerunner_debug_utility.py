@@ -73,11 +73,7 @@ CommonInfraStackName = t.add_parameter(Parameter(
     Description="REQUIRED: Name of the CommonInfra stack to import values from."
 ))
 
-ContainerImage = t.add_parameter(Parameter(
-    "ContainerImage", Type="String",
-    Default=images.get('utility', 'public.ecr.aws/cardinalhq.io/lakerunner:latest'),
-    Description="Utility container image."
-))
+ContainerImage = images.get('utility', 'public.ecr.aws/cardinalhq.io/lakerunner:latest')
 
 CommandArguments = t.add_parameter(Parameter(
     "CommandArguments", Type="String", Default="",
@@ -105,7 +101,6 @@ t.set_metadata({
             {"Label": {"default": "Command Configuration"}, "Parameters": ["CommandArguments"]},
             {"Label": {"default": "MSK Configuration"}, "Parameters": ["MSKBrokers"]},
             {"Label": {"default": "Task Sizing"}, "Parameters": ["Cpu", "MemoryMiB"]},
-            {"Label": {"default": "Container Image"}, "Parameters": ["ContainerImage"]},
         ],
         "ParameterLabels": {
             "CommonInfraStackName": {"default": "CommonInfra Stack Name"},
@@ -113,7 +108,6 @@ t.set_metadata({
             "MSKBrokers": {"default": "MSK Broker Endpoints"},
             "Cpu": {"default": "Fargate CPU"},
             "MemoryMiB": {"default": "Fargate Memory (MiB)"},
-            "ContainerImage": {"default": "Utility Image"},
         }
     }
 })
@@ -242,7 +236,7 @@ TaskDef = t.add_resource(TaskDefinition(
     ContainerDefinitions=[
         ContainerDefinition(
             Name="Utility",
-            Image=Ref(ContainerImage),
+            Image=ContainerImage,
             Command=Split(" ", Sub("/app/bin/lakerunner ${CommandArguments}")),
             LogConfiguration=LogConfiguration(
                 LogDriver="awslogs",

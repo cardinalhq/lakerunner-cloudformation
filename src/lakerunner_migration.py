@@ -72,11 +72,8 @@ CommonInfraStackName = t.add_parameter(Parameter(
     Description="REQUIRED: Name of the CommonInfra stack to import values from."
 ))
 
-ContainerImage = t.add_parameter(Parameter(
-    "ContainerImage", Type="String",
-    Default=images.get('migration', 'public.ecr.aws/cardinalhq.io/lakerunner:latest'),
-    Description="Migration container image."
-))
+ContainerImage = images.get('migration', 'public.ecr.aws/cardinalhq.io/lakerunner:latest')
+
 Cpu = t.add_parameter(Parameter(
     "Cpu", Type="String", Default="512",
     Description="Fargate CPU units (e.g., 256/512/1024)."
@@ -97,14 +94,12 @@ t.set_metadata({
             {"Label": {"default": "CommonInfra Stack"}, "Parameters": ["CommonInfraStackName"]},
             {"Label": {"default": "MSK Configuration"}, "Parameters": ["MSKBrokers"]},
             {"Label": {"default": "Task Sizing"}, "Parameters": ["Cpu", "MemoryMiB"]},
-            {"Label": {"default": "Container Image"}, "Parameters": ["ContainerImage"]},
         ],
         "ParameterLabels": {
             "CommonInfraStackName": {"default": "CommonInfra Stack Name"},
             "MSKBrokers": {"default": "MSK Broker Endpoints"},
             "Cpu": {"default": "Fargate CPU"},
             "MemoryMiB": {"default": "Fargate Memory (MiB)"},
-            "ContainerImage": {"default": "Migration Image"},
         }
     }
 })
@@ -234,7 +229,7 @@ TaskDef = t.add_resource(TaskDefinition(
     ContainerDefinitions=[
         ContainerDefinition(
             Name="Migrator",
-            Image=Ref(ContainerImage),
+            Image=ContainerImage,
             Command=["/app/bin/lakerunner", "setup"],
             LogConfiguration=LogConfiguration(
                 LogDriver="awslogs",

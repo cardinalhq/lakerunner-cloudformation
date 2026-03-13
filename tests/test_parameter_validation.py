@@ -78,15 +78,8 @@ class TestParameterValidation:
             assert common_infra_param["Type"] == "String"
             assert "Description" in common_infra_param
             
-            # Test image parameters have correct types and defaults (Grafana moved to separate stack)
-            # All services now use unified GoServicesImage parameter
-            image_params = ["GoServicesImage"]
-            for param_name in image_params:
-                assert param_name in parameters
-                param = parameters[param_name]
-                assert param["Type"] == "String"
-                assert "Default" in param
-                assert param["Default"].startswith("test:")  # From mock config
+            # Image is now hard-coded from defaults, not a parameter
+            assert "GoServicesImage" not in parameters
 
     def test_parameter_validation_with_cloud_radar(self):
         """Test parameter validation using Cloud-Radar"""

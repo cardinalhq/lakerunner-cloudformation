@@ -125,10 +125,6 @@ Metadata:
         Parameters:
           - MSKBrokers
       - Label:
-          default: Container Images
-        Parameters:
-          - GoServicesImage
-      - Label:
           default: Telemetry
         Parameters:
           - OtelEndpoint
@@ -175,8 +171,6 @@ Metadata:
         default: Enable Metrics
       EnableTraces:
         default: Enable Traces
-      GoServicesImage:
-        default: Go Services Image
       IngestLogsMemory:
         default: Ingest Logs Memory (MiB)
       IngestLogsReplicas:
@@ -445,10 +439,6 @@ Parameters:
       - 'No'
     Default: 'No'
     Description: Enable trace processing services (ingest-traces, compact-traces)
-    Type: String
-  GoServicesImage:
-    Default: ghcr.io/cardinalhq/lakerunner:v1.15.2
-    Description: Container image for all Go services (pubsub, ingest, compact, query-api, query-worker, etc.)
     Type: String
   IngestLogsMemory:
     AllowedValues:
@@ -2535,7 +2525,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: !Ref 'GoServicesImage'
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.4
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -2703,7 +2693,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: !Ref 'GoServicesImage'
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.4
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -2870,7 +2860,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: !Ref 'GoServicesImage'
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.4
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -3036,7 +3026,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: !Ref 'GoServicesImage'
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.4
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -3202,7 +3192,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: !Ref 'GoServicesImage'
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.4
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -3368,7 +3358,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: !Ref 'GoServicesImage'
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.4
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -3534,7 +3524,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: !Ref 'GoServicesImage'
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.4
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -3700,7 +3690,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: !Ref 'GoServicesImage'
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.4
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -3866,7 +3856,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: !Ref 'GoServicesImage'
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.4
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -4029,7 +4019,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: !Ref 'GoServicesImage'
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.4
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -4193,7 +4183,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: !Ref 'GoServicesImage'
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.4
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -4355,7 +4345,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: !Ref 'GoServicesImage'
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.4
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -4525,7 +4515,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: !Ref 'GoServicesImage'
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.4
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -4701,7 +4691,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: !Ref 'GoServicesImage'
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.4
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -4871,7 +4861,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: !Ref 'GoServicesImage'
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.4
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -5032,7 +5022,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: !Ref 'GoServicesImage'
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.4
           LogConfiguration:
             LogDriver: awslogs
             Options:

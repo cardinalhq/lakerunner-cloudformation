@@ -94,12 +94,7 @@ def create_otel_collector_template():
         Description="Whether to create an internal or external ALB for the OTEL collector."
     ))
 
-    # Container image override for air-gapped deployments
-    OtelCollectorImage = t.add_parameter(Parameter(
-        "OtelCollectorImage", Type="String",
-        Default=images.get('otel_collector', 'public.ecr.aws/cardinalhq.io/cardinalhq-otel-collector:latest'),
-        Description="Container image for OTEL collector service"
-    ))
+    OtelCollectorImage = images.get('otel_collector', 'public.ecr.aws/cardinalhq.io/cardinalhq-otel-collector:latest')
 
     # OTEL Configuration (optional override)
     OtelConfigYaml = t.add_parameter(Parameter(
@@ -119,10 +114,6 @@ def create_otel_collector_template():
                     "Parameters": ["CommonInfraStackName", "LoadBalancerType"]
                 },
                 {
-                    "Label": {"default": "Container Images"},
-                    "Parameters": ["OtelCollectorImage"]
-                },
-                {
                     "Label": {"default": "Configuration"},
                     "Parameters": ["OtelConfigYaml"]
                 }
@@ -130,7 +121,6 @@ def create_otel_collector_template():
             "ParameterLabels": {
                 "CommonInfraStackName": {"default": "Common Infra Stack Name"},
                 "LoadBalancerType": {"default": "Load Balancer Type"},
-                "OtelCollectorImage": {"default": "OTEL Collector Image"},
                 "OtelConfigYaml": {"default": "Custom OTEL Configuration (YAML)"}
             }
         }
@@ -527,7 +517,7 @@ def create_otel_collector_template():
     # Container definition
     container_args = {
         "Name": "OtelCollector",
-        "Image": Ref(OtelCollectorImage),
+        "Image": OtelCollectorImage,
         "Command": ["/app/bin/run-with-env-config"],
         "Environment": environment,
         "MountPoints": mount_points,

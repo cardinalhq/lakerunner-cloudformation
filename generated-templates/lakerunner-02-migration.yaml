@@ -15,15 +15,9 @@ Metadata:
         Parameters:
           - Cpu
           - MemoryMiB
-      - Label:
-          default: Container Image
-        Parameters:
-          - ContainerImage
     ParameterLabels:
       CommonInfraStackName:
         default: CommonInfra Stack Name
-      ContainerImage:
-        default: Migration Image
       Cpu:
         default: Fargate CPU
       MSKBrokers:
@@ -51,10 +45,6 @@ Parameters:
   CommonInfraStackName:
     Default: ''
     Description: 'REQUIRED: Name of the CommonInfra stack to import values from.'
-    Type: String
-  ContainerImage:
-    Default: ghcr.io/cardinalhq/lakerunner:v1.15.2
-    Description: Migration container image.
     Type: String
   Cpu:
     Default: '512'
@@ -121,7 +111,7 @@ Resources:
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
               Value: 'true'
-          Image: !Ref 'ContainerImage'
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.4
           LogConfiguration:
             LogDriver: awslogs
             Options:

@@ -19,17 +19,11 @@ Metadata:
         Parameters:
           - Cpu
           - MemoryMiB
-      - Label:
-          default: Container Image
-        Parameters:
-          - ContainerImage
     ParameterLabels:
       CommandArguments:
         default: Command Arguments
       CommonInfraStackName:
         default: CommonInfra Stack Name
-      ContainerImage:
-        default: Utility Image
       Cpu:
         default: Fargate CPU
       MSKBrokers:
@@ -61,10 +55,6 @@ Parameters:
   CommonInfraStackName:
     Default: ''
     Description: 'REQUIRED: Name of the CommonInfra stack to import values from.'
-    Type: String
-  ContainerImage:
-    Default: ghcr.io/cardinalhq/lakerunner:v1.15.2
-    Description: Utility container image.
     Type: String
   Cpu:
     Default: '512'
@@ -332,7 +322,7 @@ Resources:
               Value: SCRAM-SHA-512
             - Name: LAKERUNNER_KAFKA_TOPICS_DEFAULTS_REPLICATIONFACTOR
               Value: '2'
-          Image: !Ref 'ContainerImage'
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.4
           LogConfiguration:
             LogDriver: awslogs
             Options:

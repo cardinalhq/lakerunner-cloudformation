@@ -580,6 +580,8 @@ def create_grafana_template():
     conductor_port = conductor_config.get('port', 4100)
     conductor_env = [
         Environment(Name="AWS_BEDROCK_MODEL", Value=Ref(BedrockModel)),
+        Environment(Name="WORKFLOW_BEDROCK_INFERENCE_MODEL", Value=Ref(BedrockModel)),
+        Environment(Name="AWS_REGION", Value=Ref("AWS::Region")),
     ]
     for key, value in conductor_config.get('environment', {}).items():
         conductor_env.append(Environment(Name=key, Value=str(value)))
@@ -633,6 +635,8 @@ def create_grafana_template():
     maestro_port = maestro_config.get('port', 3100)
     maestro_env = [
         Environment(Name="AWS_BEDROCK_MODEL", Value=Ref(BedrockModel)),
+        Environment(Name="WORKFLOW_BEDROCK_INFERENCE_MODEL", Value=Ref(BedrockModel)),
+        Environment(Name="AWS_REGION", Value=Ref("AWS::Region")),
     ]
     for key, value in maestro_config.get('environment', {}).items():
         maestro_env.append(Environment(Name=key, Value=str(value)))

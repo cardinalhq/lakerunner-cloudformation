@@ -110,8 +110,10 @@ service:
             # Check for required parameters
             assert 'CommonInfraStackName' in yaml_output
             assert 'LoadBalancerType' in yaml_output
-            assert 'OtelCollectorImage' in yaml_output
             assert 'OtelConfigYaml' in yaml_output
+            # Image is now hard-coded from defaults, not a parameter
+            template_dict = json.loads(template.to_json())
+            assert 'OtelCollectorImage' not in template_dict.get('Parameters', {})
 
     def test_template_has_required_resources(self):
         """Test that the template has all required resources"""

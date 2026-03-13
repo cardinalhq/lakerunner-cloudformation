@@ -16,10 +16,6 @@ Metadata:
           - CommonInfraStackName
           - LoadBalancerType
       - Label:
-          default: Container Images
-        Parameters:
-          - OtelCollectorImage
-      - Label:
           default: Configuration
         Parameters:
           - OtelConfigYaml
@@ -28,8 +24,6 @@ Metadata:
         default: Common Infra Stack Name
       LoadBalancerType:
         default: Load Balancer Type
-      OtelCollectorImage:
-        default: OTEL Collector Image
       OtelConfigYaml:
         default: Custom OTEL Configuration (YAML)
 Outputs:
@@ -69,10 +63,6 @@ Parameters:
       - internet-facing
     Default: internal
     Description: Whether to create an internal or external ALB for the OTEL collector.
-    Type: String
-  OtelCollectorImage:
-    Default: ghcr.io/cardinalhq/cardinalhq-otel-collector:v1.4.2
-    Description: Container image for OTEL collector service
     Type: String
   OtelConfigYaml:
     Default: ''
@@ -488,7 +478,7 @@ Resources:
                           - awsemf/cloudwatch
             - Name: OTEL_RESOURCE_ATTRIBUTES
               Value: service.name=otel-gateway
-          Image: !Ref 'OtelCollectorImage'
+          Image: ghcr.io/cardinalhq/cardinalhq-otel-collector:v1.4.2
           LogConfiguration:
             LogDriver: awslogs
             Options:
