@@ -511,7 +511,7 @@ Resources:
               Value: '%(protocol)s://%(domain)s:%(http_port)s'
             - Name: GF_PLUGINS_PREINSTALL_SYNC
               Value: >-
-                cardinalhq-lakerunner-datasource@2.4.3@https://github.com/cardinalhq/cardinalhq-lakerunner-datasource/releases/download/v2.4.3/cardinalhq-lakerunner-datasource.zip,cardinalhq-cardinal-app@0.3.3@https://github.com/cardinalhq/cardinalhq-cardinal-app/releases/download/v0.3.3/cardinalhq-cardinal-app.zip
+                cardinalhq-lakerunner-datasource@2.4.3@https://github.com/cardinalhq/cardinalhq-lakerunner-datasource/releases/download/v2.4.3/cardinalhq-lakerunner-datasource.zip,cardinalhq-cardinal-app@0.3.4@https://github.com/cardinalhq/cardinalhq-cardinal-app/releases/download/v0.3.4/cardinalhq-cardinal-app.zip
             - Name: GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS
               Value: cardinalhq-lakerunner-datasource,cardinalhq-cardinal-app
             - Name: GF_PATHS_PROVISIONING
