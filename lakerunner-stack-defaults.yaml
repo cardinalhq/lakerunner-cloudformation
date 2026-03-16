@@ -20,9 +20,9 @@ storage_profiles:
 
 # Container Images configuration
 images:
-  migration: "ghcr.io/cardinalhq/lakerunner:v1.15.5"
-  utility: "ghcr.io/cardinalhq/lakerunner:v1.15.5"
-  go_services: "ghcr.io/cardinalhq/lakerunner:v1.15.5"
+  migration: "ghcr.io/cardinalhq/lakerunner:v1.15.6-rc1"
+  utility: "ghcr.io/cardinalhq/lakerunner:v1.15.6-rc1"
+  go_services: "ghcr.io/cardinalhq/lakerunner:v1.15.6-rc1"
 
 # MSK configuration
 msk:

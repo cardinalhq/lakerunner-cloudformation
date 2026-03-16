@@ -322,7 +322,7 @@ Resources:
               Value: SCRAM-SHA-512
             - Name: LAKERUNNER_KAFKA_TOPICS_DEFAULTS_REPLICATIONFACTOR
               Value: '2'
-          Image: ghcr.io/cardinalhq/lakerunner:v1.15.5
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.6-rc1
           LogConfiguration:
             LogDriver: awslogs
             Options:
