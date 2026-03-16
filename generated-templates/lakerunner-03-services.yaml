@@ -2424,7 +2424,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: ghcr.io/cardinalhq/lakerunner:v1.15.6-rc1
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.6-rc2
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -2596,7 +2596,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: ghcr.io/cardinalhq/lakerunner:v1.15.6-rc1
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.6-rc2
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -2767,7 +2767,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: ghcr.io/cardinalhq/lakerunner:v1.15.6-rc1
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.6-rc2
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -2936,7 +2936,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: ghcr.io/cardinalhq/lakerunner:v1.15.6-rc1
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.6-rc2
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -3105,7 +3105,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: ghcr.io/cardinalhq/lakerunner:v1.15.6-rc1
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.6-rc2
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -3274,7 +3274,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: ghcr.io/cardinalhq/lakerunner:v1.15.6-rc1
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.6-rc2
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -3443,7 +3443,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: ghcr.io/cardinalhq/lakerunner:v1.15.6-rc1
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.6-rc2
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -3612,7 +3612,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: ghcr.io/cardinalhq/lakerunner:v1.15.6-rc1
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.6-rc2
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -3781,7 +3781,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: ghcr.io/cardinalhq/lakerunner:v1.15.6-rc1
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.6-rc2
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -3948,7 +3948,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: ghcr.io/cardinalhq/lakerunner:v1.15.6-rc1
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.6-rc2
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -4116,7 +4116,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: ghcr.io/cardinalhq/lakerunner:v1.15.6-rc1
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.6-rc2
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -4287,7 +4287,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: ghcr.io/cardinalhq/lakerunner:v1.15.6-rc1
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.6-rc2
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -4461,7 +4461,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: ghcr.io/cardinalhq/lakerunner:v1.15.6-rc1
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.6-rc2
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -4641,7 +4641,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: ghcr.io/cardinalhq/lakerunner:v1.15.6-rc1
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.6-rc2
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -4814,7 +4814,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: ghcr.io/cardinalhq/lakerunner:v1.15.6-rc1
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.6-rc2
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -4979,7 +4979,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: ghcr.io/cardinalhq/lakerunner:v1.15.6-rc1
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.6-rc2
           LogConfiguration:
             LogDriver: awslogs
             Options:
