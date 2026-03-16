@@ -2382,6 +2382,10 @@ Resources:
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
               Value: 'true'
+            - Name: OTEL_TRACES_SAMPLER
+              Value: parentbased_traceidratio
+            - Name: OTEL_TRACES_SAMPLER_ARG
+              Value: '0.01'
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp
@@ -2420,7 +2424,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: ghcr.io/cardinalhq/lakerunner:v1.15.4
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.5
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -2560,6 +2564,10 @@ Resources:
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
               Value: 'true'
+            - Name: OTEL_TRACES_SAMPLER
+              Value: parentbased_traceidratio
+            - Name: OTEL_TRACES_SAMPLER_ARG
+              Value: '0.01'
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp
@@ -2588,7 +2596,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: ghcr.io/cardinalhq/lakerunner:v1.15.4
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.5
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -2731,6 +2739,10 @@ Resources:
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
               Value: 'true'
+            - Name: OTEL_TRACES_SAMPLER
+              Value: parentbased_traceidratio
+            - Name: OTEL_TRACES_SAMPLER_ARG
+              Value: '0.01'
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp
@@ -2755,7 +2767,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: ghcr.io/cardinalhq/lakerunner:v1.15.4
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.5
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -2892,6 +2904,10 @@ Resources:
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
               Value: 'true'
+            - Name: OTEL_TRACES_SAMPLER
+              Value: parentbased_traceidratio
+            - Name: OTEL_TRACES_SAMPLER_ARG
+              Value: '0.01'
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp
@@ -2920,7 +2936,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: ghcr.io/cardinalhq/lakerunner:v1.15.4
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.5
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -3057,6 +3073,10 @@ Resources:
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
               Value: 'true'
+            - Name: OTEL_TRACES_SAMPLER
+              Value: parentbased_traceidratio
+            - Name: OTEL_TRACES_SAMPLER_ARG
+              Value: '0.01'
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp
@@ -3085,7 +3105,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: ghcr.io/cardinalhq/lakerunner:v1.15.4
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.5
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -3222,6 +3242,10 @@ Resources:
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
               Value: 'true'
+            - Name: OTEL_TRACES_SAMPLER
+              Value: parentbased_traceidratio
+            - Name: OTEL_TRACES_SAMPLER_ARG
+              Value: '0.01'
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp
@@ -3250,7 +3274,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: ghcr.io/cardinalhq/lakerunner:v1.15.4
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.5
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -3387,6 +3411,10 @@ Resources:
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
               Value: 'true'
+            - Name: OTEL_TRACES_SAMPLER
+              Value: parentbased_traceidratio
+            - Name: OTEL_TRACES_SAMPLER_ARG
+              Value: '0.01'
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp
@@ -3415,7 +3443,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: ghcr.io/cardinalhq/lakerunner:v1.15.4
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.5
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -3552,6 +3580,10 @@ Resources:
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
               Value: 'true'
+            - Name: OTEL_TRACES_SAMPLER
+              Value: parentbased_traceidratio
+            - Name: OTEL_TRACES_SAMPLER_ARG
+              Value: '0.01'
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp
@@ -3580,7 +3612,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: ghcr.io/cardinalhq/lakerunner:v1.15.4
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.5
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -3717,6 +3749,10 @@ Resources:
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
               Value: 'true'
+            - Name: OTEL_TRACES_SAMPLER
+              Value: parentbased_traceidratio
+            - Name: OTEL_TRACES_SAMPLER_ARG
+              Value: '0.01'
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp
@@ -3745,7 +3781,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: ghcr.io/cardinalhq/lakerunner:v1.15.4
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.5
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -3884,6 +3920,10 @@ Resources:
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
               Value: 'true'
+            - Name: OTEL_TRACES_SAMPLER
+              Value: parentbased_traceidratio
+            - Name: OTEL_TRACES_SAMPLER_ARG
+              Value: '0.01'
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp
@@ -3908,7 +3948,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: ghcr.io/cardinalhq/lakerunner:v1.15.4
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.5
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -4048,6 +4088,10 @@ Resources:
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
               Value: 'true'
+            - Name: OTEL_TRACES_SAMPLER
+              Value: parentbased_traceidratio
+            - Name: OTEL_TRACES_SAMPLER_ARG
+              Value: '0.01'
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp
@@ -4072,7 +4116,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: ghcr.io/cardinalhq/lakerunner:v1.15.4
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.5
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -4126,6 +4170,11 @@ Resources:
                     Fn::Sub:
                       - ${CommonInfraStackName}-MSKCredentialsArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
+            - Name: INTERNAL_SERVICE_KEYS
+              ValueFrom: !ImportValue
+                Fn::Sub:
+                  - ${CommonInfraStackName}-InternalServiceKeysSecretArn
+                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
           User: '0'
       Cpu: '256'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
@@ -4210,6 +4259,10 @@ Resources:
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
               Value: 'true'
+            - Name: OTEL_TRACES_SAMPLER
+              Value: parentbased_traceidratio
+            - Name: OTEL_TRACES_SAMPLER_ARG
+              Value: '0.01'
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp
@@ -4234,7 +4287,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: ghcr.io/cardinalhq/lakerunner:v1.15.4
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.5
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -4371,6 +4424,10 @@ Resources:
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
               Value: 'true'
+            - Name: OTEL_TRACES_SAMPLER
+              Value: parentbased_traceidratio
+            - Name: OTEL_TRACES_SAMPLER_ARG
+              Value: '0.01'
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp
@@ -4404,7 +4461,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: ghcr.io/cardinalhq/lakerunner:v1.15.4
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.5
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -4548,6 +4605,10 @@ Resources:
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
               Value: 'true'
+            - Name: OTEL_TRACES_SAMPLER
+              Value: parentbased_traceidratio
+            - Name: OTEL_TRACES_SAMPLER_ARG
+              Value: '0.01'
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp
@@ -4580,7 +4641,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: ghcr.io/cardinalhq/lakerunner:v1.15.4
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.5
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -4721,6 +4782,10 @@ Resources:
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
               Value: 'true'
+            - Name: OTEL_TRACES_SAMPLER
+              Value: parentbased_traceidratio
+            - Name: OTEL_TRACES_SAMPLER_ARG
+              Value: '0.01'
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp
@@ -4749,7 +4814,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: ghcr.io/cardinalhq/lakerunner:v1.15.4
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.5
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -4886,6 +4951,10 @@ Resources:
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
               Value: 'true'
+            - Name: OTEL_TRACES_SAMPLER
+              Value: parentbased_traceidratio
+            - Name: OTEL_TRACES_SAMPLER_ARG
+              Value: '0.01'
             - Name: OTEL_EXPORTER_OTLP_ENDPOINT
               Value: !If
                 - EnableOtlp
@@ -4910,7 +4979,7 @@ Resources:
             Retries: 3
             StartPeriod: 60
             Timeout: 5
-          Image: ghcr.io/cardinalhq/lakerunner:v1.15.4
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.5
           LogConfiguration:
             LogDriver: awslogs
             Options:

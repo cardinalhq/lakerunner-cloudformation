@@ -1054,6 +1054,9 @@ def create_services_template():
             # License configuration
             Environment(Name="LICENSE_FILE", Value="env:LICENSE_DATA"),
             Environment(Name="SOFT_LICENSE_CHECK", Value="true"),
+            # OpenTelemetry trace sampling
+            Environment(Name="OTEL_TRACES_SAMPLER", Value="parentbased_traceidratio"),
+            Environment(Name="OTEL_TRACES_SAMPLER_ARG", Value="0.01"),
         ]
 
 
@@ -1128,8 +1131,8 @@ def create_services_template():
             EcsSecret(Name="LAKERUNNER_KAFKA_SASL_PASSWORD", ValueFrom=Sub("${SecretArn}:password::", SecretArn=MSKCredentialsArnValue))
         ]
 
-        # Add internal service keys for alert-evaluator and query-api
-        if service_name in ("lakerunner-alert-evaluator", "lakerunner-query-api"):
+        # Add internal service keys for alert-evaluator, notification-sender, and query-api
+        if service_name in ("lakerunner-alert-evaluator", "lakerunner-notification-sender", "lakerunner-query-api"):
             secrets.append(EcsSecret(Name="INTERNAL_SERVICE_KEYS", ValueFrom=InternalServiceKeysSecretArnValue))
 
         # Add initial admin API key for admin-api (bootstrap key for first access)
