@@ -252,8 +252,12 @@ Resources:
     Properties:
       LifecycleConfiguration:
         Rules:
-          - ExpirationInDays: 10
+          - ExpirationInDays: 3
             Prefix: otel-raw/
+            Status: Enabled
+          - AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
+            Id: CleanupIncompleteMultipartUploads
             Status: Enabled
       NotificationConfiguration:
         QueueConfigurations:

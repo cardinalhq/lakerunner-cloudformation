@@ -23,6 +23,7 @@ from troposphere.ec2 import SecurityGroup, SecurityGroupIngress
 from troposphere.ecs import Cluster as ECSCluster, ClusterSetting
 from troposphere.s3 import (
     Bucket, LifecycleRule, LifecycleConfiguration,
+    AbortIncompleteMultipartUpload,
     NotificationConfiguration, QueueConfigurations,
     S3Key, Filter, Rules
 )
@@ -286,7 +287,16 @@ BucketRes = t.add_resource(Bucket(
     "IngestBucket",
     DeletionPolicy="Delete",
     LifecycleConfiguration=LifecycleConfiguration(
-        Rules=[LifecycleRule(Prefix="otel-raw/", Status="Enabled", ExpirationInDays=10)]
+        Rules=[
+            LifecycleRule(Prefix="otel-raw/", Status="Enabled", ExpirationInDays=3),
+            LifecycleRule(
+                Id="CleanupIncompleteMultipartUploads",
+                Status="Enabled",
+                AbortIncompleteMultipartUpload=AbortIncompleteMultipartUpload(
+                    DaysAfterInitiation=1
+                ),
+            ),
+        ]
     ),
     NotificationConfiguration=NotificationConfiguration(
         QueueConfigurations=[
