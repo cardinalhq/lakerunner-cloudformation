@@ -169,13 +169,11 @@ def create_services_template():
     ]
 
     # Services that use YAML config only (no parameters)
-    # sweeper, monitor use YAML for both replicas and memory
+    # sweeper, monitor, admin-api use YAML for all settings
     # pubsub, boxer use YAML for memory but get replicas param
-    # admin-api is disabled by default (replicas=0), users can enable via parameter
     LAKERUNNER_REPLICAS_ONLY_SERVICES = [
         'lakerunner-pubsub-sqs',
         'lakerunner-boxer-common',
-        'lakerunner-admin-api',
         'lakerunner-alert-evaluator',
         'lakerunner-notification-sender',
     ]
@@ -275,7 +273,7 @@ def create_services_template():
                 f"{param_name}Replicas",
                 Type="Number",
                 Default=str(default_replicas),
-                MinValue=0,
+                MinValue=1,
                 Description=f"Number of {service_name} task replicas"
             ))
         service_params[service_name]['replicas'] = replicas_param
@@ -502,16 +500,7 @@ def create_services_template():
     t.add_condition("EnableOtlp", Not(Equals(Ref(OtelEndpoint), "")))
     t.add_condition("EnableAlarms", Not(Equals(Ref(AlertTopicArn), "")))
     t.add_condition("IsInternetFacing", Equals(Ref(AlbScheme), "internet-facing"))
-    # Admin API is enabled when replicas > 0 (only if admin-api service is defined)
-    if 'lakerunner-admin-api' in service_params:
-        t.add_condition("EnableAdminApi", Not(Equals(Ref(service_params['lakerunner-admin-api']['replicas']), "0")))
     t.add_condition("InjectAdminInitialKey", Equals(Ref(EnableAdminInitialKey), "Yes"))
-    # Alert Evaluator is enabled when replicas > 0
-    if 'lakerunner-alert-evaluator' in service_params:
-        t.add_condition("EnableAlertEvaluator", Not(Equals(Ref(service_params['lakerunner-alert-evaluator']['replicas']), "0")))
-    # Notification Sender is enabled when replicas > 0
-    if 'lakerunner-notification-sender' in service_params:
-        t.add_condition("EnableNotificationSender", Not(Equals(Ref(service_params['lakerunner-notification-sender']['replicas']), "0")))
 
 
     # -----------------------
@@ -537,16 +526,14 @@ def create_services_template():
         Description="HTTP 7101",
     ))
 
-    if 'lakerunner-admin-api' in service_params:
-        t.add_resource(SecurityGroupIngress(
-            "Alb9091Open",
-            Condition="EnableAdminApi",
-            GroupId=Ref(AlbSG),
-            IpProtocol="tcp",
-            FromPort=9091, ToPort=9091,
-            CidrIp="0.0.0.0/0",
-            Description="HTTP 9091 (admin-api)",
-        ))
+    t.add_resource(SecurityGroupIngress(
+        "Alb9091Open",
+        GroupId=Ref(AlbSG),
+        IpProtocol="tcp",
+        FromPort=9091, ToPort=9091,
+        CidrIp="0.0.0.0/0",
+        Description="HTTP 9091 (admin-api)",
+    ))
 
 
     # Add ingress rules to task security group to allow ALB traffic
@@ -570,17 +557,15 @@ def create_services_template():
         Description="ALB health checks",
     ))
 
-    # Allow ALB to reach admin-api on port 9091 - conditional
-    if 'lakerunner-admin-api' in service_params:
-        t.add_resource(SecurityGroupIngress(
-            "TaskFromAlb9091",
-            Condition="EnableAdminApi",
-            GroupId=TaskSecurityGroupIdValue,
-            IpProtocol="tcp",
-            FromPort=9091, ToPort=9091,
-            SourceSecurityGroupId=Ref(AlbSG),
-            Description="ALB to admin-api port",
-        ))
+    # Allow ALB to reach admin-api on port 9091
+    t.add_resource(SecurityGroupIngress(
+        "TaskFromAlb9091",
+        GroupId=TaskSecurityGroupIdValue,
+        IpProtocol="tcp",
+        FromPort=9091, ToPort=9091,
+        SourceSecurityGroupId=Ref(AlbSG),
+        Description="ALB to admin-api port",
+    ))
 
     # -----------------------
     # ALB + listeners + target groups
@@ -625,37 +610,33 @@ def create_services_template():
     ))
 
     # Admin API target group and listener on the shared ALB
-    Tg9091 = None
-    if 'lakerunner-admin-api' in service_params:
-        Tg9091 = t.add_resource(TargetGroup(
-            "Tg9091",
-            Condition="EnableAdminApi",
-            Port=9091,
-            Protocol="HTTP",
-            VpcId=VpcIdValue,
-            TargetType="ip",
-            HealthCheckPath="/healthz",
-            HealthCheckPort="9091",
-            HealthCheckProtocol="HTTP",
-            HealthCheckIntervalSeconds=5,
-            HealthCheckTimeoutSeconds=2,
-            HealthyThresholdCount=2,
-            UnhealthyThresholdCount=2,
-            Matcher=Matcher(HttpCode="200"),
-            TargetGroupAttributes=[
-                TargetGroupAttribute(Key="stickiness.enabled", Value="false"),
-                TargetGroupAttribute(Key="deregistration_delay.timeout_seconds", Value="5")
-            ]
-        ))
+    Tg9091 = t.add_resource(TargetGroup(
+        "Tg9091",
+        Port=9091,
+        Protocol="HTTP",
+        VpcId=VpcIdValue,
+        TargetType="ip",
+        HealthCheckPath="/healthz",
+        HealthCheckPort="9091",
+        HealthCheckProtocol="HTTP",
+        HealthCheckIntervalSeconds=5,
+        HealthCheckTimeoutSeconds=2,
+        HealthyThresholdCount=2,
+        UnhealthyThresholdCount=2,
+        Matcher=Matcher(HttpCode="200"),
+        TargetGroupAttributes=[
+            TargetGroupAttribute(Key="stickiness.enabled", Value="false"),
+            TargetGroupAttribute(Key="deregistration_delay.timeout_seconds", Value="5")
+        ]
+    ))
 
-        t.add_resource(Listener(
-            "Listener9091",
-            Condition="EnableAdminApi",
-            LoadBalancerArn=Ref(Alb),
-            Port="9091",
-            Protocol="HTTP",
-            DefaultActions=[AlbAction(Type="forward", TargetGroupArn=Ref(Tg9091))]
-        ))
+    t.add_resource(Listener(
+        "Listener9091",
+        LoadBalancerArn=Ref(Alb),
+        Port="9091",
+        Protocol="HTTP",
+        DefaultActions=[AlbAction(Type="forward", TargetGroupArn=Ref(Tg9091))]
+    ))
 
 
     # -----------------------
@@ -1002,26 +983,13 @@ def create_services_template():
     for service_name, service_config in services.items():
         title_name = ''.join(word.capitalize() for word in service_name.replace('-', '_').split('_'))
 
-        # Determine the condition for this service based on service-specific enablement
         signal_type = service_config.get('signal_type', 'common')
-        condition_name = None
-        if service_name == 'lakerunner-admin-api':
-            condition_name = "EnableAdminApi"
-        elif service_name == 'lakerunner-alert-evaluator':
-            condition_name = "EnableAlertEvaluator"
-        elif service_name == 'lakerunner-notification-sender':
-            condition_name = "EnableNotificationSender"
 
         # Create log group
-        log_group_kwargs = {
-            "LogGroupName": Sub(f"/ecs/{service_name}"),
-            "RetentionInDays": 14
-        }
-        if condition_name:
-            log_group_kwargs["Condition"] = condition_name
         log_group = t.add_resource(LogGroup(
             f"LogGroup{title_name}",
-            **log_group_kwargs
+            LogGroupName=Sub(f"/ecs/{service_name}"),
+            RetentionInDays=14
         ))
 
         # Build volumes list
@@ -1272,8 +1240,6 @@ def create_services_template():
             task_def_kwargs["EphemeralStorage"] = EphemeralStorage(
                 SizeInGiB=ephemeral_storage_gib
             )
-        if condition_name:
-            task_def_kwargs["Condition"] = condition_name
         task_def = t.add_resource(TaskDefinition(
             f"TaskDef{title_name}",
             **task_def_kwargs
@@ -1312,8 +1278,6 @@ def create_services_template():
             )
         }
 
-        if condition_name:
-            ecs_service_kwargs["Condition"] = condition_name
         ecs_service = t.add_resource(Service(
             f"Service{title_name}",
             **ecs_service_kwargs
@@ -1326,7 +1290,7 @@ def create_services_template():
             # Map to the appropriate target group created in this stack
             if port == 7101:
                 target_group_arn = Ref(Tg7101)
-            elif port == 9091 and Tg9091 is not None:
+            elif port == 9091:
                 target_group_arn = Ref(Tg9091)
             else:
                 # For other ports, we'd need to add them to this stack
@@ -1417,16 +1381,7 @@ def create_services_template():
         # CloudWatch Alarm for Task Count (requires Container Insights)
         # Alert when running tasks drop to 0 for 5 minutes
         # -----------------------
-        # Create combined condition for alarm: EnableAlarms AND service condition (if any)
-        if condition_name:
-            # Create a combined condition for this alarm
-            alarm_condition_name = f"CreateAlarm{title_name}"
-            t.add_condition(alarm_condition_name, And(
-                Condition("EnableAlarms"),
-                Condition(condition_name)
-            ))
-        else:
-            alarm_condition_name = "EnableAlarms"
+        alarm_condition_name = "EnableAlarms"
 
         alarm_kwargs = {
             "AlarmName": Sub(f"${{AWS::StackName}}-{service_name}-no-running-tasks"),
@@ -1504,15 +1459,13 @@ def create_services_template():
         Export=Export(name=Sub("${AWS::StackName}-Tg7101Arn"))
     ))
 
-    # Admin API URL Output (conditional) - uses the shared ALB
-    if Tg9091 is not None:
-        t.add_output(Output(
-            "AdminApiURL",
-            Condition="EnableAdminApi",
-            Value=Sub("http://${AlbDns}:9091", AlbDns=GetAtt(Alb, "DNSName")),
-            Export=Export(name=Sub("${AWS::StackName}-AdminApiURL")),
-            Description="Admin API URL (HTTP on port 9091)"
-        ))
+    # Admin API URL Output
+    t.add_output(Output(
+        "AdminApiURL",
+        Value=Sub("http://${AlbDns}:9091", AlbDns=GetAtt(Alb, "DNSName")),
+        Export=Export(name=Sub("${AWS::StackName}-AdminApiURL")),
+        Description="Admin API URL (HTTP on port 9091)"
+    ))
 
     # Service Outputs
     t.add_output(Output(
@@ -1530,24 +1483,10 @@ def create_services_template():
     # Output service ARNs
     for service_name, service_config in services.items():
         title_name = ''.join(word.capitalize() for word in service_name.replace('-', '_').split('_'))
-        # Determine the condition for this service
-        condition_name = None
-        if service_name == 'lakerunner-admin-api':
-            condition_name = "EnableAdminApi"
-        elif service_name == 'lakerunner-alert-evaluator':
-            condition_name = "EnableAlertEvaluator"
-        elif service_name == 'lakerunner-notification-sender':
-            condition_name = "EnableNotificationSender"
-
-        output_kwargs = {
-            "Value": Ref(f"Service{title_name}"),
-            "Export": Export(name=Sub(f"${{AWS::StackName}}-{service_name}-ServiceArn"))
-        }
-        if condition_name:
-            output_kwargs["Condition"] = condition_name
         t.add_output(Output(
             f"Service{title_name}Arn",
-            **output_kwargs
+            Value=Ref(f"Service{title_name}"),
+            Export=Export(name=Sub(f"${{AWS::StackName}}-{service_name}-ServiceArn"))
         ))
 
     return t

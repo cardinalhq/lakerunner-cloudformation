@@ -1,29 +1,8 @@
 Conditions:
-  CreateAlarmLakerunnerAdminApi: !And
-    - !Condition 'EnableAlarms'
-    - !Condition 'EnableAdminApi'
-  CreateAlarmLakerunnerAlertEvaluator: !And
-    - !Condition 'EnableAlarms'
-    - !Condition 'EnableAlertEvaluator'
-  CreateAlarmLakerunnerNotificationSender: !And
-    - !Condition 'EnableAlarms'
-    - !Condition 'EnableNotificationSender'
-  EnableAdminApi: !Not
-    - !Equals
-      - !Ref 'AdminApiReplicas'
-      - '0'
   EnableAlarms: !Not
     - !Equals
       - !Ref 'AlertTopicArn'
       - ''
-  EnableAlertEvaluator: !Not
-    - !Equals
-      - !Ref 'AlertEvaluatorReplicas'
-      - '0'
-  EnableNotificationSender: !Not
-    - !Equals
-      - !Ref 'NotificationSenderReplicas'
-      - '0'
   EnableOtlp: !Not
     - !Equals
       - !Ref 'OtelEndpoint'
@@ -75,7 +54,6 @@ Metadata:
         Parameters:
           - PubsubSqsReplicas
           - BoxerCommonReplicas
-          - AdminApiReplicas
           - AlertEvaluatorReplicas
           - NotificationSenderReplicas
       - Label:
@@ -97,8 +75,6 @@ Metadata:
         Parameters:
           - AlertTopicArn
     ParameterLabels:
-      AdminApiReplicas:
-        default: Admin Api Replicas
       AlbScheme:
         default: ALB Scheme
       AlertEvaluatorReplicas:
@@ -167,7 +143,6 @@ Metadata:
         default: Rollup Metrics Max Replicas
 Outputs:
   AdminApiURL:
-    Condition: EnableAdminApi
     Description: Admin API URL (HTTP on port 9091)
     Export:
       Name: !Sub '${AWS::StackName}-AdminApiURL'
@@ -187,12 +162,10 @@ Outputs:
       Name: !Sub '${AWS::StackName}-ExecutionRoleArn'
     Value: !GetAtt 'ExecRole.Arn'
   ServiceLakerunnerAdminApiArn:
-    Condition: EnableAdminApi
     Export:
       Name: !Sub '${AWS::StackName}-lakerunner-admin-api-ServiceArn'
     Value: !Ref 'ServiceLakerunnerAdminApi'
   ServiceLakerunnerAlertEvaluatorArn:
-    Condition: EnableAlertEvaluator
     Export:
       Name: !Sub '${AWS::StackName}-lakerunner-alert-evaluator-ServiceArn'
     Value: !Ref 'ServiceLakerunnerAlertEvaluator'
@@ -229,7 +202,6 @@ Outputs:
       Name: !Sub '${AWS::StackName}-lakerunner-monitoring-ServiceArn'
     Value: !Ref 'ServiceLakerunnerMonitoring'
   ServiceLakerunnerNotificationSenderArn:
-    Condition: EnableNotificationSender
     Export:
       Name: !Sub '${AWS::StackName}-lakerunner-notification-sender-ServiceArn'
     Value: !Ref 'ServiceLakerunnerNotificationSender'
@@ -262,11 +234,6 @@ Outputs:
       Name: !Sub '${AWS::StackName}-Tg7101Arn'
     Value: !Ref 'Tg7101'
 Parameters:
-  AdminApiReplicas:
-    Default: '1'
-    Description: Number of lakerunner-admin-api task replicas
-    MinValue: 0
-    Type: Number
   AlbScheme:
     AllowedValues:
       - internet-facing
@@ -277,7 +244,7 @@ Parameters:
   AlertEvaluatorReplicas:
     Default: '1'
     Description: Number of lakerunner-alert-evaluator task replicas
-    MinValue: 0
+    MinValue: 1
     Type: Number
   AlertTopicArn:
     Default: ''
@@ -304,7 +271,7 @@ Parameters:
   BoxerCommonReplicas:
     Default: '1'
     Description: Number of lakerunner-boxer-common task replicas
-    MinValue: 0
+    MinValue: 1
     Type: Number
   CommonInfraStackName:
     Description: 'REQUIRED: Name of the CommonInfra stack to import infrastructure values from.'
@@ -431,7 +398,7 @@ Parameters:
   NotificationSenderReplicas:
     Default: '1'
     Description: Number of lakerunner-notification-sender task replicas
-    MinValue: 0
+    MinValue: 1
     Type: Number
   OtelEndpoint:
     Default: ''
@@ -440,7 +407,7 @@ Parameters:
   PubsubSqsReplicas:
     Default: '1'
     Description: Number of lakerunner-pubsub-sqs task replicas
-    MinValue: 0
+    MinValue: 1
     Type: Number
   QueryApiCpu:
     AllowedValues:
@@ -509,7 +476,7 @@ Parameters:
   QueryApiReplicas:
     Default: '2'
     Description: Number of lakerunner-query-api task replicas
-    MinValue: 0
+    MinValue: 1
     Type: Number
   QueryWorkerCpu:
     AllowedValues:
@@ -578,7 +545,7 @@ Parameters:
   QueryWorkerReplicas:
     Default: '8'
     Description: Number of lakerunner-query-worker task replicas
-    MinValue: 0
+    MinValue: 1
     Type: Number
   RollupMetricsMemory:
     AllowedValues:
@@ -630,7 +597,6 @@ Resources:
       ToPort: 7101
     Type: AWS::EC2::SecurityGroupIngress
   Alb9091Open:
-    Condition: EnableAdminApi
     Properties:
       CidrIp: '0.0.0.0/0'
       Description: HTTP 9091 (admin-api)
@@ -730,7 +696,6 @@ Resources:
       Protocol: HTTP
     Type: AWS::ElasticLoadBalancingV2::Listener
   Listener9091:
-    Condition: EnableAdminApi
     Properties:
       DefaultActions:
         - TargetGroupArn: !Ref 'Tg9091'
@@ -740,13 +705,11 @@ Resources:
       Protocol: HTTP
     Type: AWS::ElasticLoadBalancingV2::Listener
   LogGroupLakerunnerAdminApi:
-    Condition: EnableAdminApi
     Properties:
       LogGroupName: !Sub '/ecs/lakerunner-admin-api'
       RetentionInDays: 14
     Type: AWS::Logs::LogGroup
   LogGroupLakerunnerAlertEvaluator:
-    Condition: EnableAlertEvaluator
     Properties:
       LogGroupName: !Sub '/ecs/lakerunner-alert-evaluator'
       RetentionInDays: 14
@@ -792,7 +755,6 @@ Resources:
       RetentionInDays: 14
     Type: AWS::Logs::LogGroup
   LogGroupLakerunnerNotificationSender:
-    Condition: EnableNotificationSender
     Properties:
       LogGroupName: !Sub '/ecs/lakerunner-notification-sender'
       RetentionInDays: 14
@@ -1306,7 +1268,6 @@ Resources:
         TargetValue: 50
     Type: AWS::ApplicationAutoScaling::ScalingPolicy
   ServiceLakerunnerAdminApi:
-    Condition: EnableAdminApi
     DependsOn:
       - Listener9091
     Properties:
@@ -1314,7 +1275,7 @@ Resources:
         Fn::Sub:
           - ${CommonInfraStackName}-ClusterArn
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
-      DesiredCount: !Ref 'AdminApiReplicas'
+      DesiredCount: '1'
       EnableECSManagedTags: true
       EnableExecuteCommand: true
       LaunchType: FARGATE
@@ -1349,7 +1310,6 @@ Resources:
       TaskDefinition: !Ref 'TaskDefLakerunnerAdminApi'
     Type: AWS::ECS::Service
   ServiceLakerunnerAlertEvaluator:
-    Condition: EnableAlertEvaluator
     Properties:
       Cluster: !ImportValue
         Fn::Sub:
@@ -1674,7 +1634,6 @@ Resources:
       TaskDefinition: !Ref 'TaskDefLakerunnerMonitoring'
     Type: AWS::ECS::Service
   ServiceLakerunnerNotificationSender:
-    Condition: EnableNotificationSender
     Properties:
       Cluster: !ImportValue
         Fn::Sub:
@@ -1897,7 +1856,7 @@ Resources:
       TaskDefinition: !Ref 'TaskDefLakerunnerSweeper'
     Type: AWS::ECS::Service
   TaskCountAlarmLakerunnerAdminApi:
-    Condition: CreateAlarmLakerunnerAdminApi
+    Condition: EnableAlarms
     Properties:
       AlarmActions:
         - !Ref 'AlertTopicArn'
@@ -1923,7 +1882,7 @@ Resources:
       TreatMissingData: breaching
     Type: AWS::CloudWatch::Alarm
   TaskCountAlarmLakerunnerAlertEvaluator:
-    Condition: CreateAlarmLakerunnerAlertEvaluator
+    Condition: EnableAlarms
     Properties:
       AlarmActions:
         - !Ref 'AlertTopicArn'
@@ -2157,7 +2116,7 @@ Resources:
       TreatMissingData: breaching
     Type: AWS::CloudWatch::Alarm
   TaskCountAlarmLakerunnerNotificationSender:
-    Condition: CreateAlarmLakerunnerNotificationSender
+    Condition: EnableAlarms
     Properties:
       AlarmActions:
         - !Ref 'AlertTopicArn'
@@ -2313,7 +2272,6 @@ Resources:
       TreatMissingData: breaching
     Type: AWS::CloudWatch::Alarm
   TaskDefLakerunnerAdminApi:
-    Condition: EnableAdminApi
     Properties:
       ContainerDefinitions:
         - Command:
@@ -2496,7 +2454,6 @@ Resources:
         - Name: scratch
     Type: AWS::ECS::TaskDefinition
   TaskDefLakerunnerAlertEvaluator:
-    Condition: EnableAlertEvaluator
     Properties:
       ContainerDefinitions:
         - Command:
@@ -4020,7 +3977,6 @@ Resources:
         - Name: scratch
     Type: AWS::ECS::TaskDefinition
   TaskDefLakerunnerNotificationSender:
-    Condition: EnableNotificationSender
     Properties:
       ContainerDefinitions:
         - Command:
@@ -5073,7 +5029,6 @@ Resources:
       ToPort: 8090
     Type: AWS::EC2::SecurityGroupIngress
   TaskFromAlb9091:
-    Condition: EnableAdminApi
     Properties:
       Description: ALB to admin-api port
       FromPort: 9091
@@ -5201,7 +5156,6 @@ Resources:
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
   Tg9091:
-    Condition: EnableAdminApi
     Properties:
       HealthCheckIntervalSeconds: 5
       HealthCheckPath: /healthz
