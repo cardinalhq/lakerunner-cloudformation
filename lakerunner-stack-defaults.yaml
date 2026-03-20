@@ -33,92 +33,49 @@ services:
     health_check:
       type: "go"
       command: ["/app/bin/lakerunner", "sysinfo"]
-    environment:
-      OTEL_METRIC_EXPORT_INTERVAL: "10000"
+    environment: {}
 
-  lakerunner-ingest-logs:
+  lakerunner-process-logs:
     signal_type: logs
-    command: ["/app/bin/lakerunner", "ingest-logs"]
+    command: ["/app/bin/lakerunner", "process-logs"]
     cpu: 1024
     memory_mib: 2048
-    replicas: 10
+    replicas: 1
+    autoscaling:
+      min_replicas: 1
+      max_replicas: 10
     health_check:
       type: "go"
       command: ["/app/bin/lakerunner", "sysinfo"]
-    environment:
-      OTEL_METRIC_EXPORT_INTERVAL: "10000"
+    environment: {}
 
-  lakerunner-ingest-metrics:
+  lakerunner-process-metrics:
     signal_type: metrics
-    command: ["/app/bin/lakerunner", "ingest-metrics"]
+    command: ["/app/bin/lakerunner", "process-metrics"]
     cpu: 1024
     memory_mib: 2048
-    replicas: 10
+    replicas: 1
+    autoscaling:
+      min_replicas: 1
+      max_replicas: 10
     health_check:
       type: "go"
       command: ["/app/bin/lakerunner", "sysinfo"]
-    environment:
-      OTEL_METRIC_EXPORT_INTERVAL: "10000"
+    environment: {}
 
-  lakerunner-ingest-traces:
+  lakerunner-process-traces:
     signal_type: traces
-    command: ["/app/bin/lakerunner", "ingest-traces"]
+    command: ["/app/bin/lakerunner", "process-traces"]
     cpu: 1024
     memory_mib: 2048
-    replicas: 10
+    replicas: 1
+    autoscaling:
+      min_replicas: 1
+      max_replicas: 10
     health_check:
       type: "go"
       command: ["/app/bin/lakerunner", "sysinfo"]
-    environment:
-      OTEL_METRIC_EXPORT_INTERVAL: "10000"
-
-  lakerunner-compact-logs:
-    signal_type: logs
-    command: ["/app/bin/lakerunner", "compact-logs"]
-    cpu: 1024
-    memory_mib: 2048
-    replicas: 10
-    health_check:
-      type: "go"
-      command: ["/app/bin/lakerunner", "sysinfo"]
-    environment:
-      OTEL_METRIC_EXPORT_INTERVAL: "10000"
-
-  lakerunner-compact-metrics:
-    signal_type: metrics
-    command: ["/app/bin/lakerunner", "compact-metrics"]
-    cpu: 1024
-    memory_mib: 2048
-    replicas: 10
-    health_check:
-      type: "go"
-      command: ["/app/bin/lakerunner", "sysinfo"]
-    environment:
-      OTEL_METRIC_EXPORT_INTERVAL: "10000"
-
-  lakerunner-compact-traces:
-    signal_type: traces
-    command: ["/app/bin/lakerunner", "compact-traces"]
-    cpu: 1024
-    memory_mib: 2048
-    replicas: 10
-    health_check:
-      type: "go"
-      command: ["/app/bin/lakerunner", "sysinfo"]
-    environment:
-      OTEL_METRIC_EXPORT_INTERVAL: "10000"
-
-  lakerunner-rollup-metrics:
-    signal_type: metrics
-    command: ["/app/bin/lakerunner", "rollup-metrics"]
-    cpu: 1024
-    memory_mib: 2048
-    replicas: 10
-    health_check:
-      type: "go"
-      command: ["/app/bin/lakerunner", "sysinfo"]
-    environment:
-      OTEL_METRIC_EXPORT_INTERVAL: "10000"
+    environment: {}
 
   lakerunner-sweeper:
     signal_type: common
@@ -129,8 +86,7 @@ services:
     health_check:
       type: "go"
       command: ["/app/bin/lakerunner", "sysinfo"]
-    environment:
-      OTEL_METRIC_EXPORT_INTERVAL: "10000"
+    environment: {}
 
   lakerunner-query-api:
     signal_type: common
@@ -148,7 +104,6 @@ services:
       type: "go"
       command: ["/app/bin/lakerunner", "sysinfo"]
     environment:
-      OTEL_METRIC_EXPORT_INTERVAL: "10000"
       EXECUTION_ENVIRONMENT: "ecs"
       QUERY_WORKER_SERVICE_NAME: "lakerunner-query-worker"
       # Note: QUERY_WORKER_CLUSTER_NAME is set dynamically in the template
@@ -167,22 +122,8 @@ services:
       command: ["/app/bin/lakerunner", "sysinfo"]
     ephemeral_storage_gib: 100
     environment:
-      OTEL_METRIC_EXPORT_INTERVAL: "10000"
       LAKERUNNER_QUERY_DISABLE_TABLE_CACHE: "true"
       LAKERUNNER_QUERY_MAX_SEGMENTS_PER_WORKER_PER_WAVE: "100"
-
-  # Boxer service for all compaction and rollup tasks
-  lakerunner-boxer-common:
-    signal_type: common
-    command: ["/app/bin/lakerunner", "boxer", "--all"]
-    cpu: 256
-    memory_mib: 512
-    replicas: 1
-    health_check:
-      type: "go"
-      command: ["/app/bin/lakerunner", "sysinfo"]
-    environment:
-      OTEL_METRIC_EXPORT_INTERVAL: "10000"
 
   # Monitoring service
   lakerunner-monitoring:
@@ -198,8 +139,7 @@ services:
     health_check:
       type: "go"
       command: ["/app/bin/lakerunner", "sysinfo"]
-    environment:
-      OTEL_METRIC_EXPORT_INTERVAL: "10000"
+    environment: {}
 
   # Admin API service
   lakerunner-admin-api:
@@ -217,8 +157,7 @@ services:
     health_check:
       type: "go"
       command: ["/app/bin/lakerunner", "sysinfo"]
-    environment:
-      OTEL_METRIC_EXPORT_INTERVAL: "10000"
+    environment: {}
 
   # Notification Sender service
   lakerunner-notification-sender:
@@ -230,8 +169,7 @@ services:
     health_check:
       type: "go"
       command: ["/app/bin/lakerunner", "sysinfo"]
-    environment:
-      OTEL_METRIC_EXPORT_INTERVAL: "10000"
+    environment: {}
 
   # Alert Evaluator service
   lakerunner-alert-evaluator:
@@ -243,5 +181,4 @@ services:
     health_check:
       type: "go"
       command: ["/app/bin/lakerunner", "sysinfo"]
-    environment:
-      OTEL_METRIC_EXPORT_INTERVAL: "10000"
+    environment: {}
