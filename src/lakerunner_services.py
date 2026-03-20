@@ -17,7 +17,7 @@ import yaml
 import os
 from troposphere import (
     Template, Parameter, Ref, Sub, GetAtt, If, Equals, Export, Output,
-    Select, Not, Tags, ImportValue, Join, And, Split, Condition
+    Not, Tags, ImportValue, Split
 )
 from troposphere.ecs import (
     Service, TaskDefinition, ContainerDefinition, Environment,
@@ -25,11 +25,6 @@ from troposphere.ecs import (
     HealthCheck, PortMapping, RuntimePlatform, NetworkConfiguration, AwsvpcConfiguration,
     LoadBalancer as EcsLoadBalancer,
     EphemeralStorage
-)
-from troposphere.applicationautoscaling import (
-    ScalableTarget, ScalingPolicy,
-    TargetTrackingScalingPolicyConfiguration, PredefinedMetricSpecification,
-    CustomizedMetricSpecification, MetricDimension as AutoScalingMetricDimension
 )
 from troposphere.iam import Role, Policy
 from troposphere.elasticloadbalancingv2 import LoadBalancer, TargetGroup, TargetGroupAttribute, Listener, Matcher
@@ -157,15 +152,11 @@ def create_services_template():
     # query-api and query-worker get CPU + memory + replicas params
     LAKERUNNER_QUERY_SERVICES = ['lakerunner-query-api', 'lakerunner-query-worker']
 
-    # Ingest/compact/rollup services get memory + replicas params
-    LAKERUNNER_WORKER_SERVICES = [
-        'lakerunner-ingest-logs',
-        'lakerunner-ingest-metrics',
-        'lakerunner-ingest-traces',
-        'lakerunner-compact-logs',
-        'lakerunner-compact-metrics',
-        'lakerunner-compact-traces',
-        'lakerunner-rollup-metrics',
+    # Process services get memory + replicas params; scaled by the monitoring service
+    LAKERUNNER_PROCESS_SERVICES = [
+        'lakerunner-process-logs',
+        'lakerunner-process-metrics',
+        'lakerunner-process-traces',
     ]
 
     # Services that use YAML config only (no parameters)
@@ -173,7 +164,6 @@ def create_services_template():
     # pubsub, boxer use YAML for memory but get replicas param
     LAKERUNNER_REPLICAS_ONLY_SERVICES = [
         'lakerunner-pubsub-sqs',
-        'lakerunner-boxer-common',
         'lakerunner-alert-evaluator',
         'lakerunner-notification-sender',
     ]
@@ -181,7 +171,7 @@ def create_services_template():
     # All configurable services (for iteration)
     LAKERUNNER_CONFIGURABLE_SERVICES = (
         LAKERUNNER_QUERY_SERVICES +
-        LAKERUNNER_WORKER_SERVICES +
+        LAKERUNNER_PROCESS_SERVICES +
         LAKERUNNER_REPLICAS_ONLY_SERVICES
     )
 
@@ -250,17 +240,17 @@ def create_services_template():
         service_params[service_name] = {}
 
         # Replicas parameter for configurable services
-        # Worker services use this as max tasks (auto-scale from 1 to max)
+        # Process services use this as max replicas (scaled by the monitoring service)
         # Other services use this as the fixed replica count
         default_replicas = service_config.get('replicas', 1)
-        if service_name in LAKERUNNER_WORKER_SERVICES:
+        if service_name in LAKERUNNER_PROCESS_SERVICES:
             replicas_param = t.add_parameter(Parameter(
                 f"{param_name}Replicas",
                 Type="Number",
                 Default=str(default_replicas),
                 MinValue=1,
                 MaxValue=50,
-                Description=f"Maximum number of {service_name} tasks (auto-scales from 1 to this value)"
+                Description=f"Maximum number of {service_name} tasks (scaled by monitoring service)"
             ))
         else:
             replicas_param = t.add_parameter(Parameter(
@@ -298,8 +288,8 @@ def create_services_template():
             ))
             service_params[service_name]['memory'] = memory_param
 
-        # Memory-only for worker services (ingest, compact, rollup)
-        elif service_name in LAKERUNNER_WORKER_SERVICES:
+        # Memory-only for process services
+        elif service_name in LAKERUNNER_PROCESS_SERVICES:
             default_memory = service_config.get('memory_mib', 1024)
             default_cpu = service_config.get('cpu', 512)
             # Get valid memory values for the service's CPU tier
@@ -315,39 +305,6 @@ def create_services_template():
 
         # Replicas-only services (pubsub, boxer) - no memory parameter
 
-    # -----------------------
-    # Auto-Scaling Parameters for Worker Services
-    # -----------------------
-    # Services that support CPU-based auto-scaling
-    AUTOSCALING_SERVICES = LAKERUNNER_WORKER_SERVICES  # ingest, compact, rollup
-
-    AutoScalingCPUTarget = t.add_parameter(Parameter(
-        "AutoScalingCPUTarget",
-        Type="Number",
-        Default="70",
-        MinValue=10,
-        MaxValue=95,
-        Description="Target CPU utilization percentage for scaling (e.g., 70 means scale when avg CPU > 70%)"
-    ))
-
-    AutoScalingScaleOutCooldown = t.add_parameter(Parameter(
-        "AutoScalingScaleOutCooldown",
-        Type="Number",
-        Default="60",
-        MinValue=0,
-        MaxValue=3600,
-        Description="Seconds to wait after a scale-out before another scale-out can occur"
-    ))
-
-    AutoScalingScaleInCooldown = t.add_parameter(Parameter(
-        "AutoScalingScaleInCooldown",
-        Type="Number",
-        Default="300",
-        MinValue=0,
-        MaxValue=3600,
-        Description="Seconds to wait after a scale-in before another scale-in can occur"
-    ))
-
     # Build parameter groups for console
     # Query services get their own group with CPU, Memory, and Replicas
     query_service_params = []
@@ -360,12 +317,12 @@ def create_services_template():
                 f"{param_name}Memory"
             ])
 
-    # Worker services get Memory and Replicas
-    worker_service_params = []
-    for svc in LAKERUNNER_WORKER_SERVICES:
+    # Process services get Memory and Replicas
+    process_service_params = []
+    for svc in LAKERUNNER_PROCESS_SERVICES:
         if svc in service_params:
             param_name = service_to_param_name(svc)
-            worker_service_params.extend([
+            process_service_params.extend([
                 f"{param_name}Replicas",
                 f"{param_name}Memory"
             ])
@@ -377,13 +334,6 @@ def create_services_template():
             param_name = service_to_param_name(svc)
             replicas_only_params.append(f"{param_name}Replicas")
 
-    # Auto-scaling parameters list for parameter groups
-    autoscaling_params = [
-        "AutoScalingCPUTarget",
-        "AutoScalingScaleOutCooldown",
-        "AutoScalingScaleInCooldown"
-    ]
-
     # Build parameter labels
     param_labels = {
         "CommonInfraStackName": {"default": "Common Infra Stack Name"},
@@ -391,9 +341,6 @@ def create_services_template():
         "EnableAdminInitialKey": {"default": "Enable Admin Bootstrap Key"},
         "OtelEndpoint": {"default": "OTEL Collector Endpoint"},
         "AlertTopicArn": {"default": "Alert SNS Topic ARN"},
-        "AutoScalingCPUTarget": {"default": "CPU Target % (Auto-Scaling)"},
-        "AutoScalingScaleOutCooldown": {"default": "Scale-Out Cooldown (seconds)"},
-        "AutoScalingScaleInCooldown": {"default": "Scale-In Cooldown (seconds)"}
     }
 
     # Add labels for service configuration parameters
@@ -403,12 +350,11 @@ def create_services_template():
         param_name = service_to_param_name(service_name)
         # Create friendly label from service name (e.g., "Query Api" from "lakerunner-query-api")
         friendly_name = service_name.replace('lakerunner-', '').replace('-', ' ').title()
-        # Worker services use "Max Replicas" since they auto-scale from 1 to max
-        if service_name in LAKERUNNER_WORKER_SERVICES:
+        if service_name in LAKERUNNER_PROCESS_SERVICES:
             param_labels[f"{param_name}Replicas"] = {"default": f"{friendly_name} Max Replicas"}
         else:
             param_labels[f"{param_name}Replicas"] = {"default": f"{friendly_name} Replicas"}
-        if service_name in LAKERUNNER_QUERY_SERVICES or service_name in LAKERUNNER_WORKER_SERVICES:
+        if service_name in LAKERUNNER_QUERY_SERVICES or service_name in LAKERUNNER_PROCESS_SERVICES:
             param_labels[f"{param_name}Memory"] = {"default": f"{friendly_name} Memory (MiB)"}
         if service_name in LAKERUNNER_QUERY_SERVICES:
             param_labels[f"{param_name}Cpu"] = {"default": f"{friendly_name} CPU"}
@@ -425,16 +371,12 @@ def create_services_template():
                     "Parameters": query_service_params
                 },
                 {
-                    "Label": {"default": "Worker Services Configuration"},
-                    "Parameters": worker_service_params
+                    "Label": {"default": "Process Services Configuration"},
+                    "Parameters": process_service_params
                 },
                 {
                     "Label": {"default": "Other Services Configuration"},
                     "Parameters": replicas_only_params
-                },
-                {
-                    "Label": {"default": "Auto-Scaling Configuration"},
-                    "Parameters": autoscaling_params
                 },
                 {
                     "Label": {"default": "Telemetry"},
@@ -459,9 +401,7 @@ def create_services_template():
         short = service_name.replace('lakerunner-', 'lr-')
         short = short.replace('query-api', 'qapi')
         short = short.replace('query-worker', 'qwork')
-        short = short.replace('ingest-', 'ing-')
-        short = short.replace('compact-', 'cmp-')
-        short = short.replace('rollup-', 'rol-')
+        short = short.replace('process-', 'proc-')
         short = short.replace('metrics', 'met')
         short = short.replace('pubsub', 'pub')
         return short
@@ -823,6 +763,7 @@ def create_services_template():
                             "Action": [
                                 "ecs:ListServices",
                                 "ecs:DescribeServices",
+                                "ecs:UpdateService",
                                 "ecs:ListTasks",
                                 "ecs:DescribeTasks"
                             ],
@@ -924,6 +865,86 @@ def create_services_template():
         ]
     ))
 
+    # Task role for Monitoring (with ECS scaling permissions)
+    MonitoringTaskRole = t.add_resource(Role(
+        "MonitoringTaskRole",
+        RoleName=Sub("${AWS::StackName}-monitoring-task-role"),
+        AssumeRolePolicyDocument={
+            "Version": "2012-10-17",
+            "Statement": [{
+                "Effect": "Allow",
+                "Principal": {"Service": "ecs-tasks.amazonaws.com"},
+                "Action": "sts:AssumeRole"
+            }]
+        },
+        Policies=[
+            Policy(
+                PolicyName="MonitoringAccess",
+                PolicyDocument={
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Action": [
+                                "s3:GetObject",
+                                "s3:PutObject",
+                                "s3:DeleteObject",
+                                "s3:ListBucket"
+                            ],
+                            "Resource": [
+                                BucketArnValue,
+                                Sub("${BucketArn}/*", BucketArn=BucketArnValue)
+                            ]
+                        },
+                        {
+                            "Effect": "Allow",
+                            "Action": [
+                                "secretsmanager:GetSecretValue"
+                            ],
+                            "Resource": [
+                                Sub("${SecretArn}*", SecretArn=DbSecretArnValue),
+                                Sub("${SecretArn}*", SecretArn=InternalServiceKeysSecretArnValue),
+                                Sub("${SecretArn}*", SecretArn=AdminInitialAPIKeySecretArnValue),
+                                Sub("arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*")
+                            ]
+                        },
+                        {
+                            "Effect": "Allow",
+                            "Action": [
+                                "ecs:ListServices",
+                                "ecs:DescribeServices",
+                                "ecs:UpdateService",
+                                "ecs:ListTasks",
+                                "ecs:DescribeTasks"
+                            ],
+                            "Resource": "*"
+                        },
+                        {
+                            "Effect": "Allow",
+                            "Action": [
+                                "ssmmessages:CreateControlChannel",
+                                "ssmmessages:CreateDataChannel",
+                                "ssmmessages:OpenControlChannel",
+                                "ssmmessages:OpenDataChannel"
+                            ],
+                            "Resource": "*"
+                        },
+                        {
+                            "Effect": "Allow",
+                            "Action": [
+                                "logs:DescribeLogGroups",
+                                "logs:CreateLogStream",
+                                "logs:DescribeLogStreams",
+                                "logs:PutLogEvents"
+                            ],
+                            "Resource": "*"
+                        }
+                    ]
+                }
+            )
+        ]
+    ))
+
     # -----------------------
     # Application Secrets
     # -----------------------
@@ -972,7 +993,8 @@ def create_services_template():
             # License configuration
             Environment(Name="LICENSE_FILE", Value="env:LICENSE_DATA"),
             Environment(Name="SOFT_LICENSE_CHECK", Value="true"),
-            # OpenTelemetry trace sampling
+            # OpenTelemetry configuration
+            Environment(Name="OTEL_METRIC_EXPORT_INTERVAL", Value="10000"),
             Environment(Name="OTEL_TRACES_SAMPLER", Value="parentbased_traceidratio"),
             Environment(Name="OTEL_TRACES_SAMPLER_ARG", Value="0.01"),
         ]
@@ -997,6 +1019,31 @@ def create_services_template():
         for key, value in service_env.items():
             base_env.append(Environment(Name=key, Value=value))
 
+        # Add autoscaler env vars for monitoring service
+        if service_name == "lakerunner-monitoring":
+            base_env.append(Environment(Name="LAKERUNNER_AUTOSCALER_ENABLED", Value="true"))
+            base_env.append(Environment(Name="LAKERUNNER_AUTOSCALER_OBSERVE_ONLY", Value="false"))
+            base_env.append(Environment(Name="LAKERUNNER_AUTOSCALER_PLATFORM", Value="ecs"))
+            base_env.append(Environment(Name="ECS_CLUSTER", Value=ImportValue(ci_export("ClusterName"))))
+            # Configure autoscaler targets for each process service
+            signal_map = {"logs": "process-logs", "metrics": "process-metrics", "traces": "process-traces"}
+            for signal, svc_suffix in signal_map.items():
+                process_svc_name = f"lakerunner-{svc_suffix}"
+                if process_svc_name in services:
+                    process_config = services[process_svc_name]
+                    as_config = process_config.get('autoscaling', {})
+                    base_env.append(Environment(
+                        Name=f"LAKERUNNER_AUTOSCALER_SERVICES_{signal.upper()}_DEPLOYMENT",
+                        Value=process_svc_name
+                    ))
+                    min_key = f"LAKERUNNER_AUTOSCALER_SERVICES_{signal.upper()}_MIN_REPLICAS"
+                    max_key = f"LAKERUNNER_AUTOSCALER_SERVICES_{signal.upper()}_MAX_REPLICAS"
+                    base_env.append(Environment(Name=min_key, Value=str(as_config.get('min_replicas', 1))))
+                    if process_svc_name in service_params and 'replicas' in service_params[process_svc_name]:
+                        base_env.append(Environment(Name=max_key, Value=Ref(service_params[process_svc_name]['replicas'])))
+                    else:
+                        base_env.append(Environment(Name=max_key, Value=str(as_config.get('max_replicas', 10))))
+
         # Add QUERY_WORKER_CLUSTER_NAME for query-api service
         if service_name == "lakerunner-query-api":
             base_env.append(Environment(Name="QUERY_WORKER_CLUSTER_NAME", Value=ImportValue(ci_export("ClusterName"))))
@@ -1013,9 +1060,8 @@ def create_services_template():
         # Calculate based on service memory configuration
         memory_mib = service_config.get('memory_mib', 1024)
 
-        # DuckDB services (ingest, compact, rollup) get specific DuckDB memory tuning
-        if service_name in LAKERUNNER_WORKER_SERVICES:
-            # DuckDB services: GOMEMLIMIT=750MiB, GOGC=100, DuckDB gets (total - 1GiB)
+        # Process services get specific DuckDB memory tuning
+        if service_name in LAKERUNNER_PROCESS_SERVICES:
             base_env.append(Environment(Name="GOMEMLIMIT", Value="750MiB"))
             base_env.append(Environment(Name="GOGC", Value="100"))
             duckdb_memory_mb = calculate_duckdb_memory_limit(memory_mib)
@@ -1143,6 +1189,8 @@ def create_services_template():
             task_role_arn = GetAtt(QueryApiTaskRole, "Arn")
         elif service_name == 'lakerunner-query-worker':
             task_role_arn = GetAtt(QueryWorkerTaskRole, "Arn")
+        elif service_name == 'lakerunner-monitoring':
+            task_role_arn = GetAtt(MonitoringTaskRole, "Arn")
         else:
             task_role_arn = GetAtt(TaskRole, "Arn")
 
@@ -1193,10 +1241,11 @@ def create_services_template():
         ))
 
         # Create ECS service
-        # Worker services (with auto-scaling) always start at 1 and scale up as needed
+        # Process services start at min_replicas (monitoring service manages scaling)
         # Other services use their replicas parameter or YAML default
-        if service_name in AUTOSCALING_SERVICES:
-            desired_count = 1
+        if service_name in LAKERUNNER_PROCESS_SERVICES:
+            autoscaling_config = service_config.get('autoscaling', {})
+            desired_count = str(autoscaling_config.get('min_replicas', 1))
         elif service_name in service_params and 'replicas' in service_params[service_name]:
             desired_count = Ref(service_params[service_name]['replicas'])
         else:
@@ -1266,65 +1315,6 @@ def create_services_template():
             ecs_service.DependsOn = [listener_name]
 
         # -----------------------
-        # Auto-Scaling for Worker Services (ingest, compact, rollup)
-        # Worker services always have auto-scaling enabled (min=1, max=replicas param)
-        # -----------------------
-        if service_name in AUTOSCALING_SERVICES:
-            # Create ScalableTarget - registers the ECS service with Application Auto Scaling
-            # MinCapacity is always 1, MaxCapacity comes from the service's replicas param
-            scalable_target = t.add_resource(ScalableTarget(
-                f"ScalableTarget{title_name}",
-                MaxCapacity=Ref(service_params[service_name]['replicas']),
-                MinCapacity=1,
-                ResourceId=Sub(
-                    "service/${ClusterName}/" + service_name,
-                    ClusterName=ImportValue(ci_export("ClusterName"))
-                ),
-                ScalableDimension="ecs:service:DesiredCount",
-                ServiceNamespace="ecs",
-                DependsOn=[f"Service{title_name}"]
-            ))
-
-            # Create CPU-based Target Tracking Scaling Policy
-            t.add_resource(ScalingPolicy(
-                f"ScalingPolicyCpu{title_name}",
-                PolicyName=f"{service_name}-cpu-scaling",
-                PolicyType="TargetTrackingScaling",
-                ScalingTargetId=Ref(scalable_target),
-                TargetTrackingScalingPolicyConfiguration=TargetTrackingScalingPolicyConfiguration(
-                    TargetValue=Ref(AutoScalingCPUTarget),
-                    PredefinedMetricSpecification=PredefinedMetricSpecification(
-                        PredefinedMetricType="ECSServiceAverageCPUUtilization"
-                    ),
-                    ScaleInCooldown=Ref(AutoScalingScaleInCooldown),
-                    ScaleOutCooldown=Ref(AutoScalingScaleOutCooldown)
-                )
-            ))
-
-            # Create Workqueue Lag-based Target Tracking Scaling Policy
-            # task_name dimension is the service name without "lakerunner-" prefix
-            task_name_dimension = service_name.replace("lakerunner-", "")
-            t.add_resource(ScalingPolicy(
-                f"ScalingPolicyLag{title_name}",
-                PolicyName=f"{service_name}-lag-scaling",
-                PolicyType="TargetTrackingScaling",
-                ScalingTargetId=Ref(scalable_target),
-                TargetTrackingScalingPolicyConfiguration=TargetTrackingScalingPolicyConfiguration(
-                    TargetValue=50,  # Scale when workqueue lag exceeds 50 items
-                    CustomizedMetricSpecification=CustomizedMetricSpecification(
-                        MetricName="lakerunner.workqueue.lag",
-                        Namespace="Lakerunner",
-                        Statistic="Average",
-                        Dimensions=[
-                            AutoScalingMetricDimension(Name="task_name", Value=task_name_dimension)
-                        ]
-                    ),
-                    ScaleInCooldown=Ref(AutoScalingScaleInCooldown),
-                    ScaleOutCooldown=Ref(AutoScalingScaleOutCooldown)
-                )
-            ))
-
-        # -----------------------
         # CloudWatch Alarm for Task Count (requires Container Insights)
         # Alert when running tasks drop to 0 for 5 minutes
         # -----------------------
@@ -1354,37 +1344,6 @@ def create_services_template():
             f"TaskCountAlarm{title_name}",
             **alarm_kwargs
         ))
-
-        # -----------------------
-        # CloudWatch Alarm for Workqueue Lag (for worker services only)
-        # Alert when workqueue lag exceeds 200 items
-        # -----------------------
-        if service_name in LAKERUNNER_WORKER_SERVICES:
-            task_name_dimension = service_name.replace("lakerunner-", "")
-
-            lag_alarm_kwargs = {
-                "AlarmName": Sub(f"${{AWS::StackName}}-{service_name}-high-workqueue-lag"),
-                "AlarmDescription": f"Alarm when {service_name} workqueue lag exceeds 200 items",
-                "MetricName": "lakerunner.workqueue.lag",
-                "Namespace": "Lakerunner",
-                "Dimensions": [
-                    MetricDimension(Name="task_name", Value=task_name_dimension)
-                ],
-                "Statistic": "Average",
-                "Period": 60,
-                "EvaluationPeriods": 3,
-                "Threshold": 200,
-                "ComparisonOperator": "GreaterThanThreshold",
-                "TreatMissingData": "notBreaching",
-                "AlarmActions": [Ref(AlertTopicArn)],
-                "OKActions": [Ref(AlertTopicArn)],
-                "Condition": alarm_condition_name
-            }
-
-            t.add_resource(Alarm(
-                f"WorkqueueLagAlarm{title_name}",
-                **lag_alarm_kwargs
-            ))
 
     # -----------------------
     # Outputs

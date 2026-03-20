@@ -300,34 +300,37 @@ class TestServicesTemplateSimple:
         assert parameters["QueryWorkerMemory"]["Default"] == "8192"
 
     @patch('lakerunner_services.load_service_config')
-    def test_worker_services_have_memory_replicas_params(self, mock_load_config):
-        """Test that ingest/compact/rollup services have Memory and Replicas parameters (not CPU)"""
+    def test_process_services_have_memory_replicas_params(self, mock_load_config):
+        """Test that process services have Memory and Replicas parameters (not CPU)"""
         mock_load_config.return_value = {
             "services": {
-                "lakerunner-ingest-logs": {
+                "lakerunner-process-logs": {
                     "signal_type": "logs",
-                    "command": ["/app/bin/lakerunner", "ingest-logs"],
+                    "command": ["/app/bin/lakerunner", "process-logs"],
                     "cpu": 1024,
                     "memory_mib": 4096,
                     "replicas": 4,
+                    "autoscaling": {"min_replicas": 1, "max_replicas": 4},
                     "health_check": {"type": "go", "command": ["/app/bin/lakerunner", "sysinfo"]},
                     "environment": {}
                 },
-                "lakerunner-compact-metrics": {
+                "lakerunner-process-metrics": {
                     "signal_type": "metrics",
-                    "command": ["/app/bin/lakerunner", "compact-metrics"],
+                    "command": ["/app/bin/lakerunner", "process-metrics"],
                     "cpu": 1024,
                     "memory_mib": 2048,
                     "replicas": 2,
+                    "autoscaling": {"min_replicas": 1, "max_replicas": 2},
                     "health_check": {"type": "go", "command": ["/app/bin/lakerunner", "sysinfo"]},
                     "environment": {}
                 },
-                "lakerunner-rollup-metrics": {
-                    "signal_type": "metrics",
-                    "command": ["/app/bin/lakerunner", "rollup-metrics"],
+                "lakerunner-process-traces": {
+                    "signal_type": "traces",
+                    "command": ["/app/bin/lakerunner", "process-traces"],
                     "cpu": 1024,
                     "memory_mib": 2048,
                     "replicas": 2,
+                    "autoscaling": {"min_replicas": 1, "max_replicas": 2},
                     "health_check": {"type": "go", "command": ["/app/bin/lakerunner", "sysinfo"]},
                     "environment": {}
                 }
@@ -341,26 +344,26 @@ class TestServicesTemplateSimple:
         template_dict = json.loads(template.to_json())
         parameters = template_dict["Parameters"]
 
-        # Ingest logs - has memory and replicas, not CPU
-        assert "IngestLogsReplicas" in parameters
-        assert "IngestLogsMemory" in parameters
-        assert "IngestLogsCpu" not in parameters
-        assert parameters["IngestLogsReplicas"]["Default"] == "4"
-        assert parameters["IngestLogsMemory"]["Default"] == "4096"
+        # Process logs - has memory and replicas, not CPU
+        assert "ProcessLogsReplicas" in parameters
+        assert "ProcessLogsMemory" in parameters
+        assert "ProcessLogsCpu" not in parameters
+        assert parameters["ProcessLogsReplicas"]["Default"] == "4"
+        assert parameters["ProcessLogsMemory"]["Default"] == "4096"
 
-        # Compact metrics - has memory and replicas, not CPU
-        assert "CompactMetricsReplicas" in parameters
-        assert "CompactMetricsMemory" in parameters
-        assert "CompactMetricsCpu" not in parameters
+        # Process metrics - has memory and replicas, not CPU
+        assert "ProcessMetricsReplicas" in parameters
+        assert "ProcessMetricsMemory" in parameters
+        assert "ProcessMetricsCpu" not in parameters
 
-        # Rollup metrics - has memory and replicas, not CPU
-        assert "RollupMetricsReplicas" in parameters
-        assert "RollupMetricsMemory" in parameters
-        assert "RollupMetricsCpu" not in parameters
+        # Process traces - has memory and replicas, not CPU
+        assert "ProcessTracesReplicas" in parameters
+        assert "ProcessTracesMemory" in parameters
+        assert "ProcessTracesCpu" not in parameters
 
     @patch('lakerunner_services.load_service_config')
     def test_replicas_only_services_have_replicas_param_only(self, mock_load_config):
-        """Test that pubsub and boxer have only Replicas parameter (no CPU/Memory)"""
+        """Test that pubsub has only Replicas parameter (no CPU/Memory)"""
         mock_load_config.return_value = {
             "services": {
                 "lakerunner-pubsub-sqs": {
@@ -368,15 +371,6 @@ class TestServicesTemplateSimple:
                     "command": ["/app/bin/lakerunner", "pubsub", "sqs"],
                     "cpu": 1024,
                     "memory_mib": 2048,
-                    "replicas": 1,
-                    "health_check": {"type": "go", "command": ["/app/bin/lakerunner", "sysinfo"]},
-                    "environment": {}
-                },
-                "lakerunner-boxer-common": {
-                    "signal_type": "common",
-                    "command": ["/app/bin/lakerunner", "boxer", "--all"],
-                    "cpu": 256,
-                    "memory_mib": 512,
                     "replicas": 1,
                     "health_check": {"type": "go", "command": ["/app/bin/lakerunner", "sysinfo"]},
                     "environment": {}
@@ -395,11 +389,6 @@ class TestServicesTemplateSimple:
         assert "PubsubSqsReplicas" in parameters
         assert "PubsubSqsMemory" not in parameters
         assert "PubsubSqsCpu" not in parameters
-
-        # Boxer Common - has replicas only
-        assert "BoxerCommonReplicas" in parameters
-        assert "BoxerCommonMemory" not in parameters
-        assert "BoxerCommonCpu" not in parameters
 
     @patch('lakerunner_services.load_service_config')
     def test_sweeper_monitor_have_no_params(self, mock_load_config):
@@ -458,12 +447,13 @@ class TestServicesTemplateSimple:
                     "health_check": {"type": "go", "command": ["/app/bin/lakerunner", "sysinfo"]},
                     "environment": {}
                 },
-                "lakerunner-ingest-logs": {
+                "lakerunner-process-logs": {
                     "signal_type": "logs",
-                    "command": ["/app/bin/lakerunner", "ingest-logs"],
+                    "command": ["/app/bin/lakerunner", "process-logs"],
                     "cpu": 1024,
                     "memory_mib": 4096,
                     "replicas": 4,
+                    "autoscaling": {"min_replicas": 1, "max_replicas": 4},
                     "health_check": {"type": "go", "command": ["/app/bin/lakerunner", "sysinfo"]},
                     "environment": {}
                 },
@@ -491,10 +481,10 @@ class TestServicesTemplateSimple:
         assert query_api_task["Cpu"] == {"Ref": "QueryApiCpu"}
         assert query_api_task["Memory"] == {"Ref": "QueryApiMemory"}
 
-        # Ingest Logs - CPU should be hardcoded, Memory should be Ref
-        ingest_logs_task = resources["TaskDefLakerunnerIngestLogs"]["Properties"]
-        assert ingest_logs_task["Cpu"] == "1024"
-        assert ingest_logs_task["Memory"] == {"Ref": "IngestLogsMemory"}
+        # Process Logs - CPU should be hardcoded, Memory should be Ref
+        process_logs_task = resources["TaskDefLakerunnerProcessLogs"]["Properties"]
+        assert process_logs_task["Cpu"] == "1024"
+        assert process_logs_task["Memory"] == {"Ref": "ProcessLogsMemory"}
 
         # Sweeper - CPU and Memory should be hardcoded from YAML
         sweeper_task = resources["TaskDefLakerunnerSweeper"]["Properties"]
@@ -556,8 +546,8 @@ class TestServicesTemplateSimple:
         assert sweeper_svc["DesiredCount"] == "1"
 
     @patch('lakerunner_services.load_service_config')
-    def test_autoscaling_parameters_exist(self, mock_load_config):
-        """Test that auto-scaling parameters exist with correct defaults"""
+    def test_autoscaling_parameters_removed(self, mock_load_config):
+        """Test that auto-scaling parameters have been removed"""
         mock_load_config.return_value = {
             "services": {},
             "images": {"lakerunner": "test:latest"}
@@ -569,19 +559,12 @@ class TestServicesTemplateSimple:
         template_dict = json.loads(template.to_json())
         parameters = template_dict["Parameters"]
 
-        # Check auto-scaling parameters exist (EnableAutoScaling and AutoScalingMaxReplicas removed)
-        assert "AutoScalingCPUTarget" in parameters
-        assert "AutoScalingScaleOutCooldown" in parameters
-        assert "AutoScalingScaleInCooldown" in parameters
-
-        # Removed parameters should not exist
+        # All auto-scaling parameters should be removed
+        assert "AutoScalingCPUTarget" not in parameters
+        assert "AutoScalingScaleOutCooldown" not in parameters
+        assert "AutoScalingScaleInCooldown" not in parameters
         assert "EnableAutoScaling" not in parameters
         assert "AutoScalingMaxReplicas" not in parameters
-
-        # Check defaults
-        assert parameters["AutoScalingCPUTarget"]["Default"] == "70"
-        assert parameters["AutoScalingScaleOutCooldown"]["Default"] == "60"
-        assert parameters["AutoScalingScaleInCooldown"]["Default"] == "300"
 
     @patch('lakerunner_services.load_service_config')
     def test_autoscaling_uses_signal_type_conditions(self, mock_load_config):
@@ -607,73 +590,8 @@ class TestServicesTemplateSimple:
         assert "CreateTracesServices" not in conditions
 
     @patch('lakerunner_services.load_service_config')
-    def test_autoscaling_resources_created_for_worker_services(self, mock_load_config):
-        """Test that ScalableTarget and ScalingPolicy are created for ingest/compact/rollup services"""
-        mock_load_config.return_value = {
-            "services": {
-                "lakerunner-ingest-logs": {
-                    "signal_type": "logs",
-                    "command": ["/app/bin/lakerunner", "ingest-logs"],
-                    "cpu": 1024,
-                    "memory_mib": 4096,
-                    "replicas": 4,
-                    "health_check": {"type": "go", "command": ["/app/bin/lakerunner", "sysinfo"]},
-                    "environment": {}
-                },
-                "lakerunner-compact-metrics": {
-                    "signal_type": "metrics",
-                    "command": ["/app/bin/lakerunner", "compact-metrics"],
-                    "cpu": 1024,
-                    "memory_mib": 2048,
-                    "replicas": 2,
-                    "health_check": {"type": "go", "command": ["/app/bin/lakerunner", "sysinfo"]},
-                    "environment": {}
-                },
-                "lakerunner-rollup-metrics": {
-                    "signal_type": "metrics",
-                    "command": ["/app/bin/lakerunner", "rollup-metrics"],
-                    "cpu": 1024,
-                    "memory_mib": 2048,
-                    "replicas": 2,
-                    "health_check": {"type": "go", "command": ["/app/bin/lakerunner", "sysinfo"]},
-                    "environment": {}
-                },
-                "lakerunner-ingest-traces": {
-                    "signal_type": "traces",
-                    "command": ["/app/bin/lakerunner", "ingest-traces"],
-                    "cpu": 1024,
-                    "memory_mib": 2048,
-                    "replicas": 1,
-                    "health_check": {"type": "go", "command": ["/app/bin/lakerunner", "sysinfo"]},
-                    "environment": {}
-                }
-            },
-            "images": {"lakerunner": "test:latest"}
-        }
-
-        from lakerunner_services import create_services_template
-
-        template = create_services_template()
-        template_dict = json.loads(template.to_json())
-        resources = template_dict["Resources"]
-
-        # Check ScalableTarget resources exist (no conditions, always created)
-        assert "ScalableTargetLakerunnerIngestLogs" in resources
-        assert "Condition" not in resources["ScalableTargetLakerunnerIngestLogs"]
-
-        assert "ScalableTargetLakerunnerCompactMetrics" in resources
-        assert "ScalableTargetLakerunnerRollupMetrics" in resources
-        assert "ScalableTargetLakerunnerIngestTraces" in resources
-
-        # Check ScalingPolicy resources exist (no conditions)
-        assert "ScalingPolicyCpuLakerunnerIngestLogs" in resources
-        assert "Condition" not in resources["ScalingPolicyCpuLakerunnerIngestLogs"]
-
-        assert "ScalingPolicyCpuLakerunnerCompactMetrics" in resources
-
-    @patch('lakerunner_services.load_service_config')
     def test_autoscaling_not_created_for_non_worker_services(self, mock_load_config):
-        """Test that auto-scaling is NOT created for query, pubsub, boxer, sweeper, monitoring"""
+        """Test that auto-scaling is NOT created for query, pubsub, sweeper, monitoring"""
         mock_load_config.return_value = {
             "services": {
                 "lakerunner-query-api": {
@@ -721,68 +639,3 @@ class TestServicesTemplateSimple:
         assert "ScalableTargetLakerunnerSweeper" not in resources
         assert "ScalingPolicyCpuLakerunnerSweeper" not in resources
 
-    @patch('lakerunner_services.load_service_config')
-    def test_autoscaling_policy_uses_cpu_target_tracking(self, mock_load_config):
-        """Test that scaling policy uses CPU target tracking with correct configuration"""
-        mock_load_config.return_value = {
-            "services": {
-                "lakerunner-ingest-logs": {
-                    "signal_type": "logs",
-                    "command": ["/app/bin/lakerunner", "ingest-logs"],
-                    "cpu": 1024,
-                    "memory_mib": 4096,
-                    "replicas": 4,
-                    "health_check": {"type": "go", "command": ["/app/bin/lakerunner", "sysinfo"]},
-                    "environment": {}
-                }
-            },
-            "images": {"lakerunner": "test:latest"}
-        }
-
-        from lakerunner_services import create_services_template
-
-        template = create_services_template()
-        template_dict = json.loads(template.to_json())
-        resources = template_dict["Resources"]
-
-        # Check scaling policy configuration
-        policy = resources["ScalingPolicyCpuLakerunnerIngestLogs"]["Properties"]
-        assert policy["PolicyType"] == "TargetTrackingScaling"
-
-        config = policy["TargetTrackingScalingPolicyConfiguration"]
-        assert config["TargetValue"] == {"Ref": "AutoScalingCPUTarget"}
-        assert config["ScaleInCooldown"] == {"Ref": "AutoScalingScaleInCooldown"}
-        assert config["ScaleOutCooldown"] == {"Ref": "AutoScalingScaleOutCooldown"}
-        assert config["PredefinedMetricSpecification"]["PredefinedMetricType"] == "ECSServiceAverageCPUUtilization"
-
-    @patch('lakerunner_services.load_service_config')
-    def test_scalable_target_uses_correct_min_max(self, mock_load_config):
-        """Test that ScalableTarget uses min=1 and replicas param for max"""
-        mock_load_config.return_value = {
-            "services": {
-                "lakerunner-ingest-logs": {
-                    "signal_type": "logs",
-                    "command": ["/app/bin/lakerunner", "ingest-logs"],
-                    "cpu": 1024,
-                    "memory_mib": 4096,
-                    "replicas": 4,
-                    "health_check": {"type": "go", "command": ["/app/bin/lakerunner", "sysinfo"]},
-                    "environment": {}
-                }
-            },
-            "images": {"lakerunner": "test:latest"}
-        }
-
-        from lakerunner_services import create_services_template
-
-        template = create_services_template()
-        template_dict = json.loads(template.to_json())
-        resources = template_dict["Resources"]
-
-        # Check scalable target configuration
-        # MinCapacity is always 1, MaxCapacity uses the replicas param
-        target = resources["ScalableTargetLakerunnerIngestLogs"]["Properties"]
-        assert target["MinCapacity"] == 1
-        assert target["MaxCapacity"] == {"Ref": "IngestLogsReplicas"}
-        assert target["ScalableDimension"] == "ecs:service:DesiredCount"
-        assert target["ServiceNamespace"] == "ecs"
