@@ -63,10 +63,6 @@ Metadata:
           - AutoScalingScaleOutCooldown
           - AutoScalingScaleInCooldown
       - Label:
-          default: MSK Configuration
-        Parameters:
-          - MSKBrokers
-      - Label:
           default: Telemetry
         Parameters:
           - OtelEndpoint
@@ -117,8 +113,6 @@ Metadata:
         default: Ingest Traces Memory (MiB)
       IngestTracesReplicas:
         default: Ingest Traces Max Replicas
-      MSKBrokers:
-        default: MSK Broker Endpoints
       NotificationSenderReplicas:
         default: Notification Sender Replicas
       OtelEndpoint:
@@ -391,10 +385,6 @@ Parameters:
     MaxValue: 50
     MinValue: 1
     Type: Number
-  MSKBrokers:
-    Default: ''
-    Description: 'REQUIRED: Comma-separated list of MSK broker endpoints (hostname:port)'
-    Type: String
   NotificationSenderReplicas:
     Default: '1'
     Description: Number of lakerunner-notification-sender task replicas
@@ -659,12 +649,6 @@ Resources:
                     - ${SecretArn}*
                     - SecretArn: !ImportValue
                         Fn::Sub:
-                          - ${CommonInfraStackName}-MSKCredentialsArn
-                          - CommonInfraStackName: !Ref 'CommonInfraStackName'
-                  - !Sub
-                    - ${SecretArn}*
-                    - SecretArn: !ImportValue
-                        Fn::Sub:
                           - ${CommonInfraStackName}-InternalServiceKeysSecretArn
                           - CommonInfraStackName: !Ref 'CommonInfraStackName'
                   - !Sub
@@ -674,14 +658,6 @@ Resources:
                           - ${CommonInfraStackName}-AdminInitialAPIKeySecretArn
                           - CommonInfraStackName: !Ref 'CommonInfraStackName'
                   - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*'
-              - Action:
-                  - kms:Decrypt
-                  - kms:DescribeKey
-                Effect: Allow
-                Resource: !ImportValue
-                  Fn::Sub:
-                    - ${CommonInfraStackName}-MSKSecretsKeyArn
-                    - CommonInfraStackName: !Ref 'CommonInfraStackName'
             Version: '2012-10-17'
           PolicyName: SSMParameterAccess
       RoleName: !Sub '${AWS::StackName}-exec-role'
@@ -827,12 +803,6 @@ Resources:
                     - ${SecretArn}*
                     - SecretArn: !ImportValue
                         Fn::Sub:
-                          - ${CommonInfraStackName}-MSKCredentialsArn
-                          - CommonInfraStackName: !Ref 'CommonInfraStackName'
-                  - !Sub
-                    - ${SecretArn}*
-                    - SecretArn: !ImportValue
-                        Fn::Sub:
                           - ${CommonInfraStackName}-InternalServiceKeysSecretArn
                           - CommonInfraStackName: !Ref 'CommonInfraStackName'
                   - !Sub
@@ -842,14 +812,6 @@ Resources:
                           - ${CommonInfraStackName}-AdminInitialAPIKeySecretArn
                           - CommonInfraStackName: !Ref 'CommonInfraStackName'
                   - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*'
-              - Action:
-                  - kms:Decrypt
-                  - kms:DescribeKey
-                Effect: Allow
-                Resource: !ImportValue
-                  Fn::Sub:
-                    - ${CommonInfraStackName}-MSKSecretsKeyArn
-                    - CommonInfraStackName: !Ref 'CommonInfraStackName'
               - Action:
                   - ecs:ListServices
                   - ecs:DescribeServices
@@ -918,12 +880,6 @@ Resources:
                     - ${SecretArn}*
                     - SecretArn: !ImportValue
                         Fn::Sub:
-                          - ${CommonInfraStackName}-MSKCredentialsArn
-                          - CommonInfraStackName: !Ref 'CommonInfraStackName'
-                  - !Sub
-                    - ${SecretArn}*
-                    - SecretArn: !ImportValue
-                        Fn::Sub:
                           - ${CommonInfraStackName}-InternalServiceKeysSecretArn
                           - CommonInfraStackName: !Ref 'CommonInfraStackName'
                   - !Sub
@@ -933,14 +889,6 @@ Resources:
                           - ${CommonInfraStackName}-AdminInitialAPIKeySecretArn
                           - CommonInfraStackName: !Ref 'CommonInfraStackName'
                   - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*'
-              - Action:
-                  - kms:Decrypt
-                  - kms:DescribeKey
-                Effect: Allow
-                Resource: !ImportValue
-                  Fn::Sub:
-                    - ${CommonInfraStackName}-MSKSecretsKeyArn
-                    - CommonInfraStackName: !Ref 'CommonInfraStackName'
               - Action:
                   - ssmmessages:CreateControlChannel
                   - ssmmessages:CreateDataChannel
@@ -2328,14 +2276,6 @@ Resources:
               Value: lakerunner
             - Name: CONFIGDB_SSLMODE
               Value: require
-            - Name: LAKERUNNER_KAFKA_BROKERS
-              Value: !Ref 'MSKBrokers'
-            - Name: LAKERUNNER_KAFKA_TLS_ENABLED
-              Value: 'true'
-            - Name: LAKERUNNER_KAFKA_SASL_ENABLED
-              Value: 'true'
-            - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
-              Value: SCRAM-SHA-512
             - Name: LICENSE_FILE
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
@@ -2424,20 +2364,6 @@ Resources:
                     Fn::Sub:
                       - ${CommonInfraStackName}-DbSecretArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: LAKERUNNER_KAFKA_SASL_USERNAME
-              ValueFrom: !Sub
-                - '${SecretArn}:username::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-MSKCredentialsArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: LAKERUNNER_KAFKA_SASL_PASSWORD
-              ValueFrom: !Sub
-                - '${SecretArn}:password::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-MSKCredentialsArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
           User: '0'
       Cpu: '256'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
@@ -2509,14 +2435,6 @@ Resources:
               Value: lakerunner
             - Name: CONFIGDB_SSLMODE
               Value: require
-            - Name: LAKERUNNER_KAFKA_BROKERS
-              Value: !Ref 'MSKBrokers'
-            - Name: LAKERUNNER_KAFKA_TLS_ENABLED
-              Value: 'true'
-            - Name: LAKERUNNER_KAFKA_SASL_ENABLED
-              Value: 'true'
-            - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
-              Value: SCRAM-SHA-512
             - Name: LICENSE_FILE
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
@@ -2592,20 +2510,6 @@ Resources:
                 - SecretArn: !ImportValue
                     Fn::Sub:
                       - ${CommonInfraStackName}-DbSecretArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: LAKERUNNER_KAFKA_SASL_USERNAME
-              ValueFrom: !Sub
-                - '${SecretArn}:username::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-MSKCredentialsArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: LAKERUNNER_KAFKA_SASL_PASSWORD
-              ValueFrom: !Sub
-                - '${SecretArn}:password::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-MSKCredentialsArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: INTERNAL_SERVICE_KEYS
               ValueFrom: !ImportValue
@@ -2684,14 +2588,6 @@ Resources:
               Value: lakerunner
             - Name: CONFIGDB_SSLMODE
               Value: require
-            - Name: LAKERUNNER_KAFKA_BROKERS
-              Value: !Ref 'MSKBrokers'
-            - Name: LAKERUNNER_KAFKA_TLS_ENABLED
-              Value: 'true'
-            - Name: LAKERUNNER_KAFKA_SASL_ENABLED
-              Value: 'true'
-            - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
-              Value: SCRAM-SHA-512
             - Name: LICENSE_FILE
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
@@ -2764,20 +2660,6 @@ Resources:
                     Fn::Sub:
                       - ${CommonInfraStackName}-DbSecretArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: LAKERUNNER_KAFKA_SASL_USERNAME
-              ValueFrom: !Sub
-                - '${SecretArn}:username::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-MSKCredentialsArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: LAKERUNNER_KAFKA_SASL_PASSWORD
-              ValueFrom: !Sub
-                - '${SecretArn}:password::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-MSKCredentialsArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
           User: '0'
       Cpu: '256'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
@@ -2849,14 +2731,6 @@ Resources:
               Value: lakerunner
             - Name: CONFIGDB_SSLMODE
               Value: require
-            - Name: LAKERUNNER_KAFKA_BROKERS
-              Value: !Ref 'MSKBrokers'
-            - Name: LAKERUNNER_KAFKA_TLS_ENABLED
-              Value: 'true'
-            - Name: LAKERUNNER_KAFKA_SASL_ENABLED
-              Value: 'true'
-            - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
-              Value: SCRAM-SHA-512
             - Name: LICENSE_FILE
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
@@ -2933,20 +2807,6 @@ Resources:
                     Fn::Sub:
                       - ${CommonInfraStackName}-DbSecretArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: LAKERUNNER_KAFKA_SASL_USERNAME
-              ValueFrom: !Sub
-                - '${SecretArn}:username::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-MSKCredentialsArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: LAKERUNNER_KAFKA_SASL_PASSWORD
-              ValueFrom: !Sub
-                - '${SecretArn}:password::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-MSKCredentialsArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
           User: '0'
       Cpu: '1024'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
@@ -3018,14 +2878,6 @@ Resources:
               Value: lakerunner
             - Name: CONFIGDB_SSLMODE
               Value: require
-            - Name: LAKERUNNER_KAFKA_BROKERS
-              Value: !Ref 'MSKBrokers'
-            - Name: LAKERUNNER_KAFKA_TLS_ENABLED
-              Value: 'true'
-            - Name: LAKERUNNER_KAFKA_SASL_ENABLED
-              Value: 'true'
-            - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
-              Value: SCRAM-SHA-512
             - Name: LICENSE_FILE
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
@@ -3102,20 +2954,6 @@ Resources:
                     Fn::Sub:
                       - ${CommonInfraStackName}-DbSecretArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: LAKERUNNER_KAFKA_SASL_USERNAME
-              ValueFrom: !Sub
-                - '${SecretArn}:username::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-MSKCredentialsArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: LAKERUNNER_KAFKA_SASL_PASSWORD
-              ValueFrom: !Sub
-                - '${SecretArn}:password::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-MSKCredentialsArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
           User: '0'
       Cpu: '1024'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
@@ -3187,14 +3025,6 @@ Resources:
               Value: lakerunner
             - Name: CONFIGDB_SSLMODE
               Value: require
-            - Name: LAKERUNNER_KAFKA_BROKERS
-              Value: !Ref 'MSKBrokers'
-            - Name: LAKERUNNER_KAFKA_TLS_ENABLED
-              Value: 'true'
-            - Name: LAKERUNNER_KAFKA_SASL_ENABLED
-              Value: 'true'
-            - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
-              Value: SCRAM-SHA-512
             - Name: LICENSE_FILE
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
@@ -3271,20 +3101,6 @@ Resources:
                     Fn::Sub:
                       - ${CommonInfraStackName}-DbSecretArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: LAKERUNNER_KAFKA_SASL_USERNAME
-              ValueFrom: !Sub
-                - '${SecretArn}:username::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-MSKCredentialsArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: LAKERUNNER_KAFKA_SASL_PASSWORD
-              ValueFrom: !Sub
-                - '${SecretArn}:password::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-MSKCredentialsArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
           User: '0'
       Cpu: '1024'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
@@ -3356,14 +3172,6 @@ Resources:
               Value: lakerunner
             - Name: CONFIGDB_SSLMODE
               Value: require
-            - Name: LAKERUNNER_KAFKA_BROKERS
-              Value: !Ref 'MSKBrokers'
-            - Name: LAKERUNNER_KAFKA_TLS_ENABLED
-              Value: 'true'
-            - Name: LAKERUNNER_KAFKA_SASL_ENABLED
-              Value: 'true'
-            - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
-              Value: SCRAM-SHA-512
             - Name: LICENSE_FILE
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
@@ -3440,20 +3248,6 @@ Resources:
                     Fn::Sub:
                       - ${CommonInfraStackName}-DbSecretArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: LAKERUNNER_KAFKA_SASL_USERNAME
-              ValueFrom: !Sub
-                - '${SecretArn}:username::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-MSKCredentialsArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: LAKERUNNER_KAFKA_SASL_PASSWORD
-              ValueFrom: !Sub
-                - '${SecretArn}:password::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-MSKCredentialsArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
           User: '0'
       Cpu: '1024'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
@@ -3525,14 +3319,6 @@ Resources:
               Value: lakerunner
             - Name: CONFIGDB_SSLMODE
               Value: require
-            - Name: LAKERUNNER_KAFKA_BROKERS
-              Value: !Ref 'MSKBrokers'
-            - Name: LAKERUNNER_KAFKA_TLS_ENABLED
-              Value: 'true'
-            - Name: LAKERUNNER_KAFKA_SASL_ENABLED
-              Value: 'true'
-            - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
-              Value: SCRAM-SHA-512
             - Name: LICENSE_FILE
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
@@ -3609,20 +3395,6 @@ Resources:
                     Fn::Sub:
                       - ${CommonInfraStackName}-DbSecretArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: LAKERUNNER_KAFKA_SASL_USERNAME
-              ValueFrom: !Sub
-                - '${SecretArn}:username::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-MSKCredentialsArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: LAKERUNNER_KAFKA_SASL_PASSWORD
-              ValueFrom: !Sub
-                - '${SecretArn}:password::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-MSKCredentialsArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
           User: '0'
       Cpu: '1024'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
@@ -3694,14 +3466,6 @@ Resources:
               Value: lakerunner
             - Name: CONFIGDB_SSLMODE
               Value: require
-            - Name: LAKERUNNER_KAFKA_BROKERS
-              Value: !Ref 'MSKBrokers'
-            - Name: LAKERUNNER_KAFKA_TLS_ENABLED
-              Value: 'true'
-            - Name: LAKERUNNER_KAFKA_SASL_ENABLED
-              Value: 'true'
-            - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
-              Value: SCRAM-SHA-512
             - Name: LICENSE_FILE
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
@@ -3778,20 +3542,6 @@ Resources:
                     Fn::Sub:
                       - ${CommonInfraStackName}-DbSecretArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: LAKERUNNER_KAFKA_SASL_USERNAME
-              ValueFrom: !Sub
-                - '${SecretArn}:username::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-MSKCredentialsArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: LAKERUNNER_KAFKA_SASL_PASSWORD
-              ValueFrom: !Sub
-                - '${SecretArn}:password::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-MSKCredentialsArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
           User: '0'
       Cpu: '1024'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
@@ -3865,14 +3615,6 @@ Resources:
               Value: lakerunner
             - Name: CONFIGDB_SSLMODE
               Value: require
-            - Name: LAKERUNNER_KAFKA_BROKERS
-              Value: !Ref 'MSKBrokers'
-            - Name: LAKERUNNER_KAFKA_TLS_ENABLED
-              Value: 'true'
-            - Name: LAKERUNNER_KAFKA_SASL_ENABLED
-              Value: 'true'
-            - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
-              Value: SCRAM-SHA-512
             - Name: LICENSE_FILE
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
@@ -3947,20 +3689,6 @@ Resources:
                     Fn::Sub:
                       - ${CommonInfraStackName}-DbSecretArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: LAKERUNNER_KAFKA_SASL_USERNAME
-              ValueFrom: !Sub
-                - '${SecretArn}:username::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-MSKCredentialsArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: LAKERUNNER_KAFKA_SASL_PASSWORD
-              ValueFrom: !Sub
-                - '${SecretArn}:password::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-MSKCredentialsArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
           User: '0'
       Cpu: '256'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
@@ -4032,14 +3760,6 @@ Resources:
               Value: lakerunner
             - Name: CONFIGDB_SSLMODE
               Value: require
-            - Name: LAKERUNNER_KAFKA_BROKERS
-              Value: !Ref 'MSKBrokers'
-            - Name: LAKERUNNER_KAFKA_TLS_ENABLED
-              Value: 'true'
-            - Name: LAKERUNNER_KAFKA_SASL_ENABLED
-              Value: 'true'
-            - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
-              Value: SCRAM-SHA-512
             - Name: LICENSE_FILE
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
@@ -4111,20 +3831,6 @@ Resources:
                 - SecretArn: !ImportValue
                     Fn::Sub:
                       - ${CommonInfraStackName}-DbSecretArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: LAKERUNNER_KAFKA_SASL_USERNAME
-              ValueFrom: !Sub
-                - '${SecretArn}:username::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-MSKCredentialsArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: LAKERUNNER_KAFKA_SASL_PASSWORD
-              ValueFrom: !Sub
-                - '${SecretArn}:password::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-MSKCredentialsArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: INTERNAL_SERVICE_KEYS
               ValueFrom: !ImportValue
@@ -4203,14 +3909,6 @@ Resources:
               Value: lakerunner
             - Name: CONFIGDB_SSLMODE
               Value: require
-            - Name: LAKERUNNER_KAFKA_BROKERS
-              Value: !Ref 'MSKBrokers'
-            - Name: LAKERUNNER_KAFKA_TLS_ENABLED
-              Value: 'true'
-            - Name: LAKERUNNER_KAFKA_SASL_ENABLED
-              Value: 'true'
-            - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
-              Value: SCRAM-SHA-512
             - Name: LICENSE_FILE
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
@@ -4283,20 +3981,6 @@ Resources:
                     Fn::Sub:
                       - ${CommonInfraStackName}-DbSecretArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: LAKERUNNER_KAFKA_SASL_USERNAME
-              ValueFrom: !Sub
-                - '${SecretArn}:username::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-MSKCredentialsArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: LAKERUNNER_KAFKA_SASL_PASSWORD
-              ValueFrom: !Sub
-                - '${SecretArn}:password::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-MSKCredentialsArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
           User: '0'
       Cpu: '1024'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
@@ -4368,14 +4052,6 @@ Resources:
               Value: lakerunner
             - Name: CONFIGDB_SSLMODE
               Value: require
-            - Name: LAKERUNNER_KAFKA_BROKERS
-              Value: !Ref 'MSKBrokers'
-            - Name: LAKERUNNER_KAFKA_TLS_ENABLED
-              Value: 'true'
-            - Name: LAKERUNNER_KAFKA_SASL_ENABLED
-              Value: 'true'
-            - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
-              Value: SCRAM-SHA-512
             - Name: LICENSE_FILE
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
@@ -4459,20 +4135,6 @@ Resources:
                     Fn::Sub:
                       - ${CommonInfraStackName}-DbSecretArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: LAKERUNNER_KAFKA_SASL_USERNAME
-              ValueFrom: !Sub
-                - '${SecretArn}:username::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-MSKCredentialsArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: LAKERUNNER_KAFKA_SASL_PASSWORD
-              ValueFrom: !Sub
-                - '${SecretArn}:password::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-MSKCredentialsArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
             - Name: INTERNAL_SERVICE_KEYS
               ValueFrom: !ImportValue
                 Fn::Sub:
@@ -4549,14 +4211,6 @@ Resources:
               Value: lakerunner
             - Name: CONFIGDB_SSLMODE
               Value: require
-            - Name: LAKERUNNER_KAFKA_BROKERS
-              Value: !Ref 'MSKBrokers'
-            - Name: LAKERUNNER_KAFKA_TLS_ENABLED
-              Value: 'true'
-            - Name: LAKERUNNER_KAFKA_SASL_ENABLED
-              Value: 'true'
-            - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
-              Value: SCRAM-SHA-512
             - Name: LICENSE_FILE
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
@@ -4639,20 +4293,6 @@ Resources:
                     Fn::Sub:
                       - ${CommonInfraStackName}-DbSecretArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: LAKERUNNER_KAFKA_SASL_USERNAME
-              ValueFrom: !Sub
-                - '${SecretArn}:username::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-MSKCredentialsArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: LAKERUNNER_KAFKA_SASL_PASSWORD
-              ValueFrom: !Sub
-                - '${SecretArn}:password::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-MSKCredentialsArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
           User: '0'
       Cpu: !Ref 'QueryWorkerCpu'
       EphemeralStorage:
@@ -4726,14 +4366,6 @@ Resources:
               Value: lakerunner
             - Name: CONFIGDB_SSLMODE
               Value: require
-            - Name: LAKERUNNER_KAFKA_BROKERS
-              Value: !Ref 'MSKBrokers'
-            - Name: LAKERUNNER_KAFKA_TLS_ENABLED
-              Value: 'true'
-            - Name: LAKERUNNER_KAFKA_SASL_ENABLED
-              Value: 'true'
-            - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
-              Value: SCRAM-SHA-512
             - Name: LICENSE_FILE
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
@@ -4810,20 +4442,6 @@ Resources:
                     Fn::Sub:
                       - ${CommonInfraStackName}-DbSecretArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: LAKERUNNER_KAFKA_SASL_USERNAME
-              ValueFrom: !Sub
-                - '${SecretArn}:username::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-MSKCredentialsArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: LAKERUNNER_KAFKA_SASL_PASSWORD
-              ValueFrom: !Sub
-                - '${SecretArn}:password::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-MSKCredentialsArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
           User: '0'
       Cpu: '1024'
       ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
@@ -4895,14 +4513,6 @@ Resources:
               Value: lakerunner
             - Name: CONFIGDB_SSLMODE
               Value: require
-            - Name: LAKERUNNER_KAFKA_BROKERS
-              Value: !Ref 'MSKBrokers'
-            - Name: LAKERUNNER_KAFKA_TLS_ENABLED
-              Value: 'true'
-            - Name: LAKERUNNER_KAFKA_SASL_ENABLED
-              Value: 'true'
-            - Name: LAKERUNNER_KAFKA_SASL_MECHANISM
-              Value: SCRAM-SHA-512
             - Name: LICENSE_FILE
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
@@ -4974,20 +4584,6 @@ Resources:
                 - SecretArn: !ImportValue
                     Fn::Sub:
                       - ${CommonInfraStackName}-DbSecretArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: LAKERUNNER_KAFKA_SASL_USERNAME
-              ValueFrom: !Sub
-                - '${SecretArn}:username::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-MSKCredentialsArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: LAKERUNNER_KAFKA_SASL_PASSWORD
-              ValueFrom: !Sub
-                - '${SecretArn}:password::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-MSKCredentialsArn
                       - CommonInfraStackName: !Ref 'CommonInfraStackName'
           User: '0'
       Cpu: '256'
@@ -5090,12 +4686,6 @@ Resources:
                     - ${SecretArn}*
                     - SecretArn: !ImportValue
                         Fn::Sub:
-                          - ${CommonInfraStackName}-MSKCredentialsArn
-                          - CommonInfraStackName: !Ref 'CommonInfraStackName'
-                  - !Sub
-                    - ${SecretArn}*
-                    - SecretArn: !ImportValue
-                        Fn::Sub:
                           - ${CommonInfraStackName}-InternalServiceKeysSecretArn
                           - CommonInfraStackName: !Ref 'CommonInfraStackName'
                   - !Sub
@@ -5105,14 +4695,6 @@ Resources:
                           - ${CommonInfraStackName}-AdminInitialAPIKeySecretArn
                           - CommonInfraStackName: !Ref 'CommonInfraStackName'
                   - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*'
-              - Action:
-                  - kms:Decrypt
-                  - kms:DescribeKey
-                Effect: Allow
-                Resource: !ImportValue
-                  Fn::Sub:
-                    - ${CommonInfraStackName}-MSKSecretsKeyArn
-                    - CommonInfraStackName: !Ref 'CommonInfraStackName'
               - Action:
                   - ssmmessages:CreateControlChannel
                   - ssmmessages:CreateDataChannel

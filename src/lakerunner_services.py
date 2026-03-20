@@ -215,12 +215,6 @@ def create_services_template():
         Description="OPTIONAL: SNS Topic ARN for CloudWatch alarms. Leave blank to disable task count alarms. Deploy the Alerting stack first to create a topic."
     ))
 
-    # MSK Configuration
-    MSKBrokers = t.add_parameter(Parameter(
-        "MSKBrokers", Type="String", Default="",
-        Description="REQUIRED: Comma-separated list of MSK broker endpoints (hostname:port)"
-    ))
-
     # ALB Configuration parameters
 
     AlbScheme = t.add_parameter(Parameter(
@@ -395,7 +389,6 @@ def create_services_template():
         "CommonInfraStackName": {"default": "Common Infra Stack Name"},
         "AlbScheme": {"default": "ALB Scheme"},
         "EnableAdminInitialKey": {"default": "Enable Admin Bootstrap Key"},
-        "MSKBrokers": {"default": "MSK Broker Endpoints"},
         "OtelEndpoint": {"default": "OTEL Collector Endpoint"},
         "AlertTopicArn": {"default": "Alert SNS Topic ARN"},
         "AutoScalingCPUTarget": {"default": "CPU Target % (Auto-Scaling)"},
@@ -444,10 +437,6 @@ def create_services_template():
                     "Parameters": autoscaling_params
                 },
                 {
-                    "Label": {"default": "MSK Configuration"},
-                    "Parameters": ["MSKBrokers"]
-                },
-                {
                     "Label": {"default": "Telemetry"},
                     "Parameters": ["OtelEndpoint"]
                 },
@@ -482,10 +471,8 @@ def create_services_template():
     DbSecretArnValue = ImportValue(ci_export("DbSecretArn"))
     DbHostValue = ImportValue(ci_export("DbEndpoint"))
     DbPortValue = ImportValue(ci_export("DbPort"))
-    MSKCredentialsArnValue = ImportValue(ci_export("MSKCredentialsArn"))
     InternalServiceKeysSecretArnValue = ImportValue(ci_export("InternalServiceKeysSecretArn"))
     AdminInitialAPIKeySecretArnValue = ImportValue(ci_export("AdminInitialAPIKeySecretArn"))
-    MSKSecretsKeyArnValue = ImportValue(ci_export("MSKSecretsKeyArn"))
     TaskSecurityGroupIdValue = ImportValue(ci_export("TaskSGId"))
     VpcIdValue = ImportValue(ci_export("VpcId"))
     PrivateSubnetsValue = Split(",", ImportValue(ci_export("PrivateSubnets")))
@@ -690,19 +677,11 @@ def create_services_template():
                             ],
                             "Resource": [
                                 Sub("${SecretArn}*", SecretArn=DbSecretArnValue),
-                                Sub("${SecretArn}*", SecretArn=MSKCredentialsArnValue),
+
                                 Sub("${SecretArn}*", SecretArn=InternalServiceKeysSecretArnValue),
                                 Sub("${SecretArn}*", SecretArn=AdminInitialAPIKeySecretArnValue),
                                 Sub("arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*")
                             ]
-                        },
-                        {
-                            "Effect": "Allow",
-                            "Action": [
-                                "kms:Decrypt",
-                                "kms:DescribeKey"
-                            ],
-                            "Resource": MSKSecretsKeyArnValue
                         }
                     ]
                 }
@@ -763,19 +742,11 @@ def create_services_template():
                             ],
                             "Resource": [
                                 Sub("${SecretArn}*", SecretArn=DbSecretArnValue),
-                                Sub("${SecretArn}*", SecretArn=MSKCredentialsArnValue),
+
                                 Sub("${SecretArn}*", SecretArn=InternalServiceKeysSecretArnValue),
                                 Sub("${SecretArn}*", SecretArn=AdminInitialAPIKeySecretArnValue),
                                 Sub("arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*")
                             ]
-                        },
-                        {
-                            "Effect": "Allow",
-                            "Action": [
-                                "kms:Decrypt",
-                                "kms:DescribeKey"
-                            ],
-                            "Resource": MSKSecretsKeyArnValue
                         },
                         {
                             "Effect": "Allow",
@@ -841,19 +812,11 @@ def create_services_template():
                             ],
                             "Resource": [
                                 Sub("${SecretArn}*", SecretArn=DbSecretArnValue),
-                                Sub("${SecretArn}*", SecretArn=MSKCredentialsArnValue),
+
                                 Sub("${SecretArn}*", SecretArn=InternalServiceKeysSecretArnValue),
                                 Sub("${SecretArn}*", SecretArn=AdminInitialAPIKeySecretArnValue),
                                 Sub("arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*")
                             ]
-                        },
-                        {
-                            "Effect": "Allow",
-                            "Action": [
-                                "kms:Decrypt",
-                                "kms:DescribeKey"
-                            ],
-                            "Resource": MSKSecretsKeyArnValue
                         },
                         {
                             "Effect": "Allow",
@@ -929,19 +892,11 @@ def create_services_template():
                             ],
                             "Resource": [
                                 Sub("${SecretArn}*", SecretArn=DbSecretArnValue),
-                                Sub("${SecretArn}*", SecretArn=MSKCredentialsArnValue),
+
                                 Sub("${SecretArn}*", SecretArn=InternalServiceKeysSecretArnValue),
                                 Sub("${SecretArn}*", SecretArn=AdminInitialAPIKeySecretArnValue),
                                 Sub("arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AWS::StackName}-*")
                             ]
-                        },
-                        {
-                            "Effect": "Allow",
-                            "Action": [
-                                "kms:Decrypt",
-                                "kms:DescribeKey"
-                            ],
-                            "Resource": MSKSecretsKeyArnValue
                         },
                         {
                             "Effect": "Allow",
@@ -1014,11 +969,6 @@ def create_services_template():
             Environment(Name="CONFIGDB_DBNAME", Value="lakerunner"),
             Environment(Name="CONFIGDB_USER", Value="lakerunner"),
             Environment(Name="CONFIGDB_SSLMODE", Value="require"),
-            # MSK Kafka Configuration
-            Environment(Name="LAKERUNNER_KAFKA_BROKERS", Value=Ref(MSKBrokers)),
-            Environment(Name="LAKERUNNER_KAFKA_TLS_ENABLED", Value="true"),
-            Environment(Name="LAKERUNNER_KAFKA_SASL_ENABLED", Value="true"),
-            Environment(Name="LAKERUNNER_KAFKA_SASL_MECHANISM", Value="SCRAM-SHA-512"),
             # License configuration
             Environment(Name="LICENSE_FILE", Value="env:LICENSE_DATA"),
             Environment(Name="SOFT_LICENSE_CHECK", Value="true"),
@@ -1093,10 +1043,7 @@ def create_services_template():
             EcsSecret(Name="API_KEYS_ENV", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/api_keys", CommonInfraStackName=Ref(CommonInfraStackName))),
             EcsSecret(Name="LICENSE_DATA", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/license", CommonInfraStackName=Ref(CommonInfraStackName))),
             EcsSecret(Name="LRDB_PASSWORD", ValueFrom=Sub("${SecretArn}:password::", SecretArn=DbSecretArnValue)),
-            EcsSecret(Name="CONFIGDB_PASSWORD", ValueFrom=Sub("${SecretArn}:password::", SecretArn=DbSecretArnValue)),
-            # MSK SASL/SCRAM Credentials
-            EcsSecret(Name="LAKERUNNER_KAFKA_SASL_USERNAME", ValueFrom=Sub("${SecretArn}:username::", SecretArn=MSKCredentialsArnValue)),
-            EcsSecret(Name="LAKERUNNER_KAFKA_SASL_PASSWORD", ValueFrom=Sub("${SecretArn}:password::", SecretArn=MSKCredentialsArnValue))
+            EcsSecret(Name="CONFIGDB_PASSWORD", ValueFrom=Sub("${SecretArn}:password::", SecretArn=DbSecretArnValue))
         ]
 
         # Add internal service keys for alert-evaluator, notification-sender, and query-api

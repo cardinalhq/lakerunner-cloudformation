@@ -195,20 +195,23 @@ class TestServicesTemplate:
             "CommonInfraStackName": "test-common-infra"
         })
         
-        # Create mock context for Cloud-Radar to handle ImportValue functions
-        template_json = template.to_json()
-        
-        # Replace ImportValue with static values for testing
-        import re
-        template_json = re.sub(
-            r'"Fn::ImportValue":\s*{[^}]+}',
-            '"vpc-12345678"',  # Mock VPC ID
-            template_json
-        )
-        
+        # Parse template and replace ImportValue nodes with mock values
+        template_dict = json.loads(template.to_json())
+
+        def replace_import_values(obj):
+            if isinstance(obj, dict):
+                if "Fn::ImportValue" in obj:
+                    return "vpc-12345678"
+                return {k: replace_import_values(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [replace_import_values(item) for item in obj]
+            return obj
+
+        template_dict = replace_import_values(template_dict)
+
         # Create Cloud-Radar template
         cf_template = CloudRadarTemplate(
-            template=json.loads(template_json)
+            template=template_dict
         )
         
         # Validate template structure

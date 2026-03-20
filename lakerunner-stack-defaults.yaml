@@ -22,13 +22,6 @@ storage_profiles:
 images:
   lakerunner: "ghcr.io/cardinalhq/lakerunner:v1.15.7-rc5"
 
-# MSK configuration
-msk:
-  instance_type: "kafka.t3.small"
-  broker_nodes: 2
-  storage_size_gb: 50
-  enable_sasl_scram: true
-
 # Service configurations for core Lakerunner services
 services:
   lakerunner-pubsub-sqs:

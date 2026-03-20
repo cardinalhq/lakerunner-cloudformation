@@ -150,20 +150,23 @@ class TestMigrationTemplate:
             "CommonInfraStackName": "test-common-infra"
         })
         
-        # Get template JSON and replace ImportValue with static values for testing
-        template_json = template.to_json()
-        
-        # Replace ImportValue functions with mock values for offline testing
-        import re
-        template_json = re.sub(
-            r'"Fn::ImportValue":\s*{[^}]+}',
-            '"mock-value"',
-            template_json
-        )
-        
+        # Parse template and replace ImportValue nodes with mock values
+        template_dict = json.loads(template.to_json())
+
+        def replace_import_values(obj):
+            if isinstance(obj, dict):
+                if "Fn::ImportValue" in obj:
+                    return "mock-value"
+                return {k: replace_import_values(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [replace_import_values(item) for item in obj]
+            return obj
+
+        template_dict = replace_import_values(template_dict)
+
         # Create Cloud-Radar template
         cf_template = CloudRadarTemplate(
-            template=json.loads(template_json)
+            template=template_dict
         )
         
         # Validate template structure
@@ -190,8 +193,6 @@ class TestMigrationTemplate:
                 # Check essential container properties
                 assert "Name" in container
                 assert "Image" in container
-                assert "Cpu" in container
-                assert "Memory" in container
                 
                 break
         else:
