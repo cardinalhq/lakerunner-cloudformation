@@ -45,11 +45,10 @@ class TestServicesTemplate:
                 }
             },
             "images": {
-                "go_services": "public.ecr.aws/test/go:latest",
+                "lakerunner": "public.ecr.aws/test/go:latest",
                 "query_api": "public.ecr.aws/test/api:latest",
                 "query_worker": "public.ecr.aws/test/worker:latest",
-                "grafana": "public.ecr.aws/test/grafana:latest",
-                "migration": "public.ecr.aws/test/migration:latest"
+                "grafana": "public.ecr.aws/test/grafana:latest"
             }
         }
 

@@ -23,7 +23,7 @@ class TestServicesTemplateSimple:
         mock_load_config.return_value = {
             "services": {},
             "images": {
-                "go_services": "test:latest",
+                "lakerunner": "test:latest",
                 "query_api": "test:latest", 
                 "query_worker": "test:latest",
                 "grafana": "test:latest"
@@ -42,7 +42,7 @@ class TestServicesTemplateSimple:
         mock_load_config.return_value = {
             "services": {},
             "images": {
-                "go_services": "test:latest",
+                "lakerunner": "test:latest",
                 "query_api": "test:latest", 
                 "query_worker": "test:latest",
                 "grafana": "test:latest"
@@ -65,7 +65,7 @@ class TestServicesTemplateSimple:
         mock_load_config.return_value = {
             "services": {},
             "images": {
-                "go_services": "test:latest",
+                "lakerunner": "test:latest",
                 "query_api": "test:latest", 
                 "query_worker": "test:latest",
                 "grafana": "test:latest"
@@ -86,7 +86,7 @@ class TestServicesTemplateSimple:
         mock_load_config.return_value = {
             "services": {},
             "images": {
-                "go_services": "test:latest",
+                "lakerunner": "test:latest",
                 "query_api": "test:latest", 
                 "query_worker": "test:latest",
                 "grafana": "test:latest"
@@ -107,7 +107,7 @@ class TestServicesTemplateSimple:
         mock_load_config.return_value = {
             "services": {},
             "images": {
-                "go_services": "test:latest",
+                "lakerunner": "test:latest",
                 "query_api": "test:latest",
                 "query_worker": "test:latest",
                 "grafana": "test:latest"
@@ -130,7 +130,7 @@ class TestServicesTemplateSimple:
         mock_load_config.return_value = {
             "services": {},
             "images": {
-                "go_services": "test:latest",
+                "lakerunner": "test:latest",
                 "query_api": "test:latest",
                 "query_worker": "test:latest",
                 "grafana": "test:latest"
@@ -155,7 +155,7 @@ class TestServicesTemplateSimple:
         mock_load_config.return_value = {
             "services": {},
             "images": {
-                "go_services": "test:latest",
+                "lakerunner": "test:latest",
                 "query_api": "test:latest",
                 "query_worker": "test:latest",
                 "grafana": "test:latest"
@@ -229,7 +229,7 @@ class TestServicesTemplateSimple:
                 }
             },
             "images": {
-                "go_services": "test:latest"
+                "lakerunner": "test:latest"
             }
         }
 
@@ -274,7 +274,7 @@ class TestServicesTemplateSimple:
                     "environment": {}
                 }
             },
-            "images": {"go_services": "test:latest"}
+            "images": {"lakerunner": "test:latest"}
         }
 
         from lakerunner_services import create_services_template
@@ -332,7 +332,7 @@ class TestServicesTemplateSimple:
                     "environment": {}
                 }
             },
-            "images": {"go_services": "test:latest"}
+            "images": {"lakerunner": "test:latest"}
         }
 
         from lakerunner_services import create_services_template
@@ -382,7 +382,7 @@ class TestServicesTemplateSimple:
                     "environment": {}
                 }
             },
-            "images": {"go_services": "test:latest"}
+            "images": {"lakerunner": "test:latest"}
         }
 
         from lakerunner_services import create_services_template
@@ -425,7 +425,7 @@ class TestServicesTemplateSimple:
                     "environment": {}
                 }
             },
-            "images": {"go_services": "test:latest"}
+            "images": {"lakerunner": "test:latest"}
         }
 
         from lakerunner_services import create_services_template
@@ -477,7 +477,7 @@ class TestServicesTemplateSimple:
                     "environment": {}
                 }
             },
-            "images": {"go_services": "test:latest"}
+            "images": {"lakerunner": "test:latest"}
         }
 
         from lakerunner_services import create_services_template
@@ -534,7 +534,7 @@ class TestServicesTemplateSimple:
                     "environment": {}
                 }
             },
-            "images": {"go_services": "test:latest"}
+            "images": {"lakerunner": "test:latest"}
         }
 
         from lakerunner_services import create_services_template
@@ -560,7 +560,7 @@ class TestServicesTemplateSimple:
         """Test that auto-scaling parameters exist with correct defaults"""
         mock_load_config.return_value = {
             "services": {},
-            "images": {"go_services": "test:latest"}
+            "images": {"lakerunner": "test:latest"}
         }
 
         from lakerunner_services import create_services_template
@@ -588,7 +588,7 @@ class TestServicesTemplateSimple:
         """Test that auto-scaling uses the signal type conditions (always on when signal enabled)"""
         mock_load_config.return_value = {
             "services": {},
-            "images": {"go_services": "test:latest"}
+            "images": {"lakerunner": "test:latest"}
         }
 
         from lakerunner_services import create_services_template
@@ -648,7 +648,7 @@ class TestServicesTemplateSimple:
                     "environment": {}
                 }
             },
-            "images": {"go_services": "test:latest"}
+            "images": {"lakerunner": "test:latest"}
         }
 
         from lakerunner_services import create_services_template
@@ -704,7 +704,7 @@ class TestServicesTemplateSimple:
                     "environment": {}
                 }
             },
-            "images": {"go_services": "test:latest"}
+            "images": {"lakerunner": "test:latest"}
         }
 
         from lakerunner_services import create_services_template
@@ -736,7 +736,7 @@ class TestServicesTemplateSimple:
                     "environment": {}
                 }
             },
-            "images": {"go_services": "test:latest"}
+            "images": {"lakerunner": "test:latest"}
         }
 
         from lakerunner_services import create_services_template
@@ -770,7 +770,7 @@ class TestServicesTemplateSimple:
                     "environment": {}
                 }
             },
-            "images": {"go_services": "test:latest"}
+            "images": {"lakerunner": "test:latest"}
         }
 
         from lakerunner_services import create_services_template

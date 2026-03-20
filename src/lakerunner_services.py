@@ -199,7 +199,7 @@ def create_services_template():
         Description="REQUIRED: Name of the CommonInfra stack to import infrastructure values from."
     ))
 
-    GoServicesImage = images.get('go_services', 'public.ecr.aws/cardinalhq.io/lakerunner:latest')
+    GoServicesImage = images.get('lakerunner', 'public.ecr.aws/cardinalhq.io/lakerunner:latest')
 
     # OTLP Telemetry configuration
     OtelEndpoint = t.add_parameter(Parameter(

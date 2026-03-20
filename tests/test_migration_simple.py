@@ -11,7 +11,7 @@ class TestMigrationTemplateSimple:
         """Minimal configuration for testing"""
         return {
             "images": {
-                "migration": "public.ecr.aws/test/migration:latest"
+                "lakerunner": "public.ecr.aws/test/migration:latest"
             }
         }
 

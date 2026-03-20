@@ -66,7 +66,7 @@ class TestCrossStackValidation:
             "storage_profiles": [{"bucket": "test", "region": "us-east-1"}]
         }
         mock_migration_defaults.return_value = {
-            "images": {"migration": "test:latest"}
+            "images": {"lakerunner": "test:latest"}
         }
         
         from lakerunner_migration import t as migration_template
@@ -110,8 +110,8 @@ class TestCrossStackValidation:
         }
         mock_services_defaults.return_value = {
             "images": {
-                "go_services": "test:latest",
-                "query_api": "test:latest", 
+                "lakerunner": "test:latest",
+                "query_api": "test:latest",
                 "query_worker": "test:latest"
             },
             "services": {

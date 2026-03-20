@@ -61,8 +61,8 @@ class TestParameterValidation:
         mock_config = {
             "services": {},
             "images": {
-                "go_services": "test:latest",
-                "query_api": "test:latest", 
+                "lakerunner": "test:latest",
+                "query_api": "test:latest",
                 "query_worker": "test:latest",
                 "grafana": "test:latest"
             }
