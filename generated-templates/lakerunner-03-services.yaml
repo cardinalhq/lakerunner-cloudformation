@@ -217,7 +217,7 @@ Parameters:
     Description: 'Memory (MiB) for lakerunner-process-logs. Valid values for 1024 CPU: 2048, 3072, 4096, 5120, 6144, 7168, 8192'
     Type: Number
   ProcessLogsReplicas:
-    Default: '1'
+    Default: '10'
     Description: Maximum number of lakerunner-process-logs tasks (scaled by monitoring service)
     MaxValue: 50
     MinValue: 1
@@ -235,7 +235,7 @@ Parameters:
     Description: 'Memory (MiB) for lakerunner-process-metrics. Valid values for 1024 CPU: 2048, 3072, 4096, 5120, 6144, 7168, 8192'
     Type: Number
   ProcessMetricsReplicas:
-    Default: '1'
+    Default: '10'
     Description: Maximum number of lakerunner-process-metrics tasks (scaled by monitoring service)
     MaxValue: 50
     MinValue: 1
@@ -253,7 +253,7 @@ Parameters:
     Description: 'Memory (MiB) for lakerunner-process-traces. Valid values for 1024 CPU: 2048, 3072, 4096, 5120, 6144, 7168, 8192'
     Type: Number
   ProcessTracesReplicas:
-    Default: '1'
+    Default: '10'
     Description: Maximum number of lakerunner-process-traces tasks (scaled by monitoring service)
     MaxValue: 50
     MinValue: 1

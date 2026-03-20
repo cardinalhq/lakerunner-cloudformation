@@ -40,7 +40,6 @@ services:
     command: ["/app/bin/lakerunner", "process-logs"]
     cpu: 1024
     memory_mib: 2048
-    replicas: 1
     autoscaling:
       min_replicas: 1
       max_replicas: 10
@@ -54,7 +53,6 @@ services:
     command: ["/app/bin/lakerunner", "process-metrics"]
     cpu: 1024
     memory_mib: 2048
-    replicas: 1
     autoscaling:
       min_replicas: 1
       max_replicas: 10
@@ -68,7 +66,6 @@ services:
     command: ["/app/bin/lakerunner", "process-traces"]
     cpu: 1024
     memory_mib: 2048
-    replicas: 1
     autoscaling:
       min_replicas: 1
       max_replicas: 10

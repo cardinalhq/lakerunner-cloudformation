@@ -242,17 +242,19 @@ def create_services_template():
         # Replicas parameter for configurable services
         # Process services use this as max replicas (scaled by the monitoring service)
         # Other services use this as the fixed replica count
-        default_replicas = service_config.get('replicas', 1)
         if service_name in LAKERUNNER_PROCESS_SERVICES:
+            autoscaling_cfg = service_config.get('autoscaling', {})
+            default_max = autoscaling_cfg.get('max_replicas', 10)
             replicas_param = t.add_parameter(Parameter(
                 f"{param_name}Replicas",
                 Type="Number",
-                Default=str(default_replicas),
+                Default=str(default_max),
                 MinValue=1,
                 MaxValue=50,
                 Description=f"Maximum number of {service_name} tasks (scaled by monitoring service)"
             ))
         else:
+            default_replicas = service_config.get('replicas', 1)
             replicas_param = t.add_parameter(Parameter(
                 f"{param_name}Replicas",
                 Type="Number",
