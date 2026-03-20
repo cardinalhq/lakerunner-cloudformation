@@ -111,7 +111,7 @@ Resources:
               Value: env:LICENSE_DATA
             - Name: SOFT_LICENSE_CHECK
               Value: 'true'
-          Image: ghcr.io/cardinalhq/lakerunner:v1.15.6
+          Image: ghcr.io/cardinalhq/lakerunner:v1.15.7-rc5
           LogConfiguration:
             LogDriver: awslogs
             Options:

@@ -72,7 +72,7 @@ CommonInfraStackName = t.add_parameter(Parameter(
     Description="REQUIRED: Name of the CommonInfra stack to import values from."
 ))
 
-ContainerImage = images.get('migration', 'public.ecr.aws/cardinalhq.io/lakerunner:latest')
+ContainerImage = images.get('lakerunner', 'public.ecr.aws/cardinalhq.io/lakerunner:latest')
 
 Cpu = t.add_parameter(Parameter(
     "Cpu", Type="String", Default="512",
