@@ -17,9 +17,11 @@ class TestCrossStackValidation:
                     import_ref = obj["Fn::ImportValue"]
                     if isinstance(import_ref, dict) and "Fn::Sub" in import_ref:
                         sub_value = import_ref["Fn::Sub"]
-                        if isinstance(sub_value, str) and f"${{{stack_name_param}}}" in sub_value:
+                        # Handle both string and list forms of Fn::Sub
+                        pattern = sub_value[0] if isinstance(sub_value, list) else sub_value
+                        if isinstance(pattern, str) and f"${{{stack_name_param}}}" in pattern:
                             # Extract the export name (part after the stack name)
-                            export_name = sub_value.replace(f"${{{stack_name_param}}}-", "")
+                            export_name = pattern.replace(f"${{{stack_name_param}}}-", "")
                             imports.add(export_name)
                     elif isinstance(import_ref, str):
                         # Handle direct string imports (shouldn't be used but check anyway)
@@ -176,7 +178,12 @@ class TestCrossStackValidation:
                     if "Fn::ImportValue" in obj:
                         import_ref = obj["Fn::ImportValue"]
                         if isinstance(import_ref, dict) and "Fn::Sub" in import_ref:
-                            patterns.append(import_ref["Fn::Sub"])
+                            sub_value = import_ref["Fn::Sub"]
+                            # Handle both string and list forms of Fn::Sub
+                            if isinstance(sub_value, list):
+                                patterns.append(sub_value[0])
+                            else:
+                                patterns.append(sub_value)
                     for value in obj.values():
                         _extract(value)
                 elif isinstance(obj, list):

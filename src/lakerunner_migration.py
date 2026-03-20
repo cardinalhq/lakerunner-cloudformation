@@ -83,21 +83,14 @@ MemoryMiB = t.add_parameter(Parameter(
     Description="Fargate Memory MiB (e.g., 512/1024/2048)."
 ))
 
-MSKBrokers = t.add_parameter(Parameter(
-    "MSKBrokers", Type="String", Default="",
-    Description="REQUIRED: Comma-separated list of MSK broker endpoints (hostname:port)"
-))
-
 t.set_metadata({
     "AWS::CloudFormation::Interface": {
         "ParameterGroups": [
             {"Label": {"default": "CommonInfra Stack"}, "Parameters": ["CommonInfraStackName"]},
-            {"Label": {"default": "MSK Configuration"}, "Parameters": ["MSKBrokers"]},
             {"Label": {"default": "Task Sizing"}, "Parameters": ["Cpu", "MemoryMiB"]},
         ],
         "ParameterLabels": {
             "CommonInfraStackName": {"default": "CommonInfra Stack Name"},
-            "MSKBrokers": {"default": "MSK Broker Endpoints"},
             "Cpu": {"default": "Fargate CPU"},
             "MemoryMiB": {"default": "Fargate Memory (MiB)"},
         }
@@ -113,8 +106,6 @@ def ci_export(suffix):
 ClusterArnValue = ImportValue(ci_export("ClusterArn"))
 DbHostValue = ImportValue(ci_export("DbEndpoint"))
 DbSecretArnValue = ImportValue(ci_export("DbSecretArn"))
-MSKCredentialsArnValue = ImportValue(ci_export("MSKCredentialsArn"))
-MSKSecretsKeyArnValue = ImportValue(ci_export("MSKSecretsKeyArn"))
 SecurityGroupsValue = ImportValue(ci_export("TaskSGId"))
 PrivateSubnetsValue = Split(",", ImportValue(ci_export("PrivateSubnets")))
 
@@ -150,12 +141,7 @@ TaskRole = t.add_resource(Role(
                     {
                         "Effect": "Allow",
                         "Action": ["secretsmanager:GetSecretValue"],
-                        "Resource": [DbSecretArnValue, MSKCredentialsArnValue]
-                    },
-                    {
-                        "Effect": "Allow",
-                        "Action": ["kms:Decrypt", "kms:DescribeKey"],
-                        "Resource": MSKSecretsKeyArnValue
+                        "Resource": DbSecretArnValue
                     }
                 ]
             }
@@ -189,10 +175,7 @@ ExecutionRole = t.add_resource(Role(
                     {
                         "Effect": "Allow",
                         "Action": ["secretsmanager:GetSecretValue"],
-                        "Resource": [
-                            Sub("${SecretArn}*", SecretArn=DbSecretArnValue),
-                            Sub("${SecretArn}*", SecretArn=MSKCredentialsArnValue)
-                        ]
+                        "Resource": Sub("${SecretArn}*", SecretArn=DbSecretArnValue)
                     },
                     {
                         "Effect": "Allow",
@@ -202,11 +185,6 @@ ExecutionRole = t.add_resource(Role(
                             Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/storage_profiles", CommonInfraStackName=Ref(CommonInfraStackName)),
                             Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/license", CommonInfraStackName=Ref(CommonInfraStackName))
                         ]
-                    },
-                    {
-                        "Effect": "Allow",
-                        "Action": ["kms:Decrypt", "kms:DescribeKey"],
-                        "Resource": MSKSecretsKeyArnValue
                     }
                 ]
             }
@@ -252,12 +230,6 @@ TaskDef = t.add_resource(TaskDefinition(
                 Environment(Name="CONFIGDB_SSLMODE", Value="require"),
                 Environment(Name="API_KEYS_FILE", Value="env:API_KEYS_ENV"),
                 Environment(Name="STORAGE_PROFILE_FILE", Value="env:STORAGE_PROFILES_ENV"),
-                # MSK Kafka Configuration
-                Environment(Name="LAKERUNNER_KAFKA_BROKERS", Value=Ref(MSKBrokers)),
-                Environment(Name="LAKERUNNER_KAFKA_TLS_ENABLED", Value="true"),
-                Environment(Name="LAKERUNNER_KAFKA_SASL_ENABLED", Value="true"),
-                Environment(Name="LAKERUNNER_KAFKA_SASL_MECHANISM", Value="SCRAM-SHA-512"),
-                Environment(Name="LAKERUNNER_KAFKA_TOPICS_DEFAULTS_REPLICATIONFACTOR", Value="2"),
                 # License configuration
                 Environment(Name="LICENSE_FILE", Value="env:LICENSE_DATA"),
                 Environment(Name="SOFT_LICENSE_CHECK", Value="true"),
@@ -267,10 +239,7 @@ TaskDef = t.add_resource(TaskDefinition(
                 EcsSecret(Name="CONFIGDB_PASSWORD", ValueFrom=Sub("${S}:password::", S=DbSecretArnValue)),
                 EcsSecret(Name="API_KEYS_ENV", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/api_keys", CommonInfraStackName=Ref(CommonInfraStackName))),
                 EcsSecret(Name="STORAGE_PROFILES_ENV", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/storage_profiles", CommonInfraStackName=Ref(CommonInfraStackName))),
-                EcsSecret(Name="LICENSE_DATA", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/license", CommonInfraStackName=Ref(CommonInfraStackName))),
-                # MSK SASL/SCRAM Credentials
-                EcsSecret(Name="LAKERUNNER_KAFKA_SASL_USERNAME", ValueFrom=Sub("${S}:username::", S=MSKCredentialsArnValue)),
-                EcsSecret(Name="LAKERUNNER_KAFKA_SASL_PASSWORD", ValueFrom=Sub("${S}:password::", S=MSKCredentialsArnValue))
+                EcsSecret(Name="LICENSE_DATA", ValueFrom=Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/license", CommonInfraStackName=Ref(CommonInfraStackName)))
             ]
         )
     ]

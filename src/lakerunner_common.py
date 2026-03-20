@@ -31,9 +31,7 @@ from troposphere.sqs import Queue, QueuePolicy
 from troposphere.secretsmanager import Secret, GenerateSecretString
 from troposphere.rds import DBInstance, DBSubnetGroup
 from troposphere.ssm import Parameter as SsmParameter
-from troposphere.msk import Cluster, BrokerNodeGroupInfo, EBSStorageInfo, StorageInfo, ClientAuthentication, Tls, Sasl, Scram, EncryptionInfo, EncryptionAtRest, EncryptionInTransit, BatchScramSecret
 from troposphere.iam import PolicyType, Role, Policy
-from troposphere.kms import Key, Alias
 
 t = Template()
 t.set_description("CommonInfra stack for Lakerunner.")
@@ -81,30 +79,6 @@ LicenseData = t.add_parameter(Parameter(
     Description="REQUIRED: License JSON content. Stored in SSM and available to all services."
 ))
 
-# MSK parameters
-MSKInstanceType = t.add_parameter(Parameter(
-    "MSKInstanceType",
-    Type="String",
-    Default="kafka.t3.small",
-    AllowedValues=[
-        "kafka.t3.small",
-        "kafka.m5.large", "kafka.m5.xlarge", "kafka.m5.2xlarge", "kafka.m5.4xlarge",
-        "kafka.m5.8xlarge", "kafka.m5.12xlarge", "kafka.m5.16xlarge", "kafka.m5.24xlarge",
-        "kafka.m7g.large", "kafka.m7g.xlarge", "kafka.m7g.2xlarge", "kafka.m7g.4xlarge",
-        "kafka.m7g.8xlarge", "kafka.m7g.12xlarge", "kafka.m7g.16xlarge"
-    ],
-    Description="MSK broker instance type."
-))
-
-MSKBrokerNodes = t.add_parameter(Parameter(
-    "MSKBrokerNodes",
-    Type="Number",
-    Default=2,
-    MinValue=2,
-    MaxValue=15,
-    Description="Number of MSK broker nodes. Must be between 2 and 15."
-))
-
 # -----------------------
 # UI Hints in Console (Parameter Groups & Labels)
 # -----------------------
@@ -116,10 +90,6 @@ t.set_metadata({
                 "Parameters": ["VpcId", "PublicSubnets", "PrivateSubnets"]
             },
             {
-                "Label": {"default": "MSK Configuration"},
-                "Parameters": ["MSKInstanceType", "MSKBrokerNodes"]
-            },
-            {
                 "Label": {"default": "Configuration Overrides (Advanced)"},
                 "Parameters": ["ApiKeysOverride", "StorageProfilesOverride", "LicenseData"]
             }
@@ -128,8 +98,6 @@ t.set_metadata({
             "VpcId": {"default": "VPC Id"},
             "PublicSubnets": {"default": "Public Subnets (for ALB internet-facing)"},
             "PrivateSubnets": {"default": "Private Subnets (for ECS/RDS)"},
-            "MSKInstanceType": {"default": "MSK Instance Type"},
-            "MSKBrokerNodes": {"default": "Number of MSK Broker Nodes"},
             "ApiKeysOverride": {"default": "Custom API Keys (YAML)"},
             "StorageProfilesOverride": {"default": "Custom Storage Profiles (YAML)"},
             "LicenseData": {"default": "License Data (JSON)"}
@@ -204,41 +172,6 @@ t.add_resource(SecurityGroupIngress(
     ToPort=5432,
     SourceSecurityGroupId=Ref(TaskSG),
     Description="task-to-database PostgreSQL",
-))
-
-# Security group for MSK cluster
-MskSecurityGroup = t.add_resource(SecurityGroup(
-    "MSKSecurityGroup",
-    GroupDescription="Security group for MSK cluster - grant access by referencing this SG ID",
-    VpcId=Ref(VpcId),
-    Tags=[
-        {"Key": "Name", "Value": Sub("${AWS::StackName}-msk-sg")},
-        {"Key": "ManagedBy", "Value": "Lakerunner"},
-        {"Key": "Environment", "Value": Ref("AWS::StackName")},
-        {"Key": "Component", "Value": "Messaging"}
-    ]
-))
-
-# Allow ECS tasks to connect to MSK on port 9094 (TLS)
-t.add_resource(SecurityGroupIngress(
-    "MSKFromTasksSG",
-    GroupId=Ref(MskSecurityGroup),
-    IpProtocol="tcp",
-    FromPort=9094,
-    ToPort=9094,
-    SourceSecurityGroupId=Ref(TaskSG),
-    Description="Kafka TLS from ECS tasks",
-))
-
-# Allow ECS tasks to connect to MSK on port 9096 (SASL_SSL)
-t.add_resource(SecurityGroupIngress(
-    "MSKFromTasksSGSASL",
-    GroupId=Ref(MskSecurityGroup),
-    IpProtocol="tcp",
-    FromPort=9096,
-    ToPort=9096,
-    SourceSecurityGroupId=Ref(TaskSG),
-    Description="Kafka SASL_SSL from ECS tasks",
 ))
 
 # -----------------------
@@ -411,161 +344,6 @@ AdminInitialAPIKeySecret = t.add_resource(Secret(
 t.add_output(Output("DbSecretArnOut", Value=DbSecretArnValue, Export=Export(name=Sub("${AWS::StackName}-DbSecretArn"))))
 t.add_output(Output("InternalServiceKeysSecretArn", Value=Ref(InternalServiceKeysSecret), Export=Export(name=Sub("${AWS::StackName}-InternalServiceKeysSecretArn"))))
 t.add_output(Output("AdminInitialAPIKeySecretArn", Value=Ref(AdminInitialAPIKeySecret), Export=Export(name=Sub("${AWS::StackName}-AdminInitialAPIKeySecretArn"))))
-
-# -----------------------
-# MSK Cluster and associated resources
-# -----------------------
-
-# KMS key for MSK SCRAM secrets (required for MSK secret association)
-MSKSecretsKey = t.add_resource(Key(
-    "MSKSecretsKey",
-    Description="KMS key for MSK SASL/SCRAM secrets",
-    KeyPolicy={
-        "Version": "2012-10-17",
-        "Statement": [
-            {
-                "Sid": "Enable IAM User Permissions",
-                "Effect": "Allow",
-                "Principal": {"AWS": Sub("arn:aws:iam::${AWS::AccountId}:root")},
-                "Action": "kms:*",
-                "Resource": "*"
-            },
-            {
-                "Sid": "Allow MSK Service",
-                "Effect": "Allow",
-                "Principal": {"Service": "kafka.amazonaws.com"},
-                "Action": [
-                    "kms:Decrypt",
-                    "kms:DescribeKey",
-                    "kms:GenerateDataKey",
-                    "kms:CreateGrant"
-                ],
-                "Resource": "*"
-            },
-            {
-                "Sid": "Allow Secrets Manager",
-                "Effect": "Allow",
-                "Principal": {"Service": "secretsmanager.amazonaws.com"},
-                "Action": [
-                    "kms:Decrypt",
-                    "kms:DescribeKey",
-                    "kms:GenerateDataKey",
-                    "kms:CreateGrant",
-                    "kms:ReEncrypt*"
-                ],
-                "Resource": "*"
-            }
-        ]
-    },
-    Tags=[
-        {"Key": "Name", "Value": Sub("${AWS::StackName}-msk-secrets-key")},
-        {"Key": "ManagedBy", "Value": "Lakerunner"},
-        {"Key": "Environment", "Value": Ref("AWS::StackName")},
-        {"Key": "Component", "Value": "Messaging"}
-    ]
-))
-
-# KMS key alias for easier identification
-MSKSecretsKeyAlias = t.add_resource(Alias(
-    "MSKSecretsKeyAlias",
-    AliasName=Sub("alias/${AWS::StackName}-msk-secrets"),
-    TargetKeyId=Ref(MSKSecretsKey)
-))
-
-# MSK SASL/SCRAM Credentials Secret
-MSKCredentials = t.add_resource(Secret(
-    "MSKCredentials",
-    Name=Sub("AmazonMSK_${AWS::StackName}"),
-    Description="MSK SASL/SCRAM credentials for Kafka authentication",
-    KmsKeyId=Ref(MSKSecretsKey),
-    GenerateSecretString=GenerateSecretString(
-        SecretStringTemplate='{"username": "lakerunner"}',
-        GenerateStringKey="password",
-        PasswordLength=32,
-        ExcludeCharacters='"@/\\'
-    ),
-    Tags=[
-        {"Key": "Name", "Value": Sub("${AWS::StackName}-msk-credentials")},
-        {"Key": "ManagedBy", "Value": "Lakerunner"},
-        {"Key": "Environment", "Value": Ref("AWS::StackName")},
-        {"Key": "Component", "Value": "Messaging"}
-    ]
-))
-
-# MSK Cluster
-MSKCluster = t.add_resource(Cluster(
-    "MSKCluster",
-    ClusterName=Sub("${AWS::StackName}-msk-cluster"),
-    KafkaVersion="3.9.x",
-    NumberOfBrokerNodes=Ref(MSKBrokerNodes),
-    BrokerNodeGroupInfo=BrokerNodeGroupInfo(
-        InstanceType=Ref(MSKInstanceType),
-        ClientSubnets=Ref(PrivateSubnets),
-        SecurityGroups=[Ref(MskSecurityGroup)],
-        StorageInfo=StorageInfo(
-            EBSStorageInfo=EBSStorageInfo(
-                VolumeSize=100  # Will make this configurable if needed
-            )
-        )
-    ),
-    ClientAuthentication=ClientAuthentication(
-        Sasl=Sasl(
-            Scram=Scram(
-                Enabled=True
-            )
-        )
-    ),
-    EncryptionInfo=EncryptionInfo(
-        EncryptionInTransit=EncryptionInTransit(
-            ClientBroker="TLS",
-            InCluster=True
-        )
-    ),
-    Tags={
-        "Name": Sub("${AWS::StackName}-msk-cluster"),
-        "ManagedBy": "Lakerunner",
-        "Environment": Ref("AWS::StackName"),
-        "Component": "Messaging"
-    }
-))
-
-# MSK outputs
-# NOTE: SCRAM secret association must be done manually via AWS CLI:
-#   aws kafka batch-associate-scram-secret --cluster-arn <cluster-arn> --secret-arn-list <secret-arn>
-t.add_output(Output(
-    "MSKClusterArn",
-    Description="MSK cluster ARN",
-    Value=GetAtt(MSKCluster, "Arn"),
-    Export=Export(name=Sub("${AWS::StackName}-MSKClusterArn"))
-))
-
-t.add_output(Output(
-    "MSKClusterName",
-    Description="MSK cluster name",
-    Value=Ref(MSKCluster),
-    Export=Export(name=Sub("${AWS::StackName}-MSKClusterName"))
-))
-
-t.add_output(Output(
-    "MSKCredentialsArn",
-    Description="MSK SASL/SCRAM credentials secret ARN",
-    Value=Ref(MSKCredentials),
-    Export=Export(name=Sub("${AWS::StackName}-MSKCredentialsArn"))
-))
-
-t.add_output(Output(
-    "MSKSecretsKeyArn",
-    Description="KMS key ARN for MSK secrets encryption",
-    Value=GetAtt(MSKSecretsKey, "Arn"),
-    Export=Export(name=Sub("${AWS::StackName}-MSKSecretsKeyArn"))
-))
-
-t.add_output(Output(
-    "MSKSecurityGroupId",
-    Description="MSK security group ID for granting access from ECS/EKS",
-    Value=Ref(MskSecurityGroup),
-    Export=Export(name=Sub("${AWS::StackName}-MSKSecurityGroupId"))
-))
 
 # Export S3 bucket name for IAM policies in other stacks
 t.add_output(Output("BucketName", Value=Ref(BucketRes), Export=Export(name=Sub("${AWS::StackName}-BucketName"))))
