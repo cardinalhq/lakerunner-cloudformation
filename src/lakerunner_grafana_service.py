@@ -46,16 +46,13 @@ def create_grafana_template():
 
     t = Template()
     t.set_description(
-        "Lakerunner Grafana + AI: Grafana with MCP Gateway, Conductor Server,"
-        " and Maestro sidecars, ALB, PostgreSQL storage, and pre-configured plugins"
+        "Lakerunner Grafana: Grafana with pre-configured plugins, PostgreSQL"
+        " storage, and ALB. The Cardinal datasource is wired to the Query API."
     )
 
     # Load configuration
     config = load_grafana_config()
     grafana_config = config.get('grafana', {})
-    mcp_gw_config = config.get('mcp_gateway', {})
-    conductor_config = config.get('conductor_server', {})
-    maestro_config = config.get('maestro_server', {})
     task_config = config.get('task', {})
     images = config.get('images', {})
     api_keys = config.get('api_keys', [])
@@ -75,9 +72,6 @@ def create_grafana_template():
 
     grafana_image = images.get('grafana', 'grafana/grafana:latest')
     grafana_init_image = images.get('grafana_init', 'lakerunner-grafana-init:latest')
-    mcp_gateway_image = images.get('mcp_gateway', 'public.ecr.aws/cardinalhq.io/mcp-gateway:v0.2.0')
-    conductor_server_image = images.get('conductor_server', 'public.ecr.aws/cardinalhq.io/conductor-server:latest')
-    maestro_server_image = images.get('maestro_server', 'public.ecr.aws/cardinalhq.io/maestro:latest')
 
     # Grafana Reset Token Configuration
     GrafanaResetToken = t.add_parameter(Parameter(
@@ -95,24 +89,10 @@ def create_grafana_template():
         Description="Load balancer scheme: 'internet-facing' for external access or 'internal' for internal access only."
     ))
 
-    # AI Configuration parameters
-    BedrockModel = t.add_parameter(Parameter(
-        "BedrockModel", Type="String",
-        Default="us.anthropic.claude-sonnet-4-6",
-        AllowedValues=[
-            "us.anthropic.claude-sonnet-4-6",
-            "eu.anthropic.claude-sonnet-4-6",
-            "au.anthropic.claude-sonnet-4-6",
-            "jp.anthropic.claude-sonnet-4-6",
-            "global.anthropic.claude-sonnet-4-6",
-        ],
-        Description="Bedrock model inference profile for AI features. Choose a geographic profile to control where requests are routed."
-    ))
-
     LakerunnerApiKey = t.add_parameter(Parameter(
         "LakerunnerApiKey", Type="String",
         Default=api_keys[0]['keys'][0] if api_keys and api_keys[0].get('keys') else "",
-        Description="API key for Lakerunner services. Defaults to the standard key."
+        Description="API key injected into the Cardinal datasource's secureJsonData."
     ))
 
     # Parameter groups for console
@@ -124,8 +104,8 @@ def create_grafana_template():
                     "Parameters": ["CommonInfraStackName", "QueryApiUrl", "AlbScheme"]
                 },
                 {
-                    "Label": {"default": "AI Configuration"},
-                    "Parameters": ["BedrockModel", "LakerunnerApiKey"]
+                    "Label": {"default": "Datasource"},
+                    "Parameters": ["LakerunnerApiKey"]
                 },
                 {
                     "Label": {"default": "Grafana Maintenance"},
@@ -136,7 +116,6 @@ def create_grafana_template():
                 "CommonInfraStackName": {"default": "Common Infra Stack Name"},
                 "QueryApiUrl": {"default": "Query API URL"},
                 "AlbScheme": {"default": "ALB Scheme"},
-                "BedrockModel": {"default": "Bedrock Model"},
                 "LakerunnerApiKey": {"default": "Lakerunner API Key"},
                 "GrafanaResetToken": {"default": "Grafana Reset Token"},
             }
@@ -235,12 +214,8 @@ def create_grafana_template():
         DefaultActions=[AlbAction(Type="forward", TargetGroupArn=Ref(GrafanaTg))]
     ))
 
-    # Create Grafana datasource configuration with Query API ALB DNS
-    # Get the first API key from the config for the datasource
-    default_api_key = ""
-    if api_keys and api_keys[0].get('keys'):
-        default_api_key = api_keys[0]['keys'][0]
-
+    # Create Grafana datasource configuration. Both the Query API URL and the
+    # Lakerunner API key are substituted at deploy time via Fn::Sub.
     grafana_datasource_config = {
         "apiVersion": 1,
         "datasources": [
@@ -250,22 +225,21 @@ def create_grafana_template():
                 "access": "proxy",
                 "isDefault": True,
                 "editable": True,
-                "jsonData": {
-                    "customPath": "${QUERY_API_URL}"
-                },
-                "secureJsonData": {
-                    "apiKey": default_api_key
-                }
+                "jsonData": {"customPath": "${QUERY_API_URL}"},
+                "secureJsonData": {"apiKey": "${LAKERUNNER_API_KEY}"},
             }
         ]
     }
 
-    # Create SSM Parameter with Query API URL substitution
     grafana_datasource_param = t.add_resource(SSMParameter(
         "GrafanaDatasourceConfig",
         Name=Sub("${AWS::StackName}-grafana-datasource-config"),
         Type="String",
-        Value=Sub(yaml.dump(grafana_datasource_config), QUERY_API_URL=Ref(QueryApiUrl)),
+        Value=Sub(
+            yaml.dump(grafana_datasource_config),
+            QUERY_API_URL=Ref(QueryApiUrl),
+            LAKERUNNER_API_KEY=Ref(LakerunnerApiKey),
+        ),
         Description="Grafana datasource configuration for Cardinal plugin"
     ))
 
@@ -296,27 +270,6 @@ def create_grafana_template():
             ExcludeCharacters=' !"#$%&\'()*+,./:;<=>?@[\\]^`{|}~',
             PasswordLength=32
         )
-    ))
-
-    # Internal API key shared between AI services (auto-generated)
-    ai_internal_secret = t.add_resource(Secret(
-        "AiInternalSecret",
-        Name=Sub("${AWS::StackName}-ai-internal"),
-        Description="Internal API key for communication between AI services",
-        GenerateSecretString=GenerateSecretString(
-            SecretStringTemplate='{}',
-            GenerateStringKey='api_key',
-            ExcludePunctuation=True,
-            PasswordLength=48
-        )
-    ))
-
-    # Lakerunner API key (stored in Secrets Manager for ECS secret injection)
-    lakerunner_api_key_secret = t.add_resource(Secret(
-        "LakerunnerApiKeySecret",
-        Name=Sub("${AWS::StackName}-lakerunner-api-key"),
-        Description="Lakerunner API key for AI services",
-        SecretString=Ref(LakerunnerApiKey)
     ))
 
     t.add_output(Output(
@@ -417,22 +370,6 @@ def create_grafana_template():
                         }
                     ]
                 }
-            ),
-            Policy(
-                PolicyName="BedrockAccess",
-                PolicyDocument={
-                    "Version": "2012-10-17",
-                    "Statement": [
-                        {
-                            "Effect": "Allow",
-                            "Action": [
-                                "bedrock:InvokeModel",
-                                "bedrock:InvokeModelWithResponseStream"
-                            ],
-                            "Resource": "*"
-                        }
-                    ]
-                }
             )
         ]
     ))
@@ -443,24 +380,6 @@ def create_grafana_template():
     grafana_log_group = t.add_resource(LogGroup(
         "GrafanaLogGroup",
         LogGroupName=Sub("/ecs/${AWS::StackName}/grafana"),
-        RetentionInDays=14
-    ))
-
-    mcp_gw_log_group = t.add_resource(LogGroup(
-        "McpGatewayLogGroup",
-        LogGroupName=Sub("/ecs/${AWS::StackName}/mcp-gateway"),
-        RetentionInDays=14
-    ))
-
-    conductor_log_group = t.add_resource(LogGroup(
-        "ConductorServerLogGroup",
-        LogGroupName=Sub("/ecs/${AWS::StackName}/conductor-server"),
-        RetentionInDays=14
-    ))
-
-    maestro_log_group = t.add_resource(LogGroup(
-        "MaestroServerLogGroup",
-        LogGroupName=Sub("/ecs/${AWS::StackName}/maestro-server"),
         RetentionInDays=14
     ))
 
@@ -525,166 +444,6 @@ def create_grafana_template():
         )
     )
     container_definitions.append(init_container)
-
-    # -- MCP Gateway sidecar --
-    mcp_gw_port = mcp_gw_config.get('port', 8080)
-    mcp_gw_env = [
-        Environment(Name="LAKERUNNER_API_URL", Value=Ref(QueryApiUrl)),
-    ]
-    for key, value in mcp_gw_config.get('environment', {}).items():
-        mcp_gw_env.append(Environment(Name=key, Value=str(value)))
-
-    mcp_gw_secrets = [
-        EcsSecret(
-            Name="LAKERUNNER_API_KEY",
-            ValueFrom=Ref(lakerunner_api_key_secret)
-        ),
-        EcsSecret(
-            Name="CARDINALHQ_API_KEY",
-            ValueFrom=Ref(lakerunner_api_key_secret)
-        ),
-        EcsSecret(
-            Name="MCP_API_KEY",
-            ValueFrom=Sub("${SecretArn}:api_key::", SecretArn=Ref(ai_internal_secret))
-        ),
-    ]
-
-    mcp_gateway_container = ContainerDefinition(
-        Name="McpGateway",
-        Image=mcp_gateway_image,
-        Essential=True,
-        User="65532",
-        PortMappings=[PortMapping(ContainerPort=mcp_gw_port, Protocol="tcp")],
-        Environment=mcp_gw_env,
-        Secrets=mcp_gw_secrets,
-        HealthCheck=HealthCheck(
-            Command=["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:%d/healthz || exit 1" % mcp_gw_port],
-            Interval=30,
-            Timeout=5,
-            Retries=3,
-            StartPeriod=30
-        ),
-        DependsOn=[{"ContainerName": "GrafanaInit", "Condition": "SUCCESS"}],
-        LogConfiguration=LogConfiguration(
-            LogDriver="awslogs",
-            Options={
-                "awslogs-group": Ref(mcp_gw_log_group),
-                "awslogs-region": Ref("AWS::Region"),
-                "awslogs-stream-prefix": "mcp-gateway"
-            }
-        )
-    )
-    container_definitions.append(mcp_gateway_container)
-
-    # -- Conductor Server sidecar --
-    conductor_port = conductor_config.get('port', 4100)
-    conductor_env = [
-        Environment(Name="AWS_BEDROCK_MODEL", Value=Ref(BedrockModel)),
-        Environment(Name="WORKFLOW_BEDROCK_INFERENCE_MODEL", Value=Ref(BedrockModel)),
-        Environment(Name="AWS_REGION", Value=Ref("AWS::Region")),
-    ]
-    for key, value in conductor_config.get('environment', {}).items():
-        conductor_env.append(Environment(Name=key, Value=str(value)))
-
-    conductor_secrets = [
-        EcsSecret(
-            Name="LAKERUNNER_API_KEY",
-            ValueFrom=Ref(lakerunner_api_key_secret)
-        ),
-        EcsSecret(
-            Name="CARDINALHQ_API_KEY",
-            ValueFrom=Ref(lakerunner_api_key_secret)
-        ),
-        EcsSecret(
-            Name="MCP_API_KEY",
-            ValueFrom=Sub("${SecretArn}:api_key::", SecretArn=Ref(ai_internal_secret))
-        ),
-    ]
-
-    conductor_container = ContainerDefinition(
-        Name="ConductorServer",
-        Image=conductor_server_image,
-        Essential=True,
-        User="65532",
-        PortMappings=[PortMapping(ContainerPort=conductor_port, Protocol="tcp")],
-        Environment=conductor_env,
-        Secrets=conductor_secrets,
-        HealthCheck=HealthCheck(
-            Command=["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:%d/api/health || exit 1" % conductor_port],
-            Interval=30,
-            Timeout=10,
-            Retries=3,
-            StartPeriod=30
-        ),
-        DependsOn=[
-            {"ContainerName": "GrafanaInit", "Condition": "SUCCESS"},
-            {"ContainerName": "McpGateway", "Condition": "HEALTHY"}
-        ],
-        LogConfiguration=LogConfiguration(
-            LogDriver="awslogs",
-            Options={
-                "awslogs-group": Ref(conductor_log_group),
-                "awslogs-region": Ref("AWS::Region"),
-                "awslogs-stream-prefix": "conductor-server"
-            }
-        )
-    )
-    container_definitions.append(conductor_container)
-
-    # -- Maestro Server sidecar --
-    maestro_port = maestro_config.get('port', 3100)
-    maestro_env = [
-        Environment(Name="AWS_BEDROCK_MODEL", Value=Ref(BedrockModel)),
-        Environment(Name="WORKFLOW_BEDROCK_INFERENCE_MODEL", Value=Ref(BedrockModel)),
-        Environment(Name="AWS_REGION", Value=Ref("AWS::Region")),
-    ]
-    for key, value in maestro_config.get('environment', {}).items():
-        maestro_env.append(Environment(Name=key, Value=str(value)))
-
-    maestro_secrets = [
-        EcsSecret(
-            Name="LAKERUNNER_API_KEY",
-            ValueFrom=Ref(lakerunner_api_key_secret)
-        ),
-        EcsSecret(
-            Name="CARDINALHQ_API_KEY",
-            ValueFrom=Ref(lakerunner_api_key_secret)
-        ),
-        EcsSecret(
-            Name="MCP_API_KEY",
-            ValueFrom=Sub("${SecretArn}:api_key::", SecretArn=Ref(ai_internal_secret))
-        ),
-    ]
-
-    maestro_container = ContainerDefinition(
-        Name="MaestroServer",
-        Image=maestro_server_image,
-        Essential=True,
-        User="65532",
-        PortMappings=[PortMapping(ContainerPort=maestro_port, Protocol="tcp")],
-        Environment=maestro_env,
-        Secrets=maestro_secrets,
-        HealthCheck=HealthCheck(
-            Command=["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:%d/health || exit 1" % maestro_port],
-            Interval=30,
-            Timeout=10,
-            Retries=3,
-            StartPeriod=30
-        ),
-        DependsOn=[
-            {"ContainerName": "GrafanaInit", "Condition": "SUCCESS"},
-            {"ContainerName": "McpGateway", "Condition": "HEALTHY"}
-        ],
-        LogConfiguration=LogConfiguration(
-            LogDriver="awslogs",
-            Options={
-                "awslogs-group": Ref(maestro_log_group),
-                "awslogs-region": Ref("AWS::Region"),
-                "awslogs-stream-prefix": "maestro-server"
-            }
-        )
-    )
-    container_definitions.append(maestro_container)
 
     # -- Main Grafana container --
     base_env = [
