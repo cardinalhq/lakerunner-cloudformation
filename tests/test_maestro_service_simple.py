@@ -89,6 +89,43 @@ class TestMaestroTemplateSimple(unittest.TestCase):
         conditions = json.loads(create_maestro_template().to_json())["Conditions"]
         assert "IsInternetFacing" in conditions
 
+    @patch('lakerunner_maestro_service.load_maestro_config')
+    def test_secret_and_log_groups(self, mock_load_config):
+        mock_load_config.return_value = MOCK_CONFIG
+        from lakerunner_maestro_service import create_maestro_template
+
+        resources = json.loads(create_maestro_template().to_json())["Resources"]
+
+        assert "MaestroDbSecret" in resources
+        secret = resources["MaestroDbSecret"]["Properties"]
+        assert '"username":"maestro"' in secret["GenerateSecretString"]["SecretStringTemplate"]
+        assert secret["GenerateSecretString"]["GenerateStringKey"] == "password"
+        assert secret["GenerateSecretString"]["PasswordLength"] == 32
+
+        for lg in ["MaestroDbInitLogGroup", "MaestroMcpGatewayLogGroup",
+                   "MaestroServerLogGroup"]:
+            assert lg in resources
+
+    @patch('lakerunner_maestro_service.load_maestro_config')
+    def test_iam_roles_present_with_expected_policies(self, mock_load_config):
+        mock_load_config.return_value = MOCK_CONFIG
+        from lakerunner_maestro_service import create_maestro_template
+
+        resources = json.loads(create_maestro_template().to_json())["Resources"]
+
+        assert "MaestroExecRole" in resources
+        exec_role = resources["MaestroExecRole"]["Properties"]
+        assert "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy" \
+            in exec_role["ManagedPolicyArns"]
+        exec_policies = {p["PolicyName"] for p in exec_role["Policies"]}
+        assert "SecretsManagerAccess" in exec_policies
+
+        assert "MaestroTaskRole" in resources
+        task_role = resources["MaestroTaskRole"]["Properties"]
+        task_policies = {p["PolicyName"] for p in task_role["Policies"]}
+        assert "LogAccess" in task_policies
+        assert "BedrockAccess" not in task_policies
+
 
 if __name__ == '__main__':
     unittest.main()

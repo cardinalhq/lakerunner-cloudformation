@@ -20,6 +20,9 @@ from troposphere import (
     Equals, Export, GetAtt, If, ImportValue, Output, Parameter, Ref, Split,
     Sub, Tags, Template,
 )
+from troposphere.iam import Policy, Role
+from troposphere.logs import LogGroup
+from troposphere.secretsmanager import GenerateSecretString, Secret
 
 
 def load_maestro_config(config_file="lakerunner-maestro-defaults.yaml"):
@@ -169,6 +172,98 @@ def create_maestro_template():
     # -----------------------
     t.add_condition("IsInternetFacing", Equals(Ref(AlbScheme), "internet-facing"))
 
+    # -----------------------
+    # Database password secret
+    # -----------------------
+    maestro_db_secret = t.add_resource(Secret(
+        "MaestroDbSecret",
+        Name=Sub("${AWS::StackName}-maestro-db"),
+        Description="Maestro PostgreSQL user password",
+        GenerateSecretString=GenerateSecretString(
+            SecretStringTemplate='{"username":"maestro"}',
+            GenerateStringKey="password",
+            ExcludeCharacters=' !"#$%&\'()*+,./:;<=>?@[\\]^`{|}~',
+            PasswordLength=32,
+        ),
+    ))
+
+    # -----------------------
+    # Log groups
+    # -----------------------
+    db_init_lg = t.add_resource(LogGroup(
+        "MaestroDbInitLogGroup",
+        LogGroupName=Sub("/ecs/${AWS::StackName}/db-init"),
+        RetentionInDays=14,
+    ))
+    mcp_gw_lg = t.add_resource(LogGroup(
+        "MaestroMcpGatewayLogGroup",
+        LogGroupName=Sub("/ecs/${AWS::StackName}/mcp-gateway"),
+        RetentionInDays=14,
+    ))
+    maestro_lg = t.add_resource(LogGroup(
+        "MaestroServerLogGroup",
+        LogGroupName=Sub("/ecs/${AWS::StackName}/maestro"),
+        RetentionInDays=14,
+    ))
+
+    # -----------------------
+    # IAM: execution and task roles
+    # -----------------------
+    exec_role = t.add_resource(Role(
+        "MaestroExecRole",
+        RoleName=Sub("${AWS::StackName}-exec-role"),
+        AssumeRolePolicyDocument={
+            "Version": "2012-10-17",
+            "Statement": [{
+                "Effect": "Allow",
+                "Principal": {"Service": "ecs-tasks.amazonaws.com"},
+                "Action": "sts:AssumeRole",
+            }],
+        },
+        ManagedPolicyArns=[
+            "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy",
+        ],
+        Policies=[Policy(
+            PolicyName="SecretsManagerAccess",
+            PolicyDocument={
+                "Version": "2012-10-17",
+                "Statement": [{
+                    "Effect": "Allow",
+                    "Action": ["secretsmanager:GetSecretValue"],
+                    "Resource": [
+                        Sub("arn:aws:secretsmanager:${AWS::Region}:"
+                            "${AWS::AccountId}:secret:${AWS::StackName}-*"),
+                        Sub("${S}*", S=DbSecretArnValue),
+                    ],
+                }],
+            },
+        )],
+    ))
+
+    task_role = t.add_resource(Role(
+        "MaestroTaskRole",
+        RoleName=Sub("${AWS::StackName}-task-role"),
+        AssumeRolePolicyDocument={
+            "Version": "2012-10-17",
+            "Statement": [{
+                "Effect": "Allow",
+                "Principal": {"Service": "ecs-tasks.amazonaws.com"},
+                "Action": "sts:AssumeRole",
+            }],
+        },
+        Policies=[Policy(
+            PolicyName="LogAccess",
+            PolicyDocument={
+                "Version": "2012-10-17",
+                "Statement": [{
+                    "Effect": "Allow",
+                    "Action": ["logs:CreateLogStream", "logs:PutLogEvents"],
+                    "Resource": "*",
+                }],
+            },
+        )],
+    ))
+
     # Stash for subsequent sections in this same function as it grows.
     t._maestro = {
         "ports": ports,
@@ -197,6 +292,14 @@ def create_maestro_template():
             "DbEndpoint": DbEndpointValue,
             "DbPort": DbPortValue,
             "DbSecretArn": DbSecretArnValue,
+        },
+        "resources": {
+            "MaestroDbSecret": maestro_db_secret,
+            "DbInitLogGroup": db_init_lg,
+            "McpGatewayLogGroup": mcp_gw_lg,
+            "MaestroServerLogGroup": maestro_lg,
+            "ExecRole": exec_role,
+            "TaskRole": task_role,
         },
     }
 
