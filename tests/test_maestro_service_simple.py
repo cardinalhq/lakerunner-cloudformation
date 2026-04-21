@@ -149,6 +149,52 @@ class TestMaestroTemplateSimple(unittest.TestCase):
         assert listener["Port"] == "80"
         assert listener["Protocol"] == "HTTP"
 
+    @patch('lakerunner_maestro_service.load_maestro_config')
+    def test_container_definitions_exist_on_task(self, mock_load_config):
+        mock_load_config.return_value = MOCK_CONFIG
+        from lakerunner_maestro_service import create_maestro_template
+
+        resources = json.loads(create_maestro_template().to_json())["Resources"]
+        assert "MaestroTaskDef" in resources
+        containers = resources["MaestroTaskDef"]["Properties"]["ContainerDefinitions"]
+        names = [c["Name"] for c in containers]
+        assert names == ["DbInit", "McpGateway", "Maestro"]
+
+        by_name = {c["Name"]: c for c in containers}
+
+        db_init = by_name["DbInit"]
+        assert db_init["Essential"] is False
+        db_init_envs = {e["Name"]: e["Value"] for e in db_init["Environment"]}
+        assert db_init_envs["GRAFANA_DB_NAME"] == "maestro"
+        assert db_init_envs["GRAFANA_DB_USER"] == "maestro"
+
+        mcp = by_name["McpGateway"]
+        assert mcp["Command"] == ["/app/entrypoint.sh", "mcp-gateway"]
+        mcp_ports = [p["ContainerPort"] for p in mcp["PortMappings"]]
+        assert 8080 in mcp_ports
+        assert mcp["User"] == "65532"
+        assert mcp["ReadonlyRootFilesystem"] is True
+        mcp_deps = {d["ContainerName"]: d["Condition"] for d in mcp["DependsOn"]}
+        assert mcp_deps["DbInit"] == "SUCCESS"
+
+        maestro = by_name["Maestro"]
+        assert maestro["Essential"] is True
+        maestro_ports = [p["ContainerPort"] for p in maestro["PortMappings"]]
+        assert 4200 in maestro_ports
+        m_deps = {d["ContainerName"]: d["Condition"] for d in maestro["DependsOn"]}
+        assert m_deps["DbInit"] == "SUCCESS"
+        assert m_deps["McpGateway"] == "HEALTHY"
+        m_envs = {e["Name"]: e["Value"] for e in maestro["Environment"]}
+        assert m_envs["MCP_GATEWAY_URL"] == "http://localhost:8080"
+        assert m_envs["PORT"] == "4200"
+        assert "MAESTRO_DATABASE_URL" in m_envs
+
+        maestro_env_names = set(m_envs.keys())
+        for name in ["OIDC_ISSUER_URL", "OIDC_AUDIENCE", "OIDC_SUPERADMIN_GROUP",
+                     "OIDC_JWKS_URL", "OIDC_SUPERADMIN_EMAILS",
+                     "OIDC_TRUST_UNVERIFIED_EMAILS", "MAESTRO_BASE_URL"]:
+            assert name in maestro_env_names, f"missing Maestro env {name}"
+
 
 if __name__ == '__main__':
     unittest.main()

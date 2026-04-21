@@ -21,6 +21,18 @@ from troposphere import (
     Sub, Tags, Template,
 )
 from troposphere.ec2 import SecurityGroup, SecurityGroupIngress
+from troposphere.ecs import (
+    ContainerDefinition,
+    Environment,
+    HealthCheck,
+    LogConfiguration,
+    MountPoint,
+    PortMapping,
+    RuntimePlatform,
+    Secret as EcsSecret,
+    TaskDefinition,
+    Volume,
+)
 from troposphere.elasticloadbalancingv2 import (
     Action as AlbAction,
     Listener,
@@ -394,6 +406,182 @@ def create_maestro_template():
         "Tg": tg,
         "Listener": listener,
     })
+
+    # -----------------------
+    # Shared env / secret helpers
+    # -----------------------
+    def _db_env():
+        return [
+            Environment(Name="MAESTRO_DB_HOST", Value=DbEndpointValue),
+            Environment(Name="MAESTRO_DB_PORT", Value=DbPortValue),
+            Environment(Name="MAESTRO_DB_NAME", Value="maestro"),
+            Environment(Name="MAESTRO_DB_USER", Value="maestro"),
+            Environment(Name="MAESTRO_DB_SSLMODE", Value="require"),
+            Environment(
+                Name="MAESTRO_DATABASE_URL",
+                Value=("postgresql://$(MAESTRO_DB_USER):$(MAESTRO_DB_PASSWORD)@"
+                       "$(MAESTRO_DB_HOST):$(MAESTRO_DB_PORT)/$(MAESTRO_DB_NAME)"
+                       "?sslmode=$(MAESTRO_DB_SSLMODE)"),
+            ),
+        ]
+
+    def _db_password_secret():
+        return EcsSecret(
+            Name="MAESTRO_DB_PASSWORD",
+            ValueFrom=Sub("${S}:password::", S=Ref(maestro_db_secret)),
+        )
+
+    # -----------------------
+    # DbInit container (generic psql bootstrapper)
+    # -----------------------
+    db_init_image = images.get(
+        "db_init", "ghcr.io/cardinalhq/initcontainer-grafana:latest"
+    )
+
+    db_init_container = ContainerDefinition(
+        Name="DbInit",
+        Image=db_init_image,
+        Essential=False,
+        Environment=[
+            Environment(Name="PGHOST", Value=DbEndpointValue),
+            Environment(Name="PGPORT", Value=DbPortValue),
+            Environment(Name="PGDATABASE", Value="postgres"),
+            Environment(Name="PGSSLMODE", Value="require"),
+            Environment(Name="GRAFANA_DB_NAME", Value="maestro"),
+            Environment(Name="GRAFANA_DB_USER", Value="maestro"),
+        ],
+        Secrets=[
+            EcsSecret(
+                Name="PGUSER",
+                ValueFrom=Sub("${S}:username::", S=DbSecretArnValue),
+            ),
+            EcsSecret(
+                Name="PGPASSWORD",
+                ValueFrom=Sub("${S}:password::", S=DbSecretArnValue),
+            ),
+            EcsSecret(
+                Name="GRAFANA_DB_PASSWORD",
+                ValueFrom=Sub("${S}:password::", S=Ref(maestro_db_secret)),
+            ),
+        ],
+        LogConfiguration=LogConfiguration(
+            LogDriver="awslogs",
+            Options={
+                "awslogs-group": Ref(db_init_lg),
+                "awslogs-region": Ref("AWS::Region"),
+                "awslogs-stream-prefix": "db-init",
+            },
+        ),
+    )
+
+    # -----------------------
+    # McpGateway container
+    # -----------------------
+    mcp_port = ports.get("mcp_gateway", 8080)
+    mcp_debug_port = ports.get("mcp_gateway_debug", 9090)
+
+    mcp_container = ContainerDefinition(
+        Name="McpGateway",
+        Image=Ref(MaestroImage),
+        Essential=True,
+        User="65532",
+        ReadonlyRootFilesystem=True,
+        Command=["/app/entrypoint.sh", "mcp-gateway"],
+        PortMappings=[
+            PortMapping(ContainerPort=mcp_port, Protocol="tcp"),
+            PortMapping(ContainerPort=mcp_debug_port, Protocol="tcp"),
+        ],
+        Environment=_db_env() + [
+            Environment(Name="MCP_PORT", Value=str(mcp_port)),
+            Environment(Name="MCP_DEBUG_PORT", Value=str(mcp_debug_port)),
+        ],
+        Secrets=[_db_password_secret()],
+        HealthCheck=HealthCheck(
+            Command=["CMD-SHELL",
+                     f"wget --no-verbose --tries=1 --spider "
+                     f"http://localhost:{mcp_port}/healthz || exit 1"],
+            Interval=30, Timeout=5, Retries=3, StartPeriod=30,
+        ),
+        DependsOn=[{"ContainerName": "DbInit", "Condition": "SUCCESS"}],
+        LogConfiguration=LogConfiguration(
+            LogDriver="awslogs",
+            Options={
+                "awslogs-group": Ref(mcp_gw_lg),
+                "awslogs-region": Ref("AWS::Region"),
+                "awslogs-stream-prefix": "mcp-gateway",
+            },
+        ),
+    )
+
+    # -----------------------
+    # Maestro container
+    # -----------------------
+    maestro_env = _db_env() + [
+        Environment(Name="MCP_GATEWAY_URL",
+                    Value=f"http://localhost:{mcp_port}"),
+        Environment(Name="PORT", Value=str(maestro_port)),
+        Environment(Name="MAESTRO_BASE_URL", Value=Ref(MaestroBaseUrl)),
+        Environment(Name="OIDC_ISSUER_URL", Value=Ref(OidcIssuerUrl)),
+        Environment(Name="OIDC_AUDIENCE", Value=Ref(OidcAudience)),
+        Environment(Name="OIDC_SUPERADMIN_GROUP", Value=Ref(OidcSuperadminGroup)),
+        Environment(Name="OIDC_JWKS_URL", Value=Ref(OidcJwksUrl)),
+        Environment(Name="OIDC_SUPERADMIN_EMAILS", Value=Ref(OidcSuperadminEmails)),
+        Environment(Name="OIDC_TRUST_UNVERIFIED_EMAILS",
+                    Value=Ref(OidcTrustUnverifiedEmails)),
+    ]
+
+    maestro_container = ContainerDefinition(
+        Name="Maestro",
+        Image=Ref(MaestroImage),
+        Essential=True,
+        User="65532",
+        ReadonlyRootFilesystem=True,
+        PortMappings=[PortMapping(ContainerPort=maestro_port, Protocol="tcp")],
+        Environment=maestro_env,
+        Secrets=[_db_password_secret()],
+        MountPoints=[MountPoint(ContainerPath="/tmp", SourceVolume="tmp",
+                                ReadOnly=False)],
+        HealthCheck=HealthCheck(
+            Command=["CMD-SHELL",
+                     f"wget --no-verbose --tries=1 --spider "
+                     f"http://localhost:{maestro_port}/api/health || exit 1"],
+            Interval=30, Timeout=5, Retries=3, StartPeriod=60,
+        ),
+        DependsOn=[
+            {"ContainerName": "DbInit", "Condition": "SUCCESS"},
+            {"ContainerName": "McpGateway", "Condition": "HEALTHY"},
+        ],
+        LogConfiguration=LogConfiguration(
+            LogDriver="awslogs",
+            Options={
+                "awslogs-group": Ref(maestro_lg),
+                "awslogs-region": Ref("AWS::Region"),
+                "awslogs-stream-prefix": "maestro",
+            },
+        ),
+    )
+
+    # -----------------------
+    # Task Definition
+    # -----------------------
+    task_def = t.add_resource(TaskDefinition(
+        "MaestroTaskDef",
+        Family=Sub("${AWS::StackName}-maestro"),
+        Cpu=Ref(TaskCpu),
+        Memory=Ref(TaskMemoryMiB),
+        NetworkMode="awsvpc",
+        RequiresCompatibilities=["FARGATE"],
+        ExecutionRoleArn=GetAtt(exec_role, "Arn"),
+        TaskRoleArn=GetAtt(task_role, "Arn"),
+        ContainerDefinitions=[db_init_container, mcp_container, maestro_container],
+        Volumes=[Volume(Name="tmp")],
+        RuntimePlatform=RuntimePlatform(
+            CpuArchitecture="ARM64",
+            OperatingSystemFamily="LINUX",
+        ),
+    ))
+
+    t._maestro["resources"]["TaskDef"] = task_def
 
     return t
 
