@@ -22,14 +22,18 @@ from troposphere import (
 )
 from troposphere.ec2 import SecurityGroup, SecurityGroupIngress
 from troposphere.ecs import (
+    AwsvpcConfiguration,
     ContainerDefinition,
     Environment,
     HealthCheck,
+    LoadBalancer as EcsLoadBalancer,
     LogConfiguration,
     MountPoint,
+    NetworkConfiguration,
     PortMapping,
     RuntimePlatform,
     Secret as EcsSecret,
+    Service,
     TaskDefinition,
     Volume,
 )
@@ -582,6 +586,69 @@ def create_maestro_template():
     ))
 
     t._maestro["resources"]["TaskDef"] = task_def
+
+    # -----------------------
+    # ECS Service
+    # -----------------------
+    service = t.add_resource(Service(
+        "MaestroService",
+        ServiceName=Sub("${AWS::StackName}-maestro"),
+        Cluster=ClusterArnValue,
+        TaskDefinition=Ref(task_def),
+        LaunchType="FARGATE",
+        DesiredCount=1,
+        NetworkConfiguration=NetworkConfiguration(
+            AwsvpcConfiguration=AwsvpcConfiguration(
+                Subnets=PrivateSubnetsValue,
+                SecurityGroups=[TaskSecurityGroupIdValue],
+                AssignPublicIp="DISABLED",
+            ),
+        ),
+        LoadBalancers=[EcsLoadBalancer(
+            ContainerName="Maestro",
+            ContainerPort=maestro_port,
+            TargetGroupArn=Ref(tg),
+        )],
+        DependsOn=["MaestroListener"],
+        EnableExecuteCommand=True,
+        EnableECSManagedTags=True,
+        PropagateTags="SERVICE",
+        Tags=Tags(
+            Name=Sub("${AWS::StackName}-maestro"),
+            ManagedBy="Lakerunner",
+            Environment=Ref("AWS::StackName"),
+            Component="Service",
+        ),
+    ))
+
+    # -----------------------
+    # Outputs
+    # -----------------------
+    t.add_output(Output(
+        "MaestroAlbDNS",
+        Value=GetAtt(alb, "DNSName"),
+        Export=Export(name=Sub("${AWS::StackName}-MaestroAlbDNS")),
+    ))
+    t.add_output(Output(
+        "MaestroAlbArn",
+        Value=Ref(alb),
+        Export=Export(name=Sub("${AWS::StackName}-MaestroAlbArn")),
+    ))
+    t.add_output(Output(
+        "MaestroServiceArn",
+        Value=Ref(service),
+        Export=Export(name=Sub("${AWS::StackName}-MaestroServiceArn")),
+    ))
+    t.add_output(Output(
+        "MaestroDbSecretArn",
+        Value=Ref(maestro_db_secret),
+        Export=Export(name=Sub("${AWS::StackName}-MaestroDbSecretArn")),
+    ))
+    t.add_output(Output(
+        "MaestroUrl",
+        Description="URL to access the Maestro UI/API",
+        Value=Sub("http://${Dns}", Dns=GetAtt(alb, "DNSName")),
+    ))
 
     return t
 

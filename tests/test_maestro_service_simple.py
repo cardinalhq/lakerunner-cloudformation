@@ -195,6 +195,27 @@ class TestMaestroTemplateSimple(unittest.TestCase):
                      "OIDC_TRUST_UNVERIFIED_EMAILS", "MAESTRO_BASE_URL"]:
             assert name in maestro_env_names, f"missing Maestro env {name}"
 
+    @patch('lakerunner_maestro_service.load_maestro_config')
+    def test_service_and_outputs(self, mock_load_config):
+        mock_load_config.return_value = MOCK_CONFIG
+        from lakerunner_maestro_service import create_maestro_template
+
+        template_dict = json.loads(create_maestro_template().to_json())
+        resources = template_dict["Resources"]
+
+        assert "MaestroService" in resources
+        svc = resources["MaestroService"]["Properties"]
+        assert svc["LaunchType"] == "FARGATE"
+        assert svc["DesiredCount"] == 1
+        assert svc["LoadBalancers"][0]["ContainerName"] == "Maestro"
+        assert svc["LoadBalancers"][0]["ContainerPort"] == 4200
+        assert resources["MaestroService"]["DependsOn"] == ["MaestroListener"]
+
+        outputs = template_dict["Outputs"]
+        for name in ["MaestroAlbDNS", "MaestroAlbArn", "MaestroServiceArn",
+                     "MaestroUrl", "MaestroDbSecretArn"]:
+            assert name in outputs
+
 
 if __name__ == '__main__':
     unittest.main()
