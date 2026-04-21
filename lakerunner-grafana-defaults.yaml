@@ -1,5 +1,7 @@
 # Grafana configuration for Lakerunner deployment
-# This file contains configuration for Grafana, MCP Gateway, and Conductor Server
+# This file contains configuration for Grafana only. The MCP Gateway,
+# Conductor, and Maestro sidecars have moved to a separate stack
+# (see lakerunner-maestro-defaults.yaml).
 
 # Database configuration (used by Setup stack)
 database:
@@ -10,9 +12,6 @@ database:
 images:
   grafana: "grafana/grafana:latest"
   grafana_init: "ghcr.io/cardinalhq/initcontainer-grafana:latest"
-  mcp_gateway: "ghcr.io/cardinalhq/mcp-gateway:v0.2.8"
-  conductor_server: "ghcr.io/cardinalhq/conductor-server:v0.1.15"
-  maestro_server: "ghcr.io/cardinalhq/maestro:v0.1.0"
 
 # Task-level resource allocation (shared by all containers)
 task:
@@ -42,28 +41,6 @@ grafana:
   health_check:
     type: "curl"
     command: ["curl", "-f", "http://localhost:3000/api/health"]
-
-# MCP Gateway configuration (sidecar container)
-mcp_gateway:
-  port: 8080
-  environment:
-    HOME: "/tmp"
-    AWS_REGION: "us-east-1"
-
-# Conductor Server configuration (sidecar container)
-conductor_server:
-  port: 4100
-  environment:
-    MCP_GATEWAY_URL: "http://localhost:8080"
-    WORKFLOW_LLM_PROVIDER: "bedrock"
-
-# Maestro Server configuration (sidecar container)
-maestro_server:
-  port: 3100
-  environment:
-    PORT: "3100"
-    MCP_GATEWAY_URL: "http://localhost:8080"
-    WORKFLOW_LLM_PROVIDER: "bedrock"
 
 # API Keys configuration (for datasource setup)
 api_keys:
