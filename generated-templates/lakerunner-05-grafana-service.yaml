@@ -2,7 +2,7 @@ Conditions:
   IsInternetFacing: !Equals
     - !Ref 'AlbScheme'
     - internet-facing
-Description: 'Lakerunner Grafana + AI: Grafana with MCP Gateway, Conductor Server, and Maestro sidecars, ALB, PostgreSQL storage, and pre-configured plugins'
+Description: 'Lakerunner Grafana: Grafana with pre-configured plugins, PostgreSQL storage, and ALB. The Cardinal datasource is wired to the Query API.'
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
@@ -13,9 +13,8 @@ Metadata:
           - QueryApiUrl
           - AlbScheme
       - Label:
-          default: AI Configuration
+          default: Datasource
         Parameters:
-          - BedrockModel
           - LakerunnerApiKey
       - Label:
           default: Grafana Maintenance
@@ -24,8 +23,6 @@ Metadata:
     ParameterLabels:
       AlbScheme:
         default: ALB Scheme
-      BedrockModel:
-        default: Bedrock Model
       CommonInfraStackName:
         default: Common Infra Stack Name
       GrafanaResetToken:
@@ -65,16 +62,6 @@ Parameters:
     Default: internal
     Description: 'Load balancer scheme: ''internet-facing'' for external access or ''internal'' for internal access only.'
     Type: String
-  BedrockModel:
-    AllowedValues:
-      - us.anthropic.claude-sonnet-4-6
-      - eu.anthropic.claude-sonnet-4-6
-      - au.anthropic.claude-sonnet-4-6
-      - jp.anthropic.claude-sonnet-4-6
-      - global.anthropic.claude-sonnet-4-6
-    Default: us.anthropic.claude-sonnet-4-6
-    Description: Bedrock model inference profile for AI features. Choose a geographic profile to control where requests are routed.
-    Type: String
   CommonInfraStackName:
     Description: 'REQUIRED: Name of the CommonInfra stack to import infrastructure values from.'
     Type: String
@@ -84,27 +71,12 @@ Parameters:
     Type: String
   LakerunnerApiKey:
     Default: f70603aa00e6f67999cc66e336134887
-    Description: API key for Lakerunner services. Defaults to the standard key.
+    Description: API key injected into the Cardinal datasource's secureJsonData.
     Type: String
   QueryApiUrl:
     Description: 'REQUIRED: Full URL to the Query API endpoint (e.g., http://alb-dns-name.region.elb.amazonaws.com:7101)'
     Type: String
 Resources:
-  AiInternalSecret:
-    Properties:
-      Description: Internal API key for communication between AI services
-      GenerateSecretString:
-        ExcludePunctuation: true
-        GenerateStringKey: api_key
-        PasswordLength: 48
-        SecretStringTemplate: '{}'
-      Name: !Sub '${AWS::StackName}-ai-internal'
-    Type: AWS::SecretsManager::Secret
-  ConductorServerLogGroup:
-    Properties:
-      LogGroupName: !Sub '/ecs/${AWS::StackName}/conductor-server'
-      RetentionInDays: 14
-    Type: AWS::Logs::LogGroup
   GrafanaAlb:
     Properties:
       Scheme: !Ref 'AlbScheme'
@@ -163,9 +135,10 @@ Resources:
               customPath: ${QUERY_API_URL}
             name: Cardinal
             secureJsonData:
-              apiKey: f70603aa00e6f67999cc66e336134887
+              apiKey: ${LAKERUNNER_API_KEY}
             type: cardinalhq-lakerunner-datasource
-        - QUERY_API_URL: !Ref 'QueryApiUrl'
+        - LAKERUNNER_API_KEY: !Ref 'LakerunnerApiKey'
+          QUERY_API_URL: !Ref 'QueryApiUrl'
     Type: AWS::SSM::Parameter
   GrafanaDbSecret:
     Properties:
@@ -347,140 +320,6 @@ Resources:
             - Condition: SUCCESS
               ContainerName: GrafanaInit
           Environment:
-            - Name: LAKERUNNER_API_URL
-              Value: !Ref 'QueryApiUrl'
-            - Name: HOME
-              Value: /tmp
-            - Name: AWS_REGION
-              Value: us-east-1
-          Essential: true
-          HealthCheck:
-            Command:
-              - CMD-SHELL
-              - wget --no-verbose --tries=1 --spider http://localhost:8080/healthz || exit 1
-            Interval: 30
-            Retries: 3
-            StartPeriod: 30
-            Timeout: 5
-          Image: ghcr.io/cardinalhq/mcp-gateway:v0.2.8
-          LogConfiguration:
-            LogDriver: awslogs
-            Options:
-              awslogs-group: !Ref 'McpGatewayLogGroup'
-              awslogs-region: !Ref 'AWS::Region'
-              awslogs-stream-prefix: mcp-gateway
-          Name: McpGateway
-          PortMappings:
-            - ContainerPort: 8080
-              Protocol: tcp
-          Secrets:
-            - Name: LAKERUNNER_API_KEY
-              ValueFrom: !Ref 'LakerunnerApiKeySecret'
-            - Name: CARDINALHQ_API_KEY
-              ValueFrom: !Ref 'LakerunnerApiKeySecret'
-            - Name: MCP_API_KEY
-              ValueFrom: !Sub
-                - '${SecretArn}:api_key::'
-                - SecretArn: !Ref 'AiInternalSecret'
-          User: '65532'
-        - DependsOn:
-            - Condition: SUCCESS
-              ContainerName: GrafanaInit
-            - Condition: HEALTHY
-              ContainerName: McpGateway
-          Environment:
-            - Name: AWS_BEDROCK_MODEL
-              Value: !Ref 'BedrockModel'
-            - Name: WORKFLOW_BEDROCK_INFERENCE_MODEL
-              Value: !Ref 'BedrockModel'
-            - Name: AWS_REGION
-              Value: !Ref 'AWS::Region'
-            - Name: MCP_GATEWAY_URL
-              Value: http://localhost:8080
-            - Name: WORKFLOW_LLM_PROVIDER
-              Value: bedrock
-          Essential: true
-          HealthCheck:
-            Command:
-              - CMD-SHELL
-              - wget --no-verbose --tries=1 --spider http://localhost:4100/api/health || exit 1
-            Interval: 30
-            Retries: 3
-            StartPeriod: 30
-            Timeout: 10
-          Image: ghcr.io/cardinalhq/conductor-server:v0.1.15
-          LogConfiguration:
-            LogDriver: awslogs
-            Options:
-              awslogs-group: !Ref 'ConductorServerLogGroup'
-              awslogs-region: !Ref 'AWS::Region'
-              awslogs-stream-prefix: conductor-server
-          Name: ConductorServer
-          PortMappings:
-            - ContainerPort: 4100
-              Protocol: tcp
-          Secrets:
-            - Name: LAKERUNNER_API_KEY
-              ValueFrom: !Ref 'LakerunnerApiKeySecret'
-            - Name: CARDINALHQ_API_KEY
-              ValueFrom: !Ref 'LakerunnerApiKeySecret'
-            - Name: MCP_API_KEY
-              ValueFrom: !Sub
-                - '${SecretArn}:api_key::'
-                - SecretArn: !Ref 'AiInternalSecret'
-          User: '65532'
-        - DependsOn:
-            - Condition: SUCCESS
-              ContainerName: GrafanaInit
-            - Condition: HEALTHY
-              ContainerName: McpGateway
-          Environment:
-            - Name: AWS_BEDROCK_MODEL
-              Value: !Ref 'BedrockModel'
-            - Name: WORKFLOW_BEDROCK_INFERENCE_MODEL
-              Value: !Ref 'BedrockModel'
-            - Name: AWS_REGION
-              Value: !Ref 'AWS::Region'
-            - Name: PORT
-              Value: '3100'
-            - Name: MCP_GATEWAY_URL
-              Value: http://localhost:8080
-            - Name: WORKFLOW_LLM_PROVIDER
-              Value: bedrock
-          Essential: true
-          HealthCheck:
-            Command:
-              - CMD-SHELL
-              - wget --no-verbose --tries=1 --spider http://localhost:3100/health || exit 1
-            Interval: 30
-            Retries: 3
-            StartPeriod: 30
-            Timeout: 10
-          Image: ghcr.io/cardinalhq/maestro:v0.1.0
-          LogConfiguration:
-            LogDriver: awslogs
-            Options:
-              awslogs-group: !Ref 'MaestroServerLogGroup'
-              awslogs-region: !Ref 'AWS::Region'
-              awslogs-stream-prefix: maestro-server
-          Name: MaestroServer
-          PortMappings:
-            - ContainerPort: 3100
-              Protocol: tcp
-          Secrets:
-            - Name: LAKERUNNER_API_KEY
-              ValueFrom: !Ref 'LakerunnerApiKeySecret'
-            - Name: CARDINALHQ_API_KEY
-              ValueFrom: !Ref 'LakerunnerApiKeySecret'
-            - Name: MCP_API_KEY
-              ValueFrom: !Sub
-                - '${SecretArn}:api_key::'
-                - SecretArn: !Ref 'AiInternalSecret'
-          User: '65532'
-        - DependsOn:
-            - Condition: SUCCESS
-              ContainerName: GrafanaInit
-          Environment:
             - Name: BUMP_REVISION
               Value: '1'
             - Name: OTEL_SERVICE_NAME
@@ -589,15 +428,6 @@ Resources:
                 Resource: '*'
             Version: '2012-10-17'
           PolicyName: LogAccess
-        - PolicyDocument:
-            Statement:
-              - Action:
-                  - bedrock:InvokeModel
-                  - bedrock:InvokeModelWithResponseStream
-                Effect: Allow
-                Resource: '*'
-            Version: '2012-10-17'
-          PolicyName: BedrockAccess
       RoleName: !Sub '${AWS::StackName}-task-role'
     Type: AWS::IAM::Role
   GrafanaTg:
@@ -627,22 +457,6 @@ Resources:
           - ${CommonInfraStackName}-VpcId
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
-  LakerunnerApiKeySecret:
-    Properties:
-      Description: Lakerunner API key for AI services
-      Name: !Sub '${AWS::StackName}-lakerunner-api-key'
-      SecretString: !Ref 'LakerunnerApiKey'
-    Type: AWS::SecretsManager::Secret
-  MaestroServerLogGroup:
-    Properties:
-      LogGroupName: !Sub '/ecs/${AWS::StackName}/maestro-server'
-      RetentionInDays: 14
-    Type: AWS::Logs::LogGroup
-  McpGatewayLogGroup:
-    Properties:
-      LogGroupName: !Sub '/ecs/${AWS::StackName}/mcp-gateway'
-      RetentionInDays: 14
-    Type: AWS::Logs::LogGroup
   TaskFromGrafanaAlb3000:
     Properties:
       Description: Grafana ALB to tasks 3000
