@@ -1,0 +1,17 @@
+# Defaults for the Maestro + MCP Gateway stack
+#
+# Image pins and port settings used by lakerunner_maestro_service.py.
+
+images:
+  maestro: "public.ecr.aws/cardinalhq.io/maestro:v0.23.0"
+  db_init: "ghcr.io/cardinalhq/initcontainer-grafana:latest"
+
+task:
+  cpu: 1024
+  memory_mib: 2048
+
+ports:
+  maestro: 4200
+  mcp_gateway: 8080
+  mcp_gateway_debug: 9090
+  alb_listener: 80
