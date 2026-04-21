@@ -126,6 +126,29 @@ class TestMaestroTemplateSimple(unittest.TestCase):
         assert "LogAccess" in task_policies
         assert "BedrockAccess" not in task_policies
 
+    @patch('lakerunner_maestro_service.load_maestro_config')
+    def test_alb_resources(self, mock_load_config):
+        mock_load_config.return_value = MOCK_CONFIG
+        from lakerunner_maestro_service import create_maestro_template
+
+        resources = json.loads(create_maestro_template().to_json())["Resources"]
+
+        assert "MaestroAlbSecurityGroup" in resources
+        assert "MaestroAlbListenerIngress" in resources
+        assert "MaestroTaskFromAlbIngress" in resources
+        assert "MaestroAlb" in resources
+        assert "MaestroTg" in resources
+        assert "MaestroListener" in resources
+
+        tg = resources["MaestroTg"]["Properties"]
+        assert tg["Port"] == 4200
+        assert tg["HealthCheckPath"] == "/api/health"
+        assert tg["TargetType"] == "ip"
+
+        listener = resources["MaestroListener"]["Properties"]
+        assert listener["Port"] == "80"
+        assert listener["Protocol"] == "HTTP"
+
 
 if __name__ == '__main__':
     unittest.main()

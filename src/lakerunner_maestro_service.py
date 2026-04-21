@@ -20,6 +20,15 @@ from troposphere import (
     Equals, Export, GetAtt, If, ImportValue, Output, Parameter, Ref, Split,
     Sub, Tags, Template,
 )
+from troposphere.ec2 import SecurityGroup, SecurityGroupIngress
+from troposphere.elasticloadbalancingv2 import (
+    Action as AlbAction,
+    Listener,
+    LoadBalancer,
+    Matcher,
+    TargetGroup,
+    TargetGroupAttribute,
+)
 from troposphere.iam import Policy, Role
 from troposphere.logs import LogGroup
 from troposphere.secretsmanager import GenerateSecretString, Secret
@@ -302,6 +311,89 @@ def create_maestro_template():
             "TaskRole": task_role,
         },
     }
+
+    # -----------------------
+    # ALB security group + ingress rules
+    # -----------------------
+    maestro_port = ports.get("maestro", 4200)
+    listener_port = ports.get("alb_listener", 80)
+
+    alb_sg = t.add_resource(SecurityGroup(
+        "MaestroAlbSecurityGroup",
+        GroupDescription="Security group for Maestro ALB",
+        VpcId=VpcIdValue,
+        SecurityGroupEgress=[{
+            "IpProtocol": "-1",
+            "CidrIp": "0.0.0.0/0",
+            "Description": "Allow all outbound",
+        }],
+    ))
+
+    t.add_resource(SecurityGroupIngress(
+        "MaestroAlbListenerIngress",
+        GroupId=Ref(alb_sg),
+        IpProtocol="tcp",
+        FromPort=listener_port, ToPort=listener_port,
+        CidrIp="0.0.0.0/0",
+        Description=f"HTTP {listener_port} for Maestro ALB",
+    ))
+
+    t.add_resource(SecurityGroupIngress(
+        "MaestroTaskFromAlbIngress",
+        GroupId=TaskSecurityGroupIdValue,
+        IpProtocol="tcp",
+        FromPort=maestro_port, ToPort=maestro_port,
+        SourceSecurityGroupId=Ref(alb_sg),
+        Description=f"Maestro ALB -> task port {maestro_port}",
+    ))
+
+    # -----------------------
+    # ALB, target group, listener
+    # -----------------------
+    alb = t.add_resource(LoadBalancer(
+        "MaestroAlb",
+        Scheme=Ref(AlbScheme),
+        SecurityGroups=[Ref(alb_sg)],
+        Subnets=If("IsInternetFacing", PublicSubnetsValue, PrivateSubnetsValue),
+        Type="application",
+    ))
+
+    tg = t.add_resource(TargetGroup(
+        "MaestroTg",
+        Name=If("IsInternetFacing",
+                Sub("${AWS::StackName}-ext"),
+                Sub("${AWS::StackName}-int")),
+        Port=maestro_port, Protocol="HTTP",
+        VpcId=VpcIdValue,
+        TargetType="ip",
+        HealthCheckPath="/api/health",
+        HealthCheckProtocol="HTTP",
+        HealthCheckIntervalSeconds=30,
+        HealthCheckTimeoutSeconds=5,
+        HealthyThresholdCount=2,
+        UnhealthyThresholdCount=3,
+        Matcher=Matcher(HttpCode="200"),
+        TargetGroupAttributes=[
+            TargetGroupAttribute(Key="stickiness.enabled", Value="false"),
+            TargetGroupAttribute(Key="deregistration_delay.timeout_seconds",
+                                 Value="30"),
+        ],
+    ))
+
+    listener = t.add_resource(Listener(
+        "MaestroListener",
+        LoadBalancerArn=Ref(alb),
+        Port=str(listener_port),
+        Protocol="HTTP",
+        DefaultActions=[AlbAction(Type="forward", TargetGroupArn=Ref(tg))],
+    ))
+
+    t._maestro["resources"].update({
+        "AlbSg": alb_sg,
+        "Alb": alb,
+        "Tg": tg,
+        "Listener": listener,
+    })
 
     return t
 
