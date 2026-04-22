@@ -449,7 +449,7 @@ def create_maestro_template():
         IpProtocol="tcp",
         FromPort=maestro_port, ToPort=maestro_port,
         SourceSecurityGroupId=Ref(alb_sg),
-        Description=f"Maestro ALB -> task port {maestro_port}",
+        Description=f"Maestro ALB to task port {maestro_port}",
     ))
 
     # -----------------------
@@ -551,7 +551,7 @@ def create_maestro_template():
         IpProtocol="tcp",
         FromPort=dex_port, ToPort=dex_port,
         SourceSecurityGroupId=Ref(alb_sg),
-        Description=f"Maestro ALB -> DEX task port {dex_port}",
+        Description=f"Maestro ALB to DEX task port {dex_port}",
     ))
 
     t._maestro["resources"].update({

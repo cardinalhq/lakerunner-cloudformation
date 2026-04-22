@@ -288,7 +288,7 @@ Resources:
   MaestroDexTaskFromAlbIngress:
     Condition: HasDex
     Properties:
-      Description: Maestro ALB -> DEX task port 5556
+      Description: Maestro ALB to DEX task port 5556
       FromPort: 5556
       GroupId: !ImportValue
         Fn::Sub:
@@ -763,7 +763,7 @@ Resources:
     Type: AWS::ECS::TaskDefinition
   MaestroTaskFromAlbIngress:
     Properties:
-      Description: Maestro ALB -> task port 4200
+      Description: Maestro ALB to task port 4200
       FromPort: 4200
       GroupId: !ImportValue
         Fn::Sub:
