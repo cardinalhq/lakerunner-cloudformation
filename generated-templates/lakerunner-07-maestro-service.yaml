@@ -1,7 +1,13 @@
 Conditions:
+  HasDex: !Equals
+    - !Ref 'DexEnabled'
+    - 'Yes'
   IsInternetFacing: !Equals
     - !Ref 'AlbScheme'
     - internet-facing
+  MaestroBaseUrlBlank: !Equals
+    - !Ref 'MaestroBaseUrl'
+    - ''
 Description: 'Lakerunner Maestro + MCP Gateway: single ECS Fargate service with a stack-local ALB. Reuses CommonInfra RDS and runs a psql init container that creates the maestro DB and user.'
 Metadata:
   AWS::CloudFormation::Interface:
@@ -21,7 +27,7 @@ Metadata:
         Parameters:
           - MaestroImage
       - Label:
-          default: OIDC (optional)
+          default: OIDC (optional, external provider)
         Parameters:
           - OidcIssuerUrl
           - OidcAudience
@@ -29,6 +35,16 @@ Metadata:
           - OidcJwksUrl
           - OidcSuperadminEmails
           - OidcTrustUnverifiedEmails
+      - Label:
+          default: DEX (optional bundled OIDC provider)
+        Parameters:
+          - DexEnabled
+          - DexAdminEmail
+          - DexAdminPasswordHash
+          - DexClientId
+          - DexPathPrefix
+          - DexImage
+          - DexInitImage
       - Label:
           default: Misc
         Parameters:
@@ -38,6 +54,20 @@ Metadata:
         default: ALB Scheme
       CommonInfraStackName:
         default: Common Infra Stack Name
+      DexAdminEmail:
+        default: DEX Admin Email
+      DexAdminPasswordHash:
+        default: DEX Admin Password (bcrypt)
+      DexClientId:
+        default: DEX Client ID
+      DexEnabled:
+        default: Enable Bundled DEX
+      DexImage:
+        default: DEX Image
+      DexInitImage:
+        default: DEX Init Image
+      DexPathPrefix:
+        default: DEX Path Prefix
       MaestroBaseUrl:
         default: Maestro Base URL
       MaestroImage:
@@ -91,9 +121,42 @@ Parameters:
   CommonInfraStackName:
     Description: 'REQUIRED: Name of the CommonInfra stack to import values from.'
     Type: String
+  DexAdminEmail:
+    Default: ''
+    Description: Email of the static DEX admin user. Required when DexEnabled=Yes.
+    Type: String
+  DexAdminPasswordHash:
+    Default: ''
+    Description: Bcrypt hash of the DEX admin password (generate out-of-band, e.g. `htpasswd -bnBC 10 "" 'secret' | tr -d ':\n'`). Required when DexEnabled=Yes.
+    NoEcho: true
+    Type: String
+  DexClientId:
+    Default: maestro-ui
+    Description: OAuth client_id DEX registers for the Maestro UI. Must match OIDC_AUDIENCE on the Maestro container (set automatically when DEX is enabled).
+    Type: String
+  DexEnabled:
+    AllowedValues:
+      - 'Yes'
+      - 'No'
+    Default: 'No'
+    Description: When 'Yes', run a bundled DEX OIDC provider as a sidecar in the Maestro task and point Maestro's OIDC settings at it. Single-replica POC-grade (in-memory storage).
+    Type: String
+  DexImage:
+    Default: ghcr.io/dexidp/dex:v2.41.1
+    Description: Container image for the bundled DEX server.
+    Type: String
+  DexInitImage:
+    Default: public.ecr.aws/docker/library/busybox:1.37
+    Description: Container image for the DEX init container (any image with POSIX 'sh' suffices; busybox by default).
+    Type: String
+  DexPathPrefix:
+    AllowedPattern: ^/[A-Za-z0-9._~%!$&'()*+,;=:@/-]*$
+    Default: /dex
+    Description: Path prefix the DEX service is served under (must start with '/'). The ALB forwards '<prefix>*' to DEX.
+    Type: String
   MaestroBaseUrl:
     Default: ''
-    Description: Optional public base URL for Maestro (forwarded as MAESTRO_BASE_URL). Leave blank to let the UI infer.
+    Description: Optional public base URL for Maestro (forwarded as MAESTRO_BASE_URL). Leave blank to auto-derive from the stack's ALB DNS when DEX is enabled.
     Type: String
   MaestroImage:
     Default: public.ecr.aws/cardinalhq.io/maestro:v0.23.0
@@ -192,6 +255,76 @@ Resources:
         SecretStringTemplate: '{"username":"maestro"}'
       Name: !Sub '${AWS::StackName}-maestro-db'
     Type: AWS::SecretsManager::Secret
+  MaestroDexInitLogGroup:
+    Condition: HasDex
+    Properties:
+      LogGroupName: !Sub '/ecs/${AWS::StackName}/dex-init'
+      RetentionInDays: 14
+    Type: AWS::Logs::LogGroup
+  MaestroDexListenerRule:
+    Condition: HasDex
+    Properties:
+      Actions:
+        - TargetGroupArn: !Ref 'MaestroDexTg'
+          Type: forward
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - !Sub
+              - ${P}
+              - P: !Ref 'DexPathPrefix'
+            - !Sub
+              - ${P}/*
+              - P: !Ref 'DexPathPrefix'
+      ListenerArn: !Ref 'MaestroListener'
+      Priority: 10
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+  MaestroDexLogGroup:
+    Condition: HasDex
+    Properties:
+      LogGroupName: !Sub '/ecs/${AWS::StackName}/dex'
+      RetentionInDays: 14
+    Type: AWS::Logs::LogGroup
+  MaestroDexTaskFromAlbIngress:
+    Condition: HasDex
+    Properties:
+      Description: Maestro ALB -> DEX task port 5556
+      FromPort: 5556
+      GroupId: !ImportValue
+        Fn::Sub:
+          - ${CommonInfraStackName}-TaskSGId
+          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+      IpProtocol: tcp
+      SourceSecurityGroupId: !Ref 'MaestroAlbSecurityGroup'
+      ToPort: 5556
+    Type: AWS::EC2::SecurityGroupIngress
+  MaestroDexTg:
+    Condition: HasDex
+    Properties:
+      HealthCheckIntervalSeconds: 30
+      HealthCheckPath: !Sub
+        - ${P}/healthz
+        - P: !Ref 'DexPathPrefix'
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      Matcher:
+        HttpCode: '200'
+      Name: !Sub '${AWS::StackName}-dex'
+      Port: 5556
+      Protocol: HTTP
+      TargetGroupAttributes:
+        - Key: stickiness.enabled
+          Value: 'false'
+        - Key: deregistration_delay.timeout_seconds
+          Value: '30'
+      TargetType: ip
+      UnhealthyThresholdCount: 3
+      VpcId: !ImportValue
+        Fn::Sub:
+          - ${CommonInfraStackName}-VpcId
+          - CommonInfraStackName: !Ref 'CommonInfraStackName'
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
   MaestroExecRole:
     Properties:
       AssumeRolePolicyDocument:
@@ -256,6 +389,12 @@ Resources:
         - ContainerName: Maestro
           ContainerPort: 4200
           TargetGroupArn: !Ref 'MaestroTg'
+        - !If
+          - HasDex
+          - ContainerName: Dex
+            ContainerPort: 5556
+            TargetGroupArn: !Ref 'MaestroDexTg'
+          - !Ref 'AWS::NoValue'
       NetworkConfiguration:
         AwsvpcConfiguration:
           AssignPublicIp: DISABLED
@@ -420,15 +559,43 @@ Resources:
             - Name: PORT
               Value: '4200'
             - Name: MAESTRO_BASE_URL
-              Value: !Ref 'MaestroBaseUrl'
+              Value: !If
+                - HasDex
+                - !If
+                  - MaestroBaseUrlBlank
+                  - !Sub
+                    - http://${Dns}
+                    - Dns: !GetAtt 'MaestroAlb.DNSName'
+                  - !Ref 'MaestroBaseUrl'
+                - !Ref 'MaestroBaseUrl'
             - Name: OIDC_ISSUER_URL
-              Value: !Ref 'OidcIssuerUrl'
+              Value: !If
+                - HasDex
+                - !Sub
+                  - ${B}${P}
+                  - B: !If
+                      - MaestroBaseUrlBlank
+                      - !Sub
+                        - http://${Dns}
+                        - Dns: !GetAtt 'MaestroAlb.DNSName'
+                      - !Ref 'MaestroBaseUrl'
+                    P: !Ref 'DexPathPrefix'
+                - !Ref 'OidcIssuerUrl'
             - Name: OIDC_AUDIENCE
-              Value: !Ref 'OidcAudience'
+              Value: !If
+                - HasDex
+                - !Ref 'DexClientId'
+                - !Ref 'OidcAudience'
             - Name: OIDC_SUPERADMIN_GROUP
               Value: !Ref 'OidcSuperadminGroup'
             - Name: OIDC_JWKS_URL
-              Value: !Ref 'OidcJwksUrl'
+              Value: !If
+                - HasDex
+                - !Sub
+                  - http://localhost:${Port}${P}/keys
+                  - P: !Ref 'DexPathPrefix'
+                    Port: '5556'
+                - !Ref 'OidcJwksUrl'
             - Name: OIDC_SUPERADMIN_EMAILS
               Value: !Ref 'OidcSuperadminEmails'
             - Name: OIDC_TRUST_UNVERIFIED_EMAILS
@@ -464,6 +631,118 @@ Resources:
                 - '${S}:password::'
                 - S: !Ref 'MaestroDbSecret'
           User: '65532'
+        - !If
+          - HasDex
+          - Command:
+              - |
+                set -eu; cat > /etc/dex/config.yaml <<EOF
+                issuer: ${DEX_ISSUER_URL}
+                storage:
+                  type: memory
+                web:
+                  http: 0.0.0.0:${DEX_PORT}
+                oauth2:
+                  skipApprovalScreen: true
+                enablePasswordDB: true
+                staticClients:
+                  - id: "${DEX_CLIENT_ID}"
+                    name: "Maestro UI"
+                    public: true
+                    redirectURIs:
+                      - "${DEX_REDIRECT_URI}"
+                staticPasswords:
+                  - email: "${DEX_ADMIN_EMAIL}"
+                    hash: "${DEX_ADMIN_HASH}"
+                    username: "admin"
+                    userID: "00000000-0000-0000-0000-000000000001"
+                EOF
+            EntryPoint:
+              - /bin/sh
+              - -c
+            Environment:
+              - Name: DEX_ISSUER_URL
+                Value: !Sub
+                  - ${B}${P}
+                  - B: !If
+                      - MaestroBaseUrlBlank
+                      - !Sub
+                        - http://${Dns}
+                        - Dns: !GetAtt 'MaestroAlb.DNSName'
+                      - !Ref 'MaestroBaseUrl'
+                    P: !Ref 'DexPathPrefix'
+              - Name: DEX_REDIRECT_URI
+                Value: !Sub
+                  - ${B}/
+                  - B: !If
+                      - MaestroBaseUrlBlank
+                      - !Sub
+                        - http://${Dns}
+                        - Dns: !GetAtt 'MaestroAlb.DNSName'
+                      - !Ref 'MaestroBaseUrl'
+              - Name: DEX_CLIENT_ID
+                Value: !Ref 'DexClientId'
+              - Name: DEX_PORT
+                Value: '5556'
+              - Name: DEX_ADMIN_EMAIL
+                Value: !Ref 'DexAdminEmail'
+              - Name: DEX_ADMIN_HASH
+                Value: !Ref 'DexAdminPasswordHash'
+            Essential: false
+            Image: !Ref 'DexInitImage'
+            LogConfiguration:
+              LogDriver: awslogs
+              Options:
+                awslogs-group: !Sub '/ecs/${AWS::StackName}/dex-init'
+                awslogs-region: !Ref 'AWS::Region'
+                awslogs-stream-prefix: dex-init
+            MountPoints:
+              - ContainerPath: /etc/dex
+                ReadOnly: false
+                SourceVolume: dex-config
+            Name: DexInit
+          - !Ref 'AWS::NoValue'
+        - !If
+          - HasDex
+          - Command:
+              - dex
+              - serve
+              - /etc/dex/config.yaml
+            DependsOn:
+              - Condition: SUCCESS
+                ContainerName: DexInit
+            Environment:
+              - Name: DEX_PATH_PREFIX
+                Value: !Ref 'DexPathPrefix'
+            Essential: true
+            HealthCheck:
+              Command:
+                - CMD-SHELL
+                - wget --no-verbose --tries=1 --spider http://localhost:5556$DEX_PATH_PREFIX/healthz || exit 1
+              Interval: 30
+              Retries: 3
+              StartPeriod: 30
+              Timeout: 5
+            Image: !Ref 'DexImage'
+            LogConfiguration:
+              LogDriver: awslogs
+              Options:
+                awslogs-group: !Sub '/ecs/${AWS::StackName}/dex'
+                awslogs-region: !Ref 'AWS::Region'
+                awslogs-stream-prefix: dex
+            MountPoints:
+              - ContainerPath: /etc/dex
+                ReadOnly: true
+                SourceVolume: dex-config
+              - ContainerPath: /tmp
+                ReadOnly: false
+                SourceVolume: tmp
+            Name: Dex
+            PortMappings:
+              - ContainerPort: 5556
+                Protocol: tcp
+            ReadonlyRootFilesystem: true
+            User: '65532'
+          - !Ref 'AWS::NoValue'
       Cpu: !Ref 'TaskCpu'
       ExecutionRoleArn: !GetAtt 'MaestroExecRole.Arn'
       Family: !Sub '${AWS::StackName}-maestro'
@@ -477,6 +756,10 @@ Resources:
       TaskRoleArn: !GetAtt 'MaestroTaskRole.Arn'
       Volumes:
         - Name: tmp
+        - !If
+          - HasDex
+          - Name: dex-config
+          - !Ref 'AWS::NoValue'
     Type: AWS::ECS::TaskDefinition
   MaestroTaskFromAlbIngress:
     Properties:

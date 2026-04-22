@@ -17,6 +17,8 @@ MOCK_CONFIG = {
     "images": {
         "maestro": "public.ecr.aws/cardinalhq.io/maestro:v0.23.0",
         "db_init": "ghcr.io/cardinalhq/initcontainer-grafana:test",
+        "dex": "ghcr.io/dexidp/dex:test",
+        "dex_init": "public.ecr.aws/docker/library/busybox:test",
     },
     "task": {"cpu": 1024, "memory_mib": 2048},
     "ports": {
@@ -24,8 +26,29 @@ MOCK_CONFIG = {
         "mcp_gateway": 8080,
         "mcp_gateway_debug": 9090,
         "alb_listener": 80,
+        "dex": 5556,
+    },
+    "dex": {
+        "path_prefix": "/dex",
+        "client_id": "maestro-ui",
     },
 }
+
+
+def _resolved_containers(containers, with_dex=False):
+    """Project the ContainerDefinitions list as if HasDex==with_dex."""
+    out = []
+    for entry in containers:
+        if isinstance(entry, dict) and "Fn::If" in entry:
+            _cond, then_v, else_v = entry["Fn::If"]
+            picked = then_v if with_dex else else_v
+            if isinstance(picked, dict) and "Ref" in picked and \
+                    picked["Ref"] == "AWS::NoValue":
+                continue
+            out.append(picked)
+        else:
+            out.append(entry)
+    return out
 
 
 class TestMaestroTemplateSimple(unittest.TestCase):
@@ -69,8 +92,17 @@ class TestMaestroTemplateSimple(unittest.TestCase):
             "OidcIssuerUrl", "OidcAudience", "OidcSuperadminGroup",
             "OidcJwksUrl", "OidcSuperadminEmails", "OidcTrustUnverifiedEmails",
             "MaestroBaseUrl",
+            "DexEnabled", "DexAdminEmail", "DexAdminPasswordHash",
+            "DexClientId", "DexPathPrefix", "DexImage", "DexInitImage",
         ]:
             assert name in parameters, f"missing parameter {name}"
+
+        assert parameters["DexEnabled"]["AllowedValues"] == ["Yes", "No"]
+        assert parameters["DexEnabled"]["Default"] == "No"
+        assert parameters["DexAdminPasswordHash"]["NoEcho"] is True
+        assert parameters["DexClientId"]["Default"] == "maestro-ui"
+        assert parameters["DexPathPrefix"]["Default"] == "/dex"
+        assert parameters["DexImage"]["Default"] == "ghcr.io/dexidp/dex:test"
 
         assert parameters["AlbScheme"]["AllowedValues"] == ["internet-facing", "internal"]
         assert parameters["AlbScheme"]["Default"] == "internal"
@@ -88,6 +120,8 @@ class TestMaestroTemplateSimple(unittest.TestCase):
 
         conditions = json.loads(create_maestro_template().to_json())["Conditions"]
         assert "IsInternetFacing" in conditions
+        assert "HasDex" in conditions
+        assert "MaestroBaseUrlBlank" in conditions
 
     @patch('lakerunner_maestro_service.load_maestro_config')
     def test_secret_and_log_groups(self, mock_load_config):
@@ -157,10 +191,13 @@ class TestMaestroTemplateSimple(unittest.TestCase):
         resources = json.loads(create_maestro_template().to_json())["Resources"]
         assert "MaestroTaskDef" in resources
         containers = resources["MaestroTaskDef"]["Properties"]["ContainerDefinitions"]
-        names = [c["Name"] for c in containers]
+        # With DEX disabled, the Fn::If wrappers resolve to AWS::NoValue and
+        # the task holds only the always-on containers.
+        resolved = _resolved_containers(containers, with_dex=False)
+        names = [c["Name"] for c in resolved]
         assert names == ["DbInit", "McpGateway", "Maestro"]
 
-        by_name = {c["Name"]: c for c in containers}
+        by_name = {c["Name"]: c for c in resolved}
 
         db_init = by_name["DbInit"]
         assert db_init["Essential"] is False
@@ -215,6 +252,167 @@ class TestMaestroTemplateSimple(unittest.TestCase):
         for name in ["MaestroAlbDNS", "MaestroAlbArn", "MaestroServiceArn",
                      "MaestroUrl", "MaestroDbSecretArn"]:
             assert name in outputs
+
+    # -----------------------
+    # DEX-specific coverage
+    # -----------------------
+
+    @patch('lakerunner_maestro_service.load_maestro_config')
+    def test_dex_resources_gated_on_has_dex_condition(self, mock_load_config):
+        """All DEX-specific resources must carry Condition: HasDex."""
+        mock_load_config.return_value = MOCK_CONFIG
+        from lakerunner_maestro_service import create_maestro_template
+
+        resources = json.loads(create_maestro_template().to_json())["Resources"]
+
+        for name in ["MaestroDexTg", "MaestroDexListenerRule",
+                     "MaestroDexTaskFromAlbIngress",
+                     "MaestroDexInitLogGroup", "MaestroDexLogGroup"]:
+            assert name in resources, f"missing DEX resource {name}"
+            assert resources[name].get("Condition") == "HasDex", \
+                f"{name} missing Condition: HasDex"
+
+    @patch('lakerunner_maestro_service.load_maestro_config')
+    def test_dex_target_group_routing(self, mock_load_config):
+        mock_load_config.return_value = MOCK_CONFIG
+        from lakerunner_maestro_service import create_maestro_template
+
+        resources = json.loads(create_maestro_template().to_json())["Resources"]
+
+        tg = resources["MaestroDexTg"]["Properties"]
+        assert tg["Port"] == 5556
+        assert tg["Protocol"] == "HTTP"
+        assert tg["TargetType"] == "ip"
+        # Health check path is a Sub of "${P}/healthz" — check the template.
+        hc = tg["HealthCheckPath"]["Fn::Sub"]
+        assert hc[0] == "${P}/healthz"
+        assert hc[1] == {"P": {"Ref": "DexPathPrefix"}}
+
+        rule = resources["MaestroDexListenerRule"]["Properties"]
+        assert rule["Priority"] == 10
+        assert rule["Actions"][0]["Type"] == "forward"
+        assert rule["Actions"][0]["TargetGroupArn"] == {"Ref": "MaestroDexTg"}
+        cond = rule["Conditions"][0]
+        assert cond["Field"] == "path-pattern"
+        # Two Subs: prefix itself and prefix/*.
+        assert len(cond["Values"]) == 2
+
+    @patch('lakerunner_maestro_service.load_maestro_config')
+    def test_dex_containers_and_volume_gated_by_has_dex(self, mock_load_config):
+        mock_load_config.return_value = MOCK_CONFIG
+        from lakerunner_maestro_service import create_maestro_template
+
+        resources = json.loads(create_maestro_template().to_json())["Resources"]
+        task_def = resources["MaestroTaskDef"]["Properties"]
+
+        containers = task_def["ContainerDefinitions"]
+        # With DEX on, the Fn::If branches resolve to the DEX container specs.
+        on = _resolved_containers(containers, with_dex=True)
+        on_names = [c["Name"] for c in on]
+        assert "DexInit" in on_names
+        assert "Dex" in on_names
+        # With DEX off, they disappear.
+        off = _resolved_containers(containers, with_dex=False)
+        off_names = [c["Name"] for c in off]
+        assert "DexInit" not in off_names
+        assert "Dex" not in off_names
+
+        by_name = {c["Name"]: c for c in on}
+        dex_init = by_name["DexInit"]
+        assert dex_init["Essential"] is False
+        assert dex_init["EntryPoint"] == ["/bin/sh", "-c"]
+        # Init must write to the shared config volume.
+        init_mounts = {m["SourceVolume"]: m for m in dex_init["MountPoints"]}
+        assert "dex-config" in init_mounts
+        assert init_mounts["dex-config"]["ContainerPath"] == "/etc/dex"
+        init_envs = {e["Name"] for e in dex_init["Environment"]}
+        for required in ["DEX_ISSUER_URL", "DEX_REDIRECT_URI", "DEX_CLIENT_ID",
+                         "DEX_PORT", "DEX_ADMIN_EMAIL", "DEX_ADMIN_HASH"]:
+            assert required in init_envs, f"DexInit missing env {required}"
+
+        dex = by_name["Dex"]
+        assert dex["Essential"] is True
+        assert dex["Command"] == ["dex", "serve", "/etc/dex/config.yaml"]
+        dex_ports = [p["ContainerPort"] for p in dex["PortMappings"]]
+        assert 5556 in dex_ports
+        dex_mounts = {m["SourceVolume"]: m for m in dex["MountPoints"]}
+        assert dex_mounts["dex-config"]["ReadOnly"] is True
+        assert dex_mounts["tmp"]["ReadOnly"] is False
+        dex_deps = {d["ContainerName"]: d["Condition"] for d in dex["DependsOn"]}
+        assert dex_deps["DexInit"] == "SUCCESS"
+
+        # Volumes list must include dex-config only when DEX is on.
+        vols = task_def["Volumes"]
+        # tmp always present
+        assert {"Name": "tmp"} in vols
+        # dex-config wrapped in Fn::If
+        dex_vol_if = [v for v in vols if isinstance(v, dict) and "Fn::If" in v]
+        assert len(dex_vol_if) == 1
+        cond, then_v, else_v = dex_vol_if[0]["Fn::If"]
+        assert cond == "HasDex"
+        assert then_v == {"Name": "dex-config"}
+        assert else_v == {"Ref": "AWS::NoValue"}
+
+    @patch('lakerunner_maestro_service.load_maestro_config')
+    def test_maestro_env_switches_to_dex_values_under_has_dex(self, mock_load_config):
+        mock_load_config.return_value = MOCK_CONFIG
+        from lakerunner_maestro_service import create_maestro_template
+
+        resources = json.loads(create_maestro_template().to_json())["Resources"]
+        containers = resources["MaestroTaskDef"]["Properties"]["ContainerDefinitions"]
+        maestro = next(c for c in _resolved_containers(containers)
+                       if c.get("Name") == "Maestro")
+        envs = {e["Name"]: e["Value"] for e in maestro["Environment"]}
+
+        # OIDC_ISSUER_URL: Fn::If(HasDex, <dex issuer Sub>, Ref(OidcIssuerUrl))
+        issuer = envs["OIDC_ISSUER_URL"]
+        assert "Fn::If" in issuer
+        cond, then_v, else_v = issuer["Fn::If"]
+        assert cond == "HasDex"
+        assert "Fn::Sub" in then_v
+        assert else_v == {"Ref": "OidcIssuerUrl"}
+
+        # OIDC_AUDIENCE: Fn::If(HasDex, Ref(DexClientId), Ref(OidcAudience))
+        aud = envs["OIDC_AUDIENCE"]
+        assert aud["Fn::If"][0] == "HasDex"
+        assert aud["Fn::If"][1] == {"Ref": "DexClientId"}
+        assert aud["Fn::If"][2] == {"Ref": "OidcAudience"}
+
+        # OIDC_JWKS_URL: Fn::If(HasDex, <localhost Sub>, Ref(OidcJwksUrl))
+        jwks = envs["OIDC_JWKS_URL"]
+        assert jwks["Fn::If"][0] == "HasDex"
+        assert "Fn::Sub" in jwks["Fn::If"][1]
+        assert jwks["Fn::If"][2] == {"Ref": "OidcJwksUrl"}
+
+        # MAESTRO_BASE_URL: Fn::If(HasDex, Fn::If(MaestroBaseUrlBlank, alb-sub,
+        #                   Ref(MaestroBaseUrl)), Ref(MaestroBaseUrl))
+        base = envs["MAESTRO_BASE_URL"]
+        assert base["Fn::If"][0] == "HasDex"
+        then_v = base["Fn::If"][1]
+        assert "Fn::If" in then_v
+        assert then_v["Fn::If"][0] == "MaestroBaseUrlBlank"
+        # then-branch (blank) must Sub the ALB DNS
+        assert "Fn::Sub" in then_v["Fn::If"][1]
+
+    @patch('lakerunner_maestro_service.load_maestro_config')
+    def test_service_registers_dex_target_group_conditionally(self, mock_load_config):
+        mock_load_config.return_value = MOCK_CONFIG
+        from lakerunner_maestro_service import create_maestro_template
+
+        resources = json.loads(create_maestro_template().to_json())["Resources"]
+        lbs = resources["MaestroService"]["Properties"]["LoadBalancers"]
+
+        # First entry is always Maestro's TG.
+        assert lbs[0]["ContainerName"] == "Maestro"
+        assert lbs[0]["ContainerPort"] == 4200
+        # Second entry is a Fn::If wrapping the DEX LB mapping.
+        assert "Fn::If" in lbs[1]
+        cond, then_v, else_v = lbs[1]["Fn::If"]
+        assert cond == "HasDex"
+        assert then_v["ContainerName"] == "Dex"
+        assert then_v["ContainerPort"] == 5556
+        assert then_v["TargetGroupArn"] == {"Ref": "MaestroDexTg"}
+        assert else_v == {"Ref": "AWS::NoValue"}
 
 
 if __name__ == '__main__':

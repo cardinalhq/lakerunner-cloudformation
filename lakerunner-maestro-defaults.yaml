@@ -5,6 +5,8 @@
 images:
   maestro: "public.ecr.aws/cardinalhq.io/maestro:v0.23.0"
   db_init: "ghcr.io/cardinalhq/initcontainer-grafana:latest"
+  dex: "ghcr.io/dexidp/dex:v2.41.1"
+  dex_init: "public.ecr.aws/docker/library/busybox:1.37"
 
 task:
   cpu: 1024
@@ -15,3 +17,8 @@ ports:
   mcp_gateway: 8080
   mcp_gateway_debug: 9090
   alb_listener: 80
+  dex: 5556
+
+dex:
+  path_prefix: "/dex"
+  client_id: "maestro-ui"

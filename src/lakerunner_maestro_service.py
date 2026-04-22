@@ -39,7 +39,10 @@ from troposphere.ecs import (
 )
 from troposphere.elasticloadbalancingv2 import (
     Action as AlbAction,
+    Condition as AlbCondition,
     Listener,
+    ListenerRule,
+    ListenerRuleAction,
     LoadBalancer,
     Matcher,
     TargetGroup,
@@ -138,7 +141,59 @@ def create_maestro_template():
     MaestroBaseUrl = t.add_parameter(Parameter(
         "MaestroBaseUrl", Type="String", Default="",
         Description="Optional public base URL for Maestro (forwarded as "
-                    "MAESTRO_BASE_URL). Leave blank to let the UI infer.",
+                    "MAESTRO_BASE_URL). Leave blank to auto-derive from the "
+                    "stack's ALB DNS when DEX is enabled.",
+    ))
+
+    # -----------------------
+    # DEX parameters (optional bundled OIDC provider)
+    # -----------------------
+    dex_cfg = config.get("dex", {}) or {}
+    dex_image_default = images.get("dex", "ghcr.io/dexidp/dex:v2.41.1")
+    dex_init_image_default = images.get(
+        "dex_init", "public.ecr.aws/docker/library/busybox:1.37"
+    )
+    dex_path_prefix_default = dex_cfg.get("path_prefix", "/dex")
+    dex_client_id_default = dex_cfg.get("client_id", "maestro-ui")
+
+    DexEnabled = t.add_parameter(Parameter(
+        "DexEnabled", Type="String",
+        AllowedValues=["Yes", "No"], Default="No",
+        Description="When 'Yes', run a bundled DEX OIDC provider as a sidecar "
+                    "in the Maestro task and point Maestro's OIDC settings at "
+                    "it. Single-replica POC-grade (in-memory storage).",
+    ))
+    DexAdminEmail = t.add_parameter(Parameter(
+        "DexAdminEmail", Type="String", Default="",
+        Description="Email of the static DEX admin user. Required when "
+                    "DexEnabled=Yes.",
+    ))
+    DexAdminPasswordHash = t.add_parameter(Parameter(
+        "DexAdminPasswordHash", Type="String", Default="", NoEcho=True,
+        Description="Bcrypt hash of the DEX admin password (generate "
+                    "out-of-band, e.g. `htpasswd -bnBC 10 \"\" 'secret' | "
+                    "tr -d ':\\n'`). Required when DexEnabled=Yes.",
+    ))
+    DexClientId = t.add_parameter(Parameter(
+        "DexClientId", Type="String", Default=dex_client_id_default,
+        Description="OAuth client_id DEX registers for the Maestro UI. Must "
+                    "match OIDC_AUDIENCE on the Maestro container (set "
+                    "automatically when DEX is enabled).",
+    ))
+    DexPathPrefix = t.add_parameter(Parameter(
+        "DexPathPrefix", Type="String", Default=dex_path_prefix_default,
+        AllowedPattern=r"^/[A-Za-z0-9._~%!$&'()*+,;=:@/-]*$",
+        Description="Path prefix the DEX service is served under (must start "
+                    "with '/'). The ALB forwards '<prefix>*' to DEX.",
+    ))
+    DexImage = t.add_parameter(Parameter(
+        "DexImage", Type="String", Default=dex_image_default,
+        Description="Container image for the bundled DEX server.",
+    ))
+    DexInitImage = t.add_parameter(Parameter(
+        "DexInitImage", Type="String", Default=dex_init_image_default,
+        Description="Container image for the DEX init container (any image "
+                    "with POSIX 'sh' suffices; busybox by default).",
     ))
 
     t.set_metadata({
@@ -150,11 +205,17 @@ def create_maestro_template():
                  "Parameters": ["TaskCpu", "TaskMemoryMiB"]},
                 {"Label": {"default": "Image"},
                  "Parameters": ["MaestroImage"]},
-                {"Label": {"default": "OIDC (optional)"},
+                {"Label": {"default": "OIDC (optional, external provider)"},
                  "Parameters": [
                      "OidcIssuerUrl", "OidcAudience", "OidcSuperadminGroup",
                      "OidcJwksUrl", "OidcSuperadminEmails",
                      "OidcTrustUnverifiedEmails",
+                 ]},
+                {"Label": {"default": "DEX (optional bundled OIDC provider)"},
+                 "Parameters": [
+                     "DexEnabled", "DexAdminEmail", "DexAdminPasswordHash",
+                     "DexClientId", "DexPathPrefix",
+                     "DexImage", "DexInitImage",
                  ]},
                 {"Label": {"default": "Misc"},
                  "Parameters": ["MaestroBaseUrl"]},
@@ -171,6 +232,13 @@ def create_maestro_template():
                 "OidcJwksUrl": {"default": "OIDC JWKS URL"},
                 "OidcSuperadminEmails": {"default": "OIDC Superadmin Emails"},
                 "OidcTrustUnverifiedEmails": {"default": "OIDC Trust Unverified Emails"},
+                "DexEnabled": {"default": "Enable Bundled DEX"},
+                "DexAdminEmail": {"default": "DEX Admin Email"},
+                "DexAdminPasswordHash": {"default": "DEX Admin Password (bcrypt)"},
+                "DexClientId": {"default": "DEX Client ID"},
+                "DexPathPrefix": {"default": "DEX Path Prefix"},
+                "DexImage": {"default": "DEX Image"},
+                "DexInitImage": {"default": "DEX Init Image"},
                 "MaestroBaseUrl": {"default": "Maestro Base URL"},
             },
         }
@@ -196,6 +264,8 @@ def create_maestro_template():
     # Conditions
     # -----------------------
     t.add_condition("IsInternetFacing", Equals(Ref(AlbScheme), "internet-facing"))
+    t.add_condition("HasDex", Equals(Ref(DexEnabled), "Yes"))
+    t.add_condition("MaestroBaseUrlBlank", Equals(Ref(MaestroBaseUrl), ""))
 
     # -----------------------
     # Database password secret
@@ -228,6 +298,18 @@ def create_maestro_template():
     maestro_lg = t.add_resource(LogGroup(
         "MaestroServerLogGroup",
         LogGroupName=Sub("/ecs/${AWS::StackName}/maestro"),
+        RetentionInDays=14,
+    ))
+    dex_init_lg = t.add_resource(LogGroup(
+        "MaestroDexInitLogGroup",
+        Condition="HasDex",
+        LogGroupName=Sub("/ecs/${AWS::StackName}/dex-init"),
+        RetentionInDays=14,
+    ))
+    dex_lg = t.add_resource(LogGroup(
+        "MaestroDexLogGroup",
+        Condition="HasDex",
+        LogGroupName=Sub("/ecs/${AWS::StackName}/dex"),
         RetentionInDays=14,
     ))
 
@@ -307,6 +389,13 @@ def create_maestro_template():
             "OidcSuperadminEmails": OidcSuperadminEmails,
             "OidcTrustUnverifiedEmails": OidcTrustUnverifiedEmails,
             "MaestroBaseUrl": MaestroBaseUrl,
+            "DexEnabled": DexEnabled,
+            "DexAdminEmail": DexAdminEmail,
+            "DexAdminPasswordHash": DexAdminPasswordHash,
+            "DexClientId": DexClientId,
+            "DexPathPrefix": DexPathPrefix,
+            "DexImage": DexImage,
+            "DexInitImage": DexInitImage,
         },
         "imports": {
             "ClusterArn": ClusterArnValue,
@@ -409,6 +498,65 @@ def create_maestro_template():
         "Alb": alb,
         "Tg": tg,
         "Listener": listener,
+    })
+
+    # -----------------------
+    # DEX ALB target group, listener rule, and task SG ingress
+    # -----------------------
+    dex_port = ports.get("dex", 5556)
+
+    dex_tg = t.add_resource(TargetGroup(
+        "MaestroDexTg",
+        Condition="HasDex",
+        Name=Sub("${AWS::StackName}-dex"),
+        Port=dex_port, Protocol="HTTP",
+        VpcId=VpcIdValue,
+        TargetType="ip",
+        HealthCheckPath=Sub("${P}/healthz", P=Ref(DexPathPrefix)),
+        HealthCheckProtocol="HTTP",
+        HealthCheckIntervalSeconds=30,
+        HealthCheckTimeoutSeconds=5,
+        HealthyThresholdCount=2,
+        UnhealthyThresholdCount=3,
+        Matcher=Matcher(HttpCode="200"),
+        TargetGroupAttributes=[
+            TargetGroupAttribute(Key="stickiness.enabled", Value="false"),
+            TargetGroupAttribute(Key="deregistration_delay.timeout_seconds",
+                                 Value="30"),
+        ],
+    ))
+
+    dex_listener_rule = t.add_resource(ListenerRule(
+        "MaestroDexListenerRule",
+        Condition="HasDex",
+        ListenerArn=Ref(listener),
+        Priority=10,
+        Conditions=[
+            AlbCondition(
+                Field="path-pattern",
+                # Match both the prefix itself and everything below it.
+                Values=[
+                    Sub("${P}", P=Ref(DexPathPrefix)),
+                    Sub("${P}/*", P=Ref(DexPathPrefix)),
+                ],
+            ),
+        ],
+        Actions=[ListenerRuleAction(Type="forward", TargetGroupArn=Ref(dex_tg))],
+    ))
+
+    t.add_resource(SecurityGroupIngress(
+        "MaestroDexTaskFromAlbIngress",
+        Condition="HasDex",
+        GroupId=TaskSecurityGroupIdValue,
+        IpProtocol="tcp",
+        FromPort=dex_port, ToPort=dex_port,
+        SourceSecurityGroupId=Ref(alb_sg),
+        Description=f"Maestro ALB -> DEX task port {dex_port}",
+    ))
+
+    t._maestro["resources"].update({
+        "DexTg": dex_tg,
+        "DexListenerRule": dex_listener_rule,
     })
 
     # -----------------------
@@ -518,17 +666,45 @@ def create_maestro_template():
     )
 
     # -----------------------
+    # Base URL + DEX-derived URLs
+    # -----------------------
+    # When DEX is enabled and the operator left MaestroBaseUrl blank, fall
+    # back to the stack's own ALB DNS so the OIDC issuer URL and SPA
+    # redirect URI resolve to a reachable host without extra DNS setup.
+    # When DEX is disabled, honor the parameter as-is (blank meant "let
+    # Maestro infer" in the old behavior; preserved here).
+    base_url_when_dex = If(
+        "MaestroBaseUrlBlank",
+        Sub("http://${Dns}", Dns=GetAtt(alb, "DNSName")),
+        Ref(MaestroBaseUrl),
+    )
+    maestro_base_url_value = If("HasDex", base_url_when_dex, Ref(MaestroBaseUrl))
+    dex_issuer_url_value = Sub("${B}${P}", B=base_url_when_dex, P=Ref(DexPathPrefix))
+    dex_redirect_uri_value = Sub("${B}/", B=base_url_when_dex)
+    # Internal JWKS URL bypasses the ALB — DEX is a sidecar in the same
+    # task, so loopback works and avoids an ALB roundtrip + any future TLS
+    # termination concerns.
+    dex_internal_jwks_value = Sub(
+        "http://localhost:${Port}${P}/keys",
+        Port=str(dex_port),
+        P=Ref(DexPathPrefix),
+    )
+
+    # -----------------------
     # Maestro container
     # -----------------------
     maestro_env = _db_env() + [
         Environment(Name="MCP_GATEWAY_URL",
                     Value=f"http://localhost:{mcp_port}"),
         Environment(Name="PORT", Value=str(maestro_port)),
-        Environment(Name="MAESTRO_BASE_URL", Value=Ref(MaestroBaseUrl)),
-        Environment(Name="OIDC_ISSUER_URL", Value=Ref(OidcIssuerUrl)),
-        Environment(Name="OIDC_AUDIENCE", Value=Ref(OidcAudience)),
+        Environment(Name="MAESTRO_BASE_URL", Value=maestro_base_url_value),
+        Environment(Name="OIDC_ISSUER_URL",
+                    Value=If("HasDex", dex_issuer_url_value, Ref(OidcIssuerUrl))),
+        Environment(Name="OIDC_AUDIENCE",
+                    Value=If("HasDex", Ref(DexClientId), Ref(OidcAudience))),
         Environment(Name="OIDC_SUPERADMIN_GROUP", Value=Ref(OidcSuperadminGroup)),
-        Environment(Name="OIDC_JWKS_URL", Value=Ref(OidcJwksUrl)),
+        Environment(Name="OIDC_JWKS_URL",
+                    Value=If("HasDex", dex_internal_jwks_value, Ref(OidcJwksUrl))),
         Environment(Name="OIDC_SUPERADMIN_EMAILS", Value=Ref(OidcSuperadminEmails)),
         Environment(Name="OIDC_TRUST_UNVERIFIED_EMAILS",
                     Value=Ref(OidcTrustUnverifiedEmails)),
@@ -566,6 +742,117 @@ def create_maestro_template():
     )
 
     # -----------------------
+    # DEX init + DEX containers (rendered only when HasDex is true; task def
+    # wraps them in Fn::If so they disappear cleanly when DEX is disabled).
+    # -----------------------
+    # BusyBox sh renders /etc/dex/config.yaml from env vars. The unquoted
+    # heredoc expands ${DEX_*} once (no re-scan), so a bcrypt hash
+    # containing '$' survives intact in the rendered YAML.
+    dex_config_render_script = (
+        "set -eu; "
+        "cat > /etc/dex/config.yaml <<EOF\n"
+        "issuer: ${DEX_ISSUER_URL}\n"
+        "storage:\n"
+        "  type: memory\n"
+        "web:\n"
+        "  http: 0.0.0.0:${DEX_PORT}\n"
+        "oauth2:\n"
+        "  skipApprovalScreen: true\n"
+        "enablePasswordDB: true\n"
+        "staticClients:\n"
+        "  - id: \"${DEX_CLIENT_ID}\"\n"
+        "    name: \"Maestro UI\"\n"
+        "    public: true\n"
+        "    redirectURIs:\n"
+        "      - \"${DEX_REDIRECT_URI}\"\n"
+        "staticPasswords:\n"
+        "  - email: \"${DEX_ADMIN_EMAIL}\"\n"
+        "    hash: \"${DEX_ADMIN_HASH}\"\n"
+        "    username: \"admin\"\n"
+        "    userID: \"00000000-0000-0000-0000-000000000001\"\n"
+        "EOF\n"
+    )
+
+    dex_init_container = ContainerDefinition(
+        Name="DexInit",
+        Image=Ref(DexInitImage),
+        Essential=False,
+        EntryPoint=["/bin/sh", "-c"],
+        Command=[dex_config_render_script],
+        Environment=[
+            Environment(Name="DEX_ISSUER_URL", Value=dex_issuer_url_value),
+            Environment(Name="DEX_REDIRECT_URI", Value=dex_redirect_uri_value),
+            Environment(Name="DEX_CLIENT_ID", Value=Ref(DexClientId)),
+            Environment(Name="DEX_PORT", Value=str(dex_port)),
+            Environment(Name="DEX_ADMIN_EMAIL", Value=Ref(DexAdminEmail)),
+            Environment(Name="DEX_ADMIN_HASH", Value=Ref(DexAdminPasswordHash)),
+        ],
+        MountPoints=[MountPoint(ContainerPath="/etc/dex",
+                                SourceVolume="dex-config",
+                                ReadOnly=False)],
+        LogConfiguration=LogConfiguration(
+            LogDriver="awslogs",
+            Options={
+                "awslogs-group": Sub("/ecs/${AWS::StackName}/dex-init"),
+                "awslogs-region": Ref("AWS::Region"),
+                "awslogs-stream-prefix": "dex-init",
+            },
+        ),
+    )
+
+    dex_container = ContainerDefinition(
+        Name="Dex",
+        Image=Ref(DexImage),
+        Essential=True,
+        User="65532",
+        ReadonlyRootFilesystem=True,
+        Command=["dex", "serve", "/etc/dex/config.yaml"],
+        PortMappings=[PortMapping(ContainerPort=dex_port, Protocol="tcp")],
+        MountPoints=[
+            MountPoint(ContainerPath="/etc/dex", SourceVolume="dex-config",
+                       ReadOnly=True),
+            # DEX writes templated assets into /tmp under its
+            # readOnlyRootFilesystem guard; reuse the shared tmp volume.
+            MountPoint(ContainerPath="/tmp", SourceVolume="tmp",
+                       ReadOnly=False),
+        ],
+        HealthCheck=HealthCheck(
+            Command=["CMD-SHELL",
+                     f"wget --no-verbose --tries=1 --spider "
+                     f"http://localhost:{dex_port}$DEX_PATH_PREFIX/healthz "
+                     f"|| exit 1"],
+            Interval=30, Timeout=5, Retries=3, StartPeriod=30,
+        ),
+        Environment=[
+            # Referenced by the HealthCheck command above.
+            Environment(Name="DEX_PATH_PREFIX", Value=Ref(DexPathPrefix)),
+        ],
+        DependsOn=[{"ContainerName": "DexInit", "Condition": "SUCCESS"}],
+        LogConfiguration=LogConfiguration(
+            LogDriver="awslogs",
+            Options={
+                "awslogs-group": Sub("/ecs/${AWS::StackName}/dex"),
+                "awslogs-region": Ref("AWS::Region"),
+                "awslogs-stream-prefix": "dex",
+            },
+        ),
+    )
+
+    # Task definition container + volume lists, conditional on HasDex.
+    # Use Fn::If + AWS::NoValue to drop DEX-only entries when disabled.
+    container_defs = [
+        db_init_container,
+        mcp_container,
+        maestro_container,
+        If("HasDex", dex_init_container, Ref("AWS::NoValue")),
+        If("HasDex", dex_container, Ref("AWS::NoValue")),
+    ]
+    task_volumes = [
+        Volume(Name="tmp"),
+        If("HasDex", Volume(Name="dex-config"), Ref("AWS::NoValue")),
+    ]
+
+    # -----------------------
     # Task Definition
     # -----------------------
     task_def = t.add_resource(TaskDefinition(
@@ -577,8 +864,8 @@ def create_maestro_template():
         RequiresCompatibilities=["FARGATE"],
         ExecutionRoleArn=GetAtt(exec_role, "Arn"),
         TaskRoleArn=GetAtt(task_role, "Arn"),
-        ContainerDefinitions=[db_init_container, mcp_container, maestro_container],
-        Volumes=[Volume(Name="tmp")],
+        ContainerDefinitions=container_defs,
+        Volumes=task_volumes,
         RuntimePlatform=RuntimePlatform(
             CpuArchitecture="ARM64",
             OperatingSystemFamily="LINUX",
@@ -586,6 +873,8 @@ def create_maestro_template():
     ))
 
     t._maestro["resources"]["TaskDef"] = task_def
+    t._maestro["resources"]["DexInitLogGroup"] = dex_init_lg
+    t._maestro["resources"]["DexLogGroup"] = dex_lg
 
     # -----------------------
     # ECS Service
@@ -604,11 +893,22 @@ def create_maestro_template():
                 AssignPublicIp="DISABLED",
             ),
         ),
-        LoadBalancers=[EcsLoadBalancer(
-            ContainerName="Maestro",
-            ContainerPort=maestro_port,
-            TargetGroupArn=Ref(tg),
-        )],
+        LoadBalancers=[
+            EcsLoadBalancer(
+                ContainerName="Maestro",
+                ContainerPort=maestro_port,
+                TargetGroupArn=Ref(tg),
+            ),
+            If(
+                "HasDex",
+                EcsLoadBalancer(
+                    ContainerName="Dex",
+                    ContainerPort=dex_port,
+                    TargetGroupArn=Ref(dex_tg),
+                ),
+                Ref("AWS::NoValue"),
+            ),
+        ],
         DependsOn=["MaestroListener"],
         EnableExecuteCommand=True,
         EnableECSManagedTags=True,
