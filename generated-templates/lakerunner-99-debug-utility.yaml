@@ -291,7 +291,7 @@ Resources:
               Value: env:API_KEYS_ENV
             - Name: STORAGE_PROFILE_FILE
               Value: env:STORAGE_PROFILES_ENV
-          Image: ghcr.io/cardinalhq/lakerunner:v1.15.7-rc5
+          Image: ghcr.io/cardinalhq/lakerunner:v1.18.1
           LogConfiguration:
             LogDriver: awslogs
             Options:

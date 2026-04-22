@@ -20,7 +20,7 @@ storage_profiles:
 
 # Container Images configuration
 images:
-  lakerunner: "ghcr.io/cardinalhq/lakerunner:v1.15.7-rc5"
+  lakerunner: "ghcr.io/cardinalhq/lakerunner:v1.18.1"
 
 # Service configurations for core Lakerunner services
 services:
