@@ -143,7 +143,6 @@ The Services stack exposes CloudFormation parameters to configure replicas, CPU,
 | lakerunner-process-traces      | Parameter | YAML      | Parameter |
 | **Replicas-Only Services**     |           |           |           |
 | lakerunner-pubsub-sqs          | Parameter | YAML      | YAML      |
-| lakerunner-notification-sender | Parameter | YAML      | YAML      |
 | **Fixed Services**             |           |           |           |
 | lakerunner-sweeper             | YAML      | YAML      | YAML      |
 | lakerunner-monitoring          | YAML      | YAML      | YAML      |

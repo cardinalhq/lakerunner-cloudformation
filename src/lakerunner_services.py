@@ -165,7 +165,6 @@ def create_services_template():
     LAKERUNNER_REPLICAS_ONLY_SERVICES = [
         'lakerunner-pubsub-sqs',
         'lakerunner-alert-evaluator',
-        'lakerunner-notification-sender',
     ]
 
     # All configurable services (for iteration)
@@ -1094,8 +1093,8 @@ def create_services_template():
             EcsSecret(Name="CONFIGDB_PASSWORD", ValueFrom=Sub("${SecretArn}:password::", SecretArn=DbSecretArnValue))
         ]
 
-        # Add internal service keys for alert-evaluator, notification-sender, and query-api
-        if service_name in ("lakerunner-alert-evaluator", "lakerunner-notification-sender", "lakerunner-query-api"):
+        # Add internal service keys for alert-evaluator and query-api
+        if service_name in ("lakerunner-alert-evaluator", "lakerunner-query-api"):
             secrets.append(EcsSecret(Name="INTERNAL_SERVICE_KEYS", ValueFrom=InternalServiceKeysSecretArnValue))
 
         # Add initial admin API key for admin-api (bootstrap key for first access)

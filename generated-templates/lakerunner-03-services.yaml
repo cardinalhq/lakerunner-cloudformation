@@ -46,7 +46,6 @@ Metadata:
         Parameters:
           - PubsubSqsReplicas
           - AlertEvaluatorReplicas
-          - NotificationSenderReplicas
       - Label:
           default: Telemetry
         Parameters:
@@ -66,8 +65,6 @@ Metadata:
         default: Common Infra Stack Name
       EnableAdminInitialKey:
         default: Enable Admin Bootstrap Key
-      NotificationSenderReplicas:
-        default: Notification Sender Replicas
       OtelEndpoint:
         default: OTEL Collector Endpoint
       ProcessLogsMemory:
@@ -128,10 +125,6 @@ Outputs:
     Export:
       Name: !Sub '${AWS::StackName}-lakerunner-monitoring-ServiceArn'
     Value: !Ref 'ServiceLakerunnerMonitoring'
-  ServiceLakerunnerNotificationSenderArn:
-    Export:
-      Name: !Sub '${AWS::StackName}-lakerunner-notification-sender-ServiceArn'
-    Value: !Ref 'ServiceLakerunnerNotificationSender'
   ServiceLakerunnerProcessLogsArn:
     Export:
       Name: !Sub '${AWS::StackName}-lakerunner-process-logs-ServiceArn'
@@ -195,11 +188,6 @@ Parameters:
     Default: 'Yes'
     Description: Inject the bootstrap admin API key into admin-api. Set to No after creating permanent keys.
     Type: String
-  NotificationSenderReplicas:
-    Default: '1'
-    Description: Number of lakerunner-notification-sender task replicas
-    MinValue: 1
-    Type: Number
   OtelEndpoint:
     Default: ''
     Description: 'OPTIONAL: OTEL collector HTTP endpoint URL (e.g., http://collector-dns:4318). Leave blank to disable OTLP telemetry export.'
@@ -539,11 +527,6 @@ Resources:
   LogGroupLakerunnerMonitoring:
     Properties:
       LogGroupName: !Sub '/ecs/lakerunner-monitoring'
-      RetentionInDays: 14
-    Type: AWS::Logs::LogGroup
-  LogGroupLakerunnerNotificationSender:
-    Properties:
-      LogGroupName: !Sub '/ecs/lakerunner-notification-sender'
       RetentionInDays: 14
     Type: AWS::Logs::LogGroup
   LogGroupLakerunnerProcessLogs:
@@ -921,42 +904,6 @@ Resources:
           Value: !Sub '${AWS::StackName}-lakerunner-monitoring'
       TaskDefinition: !Ref 'TaskDefLakerunnerMonitoring'
     Type: AWS::ECS::Service
-  ServiceLakerunnerNotificationSender:
-    Properties:
-      Cluster: !ImportValue
-        Fn::Sub:
-          - ${CommonInfraStackName}-ClusterArn
-          - CommonInfraStackName: !Ref 'CommonInfraStackName'
-      DesiredCount: !Ref 'NotificationSenderReplicas'
-      EnableECSManagedTags: true
-      EnableExecuteCommand: true
-      LaunchType: FARGATE
-      NetworkConfiguration:
-        AwsvpcConfiguration:
-          SecurityGroups:
-            - !ImportValue
-              Fn::Sub:
-                - ${CommonInfraStackName}-TaskSGId
-                - CommonInfraStackName: !Ref 'CommonInfraStackName'
-          Subnets: !Split
-            - ','
-            - !ImportValue
-              Fn::Sub:
-                - ${CommonInfraStackName}-PrivateSubnets
-                - CommonInfraStackName: !Ref 'CommonInfraStackName'
-      PropagateTags: SERVICE
-      ServiceName: lakerunner-notification-sender
-      Tags:
-        - Key: Component
-          Value: Service
-        - Key: Environment
-          Value: !Ref 'AWS::StackName'
-        - Key: ManagedBy
-          Value: Lakerunner
-        - Key: Name
-          Value: !Sub '${AWS::StackName}-lakerunner-notification-sender'
-      TaskDefinition: !Ref 'TaskDefLakerunnerNotificationSender'
-    Type: AWS::ECS::Service
   ServiceLakerunnerProcessLogs:
     Properties:
       Cluster: !ImportValue
@@ -1283,32 +1230,6 @@ Resources:
               - CommonInfraStackName: !Ref 'CommonInfraStackName'
         - Name: ServiceName
           Value: lakerunner-monitoring
-      EvaluationPeriods: 5
-      MetricName: RunningTaskCount
-      Namespace: ECS/ContainerInsights
-      OKActions:
-        - !Ref 'AlertTopicArn'
-      Period: 60
-      Statistic: Minimum
-      Threshold: 1
-      TreatMissingData: breaching
-    Type: AWS::CloudWatch::Alarm
-  TaskCountAlarmLakerunnerNotificationSender:
-    Condition: EnableAlarms
-    Properties:
-      AlarmActions:
-        - !Ref 'AlertTopicArn'
-      AlarmDescription: Alarm when lakerunner-notification-sender has no running tasks for 5 minutes
-      AlarmName: !Sub '${AWS::StackName}-lakerunner-notification-sender-no-running-tasks'
-      ComparisonOperator: LessThanThreshold
-      Dimensions:
-        - Name: ClusterName
-          Value: !ImportValue
-            Fn::Sub:
-              - ${CommonInfraStackName}-ClusterName
-              - CommonInfraStackName: !Ref 'CommonInfraStackName'
-        - Name: ServiceName
-          Value: lakerunner-notification-sender
       EvaluationPeriods: 5
       MetricName: RunningTaskCount
       Namespace: ECS/ContainerInsights
@@ -1986,154 +1907,6 @@ Resources:
         CpuArchitecture: ARM64
         OperatingSystemFamily: LINUX
       TaskRoleArn: !GetAtt 'MonitoringTaskRole.Arn'
-      Volumes:
-        - Name: scratch
-    Type: AWS::ECS::TaskDefinition
-  TaskDefLakerunnerNotificationSender:
-    Properties:
-      ContainerDefinitions:
-        - Command:
-            - /app/bin/lakerunner
-            - notification-sender
-          Environment:
-            - Name: OTEL_SERVICE_NAME
-              Value: lakerunner-notification-sender
-            - Name: TMPDIR
-              Value: /scratch
-            - Name: HOME
-              Value: /scratch
-            - Name: STORAGE_PROFILE_FILE
-              Value: env:STORAGE_PROFILES_ENV
-            - Name: API_KEYS_FILE
-              Value: env:API_KEYS_ENV
-            - Name: SQS_QUEUE_URL
-              Value: !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-QueueUrl
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: SQS_REGION
-              Value: !Ref 'AWS::Region'
-            - Name: LRDB_HOST
-              Value: !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-DbEndpoint
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: LRDB_PORT
-              Value: !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-DbPort
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: LRDB_DBNAME
-              Value: lakerunner
-            - Name: LRDB_USER
-              Value: lakerunner
-            - Name: LRDB_SSLMODE
-              Value: require
-            - Name: CONFIGDB_HOST
-              Value: !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-DbEndpoint
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: CONFIGDB_PORT
-              Value: !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-DbPort
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: CONFIGDB_DBNAME
-              Value: lakerunner
-            - Name: CONFIGDB_USER
-              Value: lakerunner
-            - Name: CONFIGDB_SSLMODE
-              Value: require
-            - Name: LICENSE_FILE
-              Value: env:LICENSE_DATA
-            - Name: SOFT_LICENSE_CHECK
-              Value: 'true'
-            - Name: OTEL_METRIC_EXPORT_INTERVAL
-              Value: '10000'
-            - Name: OTEL_TRACES_SAMPLER
-              Value: parentbased_traceidratio
-            - Name: OTEL_TRACES_SAMPLER_ARG
-              Value: '0.01'
-            - Name: OTEL_EXPORTER_OTLP_ENDPOINT
-              Value: !If
-                - EnableOtlp
-                - !Ref 'OtelEndpoint'
-                - !Ref 'AWS::NoValue'
-            - Name: ENABLE_OTLP_TELEMETRY
-              Value: !If
-                - EnableOtlp
-                - 'true'
-                - !Ref 'AWS::NoValue'
-            - Name: GOMEMLIMIT
-              Value: 384MiB
-            - Name: GOGC
-              Value: '50'
-          HealthCheck:
-            Command:
-              - /app/bin/lakerunner
-              - sysinfo
-            Interval: 30
-            Retries: 3
-            StartPeriod: 60
-            Timeout: 5
-          Image: ghcr.io/cardinalhq/lakerunner:v1.18.1
-          LogConfiguration:
-            LogDriver: awslogs
-            Options:
-              awslogs-group: !Ref 'LogGroupLakerunnerNotificationSender'
-              awslogs-region: !Ref 'AWS::Region'
-              awslogs-stream-prefix: lakerunner-notification-sender
-          MountPoints:
-            - ContainerPath: /scratch
-              ReadOnly: false
-              SourceVolume: scratch
-          Name: AppContainer
-          PortMappings: []
-          Secrets:
-            - Name: STORAGE_PROFILES_ENV
-              ValueFrom: !Sub
-                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/storage_profiles
-                - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: API_KEYS_ENV
-              ValueFrom: !Sub
-                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/api_keys
-                - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: LICENSE_DATA
-              ValueFrom: !Sub
-                - arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/lakerunner/${CommonInfraStackName}/license
-                - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: LRDB_PASSWORD
-              ValueFrom: !Sub
-                - '${SecretArn}:password::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-DbSecretArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: CONFIGDB_PASSWORD
-              ValueFrom: !Sub
-                - '${SecretArn}:password::'
-                - SecretArn: !ImportValue
-                    Fn::Sub:
-                      - ${CommonInfraStackName}-DbSecretArn
-                      - CommonInfraStackName: !Ref 'CommonInfraStackName'
-            - Name: INTERNAL_SERVICE_KEYS
-              ValueFrom: !ImportValue
-                Fn::Sub:
-                  - ${CommonInfraStackName}-InternalServiceKeysSecretArn
-                  - CommonInfraStackName: !Ref 'CommonInfraStackName'
-          User: '0'
-      Cpu: '256'
-      ExecutionRoleArn: !GetAtt 'ExecRole.Arn'
-      Family: lakerunner-notification-sender-task
-      Memory: '512'
-      NetworkMode: awsvpc
-      RequiresCompatibilities:
-        - FARGATE
-      RuntimePlatform:
-        CpuArchitecture: ARM64
-        OperatingSystemFamily: LINUX
-      TaskRoleArn: !GetAtt 'TaskRole.Arn'
       Volumes:
         - Name: scratch
     Type: AWS::ECS::TaskDefinition
