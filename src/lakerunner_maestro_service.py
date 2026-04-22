@@ -563,18 +563,16 @@ def create_maestro_template():
     # Shared env / secret helpers
     # -----------------------
     def _db_env():
+        # Maestro and mcp-gateway assemble the DSN from these parts when
+        # MAESTRO_DATABASE_URL is unset (conductor #379). Unlike Kubernetes,
+        # ECS does not interpolate $(VAR) across env entries, so we can't
+        # ship a pre-built URL from here.
         return [
             Environment(Name="MAESTRO_DB_HOST", Value=DbEndpointValue),
             Environment(Name="MAESTRO_DB_PORT", Value=DbPortValue),
             Environment(Name="MAESTRO_DB_NAME", Value="maestro"),
             Environment(Name="MAESTRO_DB_USER", Value="maestro"),
             Environment(Name="MAESTRO_DB_SSLMODE", Value="require"),
-            Environment(
-                Name="MAESTRO_DATABASE_URL",
-                Value=("postgresql://$(MAESTRO_DB_USER):$(MAESTRO_DB_PASSWORD)@"
-                       "$(MAESTRO_DB_HOST):$(MAESTRO_DB_PORT)/$(MAESTRO_DB_NAME)"
-                       "?sslmode=$(MAESTRO_DB_SSLMODE)"),
-            ),
         ]
 
     def _db_password_secret():
@@ -748,6 +746,9 @@ def create_maestro_template():
     # BusyBox sh renders /etc/dex/config.yaml from env vars. The unquoted
     # heredoc expands ${DEX_*} once (no re-scan), so a bcrypt hash
     # containing '$' survives intact in the rendered YAML.
+    # Also chmod 1777 the dex-tmp volume: Fargate mounts empty volumes as
+    # root:root 0755, so the nonroot DEX container otherwise can't write
+    # the config-expansion tempfile it creates on startup.
     dex_config_render_script = (
         "set -eu; "
         "cat > /etc/dex/config.yaml <<EOF\n"
@@ -771,6 +772,7 @@ def create_maestro_template():
         "    username: \"admin\"\n"
         "    userID: \"00000000-0000-0000-0000-000000000001\"\n"
         "EOF\n"
+        "chmod 1777 /dex-tmp\n"
     )
 
     dex_init_container = ContainerDefinition(
@@ -787,9 +789,12 @@ def create_maestro_template():
             Environment(Name="DEX_ADMIN_EMAIL", Value=Ref(DexAdminEmail)),
             Environment(Name="DEX_ADMIN_HASH", Value=Ref(DexAdminPasswordHash)),
         ],
-        MountPoints=[MountPoint(ContainerPath="/etc/dex",
-                                SourceVolume="dex-config",
-                                ReadOnly=False)],
+        MountPoints=[
+            MountPoint(ContainerPath="/etc/dex",
+                       SourceVolume="dex-config", ReadOnly=False),
+            MountPoint(ContainerPath="/dex-tmp",
+                       SourceVolume="dex-tmp", ReadOnly=False),
+        ],
         LogConfiguration=LogConfiguration(
             LogDriver="awslogs",
             Options={
@@ -811,9 +816,11 @@ def create_maestro_template():
         MountPoints=[
             MountPoint(ContainerPath="/etc/dex", SourceVolume="dex-config",
                        ReadOnly=True),
-            # DEX writes templated assets into /tmp under its
-            # readOnlyRootFilesystem guard; reuse the shared tmp volume.
-            MountPoint(ContainerPath="/tmp", SourceVolume="tmp",
+            # DEX writes a config-expansion tempfile into /tmp under its
+            # readOnlyRootFilesystem guard. Use a dedicated volume (not
+            # the Maestro-shared 'tmp') that DexInit chmods 1777, since
+            # Fargate creates empty volumes as root:root 0755.
+            MountPoint(ContainerPath="/tmp", SourceVolume="dex-tmp",
                        ReadOnly=False),
         ],
         HealthCheck=HealthCheck(
@@ -850,6 +857,7 @@ def create_maestro_template():
     task_volumes = [
         Volume(Name="tmp"),
         If("HasDex", Volume(Name="dex-config"), Ref("AWS::NoValue")),
+        If("HasDex", Volume(Name="dex-tmp"), Ref("AWS::NoValue")),
     ]
 
     # -----------------------

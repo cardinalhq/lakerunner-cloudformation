@@ -495,8 +495,6 @@ Resources:
               Value: maestro
             - Name: MAESTRO_DB_SSLMODE
               Value: require
-            - Name: MAESTRO_DATABASE_URL
-              Value: postgresql://$(MAESTRO_DB_USER):$(MAESTRO_DB_PASSWORD)@$(MAESTRO_DB_HOST):$(MAESTRO_DB_PORT)/$(MAESTRO_DB_NAME)?sslmode=$(MAESTRO_DB_SSLMODE)
             - Name: MCP_PORT
               Value: '8080'
             - Name: MCP_DEBUG_PORT
@@ -552,8 +550,6 @@ Resources:
               Value: maestro
             - Name: MAESTRO_DB_SSLMODE
               Value: require
-            - Name: MAESTRO_DATABASE_URL
-              Value: postgresql://$(MAESTRO_DB_USER):$(MAESTRO_DB_PASSWORD)@$(MAESTRO_DB_HOST):$(MAESTRO_DB_PORT)/$(MAESTRO_DB_NAME)?sslmode=$(MAESTRO_DB_SSLMODE)
             - Name: MCP_GATEWAY_URL
               Value: http://localhost:8080
             - Name: PORT
@@ -656,6 +652,7 @@ Resources:
                     username: "admin"
                     userID: "00000000-0000-0000-0000-000000000001"
                 EOF
+                chmod 1777 /dex-tmp
             EntryPoint:
               - /bin/sh
               - -c
@@ -699,6 +696,9 @@ Resources:
               - ContainerPath: /etc/dex
                 ReadOnly: false
                 SourceVolume: dex-config
+              - ContainerPath: /dex-tmp
+                ReadOnly: false
+                SourceVolume: dex-tmp
             Name: DexInit
           - !Ref 'AWS::NoValue'
         - !If
@@ -735,7 +735,7 @@ Resources:
                 SourceVolume: dex-config
               - ContainerPath: /tmp
                 ReadOnly: false
-                SourceVolume: tmp
+                SourceVolume: dex-tmp
             Name: Dex
             PortMappings:
               - ContainerPort: 5556
@@ -759,6 +759,10 @@ Resources:
         - !If
           - HasDex
           - Name: dex-config
+          - !Ref 'AWS::NoValue'
+        - !If
+          - HasDex
+          - Name: dex-tmp
           - !Ref 'AWS::NoValue'
     Type: AWS::ECS::TaskDefinition
   MaestroTaskFromAlbIngress:

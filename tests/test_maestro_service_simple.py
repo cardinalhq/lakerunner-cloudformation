@@ -224,7 +224,10 @@ class TestMaestroTemplateSimple(unittest.TestCase):
         m_envs = {e["Name"]: e["Value"] for e in maestro["Environment"]}
         assert m_envs["MCP_GATEWAY_URL"] == "http://localhost:8080"
         assert m_envs["PORT"] == "4200"
-        assert "MAESTRO_DATABASE_URL" in m_envs
+        for name in ["MAESTRO_DB_HOST", "MAESTRO_DB_PORT", "MAESTRO_DB_NAME",
+                     "MAESTRO_DB_USER", "MAESTRO_DB_SSLMODE"]:
+            assert name in m_envs, f"missing Maestro env {name}"
+        assert "MAESTRO_DATABASE_URL" not in m_envs
 
         maestro_env_names = set(m_envs.keys())
         for name in ["OIDC_ISSUER_URL", "OIDC_AUDIENCE", "OIDC_SUPERADMIN_GROUP",
@@ -321,10 +324,13 @@ class TestMaestroTemplateSimple(unittest.TestCase):
         dex_init = by_name["DexInit"]
         assert dex_init["Essential"] is False
         assert dex_init["EntryPoint"] == ["/bin/sh", "-c"]
-        # Init must write to the shared config volume.
+        # Init must write to the shared config volume and chmod the tmp volume.
         init_mounts = {m["SourceVolume"]: m for m in dex_init["MountPoints"]}
         assert "dex-config" in init_mounts
         assert init_mounts["dex-config"]["ContainerPath"] == "/etc/dex"
+        assert "dex-tmp" in init_mounts
+        assert init_mounts["dex-tmp"]["ContainerPath"] == "/dex-tmp"
+        assert "chmod 1777 /dex-tmp" in dex_init["Command"][0]
         init_envs = {e["Name"] for e in dex_init["Environment"]}
         for required in ["DEX_ISSUER_URL", "DEX_REDIRECT_URI", "DEX_CLIENT_ID",
                          "DEX_PORT", "DEX_ADMIN_EMAIL", "DEX_ADMIN_HASH"]:
@@ -337,21 +343,26 @@ class TestMaestroTemplateSimple(unittest.TestCase):
         assert 5556 in dex_ports
         dex_mounts = {m["SourceVolume"]: m for m in dex["MountPoints"]}
         assert dex_mounts["dex-config"]["ReadOnly"] is True
-        assert dex_mounts["tmp"]["ReadOnly"] is False
+        # DEX has its own /tmp (not the Maestro-shared 'tmp' volume) so
+        # DexInit can chmod it 1777 without touching Maestro's tmp.
+        assert dex_mounts["dex-tmp"]["ContainerPath"] == "/tmp"
+        assert dex_mounts["dex-tmp"]["ReadOnly"] is False
+        assert "tmp" not in dex_mounts
         dex_deps = {d["ContainerName"]: d["Condition"] for d in dex["DependsOn"]}
         assert dex_deps["DexInit"] == "SUCCESS"
 
-        # Volumes list must include dex-config only when DEX is on.
+        # Volumes list: tmp always present; dex-config and dex-tmp
+        # wrapped in Fn::If so they vanish when DEX is disabled.
         vols = task_def["Volumes"]
-        # tmp always present
         assert {"Name": "tmp"} in vols
-        # dex-config wrapped in Fn::If
         dex_vol_if = [v for v in vols if isinstance(v, dict) and "Fn::If" in v]
-        assert len(dex_vol_if) == 1
-        cond, then_v, else_v = dex_vol_if[0]["Fn::If"]
-        assert cond == "HasDex"
-        assert then_v == {"Name": "dex-config"}
-        assert else_v == {"Ref": "AWS::NoValue"}
+        dex_vol_names = set()
+        for entry in dex_vol_if:
+            cond, then_v, else_v = entry["Fn::If"]
+            assert cond == "HasDex"
+            assert else_v == {"Ref": "AWS::NoValue"}
+            dex_vol_names.add(then_v["Name"])
+        assert dex_vol_names == {"dex-config", "dex-tmp"}
 
     @patch('lakerunner_maestro_service.load_maestro_config')
     def test_maestro_env_switches_to_dex_values_under_has_dex(self, mock_load_config):
