@@ -425,7 +425,15 @@ Resources:
   MaestroTaskDef:
     Properties:
       ContainerDefinitions:
-        - Environment:
+        - Command:
+            - >-
+              set -e; /app/scripts/init-grafana.sh; PGDATABASE=$GRAFANA_DB_NAME psql -v ON_ERROR_STOP=1 -c 'CREATE EXTENSION IF NOT EXISTS vector;' -c 'CREATE EXTENSION IF NOT EXISTS pgcrypto;' -c 'CREATE
+              EXTENSION IF NOT EXISTS citext;' -c "DO \$\$ BEGIN IF EXISTS (SELECT 1 FROM pg_tables WHERE tablename='gomigrate_maestro' AND schemaname='public') THEN DELETE FROM gomigrate_maestro WHERE
+              dirty = true; END IF; END \$\$;"
+          EntryPoint:
+            - /bin/sh
+            - -c
+          Environment:
             - Name: PGHOST
               Value: !ImportValue
                 Fn::Sub:

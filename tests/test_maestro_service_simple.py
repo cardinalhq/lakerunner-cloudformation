@@ -204,6 +204,18 @@ class TestMaestroTemplateSimple(unittest.TestCase):
         db_init_envs = {e["Name"]: e["Value"] for e in db_init["Environment"]}
         assert db_init_envs["GRAFANA_DB_NAME"] == "maestro"
         assert db_init_envs["GRAFANA_DB_USER"] == "maestro"
+        # DbInit must install the extensions McpGateway migrations need —
+        # CREATE EXTENSION requires rds_superuser on RDS, so it runs here
+        # under the master user rather than in the app-level migrations.
+        assert db_init["EntryPoint"] == ["/bin/sh", "-c"]
+        assert "/app/scripts/init-grafana.sh" in db_init["Command"][0]
+        for ext in ["vector", "pgcrypto", "citext"]:
+            assert f"CREATE EXTENSION IF NOT EXISTS {ext};" in db_init["Command"][0]
+        # Self-heal any dirty-flagged app-migration rows so a previous
+        # failed run (e.g. before extensions were installed) doesn't jam
+        # golang-migrate on the next start.
+        assert "DELETE FROM gomigrate_maestro WHERE dirty = true" in db_init["Command"][0]
+        assert "pg_tables" in db_init["Command"][0]
 
         mcp = by_name["McpGateway"]
         assert mcp["Command"] == ["/app/entrypoint.sh", "mcp-gateway"]

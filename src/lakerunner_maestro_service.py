@@ -588,10 +588,34 @@ def create_maestro_template():
         "db_init", "ghcr.io/cardinalhq/initcontainer-grafana:latest"
     )
 
+    # After setup-grafana-db.sh creates the database + app user, install the
+    # extensions McpGateway migrations need (pgvector, pgcrypto, citext).
+    # CREATE EXTENSION requires rds_superuser on RDS, so it must happen here
+    # under the master user, not in the app-level migrations.
+    #
+    # Also clear any stale dirty-flag rows in gomigrate_maestro: if a prior
+    # deploy's app-level migrations failed mid-flight (e.g. pgvector not yet
+    # installed), golang-migrate leaves dirty=true and refuses to retry. The
+    # DO block is guarded on pg_tables so a fresh DB is a no-op.
+    db_init_script = (
+        "set -e; "
+        "/app/scripts/init-grafana.sh; "
+        "PGDATABASE=$GRAFANA_DB_NAME psql -v ON_ERROR_STOP=1 "
+        "-c 'CREATE EXTENSION IF NOT EXISTS vector;' "
+        "-c 'CREATE EXTENSION IF NOT EXISTS pgcrypto;' "
+        "-c 'CREATE EXTENSION IF NOT EXISTS citext;' "
+        "-c \"DO \\$\\$ BEGIN "
+        "IF EXISTS (SELECT 1 FROM pg_tables WHERE tablename='gomigrate_maestro' AND schemaname='public') THEN "
+        "DELETE FROM gomigrate_maestro WHERE dirty = true; "
+        "END IF; END \\$\\$;\""
+    )
+
     db_init_container = ContainerDefinition(
         Name="DbInit",
         Image=db_init_image,
         Essential=False,
+        EntryPoint=["/bin/sh", "-c"],
+        Command=[db_init_script],
         Environment=[
             Environment(Name="PGHOST", Value=DbEndpointValue),
             Environment(Name="PGPORT", Value=DbPortValue),
