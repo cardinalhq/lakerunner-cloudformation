@@ -129,7 +129,7 @@ def build_task_definition(
     execution_role_arn_param: str,
     task_role_ref,
     environment: list,
-    secrets: list = None,
+    secrets: list | None = None,
     log_group_ref,
 ) -> TaskDefinition:
     """ECS Fargate task definition for a service."""
@@ -175,7 +175,7 @@ def build_ecs_service(
     security_group_id_param: str,
     target_group_ref=None,
     container_name: str,
-    container_port: int = None,
+    container_port: int | None = None,
 ) -> Service:
     """ECS Fargate Service with rolling deploy + circuit breaker."""
     kwargs = dict(
