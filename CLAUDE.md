@@ -1,187 +1,194 @@
-# CloudFormation Development Instructions
+# Cardinal CloudFormation Development Instructions
 
 This file contains instructions for Claude on how to work with this CloudFormation repository.
 
-## Repository Structure
+## Repository Status
 
-The deployment consists of three CloudFormation stacks that must be deployed in order:
+This branch (`cardinal-cfn-refactor`) is mid-refactor. The old 10-template flat layout has been deleted and is being replaced by a thin-root + nested-children architecture. See:
 
-1. **CommonInfra** (`lakerunner_common.py`) - Core infrastructure
-2. **Migration** (`lakerunner_migration.py`) - Database migration task
-3. **Services** (`lakerunner_services.py`) - ECS Fargate services
+- `docs/superpowers/specs/2026-04-28-cardinal-cfn-refactor-design.md` — design spec (source of truth)
+- `docs/superpowers/plans/2026-04-28-cardinal-cfn-refactor.md` — phase-by-phase implementation plan
 
-### Stack Dependencies
+When in doubt, the design spec wins. The plan tells you the order of operations.
 
-- Migration depends on CommonInfra exports (database, networking, security groups)
-- Services depends on CommonInfra exports (all infrastructure resources)
-- Services auto-detects ALB presence from CommonInfra without requiring user input
+## Target architecture
 
-### Configuration System
+Two customer-facing CloudFormation root templates:
 
-- **lakerunner-stack-defaults.yaml** - Contains all default configurations (API keys, storage profiles, service definitions)
-- **Cross-stack imports** - Services automatically import values from CommonInfra using CloudFormation exports
-- **Parameter minimization** - Only ask users for what cannot be determined from other stacks
-- **Air-gapped support** - Container image parameters allow overriding public ECR images
+- `cardinal-vpc.yaml` — optional VPC (skipped by customers using their own VPC)
+- `cardinal-lakerunner.yaml` — application root, composed of eleven nested children
 
-## Key Design Patterns
+The lakerunner root nests these children:
 
-### Cross-Stack Resource Sharing
+| # | Template | Owns |
+|---|---|---|
+| 1 | `cluster.yaml` | ECS cluster, base TaskSG, shared execution role, base log group |
+| 2 | `database.yaml` | RDS subnet group, DB instance, DB master secret |
+| 3 | `storage.yaml` | S3 ingest bucket + lifecycle, SQS queue + policy, S3 → SQS notifications |
+| 4 | `alb.yaml` | ALB, default 443 listener, ALB security group |
+| 5 | `config.yaml` | SSM params, license/admin/internal-keys secrets |
+| 6 | `migration.yaml` | One-shot DB migration custom resource |
+| 7 | `services-query.yaml` | query-api, query-worker |
+| 8 | `services-process.yaml` | process-{logs,metrics,traces}, pubsub-sqs |
+| 9 | `services-control.yaml` | sweeper, monitoring, admin-api, alert-evaluator |
+| 10 | `otel.yaml` | otel-collector |
+| 11 | `maestro.yaml` | Maestro + bundled DEX OIDC |
 
-Templates use CloudFormation exports/imports extensively:
+Cross-stack wiring goes through the root via `Fn::GetAtt childStack.Outputs.X` → child parameter. Sibling children never reference each other directly.
 
-```python
-# Export in CommonInfra
-Export=Export(name=Sub("${AWS::StackName}-ClusterArn"))
+## Repo / generator code layout (target)
 
-# Import in Services
-ClusterArnValue = ImportValue(ci_export("ClusterArn"))
+```
+src/
+  cardinal_cfn/
+    __init__.py
+    install_id.py            # InstallIdShort/InstallIdLong derivation (root only)
+    naming.py                # Tag conventions, name-tag helpers
+    parameters.py            # Shared parameter / NoEcho / parameter-group helpers
+    images.py                # Image-override parameter machinery
+    policies.py              # DeletionPolicy / UpdateReplacePolicy table
+    listener_priorities.py   # Pre-allocated ListenerRule priorities (B → C safe)
+    defaults.py              # cardinal-defaults.yaml loader
+    children/                # one module per nested-stack child
+    root.py                  # parent template generator
+  cardinal_vpc.py            # standalone VPC generator
+cardinal-defaults.yaml       # consolidated defaults (services, images, maestro, otel)
+tests/
+  unit/                      # helper-level tests
+  templates/                 # per-template assertions via cloud-radar
+.github/workflows/
+  test.yml                   # PR/main test runner
+  release.yml                # publish to S3 on tag
 ```
 
-### Conditional ALB Resources
+Generated templates go to `generated-templates/`, mirroring the S3 key layout:
 
-ALB creation is optional in CommonInfra. Services template automatically detects ALB presence:
-
-```python
-CreateAlbValue = ImportValue(ci_export("CreateAlb"))
-t.add_condition("HasAlb", Equals(CreateAlbValue, "Yes"))
+```
+generated-templates/
+  cardinal-vpc.yaml
+  cardinal-lakerunner.yaml             # the root
+  cardinal-lakerunner/                 # the children, mirrors S3 prefix
+    cluster.yaml
+    database.yaml
+    ...
 ```
 
-### Unified Configuration Loading
+## Key design rules
 
-All templates load defaults from YAML and allow parameter overrides:
+### Naming and tags
 
-```python
-def load_defaults(config_file="defaults.yaml"):
-    with open(config_path, 'r') as f:
-        return yaml.safe_load(f)
+- Default to **CloudFormation-generated physical names** with a `Name` tag.
+- Prefix is `cardinal-`. Use `chq-` only when an AWS resource name length cap forces it.
+- Explicit physical names *only* where externally referenced — SSM Parameter names (AWS-required), the S3 ingest bucket name (predictability), license/admin secrets (referenced from outside the stack).
+- Never name RDS, ECS clusters/services, listener rules, log groups, target groups — explicit names block in-place updates.
+
+### Multi-install isolation
+
+`InstallIdShort` (8 hex) and `InstallIdLong` (12 hex) are derived from the root stack's `AWS::StackId` and propagated as parameters to every nested child. **Children never compute these themselves** — `Ref(AWS::StackId)` in a child returns the child's id, not the root's.
+
+```
+UUID            = Fn::Select(2, Fn::Split("/", Ref(AWS::StackId)))
+InstallIdShort  = Fn::Select(0, Fn::Split("-", UUID))
+InstallIdLong   = Fn::Join("", [first two segments of UUID])
 ```
 
-## Build and Testing
+### Sensitive values
 
-### Commands
+- Sensitive values **always** go to Secrets Manager. `AWS::SSM::Parameter` cannot be `SecureString` in CloudFormation.
+- Parameters carrying secrets (`LicenseData`, `ApiKeysOverride`, `StorageProfilesOverride`) declare `NoEcho: true`.
 
-- `./build.sh` - Generate all CloudFormation templates with validation
-- `python3 <template>.py` - Generate individual template
-- `cfn-lint out/<template>.yaml` - Validate specific template
-- `make test` - Run all unit tests
-- `make test-common` - Run CommonInfra template tests only
-- `make test-services` - Run Services template tests only
-- `make test-migration` - Run Migration template tests only
-- `make test-params` - Run parameter and condition validation tests only
-- `make build` - Generate templates using Makefile
-- `make lint` - Run cfn-lint validation on all templates
-- `make all` - Run build, test, and lint together
+### List parameters into nested stacks
 
-### Environment
+CloudFormation passes nested-stack parameters as strings. Lists like `PrivateSubnets` cannot be reliably forwarded as `List<...>`. The convention: every child declares such parameters as `String` (CSV) and uses `Fn::Split(",", ...)` internally. The root joins with `Fn::Join(",", ...)` before passing.
 
-The build system uses a Python virtual environment with dependencies in the `requirements.txt` file.
+### Lifecycle policies
 
-### Testing Changes
+Customer-data-bearing resources get `DeletionPolicy: Snapshot` (RDS) or `Retain` (S3 ingest, license/admin secrets). Stateless resources are `Delete`. The exact table lives in `src/cardinal_cfn/policies.py` and is enforced by `apply_policy(resource, kind)`.
 
-When making changes to templates, always use the virtual environment to test:
+### ListenerRule priorities
 
-1. `source .venv/bin/activate` - Activate the virtual environment
-1. `./build.sh` - Regenerate all templates and run validation
-1. `cfn-lint out/*.yaml` - Run additional validation if needed
+Pre-allocated, registered in `src/cardinal_cfn/listener_priorities.py`. Each service's priority stays the same when the service is later moved into its own per-service stack — preventing collisions during the future B → C split.
 
-All templates must pass cfn-lint validation (errors must be fixed, warnings are acceptable if safe).
+| Service | Priority |
+|---|---|
+| query-api | 100 |
+| admin-api | 110 |
+| maestro-https | 200 |
+| maestro-dex | 210 |
+| otel-grpc | 300 |
+| (reserved) | 400-999 |
 
-### Unit Testing
+### Migration custom resource
 
-The repository includes comprehensive unit tests using pytest and cloud-radar for offline CloudFormation template testing:
+Lambda-backed, runs the lakerunner migrator as a one-shot ECS task. Behavior:
 
-- **Test Structure**: Tests are organized in the `tests/` directory with separate test files for each template
-- **Cloud-Radar**: Enables offline validation of CloudFormation templates without AWS credentials
-- **Mock Configuration**: Tests use mocked service configurations to avoid dependencies on external files
-- **Coverage**: Tests validate template structure, parameters, resources, exports, and CloudFormation syntax
+- Stable `PhysicalResourceId`: `cardinal-migration-<InstallIdLong>`.
+- Trigger: `MigrationVersion` property = lakerunner image **digest** (`sha256:...`). Tags are rejected.
+- Create runs the migrator. Update reruns only if `MigrationVersion` changed. Delete is a no-op.
 
-When adding new templates or modifying existing ones:
-1. Run `make test` to ensure all tests pass
-2. Add new test cases for new functionality
-3. Update test mocks when changing service configurations
-4. Ensure tests cover both positive and negative scenarios
-5. Run `make test-params` specifically for parameter and condition changes
+### Service tier rule (B → C safe)
 
-### Parameter Validation Testing
+The three service tier stacks (`services-query`, `services-process`, `services-control`) own *only* per-service resources: ECS Service, TaskDefinition, TargetGroup, ListenerRule, per-service log group, per-service task role. Anything shared across services lives in `cluster`, `alb`, or `config`. This rule keeps the door open to a future per-service-stack split with minimal disruption.
 
-The repository includes comprehensive parameter validation tests that catch issues cfn-lint may miss:
+## Build and testing
 
-- **Parameter Constraints**: Validates AllowedValues, Types, and constraint consistency
-- **Condition Syntax**: Ensures all CloudFormation conditions use valid syntax
-- **Parameter References**: Verifies conditions reference existing parameters
-- **Condition Usage**: Validates conditions are used properly in resources and outputs
-- **Logic Validation**: Tests condition logic for common mistakes and antipatterns
-- **Cross-Template Consistency**: Ensures parameter types are consistent across templates
+The build script and Makefile are being rewritten in Phase 8. Until then, generators are run individually via:
 
-## Development Guidelines
+```sh
+python3 -m cardinal_cfn.children.<child>      # emits YAML to stdout
+python3 -m cardinal_cfn.root                  # emits root YAML
+python3 src/cardinal_vpc.py                   # emits VPC YAML
+```
 
-### Template Modifications
+Tests:
 
-- Always test with `./build.sh` after changes
-- Use `cfn-lint` validation - address errors, safe and explainable warnings are acceptable
-- Maintain parameter minimization - only ask users for what's necessary
-- Follow existing cross-stack import patterns for new resources
+```sh
+pytest tests/unit/        # helper unit tests
+pytest tests/templates/   # per-template assertions
+pytest tests/             # everything
+```
 
-### Adding New Services
+Linting:
 
-1. Add service configuration to `defaults.yaml`
-1. Services template will automatically create ECS service, task definition, IAM roles
-1. For ALB attachment, set `ingress.attach_alb: true` in service config
+```sh
+cfn-lint generated-templates/cardinal-vpc.yaml \
+         generated-templates/cardinal-lakerunner.yaml \
+         generated-templates/cardinal-lakerunner/*.yaml
+```
 
-### Service Configuration Parameters
+All templates must pass cfn-lint with no errors. Warnings are tolerable when explainable.
 
-The Services stack exposes CloudFormation parameters to configure replicas, CPU, and memory for lakerunner services at deployment time. Different service types have different configurable options:
+## Publishing (Phase 8)
 
-| Service                        | Replicas  | CPU       | Memory    |
-|--------------------------------|-----------|-----------|-----------|
-| **Query Services**             |           |           |           |
-| lakerunner-query-api           | Parameter | Parameter | Parameter |
-| lakerunner-query-worker        | Parameter | Parameter | Parameter |
-| **Process Services**           |           |           |           |
-| lakerunner-process-logs        | Parameter | YAML      | Parameter |
-| lakerunner-process-metrics     | Parameter | YAML      | Parameter |
-| lakerunner-process-traces      | Parameter | YAML      | Parameter |
-| **Replicas-Only Services**     |           |           |           |
-| lakerunner-pubsub-sqs          | Parameter | YAML      | YAML      |
-| **Fixed Services**             |           |           |           |
-| lakerunner-sweeper             | YAML      | YAML      | YAML      |
-| lakerunner-monitoring          | YAML      | YAML      | YAML      |
+GitHub Actions on tag push (`v*`) builds, lints, tests, and publishes to a vendor-managed public S3 bucket (`cardinal-cfn`, provisioned in `terraform-deployments/aws/production/cloudformation-distribution.tf`). Customers paste the regional S3 URL into the CloudFormation console:
 
-- **Parameter**: Configurable via CloudFormation parameter at deployment time
-- **YAML**: Uses default value from `lakerunner-stack-defaults.yaml`
+```
+https://cardinal-cfn.s3.<region>.amazonaws.com/lakerunner/<version>/cardinal-lakerunner.yaml
+```
 
-Process services are scaled by the monitoring service (not CloudWatch auto-scaling).
-The replicas parameter sets the maximum; the monitoring service manages the actual count.
+Air-gapped customers override the `TemplateBaseUrl` parameter on the root stack to point at a customer-owned mirror.
 
-Parameters are organized in the CloudFormation console into groups:
+## Security considerations
 
-- **Query Services Configuration**: CPU, Memory, and Replicas for query-api and query-worker
-- **Process Services Configuration**: Memory and Max Replicas for process-logs/metrics/traces
-- **Other Services Configuration**: Replicas only for pubsub and boxer
-
-### Security Considerations
-
-- Never hardcode secrets - use Secrets Manager or SSM parameters
-- All ECS tasks run with `AssignPublicIp: DISABLED`
-- Follow existing IAM policy patterns for new permissions
-- Database connections always use SSL (`LRDB_SSLMODE: require`)
-- Database credentials stored in AWS Secrets Manager
-- Application secrets (HMAC keys, Grafana passwords) auto-generated
-- ECS task roles follow principle of least privilege
-- All tasks run in private subnets with no public IP assignment
+- Never hardcode secrets — Secrets Manager only.
+- All ECS tasks run with `AssignPublicIp: DISABLED`.
+- Database connections require SSL (`LRDB_SSLMODE: require`).
+- DB credentials are auto-generated into Secrets Manager.
+- ECS task roles follow least privilege — each service has its own task role scoped to exactly the resources it needs.
+- All tasks run in private subnets with no public IP assignment.
+- ECS rolling deployments use `MinimumHealthyPercent: 50`, `MaximumPercent: 200`, and the deployment circuit breaker enabled, so a bad image bump rolls back automatically.
 
 ## Coding style
 
 - Follow existing coding style as much as practical.
-- Make sure there are no trailing whitespace or extra blank lines.
-- All code should be formatted properly.
-- All text-like files should have a final newline, not end on a character, unless that is how that file format usually works.
-- Useful comments welcome, verbosity should be minimal, and generally only document non-obvious code.
-- It is OK to add "section" style comments.
-- Markdown unordered lists should use a "-" not "*".
-- Markdown ordered lists should repeat "1." for each item.
-- Markdown should have blank lines between header lines, code blocks, etc. and other items.
-- Never add advertisements for Claude or Anthropic to any docs or commit messages.
-- Don't use emoji
-
+- No trailing whitespace, no extra blank lines.
+- All code formatted properly.
+- All text-like files end with a final newline.
+- Useful comments are welcome; verbosity should be minimal; document non-obvious code only.
+- "Section" style comments are OK.
+- Markdown unordered lists use `-` not `*`.
+- Markdown ordered lists repeat `1.` for each item.
+- Blank lines between markdown headers, code blocks, and other items.
+- Never add advertisements for Claude or Anthropic to docs or commit messages.
+- No emoji.
 - If my coworker (user) asks me to change ECS containers to non-root, remind them that bind mounts will require root.
