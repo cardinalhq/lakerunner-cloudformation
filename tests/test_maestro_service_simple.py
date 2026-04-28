@@ -87,6 +87,7 @@ class TestMaestroTemplateSimple(unittest.TestCase):
 
         for name in [
             "CommonInfraStackName", "AlbScheme", "MaestroCertificateArn",
+            "DeploySelfSignedCert",
             "TaskCpu", "TaskMemoryMiB",
             "MaestroImage",
             "OidcIssuerUrl", "OidcAudience", "OidcSuperadminGroup",
@@ -96,6 +97,10 @@ class TestMaestroTemplateSimple(unittest.TestCase):
             "DexClientId", "DexPathPrefix", "DexImage", "DexInitImage",
         ]:
             assert name in parameters, f"missing parameter {name}"
+
+        assert parameters["DeploySelfSignedCert"]["AllowedValues"] == \
+            ["Yes", "No"]
+        assert parameters["DeploySelfSignedCert"]["Default"] == "No"
 
         assert parameters["DexEnabled"]["AllowedValues"] == ["Yes", "No"]
         assert parameters["DexEnabled"]["Default"] == "No"
@@ -124,6 +129,11 @@ class TestMaestroTemplateSimple(unittest.TestCase):
         assert "HasDex" in conditions
         assert "MaestroBaseUrlBlank" in conditions
         assert "HasTls" in conditions
+        assert "UseSelfSignedCert" in conditions
+        # HasTls should be the OR of (user-supplied cert) and (self-signed
+        # cert opt-in), so disabling one doesn't disable the HTTPS listener.
+        has_tls = conditions["HasTls"]
+        assert "Fn::Or" in has_tls
 
     @patch('lakerunner_maestro_service.load_maestro_config')
     def test_secret_and_log_groups(self, mock_load_config):
@@ -263,7 +273,12 @@ class TestMaestroTemplateSimple(unittest.TestCase):
         assert svc["DesiredCount"] == 1
         assert svc["LoadBalancers"][0]["ContainerName"] == "Maestro"
         assert svc["LoadBalancers"][0]["ContainerPort"] == 4200
-        assert resources["MaestroService"]["DependsOn"] == ["MaestroListener"]
+        # Service must depend on the DEX listener rule too so the DEX TG is
+        # associated with the ALB before the service tries to register.
+        # CFN ignores DependsOn entries whose target's condition is false,
+        # which makes this safe when DEX is disabled.
+        assert resources["MaestroService"]["DependsOn"] == [
+            "MaestroListener", "MaestroDexListenerRule"]
 
         outputs = template_dict["Outputs"]
         for name in ["MaestroAlbDNS", "MaestroAlbArn", "MaestroServiceArn",
@@ -448,8 +463,15 @@ class TestMaestroTemplateSimple(unittest.TestCase):
         https = resources["MaestroHttpsListener"]["Properties"]
         assert https["Port"] == "443"
         assert https["Protocol"] == "HTTPS"
-        assert https["Certificates"][0]["CertificateArn"] == \
-            {"Ref": "MaestroCertificateArn"}
+        # Cert ARN is now selected at deploy time: self-signed (when opted
+        # in) wins, otherwise fall back to the user-supplied cert ARN.
+        cert_arn = https["Certificates"][0]["CertificateArn"]
+        assert "Fn::If" in cert_arn
+        branches = cert_arn["Fn::If"]
+        assert branches[0] == "UseSelfSignedCert"
+        assert branches[1] == {"Fn::GetAtt": ["SelfSignedCert",
+                                              "CertificateArn"]}
+        assert branches[2] == {"Ref": "MaestroCertificateArn"}
         assert https["DefaultActions"][0]["Type"] == "forward"
         assert https["DefaultActions"][0]["TargetGroupArn"] == {"Ref": "MaestroTg"}
 
@@ -469,6 +491,95 @@ class TestMaestroTemplateSimple(unittest.TestCase):
         assert rc["Protocol"] == "HTTPS"
         assert rc["Port"] == "443"
         assert rc["StatusCode"] == "HTTP_301"
+
+    @patch('lakerunner_maestro_service.load_maestro_config')
+    def test_dex_admin_promoted_to_superadmin(self, mock_load_config):
+        """When DEX is enabled, the DEX admin email is always added to
+        OIDC_SUPERADMIN_EMAILS so the bundled-OIDC flow works without
+        operators having to set the parameter manually."""
+        mock_load_config.return_value = MOCK_CONFIG
+        from lakerunner_maestro_service import create_maestro_template
+
+        tpl = json.loads(create_maestro_template().to_json())
+
+        assert "OidcSuperadminEmailsBlank" in tpl["Conditions"]
+
+        task_def = tpl["Resources"]["MaestroTaskDef"]["Properties"]
+        maestro_container = next(
+            c for c in task_def["ContainerDefinitions"]
+            if isinstance(c, dict) and c.get("Name") == "Maestro"
+        )
+        env = {e["Name"]: e["Value"] for e in maestro_container["Environment"]}
+        value = env["OIDC_SUPERADMIN_EMAILS"]
+
+        # Outer If gates on HasDex.
+        assert "Fn::If" in value
+        outer = value["Fn::If"]
+        assert outer[0] == "HasDex"
+        # When HasDex=No, fall back to the user-supplied param verbatim.
+        assert outer[2] == {"Ref": "OidcSuperadminEmails"}
+
+        # Inner If gates on whether the user supplied any emails.
+        inner = outer[1]
+        assert "Fn::If" in inner
+        inner_branches = inner["Fn::If"]
+        assert inner_branches[0] == "OidcSuperadminEmailsBlank"
+        # Blank case: just the DEX admin email.
+        assert inner_branches[1] == {"Ref": "DexAdminEmail"}
+        # Non-blank case: DEX admin + user-supplied list, comma-joined.
+        non_blank = inner_branches[2]
+        assert "Fn::Sub" in non_blank
+        sub_template, sub_vars = non_blank["Fn::Sub"]
+        assert "${D}" in sub_template and "${E}" in sub_template
+        assert sub_vars["D"] == {"Ref": "DexAdminEmail"}
+        assert sub_vars["E"] == {"Ref": "OidcSuperadminEmails"}
+
+    @patch('lakerunner_maestro_service.load_maestro_config')
+    def test_self_signed_cert_resources(self, mock_load_config):
+        mock_load_config.return_value = MOCK_CONFIG
+        from lakerunner_maestro_service import create_maestro_template
+
+        tpl = json.loads(create_maestro_template().to_json())
+        resources = tpl["Resources"]
+        outputs = tpl["Outputs"]
+
+        # All three resources behind the opt-in must carry the same gate so
+        # they vanish together when DeploySelfSignedCert=No.
+        for name in [
+            "SelfSignedCertLambdaRole",
+            "SelfSignedCertLambda",
+            "SelfSignedCert",
+        ]:
+            assert name in resources, f"missing {name}"
+            assert resources[name]["Condition"] == "UseSelfSignedCert"
+
+        # Lambda should run our inline Python and have permission to
+        # create + delete ACM certs.
+        fn_props = resources["SelfSignedCertLambda"]["Properties"]
+        assert fn_props["Runtime"].startswith("python3.")
+        assert fn_props["Handler"] == "index.lambda_handler"
+        assert "openssl" in fn_props["Code"]["ZipFile"]
+        assert "acm.import_certificate" in fn_props["Code"]["ZipFile"]
+        assert "acm.delete_certificate" in fn_props["Code"]["ZipFile"]
+
+        role_doc = resources["SelfSignedCertLambdaRole"]["Properties"][
+            "Policies"][0]["PolicyDocument"]["Statement"][0]
+        assert "acm:ImportCertificate" in role_doc["Action"]
+        assert "acm:DeleteCertificate" in role_doc["Action"]
+
+        # The custom resource must request a cert for the ALB DNS name so
+        # the cert CN/SAN matches the URL the user types in their browser.
+        cr_props = resources["SelfSignedCert"]["Properties"]
+        assert cr_props["ServiceToken"] == {
+            "Fn::GetAtt": ["SelfSignedCertLambda", "Arn"]
+        }
+        assert cr_props["CommonName"] == {
+            "Fn::GetAtt": ["MaestroAlb", "DNSName"]
+        }
+
+        # Output should expose the generated ARN (and only when generated).
+        assert "SelfSignedCertArn" in outputs
+        assert outputs["SelfSignedCertArn"]["Condition"] == "UseSelfSignedCert"
 
     @patch('lakerunner_maestro_service.load_maestro_config')
     def test_dex_listener_arn_switches_under_has_tls(self, mock_load_config):

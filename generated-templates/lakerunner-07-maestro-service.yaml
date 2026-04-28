@@ -2,16 +2,26 @@ Conditions:
   HasDex: !Equals
     - !Ref 'DexEnabled'
     - 'Yes'
-  HasTls: !Not
+  HasTls: !Or
+    - !Not
+      - !Equals
+        - !Ref 'MaestroCertificateArn'
+        - ''
     - !Equals
-      - !Ref 'MaestroCertificateArn'
-      - ''
+      - !Ref 'DeploySelfSignedCert'
+      - 'Yes'
   IsInternetFacing: !Equals
     - !Ref 'AlbScheme'
     - internet-facing
   MaestroBaseUrlBlank: !Equals
     - !Ref 'MaestroBaseUrl'
     - ''
+  OidcSuperadminEmailsBlank: !Equals
+    - !Ref 'OidcSuperadminEmails'
+    - ''
+  UseSelfSignedCert: !Equals
+    - !Ref 'DeploySelfSignedCert'
+    - 'Yes'
 Description: 'Lakerunner Maestro + MCP Gateway: single ECS Fargate service with a stack-local ALB. Reuses CommonInfra RDS and runs a psql init container that creates the maestro DB and user.'
 Metadata:
   AWS::CloudFormation::Interface:
@@ -22,6 +32,7 @@ Metadata:
           - CommonInfraStackName
           - AlbScheme
           - MaestroCertificateArn
+          - DeploySelfSignedCert
       - Label:
           default: Task Sizing
         Parameters:
@@ -59,6 +70,8 @@ Metadata:
         default: ALB Scheme
       CommonInfraStackName:
         default: Common Infra Stack Name
+      DeploySelfSignedCert:
+        default: Deploy Self-Signed Cert
       DexAdminEmail:
         default: DEX Admin Email
       DexAdminPasswordHash:
@@ -122,6 +135,10 @@ Outputs:
       - !Sub
         - http://${Dns}
         - Dns: !GetAtt 'MaestroAlb.DNSName'
+  SelfSignedCertArn:
+    Condition: UseSelfSignedCert
+    Description: ARN of the auto-generated self-signed ACM cert attached to the HTTPS listener.
+    Value: !GetAtt 'SelfSignedCert.CertificateArn'
 Parameters:
   AlbScheme:
     AllowedValues:
@@ -132,6 +149,15 @@ Parameters:
     Type: String
   CommonInfraStackName:
     Description: 'REQUIRED: Name of the CommonInfra stack to import values from.'
+    Type: String
+  DeploySelfSignedCert:
+    AllowedValues:
+      - 'Yes'
+      - 'No'
+    Default: 'No'
+    Description: >-
+      When 'Yes', generate a self-signed cert at deploy time, import it to ACM, and use it for the HTTPS listener. Lets HTTPS + bundled DEX OIDC work without owning a domain or making DNS changes; browsers
+      warn (untrusted CA) on first visit. Ignored if MaestroCertificateArn is set.
     Type: String
   DexAdminEmail:
     Default: ''
@@ -408,7 +434,10 @@ Resources:
     Condition: HasTls
     Properties:
       Certificates:
-        - CertificateArn: !Ref 'MaestroCertificateArn'
+        - CertificateArn: !If
+            - UseSelfSignedCert
+            - !GetAtt 'SelfSignedCert.CertificateArn'
+            - !Ref 'MaestroCertificateArn'
       DefaultActions:
         - TargetGroupArn: !Ref 'MaestroTg'
           Type: forward
@@ -439,6 +468,7 @@ Resources:
   MaestroService:
     DependsOn:
       - MaestroListener
+      - MaestroDexListenerRule
     Properties:
       Cluster: !ImportValue
         Fn::Sub:
@@ -674,7 +704,16 @@ Resources:
                     Port: '5556'
                 - !Ref 'OidcJwksUrl'
             - Name: OIDC_SUPERADMIN_EMAILS
-              Value: !Ref 'OidcSuperadminEmails'
+              Value: !If
+                - HasDex
+                - !If
+                  - OidcSuperadminEmailsBlank
+                  - !Ref 'DexAdminEmail'
+                  - !Sub
+                    - ${D},${E}
+                    - D: !Ref 'DexAdminEmail'
+                      E: !Ref 'OidcSuperadminEmails'
+                - !Ref 'OidcSuperadminEmails'
             - Name: OIDC_TRUST_UNVERIFIED_EMAILS
               Value: !Ref 'OidcTrustUnverifiedEmails'
           Essential: true
@@ -712,7 +751,7 @@ Resources:
           - HasDex
           - Command:
               - |
-                set -eu; cat > /etc/dex/config.yaml <<EOF
+                set -eu; DEX_REDIRECT_URI_LC=$(echo "$DEX_REDIRECT_URI" | tr 'A-Z' 'a-z'); cat > /etc/dex/config.yaml <<EOF
                 issuer: ${DEX_ISSUER_URL}
                 storage:
                   type: memory
@@ -727,6 +766,7 @@ Resources:
                     public: true
                     redirectURIs:
                       - "${DEX_REDIRECT_URI}"
+                      - "${DEX_REDIRECT_URI_LC}"
                 staticPasswords:
                   - email: "${DEX_ADMIN_EMAIL}"
                     hash: "${DEX_ADMIN_HASH}"
@@ -916,4 +956,176 @@ Resources:
           - ${CommonInfraStackName}-VpcId
           - CommonInfraStackName: !Ref 'CommonInfraStackName'
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
+  SelfSignedCert:
+    Condition: UseSelfSignedCert
+    Properties:
+      CommonName: !GetAtt 'MaestroAlb.DNSName'
+      ServiceToken: !GetAtt 'SelfSignedCertLambda.Arn'
+      SubjectAlternativeNames: !GetAtt 'MaestroAlb.DNSName'
+      ValidityDays: '3650'
+    Type: AWS::CloudFormation::CustomResource
+  SelfSignedCertLambda:
+    Condition: UseSelfSignedCert
+    Properties:
+      Code:
+        ZipFile: |2
+
+          import json, os, subprocess, tempfile, time, traceback, urllib.request
+          import boto3
+
+          acm = boto3.client("acm")
+
+
+          def _send(event, context, status, data=None, physical_id=None, reason=None):
+              body = {
+                  "Status": status,
+                  "Reason": reason or f"See log stream {context.log_stream_name}",
+                  "PhysicalResourceId": (
+                      physical_id
+                      or event.get("PhysicalResourceId")
+                      or context.log_stream_name
+                  ),
+                  "StackId": event["StackId"],
+                  "RequestId": event["RequestId"],
+                  "LogicalResourceId": event["LogicalResourceId"],
+                  "Data": data or {},
+              }
+              payload = json.dumps(body).encode()
+              req = urllib.request.Request(
+                  event["ResponseURL"],
+                  data=payload,
+                  headers={"content-type": "", "content-length": str(len(payload))},
+                  method="PUT",
+              )
+              urllib.request.urlopen(req)
+
+
+          def _gen_cert(cn, sans, days):
+              san_lines = ",".join("DNS:" + s for s in sans)
+              cnf = (
+                  "[req]\n"
+                  "distinguished_name=dn\n"
+                  "x509_extensions=v3_req\n"
+                  "prompt=no\n"
+                  "[dn]\n"
+                  f"CN={cn}\n"
+                  "[v3_req]\n"
+                  f"subjectAltName={san_lines}\n"
+                  "basicConstraints=CA:FALSE\n"
+                  "keyUsage=digitalSignature,keyEncipherment\n"
+                  "extendedKeyUsage=serverAuth\n"
+              )
+              with tempfile.TemporaryDirectory() as d:
+                  cnf_path = os.path.join(d, "openssl.cnf")
+                  key_path = os.path.join(d, "key.pem")
+                  crt_path = os.path.join(d, "cert.pem")
+                  with open(cnf_path, "w") as f:
+                      f.write(cnf)
+                  subprocess.run(
+                      [
+                          "openssl", "req", "-x509", "-nodes",
+                          "-newkey", "rsa:2048",
+                          "-keyout", key_path,
+                          "-out", crt_path,
+                          "-days", str(days),
+                          "-config", cnf_path,
+                      ],
+                      check=True, capture_output=True,
+                  )
+                  with open(crt_path, "rb") as f:
+                      cert = f.read()
+                  with open(key_path, "rb") as f:
+                      key = f.read()
+              return cert, key
+
+
+          def lambda_handler(event, context):
+              try:
+                  rt = event["RequestType"]
+                  if rt in ("Create", "Update"):
+                      props = event.get("ResourceProperties", {}) or {}
+                      cn = (props.get("CommonName") or "").strip() or "localhost"
+                      sans_raw = props.get("SubjectAlternativeNames") or [cn]
+                      if isinstance(sans_raw, str):
+                          sans = [
+                              s.strip() for s in sans_raw.split(",") if s.strip()
+                          ]
+                      else:
+                          sans = [s.strip() for s in sans_raw if s and s.strip()]
+                      if not sans:
+                          sans = [cn]
+                      days = int(props.get("ValidityDays") or 3650)
+                      cert, key = _gen_cert(cn, sans, days)
+                      tags = [
+                          {"Key": "ManagedBy", "Value": "Lakerunner"},
+                          {"Key": "StackId", "Value": event["StackId"]},
+                          {"Key": "LogicalResourceId",
+                           "Value": event["LogicalResourceId"]},
+                      ]
+                      resp = acm.import_certificate(
+                          Certificate=cert, PrivateKey=key, Tags=tags,
+                      )
+                      arn = resp["CertificateArn"]
+                      _send(
+                          event, context, "SUCCESS",
+                          data={"CertificateArn": arn, "CommonName": cn},
+                          physical_id=arn,
+                      )
+                  elif rt == "Delete":
+                      arn = event.get("PhysicalResourceId", "")
+                      if arn.startswith("arn:aws:acm:"):
+                          # ALB listener teardown propagates async; ACM keeps reporting
+                          # the cert as in-use for a beat after the listener is gone.
+                          # Retry briefly before giving up.
+                          last_err = None
+                          for attempt in range(6):
+                              try:
+                                  acm.delete_certificate(CertificateArn=arn)
+                                  last_err = None
+                                  break
+                              except acm.exceptions.ResourceNotFoundException:
+                                  last_err = None
+                                  break
+                              except acm.exceptions.ResourceInUseException as e:
+                                  last_err = e
+                                  time.sleep(10)
+                          if last_err is not None:
+                              raise last_err
+                      _send(event, context, "SUCCESS")
+                  else:
+                      _send(event, context, "SUCCESS")
+              except Exception as e:
+                  traceback.print_exc()
+                  _send(event, context, "FAILED", reason=str(e)[:1000])
+      Handler: index.lambda_handler
+      MemorySize: 256
+      Role: !GetAtt 'SelfSignedCertLambdaRole.Arn'
+      Runtime: python3.12
+      Timeout: 120
+    Type: AWS::Lambda::Function
+  SelfSignedCertLambdaRole:
+    Condition: UseSelfSignedCert
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+        Version: '2012-10-17'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyDocument:
+            Statement:
+              - Action:
+                  - acm:ImportCertificate
+                  - acm:DeleteCertificate
+                  - acm:AddTagsToCertificate
+                  - acm:DescribeCertificate
+                Effect: Allow
+                Resource: '*'
+            Version: '2012-10-17'
+          PolicyName: AcmImportDelete
+    Type: AWS::IAM::Role
 
