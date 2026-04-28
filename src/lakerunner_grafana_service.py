@@ -387,7 +387,10 @@ def create_grafana_template():
     # Volumes
     # -----------------------
     volumes = [
-        Volume(Name="scratch")
+        Volume(Name="scratch"),
+        # Shared between GrafanaDatasourceInit (writes cardinal.yaml) and
+        # GrafanaContainer (reads it as Grafana provisioning input).
+        Volume(Name="grafana-provisioning"),
     ]
 
     # -----------------------
@@ -445,6 +448,45 @@ def create_grafana_template():
     )
     container_definitions.append(init_container)
 
+    # -- Second init container: write Grafana datasource provisioning file --
+    # The init image (ghcr.io/cardinalhq/initcontainer-grafana) supports a
+    # MODE=datasource-provisioning entrypoint that writes
+    # /etc/grafana/provisioning/datasources/cardinal.yaml from the
+    # GRAFANA_DATASOURCE_CONFIG env. We mount a shared volume at that path
+    # so the main Grafana container picks the file up at startup. Without
+    # this step the SSM-stored datasource YAML never reaches Grafana's
+    # provisioning loader.
+    datasource_init_container = ContainerDefinition(
+        Name="GrafanaDatasourceInit",
+        Image=grafana_init_image,
+        Essential=False,
+        Environment=[
+            Environment(Name="MODE", Value="datasource-provisioning"),
+        ],
+        Secrets=[
+            EcsSecret(
+                Name="GRAFANA_DATASOURCE_CONFIG",
+                ValueFrom=Ref(grafana_datasource_param),
+            )
+        ],
+        MountPoints=[
+            MountPoint(
+                ContainerPath="/etc/grafana/provisioning/datasources",
+                SourceVolume="grafana-provisioning",
+                ReadOnly=False,
+            )
+        ],
+        LogConfiguration=LogConfiguration(
+            LogDriver="awslogs",
+            Options={
+                "awslogs-group": Ref(grafana_log_group),
+                "awslogs-region": Ref("AWS::Region"),
+                "awslogs-stream-prefix": "grafana-ds-init",
+            },
+        ),
+    )
+    container_definitions.append(datasource_init_container)
+
     # -- Main Grafana container --
     base_env = [
         Environment(Name="BUMP_REVISION", Value="1"),
@@ -473,10 +515,6 @@ def create_grafana_template():
             Name="GF_DATABASE_PASSWORD",
             ValueFrom=Sub("${SecretArn}:password::", SecretArn=Ref(grafana_db_secret))
         ),
-        EcsSecret(
-            Name="GRAFANA_DATASOURCE_CONFIG",
-            ValueFrom=Ref(grafana_datasource_param)
-        )
     ]
 
     grafana_container = ContainerDefinition(
@@ -490,7 +528,15 @@ def create_grafana_template():
                 ContainerPath="/scratch",
                 SourceVolume="scratch",
                 ReadOnly=False
-            )
+            ),
+            # Pick up the provisioned datasource YAML written by
+            # GrafanaDatasourceInit. ReadOnly=True since Grafana shouldn't
+            # mutate provisioning files at runtime.
+            MountPoint(
+                ContainerPath="/etc/grafana/provisioning/datasources",
+                SourceVolume="grafana-provisioning",
+                ReadOnly=True,
+            ),
         ],
         PortMappings=[PortMapping(ContainerPort=3000, Protocol="tcp")],
         HealthCheck=HealthCheck(
@@ -501,7 +547,10 @@ def create_grafana_template():
             StartPeriod=60
         ),
         User="0",
-        DependsOn=[{"ContainerName": "GrafanaInit", "Condition": "SUCCESS"}],
+        DependsOn=[
+            {"ContainerName": "GrafanaInit", "Condition": "SUCCESS"},
+            {"ContainerName": "GrafanaDatasourceInit", "Condition": "SUCCESS"},
+        ],
         LogConfiguration=LogConfiguration(
             LogDriver="awslogs",
             Options={

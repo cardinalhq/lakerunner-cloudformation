@@ -167,7 +167,10 @@ class TestGrafanaTemplateSimple(unittest.TestCase):
             assert name not in resources, f"{name} should have been removed"
 
     @patch('lakerunner_grafana_service.load_grafana_config')
-    def test_task_definition_has_only_init_and_grafana(self, mock_load_config):
+    def test_task_definition_has_only_init_and_grafana(self, mock_load_config):  # noqa: E501
+        # Renamed semantically: now verifies init + datasource-init + grafana
+        # are the only containers. The legacy name is kept to preserve git
+        # blame continuity.
         mock_load_config.return_value = MOCK_CONFIG
 
         from lakerunner_grafana_service import create_grafana_template
@@ -180,11 +183,12 @@ class TestGrafanaTemplateSimple(unittest.TestCase):
         names = [c["Name"] for c in containers]
 
         assert "GrafanaInit" in names
+        assert "GrafanaDatasourceInit" in names
         assert "GrafanaContainer" in names
         assert "McpGateway" not in names
         assert "ConductorServer" not in names
         assert "MaestroServer" not in names
-        assert len(containers) == 2
+        assert len(containers) == 3
 
     @patch('lakerunner_grafana_service.load_grafana_config')
     def test_task_definition_resources(self, mock_load_config):
@@ -265,6 +269,60 @@ class TestGrafanaTemplateSimple(unittest.TestCase):
         assert "${LAKERUNNER_API_KEY}" in template_str
         assert "QUERY_API_URL" in var_map
         assert "LAKERUNNER_API_KEY" in var_map
+
+
+    @patch('lakerunner_grafana_service.load_grafana_config')
+    def test_datasource_init_writes_provisioning_volume(self, mock_load_config):
+        """The Grafana container must read /etc/grafana/provisioning/datasources
+        from a shared volume that GrafanaDatasourceInit populates by running
+        the init image in MODE=datasource-provisioning. Without this wiring
+        the SSM-stored datasource YAML never reaches Grafana."""
+        mock_load_config.return_value = MOCK_CONFIG
+
+        from lakerunner_grafana_service import create_grafana_template
+
+        resources = json.loads(create_grafana_template().to_json())["Resources"]
+        td = resources["GrafanaTaskDef"]["Properties"]
+
+        # Shared volume must exist on the task def.
+        volume_names = [v["Name"] for v in td["Volumes"]]
+        assert "grafana-provisioning" in volume_names
+
+        containers = {c["Name"]: c for c in td["ContainerDefinitions"]}
+
+        # Datasource-init container: image, mode, secret, and write-mount.
+        ds_init = containers["GrafanaDatasourceInit"]
+        assert ds_init["Essential"] is False
+        env = {e["Name"]: e["Value"] for e in ds_init["Environment"]}
+        assert env.get("MODE") == "datasource-provisioning"
+        secret_names = [s["Name"] for s in ds_init["Secrets"]]
+        assert "GRAFANA_DATASOURCE_CONFIG" in secret_names
+        ds_mounts = ds_init["MountPoints"]
+        assert any(
+            m["ContainerPath"] == "/etc/grafana/provisioning/datasources"
+            and m["SourceVolume"] == "grafana-provisioning"
+            and m["ReadOnly"] is False
+            for m in ds_mounts
+        )
+
+        # Main grafana container: read-only mount of same volume + dep on
+        # both init containers.
+        gc = containers["GrafanaContainer"]
+        gc_mounts = gc["MountPoints"]
+        assert any(
+            m["ContainerPath"] == "/etc/grafana/provisioning/datasources"
+            and m["SourceVolume"] == "grafana-provisioning"
+            and m["ReadOnly"] is True
+            for m in gc_mounts
+        )
+        deps = {d["ContainerName"]: d["Condition"] for d in gc["DependsOn"]}
+        assert deps.get("GrafanaInit") == "SUCCESS"
+        assert deps.get("GrafanaDatasourceInit") == "SUCCESS"
+
+        # GRAFANA_DATASOURCE_CONFIG should NOT be on the main container any
+        # more — it's now consumed by the dedicated init container only.
+        gc_secrets = [s["Name"] for s in gc["Secrets"]]
+        assert "GRAFANA_DATASOURCE_CONFIG" not in gc_secrets
 
 
 if __name__ == '__main__':

@@ -316,9 +316,30 @@ Resources:
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
                 - SecretArn: !Ref 'GrafanaSecret'
+        - Environment:
+            - Name: MODE
+              Value: datasource-provisioning
+          Essential: false
+          Image: ghcr.io/cardinalhq/initcontainer-grafana:latest
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref 'GrafanaLogGroup'
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: grafana-ds-init
+          MountPoints:
+            - ContainerPath: /etc/grafana/provisioning/datasources
+              ReadOnly: false
+              SourceVolume: grafana-provisioning
+          Name: GrafanaDatasourceInit
+          Secrets:
+            - Name: GRAFANA_DATASOURCE_CONFIG
+              ValueFrom: !Ref 'GrafanaDatasourceConfig'
         - DependsOn:
             - Condition: SUCCESS
               ContainerName: GrafanaInit
+            - Condition: SUCCESS
+              ContainerName: GrafanaDatasourceInit
           Environment:
             - Name: BUMP_REVISION
               Value: '1'
@@ -379,6 +400,9 @@ Resources:
             - ContainerPath: /scratch
               ReadOnly: false
               SourceVolume: scratch
+            - ContainerPath: /etc/grafana/provisioning/datasources
+              ReadOnly: true
+              SourceVolume: grafana-provisioning
           Name: GrafanaContainer
           PortMappings:
             - ContainerPort: 3000
@@ -392,8 +416,6 @@ Resources:
               ValueFrom: !Sub
                 - '${SecretArn}:password::'
                 - SecretArn: !Ref 'GrafanaDbSecret'
-            - Name: GRAFANA_DATASOURCE_CONFIG
-              ValueFrom: !Ref 'GrafanaDatasourceConfig'
           User: '0'
       Cpu: '2048'
       ExecutionRoleArn: !GetAtt 'GrafanaExecRole.Arn'
@@ -408,6 +430,7 @@ Resources:
       TaskRoleArn: !GetAtt 'GrafanaTaskRole.Arn'
       Volumes:
         - Name: scratch
+        - Name: grafana-provisioning
     Type: AWS::ECS::TaskDefinition
   GrafanaTaskRole:
     Properties:
