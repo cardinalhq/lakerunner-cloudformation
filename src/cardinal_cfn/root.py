@@ -215,7 +215,7 @@ def build() -> Template:
         t, name="DbInitImage",
         default=defaults["images"]["db_init"],
         description="psql-capable bootstrapper container image (maestro db-init).")
-    migration_image = add_image_override(
+    add_image_override(
         t, name="MigrationImage",
         default=defaults["images"]["migration"],
         description="DB migrator container image.")
@@ -471,7 +471,7 @@ def build() -> Template:
 def _add_child(t: Template, logical_id: str, child_filename: str,
                parameters: dict, depends_on: list[str] | None = None):
     """Add an AWS::CloudFormation::Stack resource with a Sub-rendered TemplateURL."""
-    kwargs = dict(
+    kwargs: dict = dict(
         TemplateURL=Sub("${TemplateBaseUrl}" + child_filename),
         Parameters=parameters,
     )
