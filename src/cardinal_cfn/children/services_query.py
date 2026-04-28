@@ -14,18 +14,11 @@ from troposphere import (
     Template,
 )
 from troposphere.ec2 import SecurityGroupIngress
-from troposphere.ecs import (
-    ContainerDefinition,
-    Environment,
-    LogConfiguration,
-    Secret,
-    TaskDefinition,
-)
+from troposphere.ecs import Environment, Secret
 
 from cardinal_cfn.children import services_common
 from cardinal_cfn.defaults import load_defaults
 from cardinal_cfn.images import add_image_override
-from cardinal_cfn.naming import cardinal_tags
 from cardinal_cfn.parameters import (
     add_install_id_parameters,
     add_parameter_group_metadata,
@@ -298,12 +291,13 @@ def build() -> Template:
         )
     )
     api_task = t.add_resource(
-        _task_definition_with_param_resources(
+        services_common.build_task_definition(
             service_key="query-api",
-            service_config=api_cfg,
-            cpu_ref=Ref("QueryApiCpu"),
-            memory_ref=Ref("QueryApiMemory"),
             image_ref=image_ref,
+            cpu=Ref("QueryApiCpu"),
+            memory_mib=Ref("QueryApiMemory"),
+            command=api_cfg.get("command"),
+            execution_role_arn_param="ExecutionRoleArn",
             task_role_ref=api_role,
             environment=api_env,
             secrets=base_secrets,
@@ -337,12 +331,13 @@ def build() -> Template:
 
     worker_env = list(base_env) + _service_specific_env(worker_cfg)
     worker_task = t.add_resource(
-        _task_definition_with_param_resources(
+        services_common.build_task_definition(
             service_key="query-worker",
-            service_config=worker_cfg,
-            cpu_ref=Ref("QueryWorkerCpu"),
-            memory_ref=Ref("QueryWorkerMemory"),
             image_ref=image_ref,
+            cpu=Ref("QueryWorkerCpu"),
+            memory_mib=Ref("QueryWorkerMemory"),
+            command=worker_cfg.get("command"),
+            execution_role_arn_param="ExecutionRoleArn",
             task_role_ref=worker_role,
             environment=worker_env,
             secrets=base_secrets,
@@ -390,59 +385,6 @@ def _service_specific_env(service_cfg: dict) -> list:
     """Convert the YAML environment dict into a list of ECS Environment objects."""
     env = service_cfg.get("environment") or {}
     return [Environment(Name=k, Value=str(v)) for k, v in env.items()]
-
-
-def _task_definition_with_param_resources(
-    *,
-    service_key: str,
-    service_config: dict,
-    cpu_ref,
-    memory_ref,
-    image_ref,
-    task_role_ref,
-    environment: list,
-    secrets: list,
-    log_group_ref,
-) -> TaskDefinition:
-    """Build a Fargate TaskDefinition where Cpu/Memory come from CFN parameters.
-
-    services_common.build_task_definition coerces cpu/memory through str(),
-    which is fine for static values from YAML but mangles troposphere Refs into
-    Python repr strings. The query tier exposes per-service cpu/memory as
-    customer-tunable parameters, so we build the TaskDefinition inline here
-    and let troposphere serialize the Refs verbatim. The container shape
-    otherwise mirrors services_common.build_task_definition exactly.
-    """
-    container_kwargs = dict(
-        Name=service_key,
-        Image=image_ref,
-        Essential=True,
-        Environment=environment,
-        Secrets=secrets,
-        LogConfiguration=LogConfiguration(
-            LogDriver="awslogs",
-            Options={
-                "awslogs-group": Ref(log_group_ref),
-                "awslogs-region": Ref("AWS::Region"),
-                "awslogs-stream-prefix": service_key,
-            },
-        ),
-    )
-    if service_config.get("command"):
-        container_kwargs["Command"] = service_config["command"]
-
-    title = "".join(p.capitalize() for p in service_key.replace("-", " ").split()) + "TaskDef"
-    return TaskDefinition(
-        title,
-        RequiresCompatibilities=["FARGATE"],
-        NetworkMode="awsvpc",
-        Cpu=cpu_ref,
-        Memory=memory_ref,
-        ExecutionRoleArn=Ref("ExecutionRoleArn"),
-        TaskRoleArn=GetAtt(task_role_ref, "Arn"),
-        ContainerDefinitions=[ContainerDefinition(**container_kwargs)],
-        Tags=cardinal_tags(component="compute", role=service_key),
-    )
 
 
 def _task_role_statements(log_group_ref) -> list:

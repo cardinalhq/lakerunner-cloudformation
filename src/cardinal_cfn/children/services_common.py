@@ -122,15 +122,23 @@ def build_listener_rule(
 def build_task_definition(
     *,
     service_key: str,
-    service_config: dict,
     image_ref,
+    cpu,
+    memory_mib,
+    command: list | None = None,
     execution_role_arn_param: str,
     task_role_ref,
     environment: list,
     secrets: list | None = None,
     log_group_ref,
 ) -> TaskDefinition:
-    """ECS Fargate task definition for a service."""
+    """ECS Fargate task definition for a service.
+
+    cpu / memory_mib accept ints (from YAML defaults) or troposphere Refs
+    (from CloudFormation parameters). Ints are coerced to strings; Refs and
+    other troposphere objects pass through unchanged so they serialize as
+    intrinsic functions.
+    """
     container_kwargs = dict(
         Name=service_key,
         Image=image_ref,
@@ -140,13 +148,13 @@ def build_task_definition(
             LogDriver="awslogs",
             Options={
                 "awslogs-group": Ref(log_group_ref),
-                "awslogs-region": {"Ref": "AWS::Region"},
+                "awslogs-region": Ref("AWS::Region"),
                 "awslogs-stream-prefix": service_key,
             },
         ),
     )
-    if service_config.get("command"):
-        container_kwargs["Command"] = service_config["command"]
+    if command:
+        container_kwargs["Command"] = command
     if secrets:
         container_kwargs["Secrets"] = secrets
 
@@ -154,13 +162,20 @@ def build_task_definition(
         _resource_title(service_key, "TaskDef"),
         RequiresCompatibilities=["FARGATE"],
         NetworkMode="awsvpc",
-        Cpu=str(service_config["cpu"]),
-        Memory=str(service_config["memory_mib"]),
+        Cpu=_coerce_size(cpu),
+        Memory=_coerce_size(memory_mib),
         ExecutionRoleArn=Ref(execution_role_arn_param),
         TaskRoleArn=GetAtt(task_role_ref, "Arn"),
         ContainerDefinitions=[ContainerDefinition(**container_kwargs)],
         Tags=cardinal_tags(component="compute", role=service_key),
     )
+
+
+def _coerce_size(value):
+    """Stringify ints/floats from YAML; pass through troposphere objects (Refs, Subs)."""
+    if isinstance(value, (int, float)):
+        return str(value)
+    return value
 
 
 def build_ecs_service(

@@ -48,6 +48,46 @@ def test_build_task_role_returns_role_with_inline_policy():
     assert len(policies) >= 1
 
 
+def test_build_task_definition_accepts_int_cpu_memory():
+    from troposphere.logs import LogGroup
+
+    lg = LogGroup("L", LogGroupName="x")
+    td = services_common.build_task_definition(
+        service_key="query-api",
+        image_ref="image",
+        cpu=1024,
+        memory_mib=2048,
+        command=["/app/bin/lakerunner"],
+        execution_role_arn_param="ExecutionRoleArn",
+        task_role_ref="TaskRole",
+        environment=[],
+        log_group_ref=lg,
+    )
+    rendered = json.loads(json.dumps(td, default=lambda o: o.to_dict()))
+    assert rendered["Properties"]["Cpu"] == "1024"
+    assert rendered["Properties"]["Memory"] == "2048"
+
+
+def test_build_task_definition_accepts_ref_cpu_memory():
+    from troposphere import Ref
+    from troposphere.logs import LogGroup
+
+    lg = LogGroup("L", LogGroupName="x")
+    td = services_common.build_task_definition(
+        service_key="query-api",
+        image_ref="image",
+        cpu=Ref("QueryApiCpu"),
+        memory_mib=Ref("QueryApiMemory"),
+        execution_role_arn_param="ExecutionRoleArn",
+        task_role_ref="TaskRole",
+        environment=[],
+        log_group_ref=lg,
+    )
+    rendered = json.loads(json.dumps(td, default=lambda o: o.to_dict()))
+    assert rendered["Properties"]["Cpu"] == {"Ref": "QueryApiCpu"}
+    assert rendered["Properties"]["Memory"] == {"Ref": "QueryApiMemory"}
+
+
 def test_build_ecs_service_has_circuit_breaker_and_rolling_deploy():
     svc = services_common.build_ecs_service(
         service_key="query-api",
