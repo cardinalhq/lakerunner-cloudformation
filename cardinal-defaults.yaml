@@ -1,28 +1,51 @@
-# Default configuration for core Lakerunner deployment
-# This file contains configuration for the main three stacks: common, migration, and services
+# Consolidated defaults for the Cardinal Lakerunner CloudFormation deployment.
+#
+# Customer-tunable values appear as parameters on the root template; this file
+# provides the defaults. Service-level fields (replicas, cpu, memory) flow
+# through to per-tier sub-stacks. Image references default to public ECR /
+# GHCR; air-gapped customers override at deploy time via root parameters.
 
-# API Keys configuration
+# ---------------------------------------------------------------------------
+# API keys (default seed). Real customers override via ApiKeysOverride on root.
+# ---------------------------------------------------------------------------
 api_keys:
   - organization_id: 12340000-0000-4000-8000-000000000000
     keys:
       - f70603aa00e6f67999cc66e336134887
 
-# Storage Profiles configuration
+# ---------------------------------------------------------------------------
+# Storage profiles. ${BUCKET_NAME} and ${AWS_REGION} are filled in by the
+# config stack at deploy time using CFN intrinsic functions.
+# ---------------------------------------------------------------------------
 storage_profiles:
-  - bucket: "${BUCKET_NAME}"  # Will be replaced with actual bucket name
+  - bucket: "${BUCKET_NAME}"
     cloud_provider: aws
     collector_name: lakerunner
     insecure_tls: false
     instance_num: 1
     organization_id: 12340000-0000-4000-8000-000000000000
-    region: "${AWS_REGION}"  # Will be replaced with actual region
+    region: "${AWS_REGION}"
     use_path_style: true
 
-# Container Images configuration
+# ---------------------------------------------------------------------------
+# Container images. Each can be overridden via *Image parameters on the root.
+# MigrationImageDigest is mandatory and digest-pinned (sha256:...) — that's a
+# root-template concern, not a default here.
+# ---------------------------------------------------------------------------
 images:
-  lakerunner: "ghcr.io/cardinalhq/lakerunner:v1.18.1"
+  lakerunner: "public.ecr.aws/cardinalhq.io/lakerunner:v1.18.1"
+  maestro:    "public.ecr.aws/cardinalhq.io/maestro:v1.7.16"
+  otel:       "ghcr.io/cardinalhq/cardinalhq-otel-collector:v1.4.2"
+  dex:        "ghcr.io/dexidp/dex:v2.41.1"
+  dex_init:   "public.ecr.aws/docker/library/busybox:1.37"
+  db_init:    "ghcr.io/cardinalhq/initcontainer-grafana:latest"
+  migration:  "public.ecr.aws/cardinalhq.io/lakerunner:v1.18.1"
 
-# Service configurations for core Lakerunner services
+# ---------------------------------------------------------------------------
+# Lakerunner microservices. Each entry's tier (query / process / control) is
+# determined by which services-*.yaml child stack owns it; this file does not
+# encode the tier mapping (the generators do).
+# ---------------------------------------------------------------------------
 services:
   lakerunner-pubsub-sqs:
     signal_type: common
@@ -103,7 +126,6 @@ services:
     environment:
       EXECUTION_ENVIRONMENT: "ecs"
       QUERY_WORKER_SERVICE_NAME: "lakerunner-query-worker"
-      # Note: QUERY_WORKER_CLUSTER_NAME is set dynamically in the template
 
   lakerunner-query-worker:
     signal_type: common
@@ -122,7 +144,6 @@ services:
       LAKERUNNER_QUERY_DISABLE_TABLE_CACHE: "true"
       LAKERUNNER_QUERY_MAX_SEGMENTS_PER_WORKER_PER_WAVE: "100"
 
-  # Monitoring service
   lakerunner-monitoring:
     signal_type: common
     command: ["/app/bin/lakerunner", "monitoring", "serve", "--grpc-port=9090"]
@@ -138,7 +159,6 @@ services:
       command: ["/app/bin/lakerunner", "sysinfo"]
     environment: {}
 
-  # Admin API service
   lakerunner-admin-api:
     signal_type: common
     command: ["/app/bin/lakerunner", "admin-api", "serve"]
@@ -156,7 +176,6 @@ services:
       command: ["/app/bin/lakerunner", "sysinfo"]
     environment: {}
 
-  # Alert Evaluator service
   lakerunner-alert-evaluator:
     signal_type: common
     command: ["/app/bin/lakerunner", "alert-evaluator"]
@@ -167,3 +186,32 @@ services:
       type: "go"
       command: ["/app/bin/lakerunner", "sysinfo"]
     environment: {}
+
+# ---------------------------------------------------------------------------
+# Maestro task and bundled DEX OIDC.
+# ---------------------------------------------------------------------------
+maestro:
+  task:
+    cpu: 1024
+    memory_mib: 2048
+  ports:
+    maestro: 4200
+    mcp_gateway: 8080
+    mcp_gateway_debug: 9090
+    alb_listener: 80
+    dex: 5556
+  dex:
+    path_prefix: "/dex"
+    client_id: "maestro-ui"
+
+# ---------------------------------------------------------------------------
+# OTEL collector.
+# ---------------------------------------------------------------------------
+otel:
+  otel-gateway:
+    command: ["/app/bin/cardinalhq-otel-collector", "--config=/etc/otel/config.yaml"]
+    cpu: 1024
+    memory_mib: 2048
+    replicas: 1
+    environment:
+      OTEL_RESOURCE_ATTRIBUTES: "service.name=otel-gateway"
