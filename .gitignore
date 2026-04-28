@@ -10,3 +10,6 @@ __pycache__/
 .venv/
 .DS_Store
 .playwright-mcp/
+
+# Generated CloudFormation templates
+generated-templates/
