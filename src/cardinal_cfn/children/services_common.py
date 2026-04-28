@@ -10,11 +10,9 @@ from troposphere.ecs import (
     ContainerDefinition,
     DeploymentCircuitBreaker,
     DeploymentConfiguration,
-    Environment,
     LoadBalancer as EcsLoadBalancer,
     LogConfiguration,
     NetworkConfiguration,
-    Secret as EcsSecret,
     Service,
     TaskDefinition,
 )
@@ -178,7 +176,7 @@ def build_ecs_service(
     container_port: int | None = None,
 ) -> Service:
     """ECS Fargate Service with rolling deploy + circuit breaker."""
-    kwargs = dict(
+    kwargs: dict = dict(
         Cluster=Ref(cluster_arn_param),
         LaunchType="FARGATE",
         DesiredCount=desired_count,
