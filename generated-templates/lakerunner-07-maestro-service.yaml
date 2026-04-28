@@ -2,6 +2,10 @@ Conditions:
   HasDex: !Equals
     - !Ref 'DexEnabled'
     - 'Yes'
+  HasTls: !Not
+    - !Equals
+      - !Ref 'MaestroCertificateArn'
+      - ''
   IsInternetFacing: !Equals
     - !Ref 'AlbScheme'
     - internet-facing
@@ -17,6 +21,7 @@ Metadata:
         Parameters:
           - CommonInfraStackName
           - AlbScheme
+          - MaestroCertificateArn
       - Label:
           default: Task Sizing
         Parameters:
@@ -70,6 +75,8 @@ Metadata:
         default: DEX Path Prefix
       MaestroBaseUrl:
         default: Maestro Base URL
+      MaestroCertificateArn:
+        default: ACM Certificate ARN (HTTPS)
       MaestroImage:
         default: Maestro Image
       OidcAudience:
@@ -107,9 +114,14 @@ Outputs:
     Value: !Ref 'MaestroService'
   MaestroUrl:
     Description: URL to access the Maestro UI/API
-    Value: !Sub
-      - http://${Dns}
-      - Dns: !GetAtt 'MaestroAlb.DNSName'
+    Value: !If
+      - HasTls
+      - !Sub
+        - https://${Dns}
+        - Dns: !GetAtt 'MaestroAlb.DNSName'
+      - !Sub
+        - http://${Dns}
+        - Dns: !GetAtt 'MaestroAlb.DNSName'
 Parameters:
   AlbScheme:
     AllowedValues:
@@ -158,8 +170,14 @@ Parameters:
     Default: ''
     Description: Optional public base URL for Maestro (forwarded as MAESTRO_BASE_URL). Leave blank to auto-derive from the stack's ALB DNS when DEX is enabled.
     Type: String
+  MaestroCertificateArn:
+    Default: ''
+    Description: >-
+      Optional ACM certificate ARN. When provided, the ALB adds an HTTPS listener on port 443 using this cert and the HTTP listener on port 80 redirects to HTTPS. Required for OIDC to work, since most providers
+      reject http:// redirect URIs. Leave blank for HTTP-only.
+    Type: String
   MaestroImage:
-    Default: public.ecr.aws/cardinalhq.io/maestro:v0.23.0
+    Default: public.ecr.aws/cardinalhq.io/maestro:v1.7.16
     Description: Container image for both Maestro and the MCP Gateway (same image, different entrypoints).
     Type: String
   OidcAudience:
@@ -219,6 +237,16 @@ Resources:
               - CommonInfraStackName: !Ref 'CommonInfraStackName'
       Type: application
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+  MaestroAlbHttpsIngress:
+    Condition: HasTls
+    Properties:
+      CidrIp: '0.0.0.0/0'
+      Description: HTTPS 443 for Maestro ALB
+      FromPort: 443
+      GroupId: !Ref 'MaestroAlbSecurityGroup'
+      IpProtocol: tcp
+      ToPort: 443
+    Type: AWS::EC2::SecurityGroupIngress
   MaestroAlbListenerIngress:
     Properties:
       CidrIp: '0.0.0.0/0'
@@ -276,7 +304,10 @@ Resources:
             - !Sub
               - ${P}/*
               - P: !Ref 'DexPathPrefix'
-      ListenerArn: !Ref 'MaestroListener'
+      ListenerArn: !If
+        - HasTls
+        - !Ref 'MaestroHttpsListener'
+        - !Ref 'MaestroListener'
       Priority: 10
     Type: AWS::ElasticLoadBalancingV2::ListenerRule
   MaestroDexLogGroup:
@@ -354,6 +385,38 @@ Resources:
           PolicyName: SecretsManagerAccess
       RoleName: !Sub '${AWS::StackName}-exec-role'
     Type: AWS::IAM::Role
+  MaestroHttpRedirectRule:
+    Condition: HasTls
+    Properties:
+      Actions:
+        - RedirectConfig:
+            Host: '#{host}'
+            Path: /#{path}
+            Port: '443'
+            Protocol: HTTPS
+            Query: '#{query}'
+            StatusCode: HTTP_301
+          Type: redirect
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - '*'
+      ListenerArn: !Ref 'MaestroListener'
+      Priority: 50000
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+  MaestroHttpsListener:
+    Condition: HasTls
+    Properties:
+      Certificates:
+        - CertificateArn: !Ref 'MaestroCertificateArn'
+      DefaultActions:
+        - TargetGroupArn: !Ref 'MaestroTg'
+          Type: forward
+      LoadBalancerArn: !Ref 'MaestroAlb'
+      Port: '443'
+      Protocol: HTTPS
+      SslPolicy: ELBSecurityPolicy-TLS13-1-2-2021-06
+    Type: AWS::ElasticLoadBalancingV2::Listener
   MaestroListener:
     Properties:
       DefaultActions:
@@ -567,9 +630,14 @@ Resources:
                 - HasDex
                 - !If
                   - MaestroBaseUrlBlank
-                  - !Sub
-                    - http://${Dns}
-                    - Dns: !GetAtt 'MaestroAlb.DNSName'
+                  - !If
+                    - HasTls
+                    - !Sub
+                      - https://${Dns}
+                      - Dns: !GetAtt 'MaestroAlb.DNSName'
+                    - !Sub
+                      - http://${Dns}
+                      - Dns: !GetAtt 'MaestroAlb.DNSName'
                   - !Ref 'MaestroBaseUrl'
                 - !Ref 'MaestroBaseUrl'
             - Name: OIDC_ISSUER_URL
@@ -579,9 +647,14 @@ Resources:
                   - ${B}${P}
                   - B: !If
                       - MaestroBaseUrlBlank
-                      - !Sub
-                        - http://${Dns}
-                        - Dns: !GetAtt 'MaestroAlb.DNSName'
+                      - !If
+                        - HasTls
+                        - !Sub
+                          - https://${Dns}
+                          - Dns: !GetAtt 'MaestroAlb.DNSName'
+                        - !Sub
+                          - http://${Dns}
+                          - Dns: !GetAtt 'MaestroAlb.DNSName'
                       - !Ref 'MaestroBaseUrl'
                     P: !Ref 'DexPathPrefix'
                 - !Ref 'OidcIssuerUrl'
@@ -670,9 +743,14 @@ Resources:
                   - ${B}${P}
                   - B: !If
                       - MaestroBaseUrlBlank
-                      - !Sub
-                        - http://${Dns}
-                        - Dns: !GetAtt 'MaestroAlb.DNSName'
+                      - !If
+                        - HasTls
+                        - !Sub
+                          - https://${Dns}
+                          - Dns: !GetAtt 'MaestroAlb.DNSName'
+                        - !Sub
+                          - http://${Dns}
+                          - Dns: !GetAtt 'MaestroAlb.DNSName'
                       - !Ref 'MaestroBaseUrl'
                     P: !Ref 'DexPathPrefix'
               - Name: DEX_REDIRECT_URI
@@ -680,9 +758,14 @@ Resources:
                   - ${B}/
                   - B: !If
                       - MaestroBaseUrlBlank
-                      - !Sub
-                        - http://${Dns}
-                        - Dns: !GetAtt 'MaestroAlb.DNSName'
+                      - !If
+                        - HasTls
+                        - !Sub
+                          - https://${Dns}
+                          - Dns: !GetAtt 'MaestroAlb.DNSName'
+                        - !Sub
+                          - http://${Dns}
+                          - Dns: !GetAtt 'MaestroAlb.DNSName'
                       - !Ref 'MaestroBaseUrl'
               - Name: DEX_CLIENT_ID
                 Value: !Ref 'DexClientId'

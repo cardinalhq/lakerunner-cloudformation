@@ -17,8 +17,8 @@ import os
 import yaml
 
 from troposphere import (
-    Equals, Export, GetAtt, If, ImportValue, Output, Parameter, Ref, Split,
-    Sub, Tags, Template,
+    Equals, Export, GetAtt, If, ImportValue, Not, Output, Parameter, Ref,
+    Split, Sub, Tags, Template,
 )
 from troposphere.ec2 import SecurityGroup, SecurityGroupIngress
 from troposphere.ecs import (
@@ -39,12 +39,14 @@ from troposphere.ecs import (
 )
 from troposphere.elasticloadbalancingv2 import (
     Action as AlbAction,
+    Certificate as AlbCertificate,
     Condition as AlbCondition,
     Listener,
     ListenerRule,
     ListenerRuleAction,
     LoadBalancer,
     Matcher,
+    RedirectConfig,
     TargetGroup,
     TargetGroupAttribute,
 )
@@ -92,6 +94,14 @@ def create_maestro_template():
         Default="internal",
         Description="Load balancer scheme: 'internet-facing' for external access "
                     "or 'internal' for internal access only.",
+    ))
+    MaestroCertificateArn = t.add_parameter(Parameter(
+        "MaestroCertificateArn", Type="String", Default="",
+        Description="Optional ACM certificate ARN. When provided, the ALB adds "
+                    "an HTTPS listener on port 443 using this cert and the HTTP "
+                    "listener on port 80 redirects to HTTPS. Required for OIDC "
+                    "to work, since most providers reject http:// redirect URIs. "
+                    "Leave blank for HTTP-only.",
     ))
     TaskCpu = t.add_parameter(Parameter(
         "TaskCpu", Type="String",
@@ -200,7 +210,8 @@ def create_maestro_template():
         "AWS::CloudFormation::Interface": {
             "ParameterGroups": [
                 {"Label": {"default": "Infrastructure"},
-                 "Parameters": ["CommonInfraStackName", "AlbScheme"]},
+                 "Parameters": ["CommonInfraStackName", "AlbScheme",
+                                "MaestroCertificateArn"]},
                 {"Label": {"default": "Task Sizing"},
                  "Parameters": ["TaskCpu", "TaskMemoryMiB"]},
                 {"Label": {"default": "Image"},
@@ -223,6 +234,7 @@ def create_maestro_template():
             "ParameterLabels": {
                 "CommonInfraStackName": {"default": "Common Infra Stack Name"},
                 "AlbScheme": {"default": "ALB Scheme"},
+                "MaestroCertificateArn": {"default": "ACM Certificate ARN (HTTPS)"},
                 "TaskCpu": {"default": "Fargate CPU"},
                 "TaskMemoryMiB": {"default": "Fargate Memory (MiB)"},
                 "MaestroImage": {"default": "Maestro Image"},
@@ -266,6 +278,7 @@ def create_maestro_template():
     t.add_condition("IsInternetFacing", Equals(Ref(AlbScheme), "internet-facing"))
     t.add_condition("HasDex", Equals(Ref(DexEnabled), "Yes"))
     t.add_condition("MaestroBaseUrlBlank", Equals(Ref(MaestroBaseUrl), ""))
+    t.add_condition("HasTls", Not(Equals(Ref(MaestroCertificateArn), "")))
 
     # -----------------------
     # Database password secret
@@ -444,6 +457,16 @@ def create_maestro_template():
     ))
 
     t.add_resource(SecurityGroupIngress(
+        "MaestroAlbHttpsIngress",
+        Condition="HasTls",
+        GroupId=Ref(alb_sg),
+        IpProtocol="tcp",
+        FromPort=443, ToPort=443,
+        CidrIp="0.0.0.0/0",
+        Description="HTTPS 443 for Maestro ALB",
+    ))
+
+    t.add_resource(SecurityGroupIngress(
         "MaestroTaskFromAlbIngress",
         GroupId=TaskSecurityGroupIdValue,
         IpProtocol="tcp",
@@ -485,6 +508,12 @@ def create_maestro_template():
         ],
     ))
 
+    # The HTTP listener always forwards to the maestro target group as its
+    # default action. When TLS is enabled, an additional HasTls-gated rule
+    # (priority 50000, path '*') pre-empts the default with a 301 redirect
+    # to HTTPS. Keeping the default action stable lets the ECS Service's
+    # `DependsOn: MaestroListener` work the same in both modes — no
+    # conditional dependency on the HTTPS listener required.
     listener = t.add_resource(Listener(
         "MaestroListener",
         LoadBalancerArn=Ref(alb),
@@ -493,11 +522,42 @@ def create_maestro_template():
         DefaultActions=[AlbAction(Type="forward", TargetGroupArn=Ref(tg))],
     ))
 
+    https_listener = t.add_resource(Listener(
+        "MaestroHttpsListener",
+        Condition="HasTls",
+        LoadBalancerArn=Ref(alb),
+        Port="443",
+        Protocol="HTTPS",
+        SslPolicy="ELBSecurityPolicy-TLS13-1-2-2021-06",
+        Certificates=[AlbCertificate(CertificateArn=Ref(MaestroCertificateArn))],
+        DefaultActions=[AlbAction(Type="forward", TargetGroupArn=Ref(tg))],
+    ))
+
+    # Lowest-priority catch-all redirect on the HTTP listener. Sits below
+    # the DEX rule (priority 10) so DEX paths still resolve via HTTPS after
+    # the redirect bounce.
+    http_redirect_rule = t.add_resource(ListenerRule(
+        "MaestroHttpRedirectRule",
+        Condition="HasTls",
+        ListenerArn=Ref(listener),
+        Priority=50000,
+        Conditions=[AlbCondition(Field="path-pattern", Values=["*"])],
+        Actions=[ListenerRuleAction(
+            Type="redirect",
+            RedirectConfig=RedirectConfig(
+                Protocol="HTTPS", Port="443", StatusCode="HTTP_301",
+                Host="#{host}", Path="/#{path}", Query="#{query}",
+            ),
+        )],
+    ))
+
     t._maestro["resources"].update({
         "AlbSg": alb_sg,
         "Alb": alb,
         "Tg": tg,
         "Listener": listener,
+        "HttpsListener": https_listener,
+        "HttpRedirectRule": http_redirect_rule,
     })
 
     # -----------------------
@@ -526,10 +586,16 @@ def create_maestro_template():
         ],
     ))
 
+    # Attach the DEX rule to whichever listener actually serves traffic: the
+    # HTTPS listener when a cert is configured (the HTTP listener is then a
+    # 301 redirect and would strip path semantics for in-flight OIDC
+    # callbacks), otherwise the HTTP listener.
+    dex_listener_arn = If("HasTls", Ref(https_listener), Ref(listener))
+
     dex_listener_rule = t.add_resource(ListenerRule(
         "MaestroDexListenerRule",
         Condition="HasDex",
-        ListenerArn=Ref(listener),
+        ListenerArn=dex_listener_arn,
         Priority=10,
         Conditions=[
             AlbCondition(
@@ -695,9 +761,19 @@ def create_maestro_template():
     # redirect URI resolve to a reachable host without extra DNS setup.
     # When DEX is disabled, honor the parameter as-is (blank meant "let
     # Maestro infer" in the old behavior; preserved here).
+    # When HTTPS is on the ALB, the auto-derived URL has to be https:// so the
+    # SPA loads its own assets and the OIDC redirect URI match what's
+    # registered. Operators using a custom domain should still set
+    # MaestroBaseUrl explicitly — the ALB DNS name won't match an ACM cert
+    # issued for example.com.
+    auto_base_url = If(
+        "HasTls",
+        Sub("https://${Dns}", Dns=GetAtt(alb, "DNSName")),
+        Sub("http://${Dns}", Dns=GetAtt(alb, "DNSName")),
+    )
     base_url_when_dex = If(
         "MaestroBaseUrlBlank",
-        Sub("http://${Dns}", Dns=GetAtt(alb, "DNSName")),
+        auto_base_url,
         Ref(MaestroBaseUrl),
     )
     maestro_base_url_value = If("HasDex", base_url_when_dex, Ref(MaestroBaseUrl))
@@ -979,7 +1055,11 @@ def create_maestro_template():
     t.add_output(Output(
         "MaestroUrl",
         Description="URL to access the Maestro UI/API",
-        Value=Sub("http://${Dns}", Dns=GetAtt(alb, "DNSName")),
+        Value=If(
+            "HasTls",
+            Sub("https://${Dns}", Dns=GetAtt(alb, "DNSName")),
+            Sub("http://${Dns}", Dns=GetAtt(alb, "DNSName")),
+        ),
     ))
 
     return t

@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 MOCK_CONFIG = {
     "images": {
-        "maestro": "public.ecr.aws/cardinalhq.io/maestro:v0.23.0",
+        "maestro": "public.ecr.aws/cardinalhq.io/maestro:v1.7.16",
         "db_init": "ghcr.io/cardinalhq/initcontainer-grafana:test",
         "dex": "ghcr.io/dexidp/dex:test",
         "dex_init": "public.ecr.aws/docker/library/busybox:test",
@@ -86,7 +86,7 @@ class TestMaestroTemplateSimple(unittest.TestCase):
         parameters = json.loads(create_maestro_template().to_json())["Parameters"]
 
         for name in [
-            "CommonInfraStackName", "AlbScheme",
+            "CommonInfraStackName", "AlbScheme", "MaestroCertificateArn",
             "TaskCpu", "TaskMemoryMiB",
             "MaestroImage",
             "OidcIssuerUrl", "OidcAudience", "OidcSuperadminGroup",
@@ -111,7 +111,8 @@ class TestMaestroTemplateSimple(unittest.TestCase):
         assert parameters["OidcAudience"]["Default"] == "maestro-ui"
         assert parameters["OidcSuperadminGroup"]["Default"] == "maestro-superadmin"
         assert parameters["MaestroImage"]["Default"] == \
-            "public.ecr.aws/cardinalhq.io/maestro:v0.23.0"
+            "public.ecr.aws/cardinalhq.io/maestro:v1.7.16"
+        assert parameters["MaestroCertificateArn"]["Default"] == ""
 
     @patch('lakerunner_maestro_service.load_maestro_config')
     def test_conditions(self, mock_load_config):
@@ -122,6 +123,7 @@ class TestMaestroTemplateSimple(unittest.TestCase):
         assert "IsInternetFacing" in conditions
         assert "HasDex" in conditions
         assert "MaestroBaseUrlBlank" in conditions
+        assert "HasTls" in conditions
 
     @patch('lakerunner_maestro_service.load_maestro_config')
     def test_secret_and_log_groups(self, mock_load_config):
@@ -407,15 +409,93 @@ class TestMaestroTemplateSimple(unittest.TestCase):
         assert "Fn::Sub" in jwks["Fn::If"][1]
         assert jwks["Fn::If"][2] == {"Ref": "OidcJwksUrl"}
 
-        # MAESTRO_BASE_URL: Fn::If(HasDex, Fn::If(MaestroBaseUrlBlank, alb-sub,
-        #                   Ref(MaestroBaseUrl)), Ref(MaestroBaseUrl))
+        # MAESTRO_BASE_URL nesting:
+        #   Fn::If(HasDex,
+        #     Fn::If(MaestroBaseUrlBlank,
+        #       Fn::If(HasTls, Sub(https://...), Sub(http://...)),
+        #       Ref(MaestroBaseUrl)),
+        #     Ref(MaestroBaseUrl))
         base = envs["MAESTRO_BASE_URL"]
         assert base["Fn::If"][0] == "HasDex"
-        then_v = base["Fn::If"][1]
-        assert "Fn::If" in then_v
-        assert then_v["Fn::If"][0] == "MaestroBaseUrlBlank"
-        # then-branch (blank) must Sub the ALB DNS
-        assert "Fn::Sub" in then_v["Fn::If"][1]
+        blank_branch = base["Fn::If"][1]
+        assert "Fn::If" in blank_branch
+        assert blank_branch["Fn::If"][0] == "MaestroBaseUrlBlank"
+        auto_url = blank_branch["Fn::If"][1]
+        assert "Fn::If" in auto_url
+        assert auto_url["Fn::If"][0] == "HasTls"
+        # https branch first, then http branch — both Subs over the ALB DNS.
+        assert "Fn::Sub" in auto_url["Fn::If"][1]
+        assert auto_url["Fn::If"][1]["Fn::Sub"][0] == "https://${Dns}"
+        assert "Fn::Sub" in auto_url["Fn::If"][2]
+        assert auto_url["Fn::If"][2]["Fn::Sub"][0] == "http://${Dns}"
+
+    @patch('lakerunner_maestro_service.load_maestro_config')
+    def test_https_listener_and_redirect_gated_on_has_tls(self, mock_load_config):
+        mock_load_config.return_value = MOCK_CONFIG
+        from lakerunner_maestro_service import create_maestro_template
+
+        resources = json.loads(create_maestro_template().to_json())["Resources"]
+
+        # HTTPS listener + the catch-all redirect rule + the new ALB ingress
+        # for 443 must all carry Condition: HasTls so they vanish when no
+        # cert ARN is supplied.
+        for name in ["MaestroHttpsListener", "MaestroHttpRedirectRule",
+                     "MaestroAlbHttpsIngress"]:
+            assert name in resources, f"missing TLS resource {name}"
+            assert resources[name].get("Condition") == "HasTls", \
+                f"{name} missing Condition: HasTls"
+
+        https = resources["MaestroHttpsListener"]["Properties"]
+        assert https["Port"] == "443"
+        assert https["Protocol"] == "HTTPS"
+        assert https["Certificates"][0]["CertificateArn"] == \
+            {"Ref": "MaestroCertificateArn"}
+        assert https["DefaultActions"][0]["Type"] == "forward"
+        assert https["DefaultActions"][0]["TargetGroupArn"] == {"Ref": "MaestroTg"}
+
+        # HTTP listener default action stays as forward-to-TG so the ECS
+        # service's `DependsOn: MaestroListener` works in both modes.
+        http = resources["MaestroListener"]["Properties"]
+        assert http["DefaultActions"][0]["Type"] == "forward"
+        assert http["DefaultActions"][0]["TargetGroupArn"] == {"Ref": "MaestroTg"}
+
+        # Redirect rule sits below DEX (priority 10) so DEX paths still
+        # resolve via HTTPS after the bounce.
+        redirect = resources["MaestroHttpRedirectRule"]["Properties"]
+        assert redirect["Priority"] == 50000
+        assert redirect["ListenerArn"] == {"Ref": "MaestroListener"}
+        assert redirect["Actions"][0]["Type"] == "redirect"
+        rc = redirect["Actions"][0]["RedirectConfig"]
+        assert rc["Protocol"] == "HTTPS"
+        assert rc["Port"] == "443"
+        assert rc["StatusCode"] == "HTTP_301"
+
+    @patch('lakerunner_maestro_service.load_maestro_config')
+    def test_dex_listener_arn_switches_under_has_tls(self, mock_load_config):
+        mock_load_config.return_value = MOCK_CONFIG
+        from lakerunner_maestro_service import create_maestro_template
+
+        resources = json.loads(create_maestro_template().to_json())["Resources"]
+        rule = resources["MaestroDexListenerRule"]["Properties"]
+        listener_arn = rule["ListenerArn"]
+        assert "Fn::If" in listener_arn
+        cond, then_v, else_v = listener_arn["Fn::If"]
+        assert cond == "HasTls"
+        assert then_v == {"Ref": "MaestroHttpsListener"}
+        assert else_v == {"Ref": "MaestroListener"}
+
+    @patch('lakerunner_maestro_service.load_maestro_config')
+    def test_maestro_url_output_switches_scheme_under_has_tls(self, mock_load_config):
+        mock_load_config.return_value = MOCK_CONFIG
+        from lakerunner_maestro_service import create_maestro_template
+
+        outputs = json.loads(create_maestro_template().to_json())["Outputs"]
+        value = outputs["MaestroUrl"]["Value"]
+        assert "Fn::If" in value
+        cond, then_v, else_v = value["Fn::If"]
+        assert cond == "HasTls"
+        assert then_v["Fn::Sub"][0] == "https://${Dns}"
+        assert else_v["Fn::Sub"][0] == "http://${Dns}"
 
     @patch('lakerunner_maestro_service.load_maestro_config')
     def test_service_registers_dex_target_group_conditionally(self, mock_load_config):

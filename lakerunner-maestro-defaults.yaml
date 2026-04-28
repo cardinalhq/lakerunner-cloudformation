@@ -3,7 +3,7 @@
 # Image pins and port settings used by lakerunner_maestro_service.py.
 
 images:
-  maestro: "public.ecr.aws/cardinalhq.io/maestro:v0.23.0"
+  maestro: "public.ecr.aws/cardinalhq.io/maestro:v1.7.16"
   db_init: "ghcr.io/cardinalhq/initcontainer-grafana:latest"
   dex: "ghcr.io/dexidp/dex:v2.41.1"
   dex_init: "public.ecr.aws/docker/library/busybox:1.37"
