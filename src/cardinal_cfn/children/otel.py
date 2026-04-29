@@ -320,6 +320,7 @@ def build() -> Template:
             environment=env,
             secrets=secrets,
             log_group_ref=log_group,
+            container_port=_OTLP_GRPC_PORT,
         )
     )
 

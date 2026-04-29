@@ -13,6 +13,7 @@ from troposphere.ecs import (
     LoadBalancer as EcsLoadBalancer,
     LogConfiguration,
     NetworkConfiguration,
+    PortMapping,
     Service,
     TaskDefinition,
 )
@@ -131,6 +132,7 @@ def build_task_definition(
     environment: list,
     secrets: list | None = None,
     log_group_ref,
+    container_port: int | None = None,
 ) -> TaskDefinition:
     """ECS Fargate task definition for a service.
 
@@ -138,6 +140,12 @@ def build_task_definition(
     (from CloudFormation parameters). Ints are coerced to strings; Refs and
     other troposphere objects pass through unchanged so they serialize as
     intrinsic functions.
+
+    container_port: if provided, the container exposes a tcp PortMapping at
+    that port. Required whenever the corresponding ECS Service references
+    the container in a LoadBalancer/TargetGroup attachment — without the
+    PortMapping CFN rejects the Service with "container ... did not have a
+    container port N defined."
     """
     container_kwargs = dict(
         Name=service_key,
@@ -157,6 +165,10 @@ def build_task_definition(
         container_kwargs["Command"] = command
     if secrets:
         container_kwargs["Secrets"] = secrets
+    if container_port is not None:
+        container_kwargs["PortMappings"] = [
+            PortMapping(ContainerPort=container_port, Protocol="tcp")
+        ]
 
     return TaskDefinition(
         _resource_title(service_key, "TaskDef"),
