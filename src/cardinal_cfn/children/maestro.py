@@ -352,35 +352,85 @@ def build() -> Template:
         ),
     )
 
+    # mcp-gateway runs the maestro DB schema migrations on startup, then
+    # serves MCP. Maestro shares this DB and breaks if migrations haven't
+    # run yet (relation "maestro_*" does not exist).
+    db_env = [
+        Environment(Name="MAESTRO_DB_HOST", Value=Ref("DbEndpoint")),
+        Environment(Name="MAESTRO_DB_PORT", Value=Ref("DbPort")),
+        Environment(Name="MAESTRO_DB_NAME", Value="maestro"),
+        Environment(Name="MAESTRO_DB_USER", Value="maestro"),
+        Environment(Name="MAESTRO_DB_SSLMODE", Value="require"),
+    ]
+    db_secrets = [
+        Secret(
+            Name="MAESTRO_DB_PASSWORD",
+            ValueFrom=Sub("${MaestroDbSecret}:password::"),
+        ),
+    ]
+
+    mcp_gateway_container = ContainerDefinition(
+        Name="mcp-gateway",
+        Image=maestro_image_ref,
+        Essential=True,
+        EntryPoint=["/app/entrypoint.sh"],
+        Command=["mcp-gateway"],
+        PortMappings=[PortMapping(ContainerPort=mcp_gateway_port, Protocol="tcp")],
+        Environment=db_env + [
+            Environment(Name="MCP_PORT", Value=str(mcp_gateway_port)),
+        ],
+        Secrets=list(db_secrets),
+        DependsOn=[{"ContainerName": "db-init", "Condition": "SUCCESS"}],
+        LogConfiguration=LogConfiguration(
+            LogDriver="awslogs",
+            Options={
+                "awslogs-group": Ref(maestro_lg),
+                "awslogs-region": Ref("AWS::Region"),
+                "awslogs-stream-prefix": "mcp-gateway",
+            },
+        ),
+    )
+
+    # Sidecar that polls localhost:<mcp_port> until it accepts a connection,
+    # then exits. Maestro depends on this completing so it doesn't start
+    # before mcp-gateway has finished migrating.
+    wait_for_mcp_container = ContainerDefinition(
+        Name="wait-for-mcp",
+        Image=maestro_image_ref,
+        Essential=False,
+        EntryPoint=["/app/entrypoint.sh"],
+        Command=["wait-for-tcp", "localhost", str(mcp_gateway_port)],
+        DependsOn=[{"ContainerName": "mcp-gateway", "Condition": "START"}],
+        LogConfiguration=LogConfiguration(
+            LogDriver="awslogs",
+            Options={
+                "awslogs-group": Ref(maestro_lg),
+                "awslogs-region": Ref("AWS::Region"),
+                "awslogs-stream-prefix": "wait-for-mcp",
+            },
+        ),
+    )
+
     maestro_container = ContainerDefinition(
         Name="maestro",
         Image=maestro_image_ref,
         Essential=True,
-        PortMappings=[
-            PortMapping(ContainerPort=maestro_port, Protocol="tcp"),
-            PortMapping(ContainerPort=mcp_gateway_port, Protocol="tcp"),
-        ],
-        Environment=[
-            Environment(Name="MAESTRO_DB_HOST", Value=Ref("DbEndpoint")),
-            Environment(Name="MAESTRO_DB_PORT", Value=Ref("DbPort")),
-            Environment(Name="MAESTRO_DB_NAME", Value="maestro"),
-            Environment(Name="MAESTRO_DB_USER", Value="maestro"),
-            Environment(Name="MAESTRO_DB_SSLMODE", Value="require"),
+        PortMappings=[PortMapping(ContainerPort=maestro_port, Protocol="tcp")],
+        Environment=db_env + [
             Environment(
                 Name="DEX_ISSUER_URL",
                 Value=Sub("https://${AlbDnsName}/dex"),
             ),
             Environment(Name="DEX_CLIENT_ID", Value=Ref("DexClientId")),
         ],
-        Secrets=[
-            Secret(
-                Name="MAESTRO_DB_PASSWORD",
-                ValueFrom=Sub("${MaestroDbSecret}:password::"),
-            ),
+        Secrets=list(db_secrets) + [
             Secret(Name="LRDB_LICENSE", ValueFrom=Ref("LicenseSecretArn")),
             Secret(Name="LRDB_INTERNAL_KEYS", ValueFrom=Ref("InternalServiceKeysSecretArn")),
         ],
-        DependsOn=[{"ContainerName": "db-init", "Condition": "SUCCESS"}],
+        DependsOn=[
+            {"ContainerName": "db-init", "Condition": "SUCCESS"},
+            {"ContainerName": "wait-for-mcp", "Condition": "SUCCESS"},
+        ],
         LogConfiguration=LogConfiguration(
             LogDriver="awslogs",
             Options={
@@ -422,7 +472,13 @@ def build() -> Template:
             Memory=Ref("MaestroTaskMemory"),
             ExecutionRoleArn=Ref("ExecutionRoleArn"),
             TaskRoleArn=GetAtt(task_role, "Arn"),
-            ContainerDefinitions=[db_init_container, maestro_container, dex_container],
+            ContainerDefinitions=[
+                db_init_container,
+                mcp_gateway_container,
+                wait_for_mcp_container,
+                maestro_container,
+                dex_container,
+            ],
             Tags=cardinal_tags(component="compute", role=_SERVICE_KEY),
         )
     )
