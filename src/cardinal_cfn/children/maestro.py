@@ -541,8 +541,8 @@ def _task_role_statements(*, log_group_refs: list, maestro_db_secret_ref) -> lis
             "Effect": "Allow",
             "Action": ["ssm:GetParameter", "ssm:GetParameters"],
             "Resource": [
-                Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${ApiKeysParamName}"),
-                Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${StorageProfilesParamName}"),
+                Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ApiKeysParamName}"),
+                Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${StorageProfilesParamName}"),
             ],
         },
         {

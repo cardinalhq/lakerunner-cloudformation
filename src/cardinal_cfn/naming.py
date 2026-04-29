@@ -37,8 +37,13 @@ def name_tag(*, role: str):
 
 
 def ssm_param_name(*, key: str):
-    """Explicit SSM parameter name. AWS requires Name on SSM parameters."""
-    return Sub(f"cardinal/${{InstallIdLong}}/{key}")
+    """Explicit SSM parameter name. AWS requires Name on SSM parameters.
+
+    The leading slash is required: SSM rejects PutParameter with
+    "Parameter name must be a fully qualified name" when a name contains
+    slashes but does not start with one.
+    """
+    return Sub(f"/cardinal/${{InstallIdLong}}/{key}")
 
 
 def secret_name(*, purpose: str):
