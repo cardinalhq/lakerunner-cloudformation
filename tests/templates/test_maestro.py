@@ -69,14 +69,13 @@ def test_creates_one_task_definition(td):
     assert len(task_defs) == 1
 
 
-def test_task_definition_has_three_containers(td):
+def test_task_definition_has_expected_containers(td):
     task_def = next(
         r for r in td["Resources"].values() if r["Type"] == "AWS::ECS::TaskDefinition"
     )
     containers = task_def["Properties"]["ContainerDefinitions"]
-    assert len(containers) == 3
     names = {c["Name"] for c in containers}
-    assert names == {"db-init", "maestro", "dex"}
+    assert names == {"db-init", "mcp-gateway", "wait-for-mcp", "maestro", "dex"}
 
 
 def test_db_init_is_not_essential(td):
