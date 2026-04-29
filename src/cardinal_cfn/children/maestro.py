@@ -767,6 +767,20 @@ def _task_role_statements(*, log_group_refs: list, maestro_db_secret_ref) -> lis
             "Action": ["logs:CreateLogStream", "logs:PutLogEvents"],
             "Resource": [GetAtt(lg, "Arn") for lg in log_group_refs],
         },
+        # Bedrock embeddings + chat. mcp-gateway calls Titan for embeddings
+        # and Claude (or similar) for chat completion; both go through
+        # bedrock:InvokeModel and the streaming variant. Foundation-model
+        # ARNs are AWS-owned, hence the empty account segment.
+        {
+            "Effect": "Allow",
+            "Action": [
+                "bedrock:InvokeModel",
+                "bedrock:InvokeModelWithResponseStream",
+            ],
+            "Resource": [
+                Sub("arn:aws:bedrock:${AWS::Region}::foundation-model/*"),
+            ],
+        },
     ]
 
 
