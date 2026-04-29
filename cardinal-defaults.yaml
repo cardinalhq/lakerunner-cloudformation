@@ -123,9 +123,7 @@ services:
     health_check:
       type: "go"
       command: ["/app/bin/lakerunner", "sysinfo"]
-    environment:
-      EXECUTION_ENVIRONMENT: "ecs"
-      QUERY_WORKER_SERVICE_NAME: "lakerunner-query-worker"
+    environment: {}
 
   lakerunner-query-worker:
     signal_type: common

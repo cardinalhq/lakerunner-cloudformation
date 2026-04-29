@@ -57,6 +57,7 @@ def build() -> Template:
     # Cross-stack inputs (forwarded from root)
     # ---------------------------------------------------------------------
     t.add_parameter(Parameter("ClusterArn", Type="String", Description="ECS cluster ARN."))
+    t.add_parameter(Parameter("ClusterName", Type="String", Description="ECS cluster name."))
     t.add_parameter(
         Parameter(
             "TaskSecurityGroupId",
@@ -283,15 +284,78 @@ def build() -> Template:
     # ---------------------------------------------------------------------
     # query-api
     # ---------------------------------------------------------------------
+    # query-worker (built first so query-api can reference its ECS Service
+    # name in QUERY_WORKER_SERVICE_NAME for ECS-based worker discovery).
+    # ---------------------------------------------------------------------
+    worker_lg = t.add_resource(services_common.build_log_group(service_key="query-worker"))
+    worker_role = t.add_resource(
+        services_common.build_task_role(
+            service_key="query-worker",
+            statements=_task_role_statements(worker_lg),
+        )
+    )
+
+    worker_env = list(base_env) + _service_specific_env(worker_cfg)
+    worker_task = t.add_resource(
+        services_common.build_task_definition(
+            service_key="query-worker",
+            image_ref=image_ref,
+            cpu=Ref("QueryWorkerCpu"),
+            memory_mib=Ref("QueryWorkerMemory"),
+            command=worker_cfg.get("command"),
+            execution_role_arn_param="ExecutionRoleArn",
+            task_role_ref=worker_role,
+            environment=worker_env,
+            secrets=base_secrets,
+            log_group_ref=worker_lg,
+        )
+    )
+    worker_service = t.add_resource(
+        services_common.build_ecs_service(
+            service_key="query-worker",
+            cluster_arn_param="ClusterArn",
+            task_definition_ref=worker_task,
+            desired_count=Ref("QueryWorkerReplicas"),
+            subnets_csv_param="PrivateSubnetsCsv",
+            security_group_id_param="TaskSecurityGroupId",
+            container_name="query-worker",
+        )
+    )
+
+    # query-api reaches query-worker on its task port over the shared task SG.
+    # The cluster stack already permits all task-to-task traffic via TaskSGAllSelf,
+    # but we add a narrow self-referential ingress here so the wiring is explicit
+    # and the port is documented at the service-tier level.
+    t.add_resource(
+        SecurityGroupIngress(
+            "QueryWorkerIngress",
+            GroupId=Ref("TaskSecurityGroupId"),
+            IpProtocol="tcp",
+            FromPort=worker_port,
+            ToPort=worker_port,
+            SourceSecurityGroupId=Ref("TaskSecurityGroupId"),
+            Description="query-api to query-worker task-to-task",
+        )
+    )
+
+    # ---------------------------------------------------------------------
+    # query-api
+    # ---------------------------------------------------------------------
     api_lg = t.add_resource(services_common.build_log_group(service_key="query-api"))
     api_role = t.add_resource(
         services_common.build_task_role(
             service_key="query-api",
-            statements=_task_role_statements(api_lg),
+            statements=_api_task_role_statements(api_lg),
         )
     )
 
-    api_env = list(base_env) + _service_specific_env(api_cfg)
+    # query-api uses ECS API to discover live query-worker tasks.
+    api_env = list(base_env) + _service_specific_env(api_cfg) + [
+        Environment(Name="EXECUTION_ENVIRONMENT", Value="ecs"),
+        Environment(Name="QUERY_WORKER_CLUSTER_NAME", Value=Ref("ClusterName")),
+        Environment(Name="QUERY_WORKER_SERVICE_NAME", Value=GetAtt(worker_service, "Name")),
+        Environment(Name="QUERY_WORKER_PORT", Value=str(worker_port)),
+    ]
     api_tg = t.add_resource(
         services_common.build_target_group(
             service_key="query-api",
@@ -349,60 +413,6 @@ def build() -> Template:
             container_name="query-api",
             container_port=api_container_port,
             service_registry_ref=api_discovery,
-        )
-    )
-
-    # ---------------------------------------------------------------------
-    # query-worker
-    # ---------------------------------------------------------------------
-    worker_lg = t.add_resource(services_common.build_log_group(service_key="query-worker"))
-    worker_role = t.add_resource(
-        services_common.build_task_role(
-            service_key="query-worker",
-            statements=_task_role_statements(worker_lg),
-        )
-    )
-
-    worker_env = list(base_env) + _service_specific_env(worker_cfg)
-    worker_task = t.add_resource(
-        services_common.build_task_definition(
-            service_key="query-worker",
-            image_ref=image_ref,
-            cpu=Ref("QueryWorkerCpu"),
-            memory_mib=Ref("QueryWorkerMemory"),
-            command=worker_cfg.get("command"),
-            execution_role_arn_param="ExecutionRoleArn",
-            task_role_ref=worker_role,
-            environment=worker_env,
-            secrets=base_secrets,
-            log_group_ref=worker_lg,
-        )
-    )
-    worker_service = t.add_resource(
-        services_common.build_ecs_service(
-            service_key="query-worker",
-            cluster_arn_param="ClusterArn",
-            task_definition_ref=worker_task,
-            desired_count=Ref("QueryWorkerReplicas"),
-            subnets_csv_param="PrivateSubnetsCsv",
-            security_group_id_param="TaskSecurityGroupId",
-            container_name="query-worker",
-        )
-    )
-
-    # query-api reaches query-worker on its task port over the shared task SG.
-    # The cluster stack already permits all task-to-task traffic via TaskSGAllSelf,
-    # but we add a narrow self-referential ingress here so the wiring is explicit
-    # and the port is documented at the service-tier level.
-    t.add_resource(
-        SecurityGroupIngress(
-            "QueryWorkerIngress",
-            GroupId=Ref("TaskSecurityGroupId"),
-            IpProtocol="tcp",
-            FromPort=worker_port,
-            ToPort=worker_port,
-            SourceSecurityGroupId=Ref("TaskSecurityGroupId"),
-            Description="query-api to query-worker task-to-task",
         )
     )
 
@@ -474,6 +484,28 @@ def _task_role_statements(log_group_ref) -> list:
             "Effect": "Allow",
             "Action": ["logs:CreateLogStream", "logs:PutLogEvents"],
             "Resource": GetAtt(log_group_ref, "Arn"),
+        },
+    ]
+
+
+def _api_task_role_statements(log_group_ref) -> list:
+    """Query-api task role: query-tier base perms + ECS service/task discovery.
+
+    query-api uses the ECS API to discover live query-worker tasks (via
+    DescribeServices and ListTasks/DescribeTasks). Resource scoping for these
+    APIs requires an `ecs:cluster` condition rather than direct ARN matching,
+    which is why the resource is `*` with the cluster condition applied.
+    """
+    return _task_role_statements(log_group_ref) + [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "ecs:DescribeServices",
+                "ecs:ListTasks",
+                "ecs:DescribeTasks",
+            ],
+            "Resource": "*",
+            "Condition": {"ArnLike": {"ecs:cluster": Ref("ClusterArn")}},
         },
     ]
 

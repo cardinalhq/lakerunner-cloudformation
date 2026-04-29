@@ -401,6 +401,7 @@ def build() -> Template:
     services_query_params.update({
         "HttpsListenerArn": GetAtt(alb_stack, "Outputs.HttpsListenerArn"),
         "VpcId": Ref("VpcId"),
+        "ClusterName": GetAtt(cluster_stack, "Outputs.ClusterName"),
         "ServiceNamespaceId": GetAtt(cluster_stack, "Outputs.ServiceNamespaceId"),
         "QueryApiReplicas": Ref("QueryApiReplicas"),
         "QueryApiCpu": Ref("QueryApiCpu"),
