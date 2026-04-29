@@ -1,6 +1,6 @@
-# Makefile for cardinal-cfn (Cardinal Lakerunner CloudFormation).
+# Makefile for Cardinal CloudFormation project.
 
-.PHONY: help install test check build lint clean all
+.PHONY: help install build test test-unit test-templates check lint clean all
 
 VENV_DIR := .venv
 PYTHON   := $(VENV_DIR)/bin/python
@@ -10,23 +10,35 @@ PYTEST   := $(VENV_DIR)/bin/pytest
 SHELL := /bin/bash
 
 help:	## Show this help
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-15s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
+		awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-15s\033[0m %s\n", $$1, $$2}'
 
 install:	## Install dependencies in virtual environment
-	source $(VENV_DIR)/bin/activate && pip install -r requirements.txt
+	@if [ ! -d "$(VENV_DIR)" ]; then python3 -m venv $(VENV_DIR); fi
+	$(PIP) install -r requirements.txt
 
-test:	## Run pytest suites (unit + template)
-	source $(VENV_DIR)/bin/activate && $(PYTEST) tests/unit tests/templates -v
+build:	## Generate CloudFormation templates and run cfn-lint
+	./build.sh
 
-check: test	## Alias for test (pre-push gate)
+test:	## Run all tests
+	$(PYTEST) tests/ -v
 
-build:	## Generate CloudFormation templates (Phase 8 placeholder)
-	source $(VENV_DIR)/bin/activate && ./build.sh
+test-unit:	## Run unit tests only
+	$(PYTEST) tests/unit/ -v
 
-lint:	## Run cfn-lint on generated templates (Phase 8 placeholder)
-	source $(VENV_DIR)/bin/activate && cfn-lint generated-templates/*.yaml || echo "cfn-lint completed with warnings"
+test-templates:	## Run per-template tests only
+	$(PYTEST) tests/templates/ -v
+
+check: test	## Pre-push gate (alias for test)
+
+lint:	## Run cfn-lint on every generated template
+	source $(VENV_DIR)/bin/activate && cfn-lint \
+	  generated-templates/cardinal-vpc.yaml \
+	  generated-templates/cardinal-lakerunner.yaml \
+	  generated-templates/cardinal-lakerunner/*.yaml
 
 clean:	## Clean generated files and test caches
-	rm -rf generated-templates/*.yaml .pytest_cache tests/__pycache__ src/__pycache__
+	rm -rf generated-templates .pytest_cache tests/__pycache__ src/__pycache__ \
+	       src/cardinal_cfn/__pycache__ src/cardinal_cfn/children/__pycache__
 
-all: check	## Default sanity check (alias for check until Phase 8 build wires up)
+all: build test	## Run build + tests

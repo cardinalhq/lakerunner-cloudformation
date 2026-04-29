@@ -1,0 +1,78 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  id-token: write
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: us-east-2
+      CARDINAL_BUCKET_NAME: cardinal-cfn
+      CARDINAL_BUCKET_REGION: us-east-2
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install -r requirements.txt
+
+      - name: Determine version
+        id: version
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          echo "version=${REF_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Build templates with version baked in
+        env:
+          CARDINAL_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          source .venv/bin/activate
+          ./build.sh
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::992382549843:role/cardinal-cfn-publisher
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Publish version
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          aws s3 sync generated-templates/ \
+            "s3://${CARDINAL_BUCKET_NAME}/lakerunner/${VERSION}/" --delete
+
+      - name: Publish latest
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          aws s3 sync generated-templates/ \
+            "s3://${CARDINAL_BUCKET_NAME}/lakerunner/latest/" --delete
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          ROOT_URL="https://${CARDINAL_BUCKET_NAME}.s3.${CARDINAL_BUCKET_REGION}.amazonaws.com/lakerunner/${VERSION}/cardinal-lakerunner.yaml"
+          VPC_URL="https://${CARDINAL_BUCKET_NAME}.s3.${CARDINAL_BUCKET_REGION}.amazonaws.com/lakerunner/${VERSION}/cardinal-vpc.yaml"
+          gh release create "$VERSION" \
+            --title "$VERSION" \
+            --notes "**Lakerunner root template:** $ROOT_URL
+
+          **Optional VPC template:** $VPC_URL
+
+          Paste the root URL into the CloudFormation console to deploy."
