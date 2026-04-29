@@ -236,6 +236,18 @@ def build() -> Template:
             Description="Email address for the DEX local-DB admin login.",
         )
     )
+    t.add_parameter(
+        Parameter(
+            "OidcSuperadminEmails",
+            Type="String",
+            Default="admin@cardinal.local",
+            Description=(
+                "Comma-separated email allowlist whose holders get maestro "
+                "superadmin. Default matches DexAdminEmail so the bundled "
+                "DEX admin can bootstrap orgs."
+            ),
+        )
+    )
     add_no_echo_parameter(
         t,
         "DexAdminPasswordHash",
@@ -284,7 +296,12 @@ def build() -> Template:
             },
             {
                 "label": "DEX configuration",
-                "parameters": ["DexClientId", "DexAdminEmail", "DexAdminPasswordHash"],
+                "parameters": [
+                    "DexClientId",
+                    "DexAdminEmail",
+                    "DexAdminPasswordHash",
+                    "OidcSuperadminEmails",
+                ],
             },
         ],
     )
@@ -489,6 +506,10 @@ def build() -> Template:
             # "JWT verification failed: fetch failed" and a 401 on /api/me.
             # The CA-signed-cert path leaves this unset.
             Environment(Name="NODE_TLS_REJECT_UNAUTHORIZED", Value="0"),
+            # Email allowlist that grants maestro superadmin. The dex login
+            # token has groups=[], so without this the DEX admin lands on
+            # /onboard with no way to bootstrap an org.
+            Environment(Name="OIDC_SUPERADMIN_EMAILS", Value=Ref("OidcSuperadminEmails")),
         ],
         Secrets=list(db_secrets) + [
             Secret(Name="LICENSE_DATA", ValueFrom=Ref("LicenseSecretArn")),

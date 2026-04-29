@@ -222,6 +222,15 @@ def build() -> Template:
         ),
     )
     t.add_parameter(Parameter(
+        "OidcSuperadminEmails",
+        Type="String",
+        Default="admin@cardinal.local",
+        Description=(
+            "Comma-separated email allowlist that grants maestro superadmin. "
+            "Default matches DexAdminEmail."
+        ),
+    ))
+    t.add_parameter(Parameter(
         "TemplateBaseUrl",
         Type="String",
         Default=DEFAULT_TEMPLATE_BASE_URL,
@@ -311,6 +320,7 @@ def build() -> Template:
              "parameters": ["LicenseData", "ApiKeysOverride",
                             "StorageProfilesOverride",
                             "DexAdminEmail", "DexAdminPasswordHash",
+                            "OidcSuperadminEmails",
                             "TemplateBaseUrl"]},
         ],
     )
@@ -513,6 +523,7 @@ def build() -> Template:
         "DexClientId": Ref("DexClientId"),
         "DexAdminEmail": Ref("DexAdminEmail"),
         "DexAdminPasswordHash": Ref("DexAdminPasswordHash"),
+        "OidcSuperadminEmails": Ref("OidcSuperadminEmails"),
     }, depends_on=["MigrationStack"])
 
     # ---------------------------------------------------------------------
