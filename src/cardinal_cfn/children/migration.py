@@ -159,9 +159,13 @@ def build() -> Template:
                     ],
                     Secrets=[
                         Secret(
+                            Name="LRDB_USER",
+                            ValueFrom=Sub("${DbSecretArn}:username::"),
+                        ),
+                        Secret(
                             Name="LRDB_PASSWORD",
                             ValueFrom=Sub("${DbSecretArn}:password::"),
-                        )
+                        ),
                     ],
                     LogConfiguration=LogConfiguration(
                         LogDriver="awslogs",
