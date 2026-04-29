@@ -401,6 +401,7 @@ def build() -> Template:
     services_query_params.update({
         "HttpsListenerArn": GetAtt(alb_stack, "Outputs.HttpsListenerArn"),
         "VpcId": Ref("VpcId"),
+        "ServiceNamespaceId": GetAtt(cluster_stack, "Outputs.ServiceNamespaceId"),
         "QueryApiReplicas": Ref("QueryApiReplicas"),
         "QueryApiCpu": Ref("QueryApiCpu"),
         "QueryApiMemory": Ref("QueryApiMemory"),
@@ -428,6 +429,7 @@ def build() -> Template:
     services_control_params.update({
         "HttpsListenerArn": GetAtt(alb_stack, "Outputs.HttpsListenerArn"),
         "VpcId": Ref("VpcId"),
+        "ServiceNamespaceName": GetAtt(cluster_stack, "Outputs.ServiceNamespaceName"),
     })
     _add_child(t, "ServicesControlStack", "services-control.yaml",
                services_control_params, depends_on=["MigrationStack"])

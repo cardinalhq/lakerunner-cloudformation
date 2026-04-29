@@ -82,6 +82,13 @@ def build() -> Template:
     t.add_parameter(
         Parameter("VpcId", Type="AWS::EC2::VPC::Id", Description="VPC ID (forwarded from root).")
     )
+    t.add_parameter(
+        Parameter(
+            "ServiceNamespaceName",
+            Type="String",
+            Description="Cloud Map private DNS namespace name (e.g. cardinal-<id>.local).",
+        )
+    )
     t.add_parameter(Parameter("DbEndpoint", Type="String", Description="RDS endpoint hostname."))
     t.add_parameter(Parameter("DbPort", Type="String", Default="5432", Description="RDS port."))
     t.add_parameter(
@@ -270,21 +277,33 @@ def build() -> Template:
     # ---------------------------------------------------------------------
     # Internal services (no ALB attachment)
     # ---------------------------------------------------------------------
+    # alert-evaluator reaches query-api over the in-cluster Cloud Map DNS.
+    # Container port is 8080 (matches lakerunner-query-api.ingress.container_port).
+    alert_extra_env = [
+        Environment(
+            Name="ALERT_EVALUATOR_QUERY_API_URL",
+            Value=Sub("http://query-api.${ServiceNamespaceName}:8080"),
+        ),
+    ]
+
     internal_services = [
         {
             "service_key": "sweeper",
             "config": sweeper_cfg,
             "output_name": "SweeperServiceName",
+            "extra_env": [],
         },
         {
             "service_key": "monitoring",
             "config": monitoring_cfg,
             "output_name": "MonitoringServiceName",
+            "extra_env": [],
         },
         {
             "service_key": "alert-evaluator",
             "config": alert_cfg,
             "output_name": "AlertEvaluatorServiceName",
+            "extra_env": alert_extra_env,
         },
     ]
 
@@ -296,6 +315,7 @@ def build() -> Template:
             image_ref=image_ref,
             base_env=base_env,
             base_secrets=base_secrets,
+            extra_env=spec["extra_env"],
         )
         t.add_output(Output(spec["output_name"], Value=GetAtt(ecs_service, "Name")))
 
@@ -310,6 +330,7 @@ def _build_internal_service_block(
     image_ref,
     base_env: list,
     base_secrets: list,
+    extra_env: list | None = None,
 ):
     """Wire up log group, task role, task def, and ECS service for one internal service."""
     log_group = t.add_resource(services_common.build_log_group(service_key=service_key))
@@ -319,7 +340,7 @@ def _build_internal_service_block(
             statements=_task_role_statements(log_group),
         )
     )
-    env = list(base_env) + _service_specific_env(config)
+    env = list(base_env) + _service_specific_env(config) + list(extra_env or [])
     task_def = t.add_resource(
         services_common.build_task_definition(
             service_key=service_key,

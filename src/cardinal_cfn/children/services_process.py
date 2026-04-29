@@ -272,6 +272,8 @@ def build() -> Template:
         Environment(Name="LRDB_SSLMODE", Value="require"),
         Environment(Name="LRDB_S3_BUCKET", Value=Ref("BucketName")),
         Environment(Name="LRDB_SQS_QUEUE_URL", Value=Ref("QueueUrl")),
+        Environment(Name="LAKERUNNER_PUBSUB_SQS_QUEUE_URL", Value=Ref("QueueUrl")),
+        Environment(Name="LAKERUNNER_PUBSUB_SQS_REGION", Value=Ref("AWS::Region")),
         Environment(Name="CONFIGDB_HOST", Value=Ref("DbEndpoint")),
         Environment(Name="CONFIGDB_PORT", Value=Ref("DbPort")),
         Environment(Name="CONFIGDB_DBNAME", Value="configdb"),

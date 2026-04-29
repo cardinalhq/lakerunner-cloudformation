@@ -15,6 +15,7 @@ from troposphere.ecs import (
     NetworkConfiguration,
     PortMapping,
     Service,
+    ServiceRegistry,
     TaskDefinition,
 )
 from troposphere.elasticloadbalancingv2 import (
@@ -201,8 +202,14 @@ def build_ecs_service(
     target_group_ref=None,
     container_name: str,
     container_port: int | None = None,
+    service_registry_ref=None,
 ) -> Service:
-    """ECS Fargate Service with rolling deploy + circuit breaker."""
+    """ECS Fargate Service with rolling deploy + circuit breaker.
+
+    service_registry_ref: optional Cloud Map ServiceDiscovery::Service to attach
+    so the ECS Service registers each task in private DNS for in-cluster
+    routing (e.g. alert-evaluator -> query-api).
+    """
     kwargs: dict = dict(
         Cluster=Ref(cluster_arn_param),
         LaunchType="FARGATE",
@@ -233,6 +240,11 @@ def build_ecs_service(
                 ContainerPort=container_port,
                 TargetGroupArn=Ref(target_group_ref),
             )
+        ]
+
+    if service_registry_ref is not None:
+        kwargs["ServiceRegistries"] = [
+            ServiceRegistry(RegistryArn=GetAtt(service_registry_ref, "Arn"))
         ]
 
     return Service(_resource_title(service_key, "Service"), **kwargs)
