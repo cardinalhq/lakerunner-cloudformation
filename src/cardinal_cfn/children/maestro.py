@@ -35,11 +35,13 @@ from troposphere.ecs import (
     Environment,
     LoadBalancer as EcsLoadBalancer,
     LogConfiguration,
+    MountPoint,
     NetworkConfiguration,
     PortMapping,
     Secret,
     Service,
     TaskDefinition,
+    Volume,
 )
 from troposphere.secretsmanager import GenerateSecretString
 from troposphere.secretsmanager import Secret as SmSecret
@@ -50,6 +52,7 @@ from cardinal_cfn.images import add_image_override
 from cardinal_cfn.naming import cardinal_tags
 from cardinal_cfn.parameters import (
     add_install_id_parameters,
+    add_no_echo_parameter,
     add_parameter_group_metadata,
 )
 
@@ -61,6 +64,7 @@ _SERVICE_KEY = "maestro"
 _DB_INIT_KEY = "maestro-db-init"
 _MAESTRO_KEY = "maestro"
 _DEX_KEY = "maestro-dex"
+_DEX_INIT_KEY = "maestro-dex-init"
 
 # Listener-rule registration keys (see listener_priorities.py).
 _MAESTRO_LISTENER_KEY = "maestro-https"
@@ -190,6 +194,12 @@ def build() -> Template:
         default=defaults["images"]["db_init"],
         description="Container image for the psql-capable db-init bootstrapper.",
     )
+    dex_init_image_ref = add_image_override(
+        t,
+        name="DexInitImage",
+        default=defaults["images"]["dex_init"],
+        description="BusyBox-style image used by the dex-init container to render config.yaml.",
+    )
 
     # ---------------------------------------------------------------------
     # Customer-tunable parameters
@@ -217,6 +227,23 @@ def build() -> Template:
             Default=str(maestro_cfg["dex"]["client_id"]),
             Description="OIDC client ID the maestro UI uses to authenticate against DEX.",
         )
+    )
+    t.add_parameter(
+        Parameter(
+            "DexAdminEmail",
+            Type="String",
+            Default="admin@cardinal.local",
+            Description="Email address for the DEX local-DB admin login.",
+        )
+    )
+    add_no_echo_parameter(
+        t,
+        "DexAdminPasswordHash",
+        description=(
+            "Bcrypt hash of the DEX admin password. Generate with "
+            "`htpasswd -bnBC 10 \"\" 'your-password' | tr -d ':\\n' | sed 's/^/$/' | sed 's/2y/2a/'` "
+            "(or any bcrypt $2a$/$2b$/$2y$ hash). Required."
+        ),
     )
 
     # ---------------------------------------------------------------------
@@ -253,11 +280,11 @@ def build() -> Template:
             },
             {
                 "label": "Image overrides",
-                "parameters": ["MaestroImage", "DexImage", "DbInitImage"],
+                "parameters": ["MaestroImage", "DexImage", "DbInitImage", "DexInitImage"],
             },
             {
                 "label": "DEX configuration",
-                "parameters": ["DexClientId"],
+                "parameters": ["DexClientId", "DexAdminEmail", "DexAdminPasswordHash"],
             },
         ],
     )
@@ -290,15 +317,16 @@ def build() -> Template:
     db_init_lg = t.add_resource(services_common.build_log_group(service_key=_DB_INIT_KEY))
     maestro_lg = t.add_resource(services_common.build_log_group(service_key=_MAESTRO_KEY))
     dex_lg = t.add_resource(services_common.build_log_group(service_key=_DEX_KEY))
+    dex_init_lg = t.add_resource(services_common.build_log_group(service_key=_DEX_INIT_KEY))
 
     # ---------------------------------------------------------------------
-    # IAM task role (single role used by all three containers in the task)
+    # IAM task role (single role used by all containers in the task)
     # ---------------------------------------------------------------------
     task_role = t.add_resource(
         services_common.build_task_role(
             service_key=_SERVICE_KEY,
             statements=_task_role_statements(
-                log_group_refs=[db_init_lg, maestro_lg, dex_lg],
+                log_group_refs=[db_init_lg, maestro_lg, dex_lg, dex_init_lg],
                 maestro_db_secret_ref=maestro_db_secret,
             ),
         )
@@ -467,17 +495,82 @@ def build() -> Template:
         ),
     )
 
-    # TODO(maestro): static DEX config injection (issuer, connectors, clients)
-    # is out of scope here. The container ships with default config; richer
-    # config injection (SSM-backed YAML, init-rendered file) can be layered
-    # on later.
+    # dex-init renders /etc/dex/config.yaml from env vars (BusyBox sh + heredoc).
+    # The unquoted heredoc expands ${DEX_*} once (no re-scan), so a bcrypt hash
+    # containing '$' survives intact. ALB DNS comes back mixed-case but
+    # browsers lower-case Host before sending; Dex's redirect_uri match is
+    # exact-string, so we register both the original and lowercased URI.
+    # 1777 on /dex-tmp because Fargate mounts empty volumes 0755 root:root and
+    # the nonroot dex container can't otherwise write its config-expansion
+    # tempfile on startup.
+    dex_config_render_script = (
+        "set -eu; "
+        "DEX_REDIRECT_URI_LC=$(echo \"$DEX_REDIRECT_URI\" | tr 'A-Z' 'a-z'); "
+        "cat > /etc/dex/config.yaml <<EOF\n"
+        "issuer: ${DEX_ISSUER_URL}\n"
+        "storage:\n"
+        "  type: memory\n"
+        "web:\n"
+        "  http: 0.0.0.0:${DEX_PORT}\n"
+        "oauth2:\n"
+        "  skipApprovalScreen: true\n"
+        "enablePasswordDB: true\n"
+        "staticClients:\n"
+        "  - id: \"${DEX_CLIENT_ID}\"\n"
+        "    name: \"Maestro UI\"\n"
+        "    public: true\n"
+        "    redirectURIs:\n"
+        "      - \"${DEX_REDIRECT_URI}\"\n"
+        "      - \"${DEX_REDIRECT_URI_LC}\"\n"
+        "staticPasswords:\n"
+        "  - email: \"${DEX_ADMIN_EMAIL}\"\n"
+        "    hash: \"${DEX_ADMIN_HASH}\"\n"
+        "    username: \"admin\"\n"
+        "    userID: \"00000000-0000-0000-0000-000000000001\"\n"
+        "EOF\n"
+        "chmod 1777 /dex-tmp\n"
+    )
+
+    dex_init_container = ContainerDefinition(
+        Name="dex-init",
+        Image=dex_init_image_ref,
+        Essential=False,
+        EntryPoint=["/bin/sh", "-c"],
+        Command=[dex_config_render_script],
+        Environment=[
+            Environment(Name="DEX_ISSUER_URL", Value=Sub("https://${AlbDnsName}/dex")),
+            Environment(Name="DEX_REDIRECT_URI", Value=Sub("https://${AlbDnsName}/")),
+            Environment(Name="DEX_CLIENT_ID", Value=Ref("DexClientId")),
+            Environment(Name="DEX_PORT", Value=str(dex_port)),
+            Environment(Name="DEX_ADMIN_EMAIL", Value=Ref("DexAdminEmail")),
+            Environment(Name="DEX_ADMIN_HASH", Value=Ref("DexAdminPasswordHash")),
+        ],
+        MountPoints=[
+            MountPoint(ContainerPath="/etc/dex", SourceVolume="dex-config", ReadOnly=False),
+            MountPoint(ContainerPath="/dex-tmp", SourceVolume="dex-tmp", ReadOnly=False),
+        ],
+        LogConfiguration=LogConfiguration(
+            LogDriver="awslogs",
+            Options={
+                "awslogs-group": Ref(dex_init_lg),
+                "awslogs-region": Ref("AWS::Region"),
+                "awslogs-stream-prefix": "dex-init",
+            },
+        ),
+    )
+
     dex_container = ContainerDefinition(
         Name="dex",
         Image=dex_image_ref,
         Essential=True,
+        User="65532",
+        ReadonlyRootFilesystem=True,
+        Command=["dex", "serve", "/etc/dex/config.yaml"],
         PortMappings=[PortMapping(ContainerPort=dex_port, Protocol="tcp")],
-        Environment=[
-            Environment(Name="DEX_ISSUER", Value=Sub("https://${AlbDnsName}/dex")),
+        DependsOn=[{"ContainerName": "dex-init", "Condition": "SUCCESS"}],
+        MountPoints=[
+            MountPoint(ContainerPath="/etc/dex", SourceVolume="dex-config", ReadOnly=True),
+            MountPoint(ContainerPath="/tmp", SourceVolume="dex-tmp", ReadOnly=False),
         ],
         LogConfiguration=LogConfiguration(
             LogDriver="awslogs",
@@ -503,7 +596,12 @@ def build() -> Template:
                 mcp_gateway_container,
                 wait_for_mcp_container,
                 maestro_container,
+                dex_init_container,
                 dex_container,
+            ],
+            Volumes=[
+                Volume(Name="dex-config"),
+                Volume(Name="dex-tmp"),
             ],
             Tags=cardinal_tags(component="compute", role=_SERVICE_KEY),
         )

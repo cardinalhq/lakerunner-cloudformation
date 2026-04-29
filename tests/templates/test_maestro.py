@@ -75,7 +75,7 @@ def test_task_definition_has_expected_containers(td):
     )
     containers = task_def["Properties"]["ContainerDefinitions"]
     names = {c["Name"] for c in containers}
-    assert names == {"db-init", "mcp-gateway", "wait-for-mcp", "maestro", "dex"}
+    assert names == {"db-init", "mcp-gateway", "wait-for-mcp", "maestro", "dex-init", "dex"}
 
 
 def test_db_init_is_not_essential(td):
@@ -110,13 +110,13 @@ def test_maestro_depends_on_db_init(td):
     assert {"ContainerName": "db-init", "Condition": "SUCCESS"} in deps
 
 
-def test_three_log_groups(td):
+def test_four_log_groups(td):
     log_groups = [r for r in td["Resources"].values() if r["Type"] == "AWS::Logs::LogGroup"]
-    assert len(log_groups) == 3
+    assert len(log_groups) == 4
     for lg in log_groups:
         assert lg["Properties"]["RetentionInDays"] == 14
     names = {json.dumps(lg["Properties"].get("LogGroupName")) for lg in log_groups}
-    assert len(names) == 3, "log groups must have distinct names"
+    assert len(names) == 4, "log groups must have distinct names"
 
 
 def test_one_iam_task_role(td):
@@ -239,10 +239,16 @@ def test_maestro_container_password_secret_present(td):
     assert "MAESTRO_DB_PASSWORD" in secret_names
 
 
-def test_dex_container_env_has_issuer(td):
+def test_dex_init_container_env_has_issuer_url(td):
+    dex_init_c = _container(td, "dex-init")
+    env_names = {e["Name"] for e in dex_init_c.get("Environment", [])}
+    assert "DEX_ISSUER_URL" in env_names
+
+
+def test_dex_depends_on_dex_init(td):
     dex_c = _container(td, "dex")
-    env_names = {e["Name"] for e in dex_c.get("Environment", [])}
-    assert "DEX_ISSUER" in env_names
+    deps = dex_c.get("DependsOn", [])
+    assert {"ContainerName": "dex-init", "Condition": "SUCCESS"} in deps
 
 
 # ---------------------------------------------------------------------------
