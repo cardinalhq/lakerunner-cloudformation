@@ -305,7 +305,7 @@ def build() -> Template:
 
     secrets = [
         Secret(Name="LRDB_INTERNAL_KEYS", ValueFrom=Ref("InternalServiceKeysSecretArn")),
-        Secret(Name="LRDB_LICENSE", ValueFrom=Ref("LicenseSecretArn")),
+        Secret(Name="LICENSE_DATA", ValueFrom=Ref("LicenseSecretArn")),
     ]
 
     task_def = t.add_resource(
