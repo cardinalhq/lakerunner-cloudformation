@@ -6,10 +6,11 @@ from troposphere import (
     Ref,
     GetAtt,
     Output,
+    Sub,
 )
 from troposphere.ecs import Cluster as ECSCluster, ClusterSetting
 from troposphere.ec2 import SecurityGroup, SecurityGroupIngress
-from troposphere.iam import Role
+from troposphere.iam import Policy, Role
 from troposphere.logs import LogGroup
 
 from cardinal_cfn.naming import cardinal_tags
@@ -82,6 +83,62 @@ def build() -> Template:
             },
             ManagedPolicyArns=[
                 "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+            ],
+            Policies=[
+                Policy(
+                    PolicyName="cardinal-execution-secrets",
+                    # ECS uses ExecutionRole to fetch values for the
+                    # `secrets` block at task launch (Secrets Manager + SSM).
+                    # AmazonECSTaskExecutionRolePolicy does not include either,
+                    # so we add tightly-scoped inline grants here. Patterns
+                    # cover the named cardinal/* secrets and the
+                    # logical-ID-derived auto-generated ones.
+                    PolicyDocument={
+                        "Version": "2012-10-17",
+                        "Statement": [
+                            {
+                                "Effect": "Allow",
+                                "Action": ["secretsmanager:GetSecretValue"],
+                                "Resource": [
+                                    Sub(
+                                        "arn:${AWS::Partition}:secretsmanager:"
+                                        "${AWS::Region}:${AWS::AccountId}:"
+                                        "secret:cardinal/${InstallIdLong}/*"
+                                    ),
+                                    Sub(
+                                        "arn:${AWS::Partition}:secretsmanager:"
+                                        "${AWS::Region}:${AWS::AccountId}:"
+                                        "secret:DbMasterSecret-*"
+                                    ),
+                                    Sub(
+                                        "arn:${AWS::Partition}:secretsmanager:"
+                                        "${AWS::Region}:${AWS::AccountId}:"
+                                        "secret:MaestroDbSecret-*"
+                                    ),
+                                    Sub(
+                                        "arn:${AWS::Partition}:secretsmanager:"
+                                        "${AWS::Region}:${AWS::AccountId}:"
+                                        "secret:InternalServiceKeysSecret-*"
+                                    ),
+                                ],
+                            },
+                            {
+                                "Effect": "Allow",
+                                "Action": [
+                                    "ssm:GetParameter",
+                                    "ssm:GetParameters",
+                                ],
+                                "Resource": [
+                                    Sub(
+                                        "arn:${AWS::Partition}:ssm:"
+                                        "${AWS::Region}:${AWS::AccountId}:"
+                                        "parameter/cardinal/${InstallIdLong}/*"
+                                    ),
+                                ],
+                            },
+                        ],
+                    },
+                )
             ],
             Tags=cardinal_tags(component="compute", role="exec-role"),
         )
