@@ -433,6 +433,16 @@ def build() -> Template:
         Essential=True,
         PortMappings=[PortMapping(ContainerPort=maestro_port, Protocol="tcp")],
         Environment=db_env + [
+            # Maestro reads OIDC_* (see packages/maestro/src/index.ts).
+            # Without OIDC_ISSUER_URL the UI renders an "Authentication
+            # not configured" placeholder instead of mounting routes.
+            Environment(
+                Name="OIDC_ISSUER_URL",
+                Value=Sub("https://${AlbDnsName}/dex"),
+            ),
+            Environment(Name="OIDC_CLIENT_ID", Value=Ref("DexClientId")),
+            Environment(Name="OIDC_AUDIENCE", Value=Ref("DexClientId")),
+            # DEX_* kept for any tooling that still reads the legacy names.
             Environment(
                 Name="DEX_ISSUER_URL",
                 Value=Sub("https://${AlbDnsName}/dex"),
