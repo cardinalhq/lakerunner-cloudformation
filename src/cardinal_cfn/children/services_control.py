@@ -91,6 +91,17 @@ def build() -> Template:
         )
     )
     t.add_parameter(
+        Parameter(
+            "AdminApiKeySecretArn",
+            Type="String",
+            Description=(
+                "ARN of the admin-api initial-key secret. Forwarded into the "
+                "admin-api container as ADMIN_INITIAL_API_KEY so the binary "
+                "seeds its first valid admin key on startup."
+            ),
+        )
+    )
+    t.add_parameter(
         Parameter("VpcId", Type="AWS::EC2::VPC::Id", Description="VPC ID (forwarded from root).")
     )
     t.add_parameter(
@@ -235,7 +246,10 @@ def build() -> Template:
     admin_role = t.add_resource(
         services_common.build_task_role(
             service_key="admin-api",
-            statements=_task_role_statements(admin_lg),
+            statements=_task_role_statements(
+                admin_lg,
+                extra_secret_refs=[Ref("AdminApiKeySecretArn")],
+            ),
         )
     )
     admin_tg = t.add_resource(
@@ -259,6 +273,16 @@ def build() -> Template:
         )
     )
     admin_env = list(base_env) + _service_specific_env(admin_cfg)
+    # Seed the lakerunner admin-api binary's first valid admin key. Without
+    # this, every Authorization: Bearer <key> request fails validation
+    # because the configdb has no admin keys and the binary won't accept
+    # the one we want to use.
+    admin_secrets = list(base_secrets) + [
+        Secret(
+            Name="ADMIN_INITIAL_API_KEY",
+            ValueFrom=Sub("${AdminApiKeySecretArn}:key::"),
+        ),
+    ]
     admin_task = t.add_resource(
         services_common.build_task_definition(
             service_key="admin-api",
@@ -269,7 +293,7 @@ def build() -> Template:
             execution_role_arn_param="ExecutionRoleArn",
             task_role_ref=admin_role,
             environment=admin_env,
-            secrets=base_secrets,
+            secrets=admin_secrets,
             log_group_ref=admin_lg,
             container_port=admin_container_port,
         )
@@ -389,13 +413,15 @@ def _service_specific_env(service_cfg: dict) -> list:
     return [Environment(Name=k, Value=str(v)) for k, v in env.items()]
 
 
-def _task_role_statements(log_group_ref) -> list:
+def _task_role_statements(log_group_ref, extra_secret_refs: list | None = None) -> list:
     """Inline IAM policy for a control-tier task role.
 
     Grants S3 (bucket+objects), SQS (consume+send), SSM GetParameter on the
-    two config params, Secrets Manager GetSecretValue on the three secrets,
-    and CloudWatch Logs writes to the per-service log group.
+    two config params, Secrets Manager GetSecretValue on the three shared
+    secrets plus any per-service `extra_secret_refs`, and CloudWatch Logs
+    writes to the per-service log group.
     """
+    extra_secret_refs = list(extra_secret_refs or [])
     return [
         {
             "Effect": "Allow",
@@ -436,7 +462,7 @@ def _task_role_statements(log_group_ref) -> list:
                 Ref("DbSecretArn"),
                 Ref("LicenseSecretArn"),
                 Ref("InternalServiceKeysSecretArn"),
-            ],
+            ] + extra_secret_refs,
         },
         {
             "Effect": "Allow",

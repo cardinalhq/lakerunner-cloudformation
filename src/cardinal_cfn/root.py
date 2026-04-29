@@ -464,6 +464,7 @@ def build() -> Template:
     services_control_params.update({
         "HttpsListenerArn": GetAtt(alb_stack, "Outputs.HttpsListenerArn"),
         "AdminHttpsListenerArn": GetAtt(alb_stack, "Outputs.AdminHttpsListenerArn"),
+        "AdminApiKeySecretArn": GetAtt(config_stack, "Outputs.AdminApiKeySecretArn"),
         "VpcId": Ref("VpcId"),
         "ServiceNamespaceName": GetAtt(cluster_stack, "Outputs.ServiceNamespaceName"),
     })
