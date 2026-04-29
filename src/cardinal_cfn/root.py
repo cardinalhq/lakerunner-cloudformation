@@ -210,6 +210,18 @@ def build() -> Template:
         ),
     )
     t.add_parameter(Parameter(
+        "DexAdminEmail",
+        Type="String",
+        Default="admin@cardinal.local",
+        Description="Email address for the DEX local-DB admin login.",
+    ))
+    add_no_echo_parameter(
+        t, "DexAdminPasswordHash",
+        description=(
+            "Bcrypt hash ($2a$/$2b$/$2y$) of the DEX admin password. Required."
+        ),
+    )
+    t.add_parameter(Parameter(
         "TemplateBaseUrl",
         Type="String",
         Default=DEFAULT_TEMPLATE_BASE_URL,
@@ -246,6 +258,10 @@ def build() -> Template:
         t, name="DbInitImage",
         default=defaults["images"]["db_init"],
         description="psql-capable bootstrapper container image (maestro db-init).")
+    dex_init_image = add_image_override(
+        t, name="DexInitImage",
+        default=defaults["images"]["dex_init"],
+        description="BusyBox-style image used to render the dex config.yaml.")
     add_image_override(
         t, name="MigrationImage",
         default=defaults["images"]["migration"],
@@ -267,6 +283,7 @@ def build() -> Template:
         "OtelImage",
         "DexImage",
         "DbInitImage",
+        "DexInitImage",
         "MigrationImage",
         "MigrationImageDigest",
     ]
@@ -292,7 +309,9 @@ def build() -> Template:
             {"label": "Images", "parameters": image_param_names},
             {"label": "Advanced",
              "parameters": ["LicenseData", "ApiKeysOverride",
-                            "StorageProfilesOverride", "TemplateBaseUrl"]},
+                            "StorageProfilesOverride",
+                            "DexAdminEmail", "DexAdminPasswordHash",
+                            "TemplateBaseUrl"]},
         ],
     )
 
@@ -488,9 +507,12 @@ def build() -> Template:
         "MaestroImage": maestro_image,
         "DexImage": dex_image,
         "DbInitImage": db_init_image,
+        "DexInitImage": dex_init_image,
         "MaestroTaskCpu": Ref("MaestroTaskCpu"),
         "MaestroTaskMemory": Ref("MaestroTaskMemory"),
         "DexClientId": Ref("DexClientId"),
+        "DexAdminEmail": Ref("DexAdminEmail"),
+        "DexAdminPasswordHash": Ref("DexAdminPasswordHash"),
     }, depends_on=["MigrationStack"])
 
     # ---------------------------------------------------------------------
