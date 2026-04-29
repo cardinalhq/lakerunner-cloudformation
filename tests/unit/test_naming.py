@@ -34,8 +34,9 @@ def test_name_tag_returns_just_the_name_dict():
 
 
 def test_ssm_param_name_uses_install_id_long():
+    """SSM rejects PutParameter on names that contain slashes without a leading slash."""
     rendered = _render(ssm_param_name(key="storage-profiles"))
-    assert rendered == {"Fn::Sub": "cardinal/${InstallIdLong}/storage-profiles"}
+    assert rendered == {"Fn::Sub": "/cardinal/${InstallIdLong}/storage-profiles"}
 
 
 def test_secret_name_uses_install_id_long():

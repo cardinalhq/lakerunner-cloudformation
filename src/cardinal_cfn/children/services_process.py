@@ -440,8 +440,8 @@ def _task_role_statements(log_group_ref) -> list:
             "Effect": "Allow",
             "Action": ["ssm:GetParameter", "ssm:GetParameters"],
             "Resource": [
-                Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${ApiKeysParamName}"),
-                Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${StorageProfilesParamName}"),
+                Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ApiKeysParamName}"),
+                Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${StorageProfilesParamName}"),
             ],
         },
         {
