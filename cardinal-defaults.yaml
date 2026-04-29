@@ -209,7 +209,10 @@ maestro:
 # ---------------------------------------------------------------------------
 otel:
   otel-gateway:
-    command: ["/app/bin/cardinalhq-otel-collector", "--config=/etc/otel/config.yaml"]
+    # The image's run-with-env-config wrapper writes the YAML from the
+    # CHQ_COLLECTOR_CONFIG_YAML env var (set by otel.py) to /tmp and runs
+    # the collector against it.
+    command: ["/app/bin/run-with-env-config"]
     cpu: 1024
     memory_mib: 2048
     replicas: 1

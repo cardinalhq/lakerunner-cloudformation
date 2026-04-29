@@ -136,13 +136,16 @@ def test_ecs_service_load_balancers_is_conditional(td):
 # ---------------------------------------------------------------------------
 
 
-def test_container_has_otel_config_override_env(td):
+def test_container_has_collector_config_env(td):
+    """run-with-env-config in the image reads YAML from CHQ_COLLECTOR_CONFIG_YAML."""
     task_def = next(
         r for r in td["Resources"].values() if r["Type"] == "AWS::ECS::TaskDefinition"
     )
     container = task_def["Properties"]["ContainerDefinitions"][0]
     env_names = {e["Name"] for e in container.get("Environment", [])}
-    assert "OTEL_CONFIG_OVERRIDE" in env_names
+    assert "CHQ_COLLECTOR_CONFIG_YAML" in env_names
+    for n in ("LRDB_S3_BUCKET", "LRDB_S3_REGION", "ORG", "COLLECTOR"):
+        assert n in env_names, f"missing env var {n}"
 
 
 # ---------------------------------------------------------------------------
