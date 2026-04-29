@@ -52,9 +52,9 @@ def test_storage_profiles_override_no_echo(td):
     assert td["Parameters"]["StorageProfilesOverride"]["NoEcho"] is True
 
 
-def test_eleven_nested_stacks(td):
+def test_nested_stack_count(td):
     nested = [r for r in td["Resources"].values() if r["Type"] == "AWS::CloudFormation::Stack"]
-    assert len(nested) == 11
+    assert len(nested) == 12
 
 
 def test_nested_stack_logical_ids(td):
@@ -66,6 +66,7 @@ def test_nested_stack_logical_ids(td):
         "StorageStack",
         "AlbStack",
         "ConfigStack",
+        "CertStack",
         "MigrationStack",
         "ServicesQueryStack",
         "ServicesProcessStack",

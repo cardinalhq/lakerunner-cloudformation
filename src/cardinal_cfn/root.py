@@ -167,7 +167,12 @@ def build() -> Template:
     t.add_parameter(Parameter(
         "CertificateArn",
         Type="String",
-        Description="ACM certificate ARN for the ALB HTTPS listener (required).",
+        Default="",
+        Description=(
+            "ACM certificate ARN for the ALB HTTPS listener. Leave empty to "
+            "import a cert from the CertificateBody / CertificatePrivateKey "
+            "parameters instead."
+        ),
     ))
 
     # ---------------------------------------------------------------------
@@ -178,6 +183,27 @@ def build() -> Template:
                           description="Optional YAML override for API keys.")
     add_no_echo_parameter(t, "StorageProfilesOverride",
                           description="Optional YAML override for storage profiles.")
+    add_no_echo_parameter(
+        t, "CertificateBody",
+        description=(
+            "PEM-encoded certificate. Required when CertificateArn is empty; "
+            "ignored otherwise."
+        ),
+    )
+    add_no_echo_parameter(
+        t, "CertificatePrivateKey",
+        description=(
+            "PEM-encoded private key. Required when CertificateArn is empty; "
+            "ignored otherwise."
+        ),
+    )
+    add_no_echo_parameter(
+        t, "CertificateChain",
+        description=(
+            "Optional PEM-encoded chain of intermediate certificates. Used "
+            "when CertificateArn is empty."
+        ),
+    )
     t.add_parameter(Parameter(
         "TemplateBaseUrl",
         Type="String",
@@ -254,7 +280,9 @@ def build() -> Template:
         groups=[
             {"label": "Networking",
              "parameters": ["VpcId", "PrivateSubnets", "PublicSubnets",
-                            "AlbScheme", "CertificateArn"]},
+                            "AlbScheme", "CertificateArn",
+                            "CertificateBody", "CertificatePrivateKey",
+                            "CertificateChain"]},
             {"label": "Sizing", "parameters": sizing_param_names},
             {"label": "Images", "parameters": image_param_names},
             {"label": "Advanced",
@@ -304,6 +332,15 @@ def build() -> Template:
         "StorageProfilesOverride": Ref("StorageProfilesOverride"),
     })
 
+    cert_stack = _add_child(t, "CertStack", "cert.yaml", {
+        "InstallIdShort": install_short,
+        "InstallIdLong": install_long,
+        "CertificateArn": Ref("CertificateArn"),
+        "CertificateBody": Ref("CertificateBody"),
+        "CertificatePrivateKey": Ref("CertificatePrivateKey"),
+        "CertificateChain": Ref("CertificateChain"),
+    })
+
     alb_stack = _add_child(t, "AlbStack", "alb.yaml", {
         "InstallIdShort": install_short,
         "InstallIdLong": install_long,
@@ -312,8 +349,8 @@ def build() -> Template:
         "PrivateSubnetsCsv": private_subnets_csv,
         "AlbScheme": Ref("AlbScheme"),
         "TaskSecurityGroupId": GetAtt(cluster_stack, "Outputs.TaskSecurityGroupId"),
-        "CertificateArn": Ref("CertificateArn"),
-    }, depends_on=["ClusterStack"])
+        "CertificateArn": GetAtt(cert_stack, "Outputs.EffectiveCertificateArn"),
+    }, depends_on=["ClusterStack", "CertStack"])
 
     migration_stack = _add_child(t, "MigrationStack", "migration.yaml", {
         "InstallIdShort": install_short,
