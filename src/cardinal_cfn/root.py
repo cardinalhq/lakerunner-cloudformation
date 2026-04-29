@@ -366,6 +366,7 @@ def build() -> Template:
         "DbSecretArn": GetAtt(database_stack, "Outputs.DbSecretArn"),
         "MigrationImage": Ref("MigrationImage"),
         "MigrationImageDigest": Ref("MigrationImageDigest"),
+        "DbInitImage": Ref("DbInitImage"),
     })
 
     migration_complete = GetAtt(migration_stack, "Outputs.MigrationCustomResourceRef")

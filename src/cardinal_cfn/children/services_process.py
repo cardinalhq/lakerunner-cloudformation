@@ -272,6 +272,10 @@ def build() -> Template:
         Environment(Name="LRDB_SSLMODE", Value="require"),
         Environment(Name="LRDB_S3_BUCKET", Value=Ref("BucketName")),
         Environment(Name="LRDB_SQS_QUEUE_URL", Value=Ref("QueueUrl")),
+        Environment(Name="CONFIGDB_HOST", Value=Ref("DbEndpoint")),
+        Environment(Name="CONFIGDB_PORT", Value=Ref("DbPort")),
+        Environment(Name="CONFIGDB_DBNAME", Value="configdb"),
+        Environment(Name="CONFIGDB_SSLMODE", Value="require"),
         Environment(Name=_API_KEYS_ENV, Value=Ref("ApiKeysParamName")),
         Environment(Name=_STORAGE_PROFILES_ENV, Value=Ref("StorageProfilesParamName")),
     ]
@@ -279,6 +283,8 @@ def build() -> Template:
     base_secrets = [
         Secret(Name="LRDB_USER", ValueFrom=Sub("${DbSecretArn}:username::")),
         Secret(Name="LRDB_PASSWORD", ValueFrom=Sub("${DbSecretArn}:password::")),
+        Secret(Name="CONFIGDB_USER", ValueFrom=Sub("${DbSecretArn}:username::")),
+        Secret(Name="CONFIGDB_PASSWORD", ValueFrom=Sub("${DbSecretArn}:password::")),
         Secret(Name="LRDB_INTERNAL_KEYS", ValueFrom=Ref("InternalServiceKeysSecretArn")),
         Secret(Name="LRDB_LICENSE", ValueFrom=Ref("LicenseSecretArn")),
     ]

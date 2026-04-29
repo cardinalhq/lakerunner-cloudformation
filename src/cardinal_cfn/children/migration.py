@@ -13,6 +13,7 @@ from troposphere.awslambda import Code, Function
 from troposphere.cloudformation import CustomResource
 from troposphere.ecs import (
     ContainerDefinition,
+    ContainerDependency,
     Environment,
     LogConfiguration,
     Secret,
@@ -56,6 +57,14 @@ def build() -> Template:
             Type="String",
             Default=defaults["images"]["migration"],
             Description="Container image for the DB migrator.",
+        )
+    )
+    t.add_parameter(
+        Parameter(
+            "DbInitImage",
+            Type="String",
+            Default=defaults["images"]["db_init"],
+            Description="Image used by the configdb-init container (must include psql).",
         )
     )
     t.add_parameter(
@@ -133,8 +142,84 @@ def build() -> Template:
     )
 
     # ---------------------------------------------------------------------------
-    # Migrator ECS task definition
+    # Migrator ECS task definition.
+    #
+    # Two containers:
+    #   1. configdb-init (non-essential): runs psql to CREATE DATABASE configdb
+    #      if it doesn't already exist. lakerunner migrate connects to existing
+    #      DBs only and never issues CREATE DATABASE itself.
+    #   2. migrator (essential): runs `lakerunner migrate --databases=lrdb,configdb`
+    #      against both DBs. Uses dependsOn=COMPLETE so it waits for the init
+    #      container to finish first.
     # ---------------------------------------------------------------------------
+    db_init_secrets = [
+        Secret(Name="LRDB_USER", ValueFrom=Sub("${DbSecretArn}:username::")),
+        Secret(Name="LRDB_PASSWORD", ValueFrom=Sub("${DbSecretArn}:password::")),
+    ]
+
+    configdb_init_container = ContainerDefinition(
+        Name="configdb-init",
+        Image=Ref("DbInitImage"),
+        Essential=False,
+        EntryPoint=["sh", "-c"],
+        Command=[
+            (
+                "PGPASSWORD=$LRDB_PASSWORD psql -h $LRDB_HOST -p $LRDB_PORT "
+                "-U $LRDB_USER -d postgres -v ON_ERROR_STOP=1 "
+                "-tAc \"SELECT 1 FROM pg_database WHERE datname='configdb'\" "
+                "| grep -q 1 || "
+                "PGPASSWORD=$LRDB_PASSWORD psql -h $LRDB_HOST -p $LRDB_PORT "
+                "-U $LRDB_USER -d postgres -v ON_ERROR_STOP=1 "
+                "-c \"CREATE DATABASE configdb\""
+            )
+        ],
+        Environment=[
+            Environment(Name="LRDB_HOST", Value=Ref("DbEndpoint")),
+            Environment(Name="LRDB_PORT", Value=Ref("DbPort")),
+        ],
+        Secrets=db_init_secrets,
+        LogConfiguration=LogConfiguration(
+            LogDriver="awslogs",
+            Options={
+                "awslogs-group": Ref(migrator_lg),
+                "awslogs-region": Ref("AWS::Region"),
+                "awslogs-stream-prefix": "configdb-init",
+            },
+        ),
+    )
+
+    migrator_container = ContainerDefinition(
+        Name="migrator",
+        Image=Ref("MigrationImage"),
+        Command=["/app/bin/lakerunner", "migrate", "--databases=lrdb,configdb"],
+        Essential=True,
+        DependsOn=[ContainerDependency(ContainerName="configdb-init", Condition="COMPLETE")],
+        Environment=[
+            Environment(Name="LRDB_HOST", Value=Ref("DbEndpoint")),
+            Environment(Name="LRDB_PORT", Value=Ref("DbPort")),
+            Environment(Name="LRDB_DBNAME", Value=Ref("DbName")),
+            Environment(Name="LRDB_SSLMODE", Value="require"),
+            Environment(Name="CONFIGDB_HOST", Value=Ref("DbEndpoint")),
+            Environment(Name="CONFIGDB_PORT", Value=Ref("DbPort")),
+            Environment(Name="CONFIGDB_DBNAME", Value="configdb"),
+            Environment(Name="CONFIGDB_SSLMODE", Value="require"),
+        ],
+        Secrets=[
+            Secret(Name="LRDB_USER", ValueFrom=Sub("${DbSecretArn}:username::")),
+            Secret(Name="LRDB_PASSWORD", ValueFrom=Sub("${DbSecretArn}:password::")),
+            Secret(Name="CONFIGDB_USER", ValueFrom=Sub("${DbSecretArn}:username::")),
+            Secret(Name="CONFIGDB_PASSWORD", ValueFrom=Sub("${DbSecretArn}:password::")),
+        ],
+        LogConfiguration=LogConfiguration(
+            LogDriver="awslogs",
+            Options={
+                "awslogs-group": Ref(migrator_lg),
+                "awslogs-region": Ref("AWS::Region"),
+                "awslogs-stream-prefix": "migrator",
+            },
+        ),
+    )
+
     task_def = t.add_resource(
         TaskDefinition(
             "MigratorTaskDef",
@@ -145,38 +230,7 @@ def build() -> Template:
             Memory="512",
             ExecutionRoleArn=Ref("ExecutionRoleArn"),
             TaskRoleArn=GetAtt(task_role, "Arn"),
-            ContainerDefinitions=[
-                ContainerDefinition(
-                    Name="migrator",
-                    Image=Ref("MigrationImage"),
-                    Command=["/app/bin/lakerunner", "migrate"],
-                    Essential=True,
-                    Environment=[
-                        Environment(Name="LRDB_HOST", Value=Ref("DbEndpoint")),
-                        Environment(Name="LRDB_PORT", Value=Ref("DbPort")),
-                        Environment(Name="LRDB_DBNAME", Value=Ref("DbName")),
-                        Environment(Name="LRDB_SSLMODE", Value="require"),
-                    ],
-                    Secrets=[
-                        Secret(
-                            Name="LRDB_USER",
-                            ValueFrom=Sub("${DbSecretArn}:username::"),
-                        ),
-                        Secret(
-                            Name="LRDB_PASSWORD",
-                            ValueFrom=Sub("${DbSecretArn}:password::"),
-                        ),
-                    ],
-                    LogConfiguration=LogConfiguration(
-                        LogDriver="awslogs",
-                        Options={
-                            "awslogs-group": Ref(migrator_lg),
-                            "awslogs-region": Ref("AWS::Region"),
-                            "awslogs-stream-prefix": "migrator",
-                        },
-                    ),
-                )
-            ],
+            ContainerDefinitions=[configdb_init_container, migrator_container],
             Tags=cardinal_tags(component="migration", role="migrator-task"),
         )
     )

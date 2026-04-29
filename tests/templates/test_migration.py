@@ -56,10 +56,16 @@ def test_migrator_task_uses_ssl_required(template_dict):
     task_def = next(
         r for r in template_dict["Resources"].values() if r["Type"] == "AWS::ECS::TaskDefinition"
     )
-    container = task_def["Properties"]["ContainerDefinitions"][0]
+    container = next(
+        c for c in task_def["Properties"]["ContainerDefinitions"]
+        if c["Name"] == "migrator"
+    )
     env = {e["Name"]: e["Value"] for e in container["Environment"]}
     assert env.get("LRDB_SSLMODE") == "require", (
         f"LRDB_SSLMODE must be 'require'; got {env.get('LRDB_SSLMODE')!r}"
+    )
+    assert env.get("CONFIGDB_SSLMODE") == "require", (
+        f"CONFIGDB_SSLMODE must be 'require'; got {env.get('CONFIGDB_SSLMODE')!r}"
     )
 
 
