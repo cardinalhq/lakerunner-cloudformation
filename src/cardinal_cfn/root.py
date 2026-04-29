@@ -109,11 +109,16 @@ def _sizing_param_specs(defaults: dict) -> list[dict]:
         {"name": "OtelConfigYaml", "type": "String", "default": "",
          "description": "Optional inline OTEL collector config YAML override."},
         # Database
-        {"name": "DbInstanceClass", "type": "String", "default": "db.t3.medium",
-         "description": "RDS DB instance class."},
-        {"name": "DbAllocatedStorage", "type": "Number", "default": 20, "min": 20,
+        {"name": "DbInstanceClass", "type": "String", "default": "db.t4g.xlarge",
+         "description": (
+             "RDS DB instance class. Default db.t4g.xlarge (Graviton burstable, "
+             "16 GiB RAM, ~1700 max_connections) — enough headroom for "
+             "lakerunner's many concurrent service replicas. Bump higher "
+             "(e.g. db.r7g.xlarge) for sustained heavy workloads."
+         )},
+        {"name": "DbAllocatedStorage", "type": "Number", "default": 100, "min": 20,
          "description": "RDS allocated storage in GiB."},
-        {"name": "DbEngineVersion", "type": "String", "default": "17",
+        {"name": "DbEngineVersion", "type": "String", "default": "18.3",
          "description": "PostgreSQL engine version."},
     ]
 
