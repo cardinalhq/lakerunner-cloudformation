@@ -96,13 +96,14 @@ def test_only_one_target_group_and_one_listener_rule(td):
     assert len(rules) == 1
 
 
-def test_admin_api_listener_rule_priority(td):
-    rules = [r for r in td["Resources"].values()
-             if r["Type"] == "AWS::ElasticLoadBalancingV2::ListenerRule"]
-    assert any(r["Properties"]["Priority"] == 110 for r in rules)
+def test_admin_api_listener_rule_uses_dedicated_listener(td):
+    rule = next(r for r in td["Resources"].values()
+                if r["Type"] == "AWS::ElasticLoadBalancingV2::ListenerRule")
+    assert rule["Properties"]["Priority"] == 1
+    assert rule["Properties"]["ListenerArn"] == {"Ref": "AdminHttpsListenerArn"}
 
 
-def test_admin_api_listener_rule_path_pattern(td):
+def test_admin_api_listener_rule_is_catch_all(td):
     rule = next(r for r in td["Resources"].values()
                 if r["Type"] == "AWS::ElasticLoadBalancingV2::ListenerRule")
     conditions = rule["Properties"]["Conditions"]
@@ -110,9 +111,13 @@ def test_admin_api_listener_rule_path_pattern(td):
     for cond in conditions:
         if cond.get("Field") == "path-pattern":
             values = cond["PathPatternConfig"]["Values"]
-            assert values == ["/admin/*"]
+            assert values == ["/*"]
             found = True
     assert found, "expected a path-pattern condition"
+
+
+def test_admin_https_listener_arn_parameter(td):
+    assert "AdminHttpsListenerArn" in td["Parameters"]
 
 
 # ---------------------------------------------------------------------------
