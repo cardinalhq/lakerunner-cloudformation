@@ -7,6 +7,7 @@ import yaml
 
 _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 _DEFAULTS_PATH = os.path.join(_REPO_ROOT, "cardinal-defaults.yaml")
+_OTEL_CONFIG_PATH = os.path.join(_REPO_ROOT, "cardinal-otel-config.yaml")
 
 
 def load_defaults() -> dict:
@@ -23,3 +24,15 @@ def load_defaults() -> dict:
             f"got {type(data).__name__}"
         )
     return data
+
+
+def load_otel_default_config() -> str:
+    """Return the cardinal-otel-config.yaml file as a YAML string.
+
+    The cardinalhq-otel-collector image uses a run-with-env-config wrapper
+    that reads the config from the CHQ_COLLECTOR_CONFIG_YAML env var. The
+    otel child stack passes this string in by default; customers can
+    override it via the OtelConfigYaml root parameter.
+    """
+    with open(_OTEL_CONFIG_PATH, "r") as f:
+        return f.read()

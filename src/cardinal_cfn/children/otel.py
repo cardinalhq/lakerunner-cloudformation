@@ -23,6 +23,7 @@ from troposphere import (
     GetAtt,
     Equals,
     If,
+    Not,
     Output,
     Parameter,
     Ref,
@@ -42,7 +43,7 @@ from troposphere.ecs import (
 )
 
 from cardinal_cfn.children import services_common
-from cardinal_cfn.defaults import load_defaults
+from cardinal_cfn.defaults import load_defaults, load_otel_default_config
 from cardinal_cfn.images import add_image_override
 from cardinal_cfn.naming import cardinal_tags
 from cardinal_cfn.parameters import (
@@ -194,18 +195,18 @@ def build() -> Template:
             ),
         )
     )
-    # Surfaced as the OTEL_CONFIG_OVERRIDE container env var. The image's
-    # baked-in /etc/otel/config.yaml is the default; customers wanting a
-    # custom collector config can pass the YAML through this parameter.
+    # The cardinalhq-otel-collector image's run-with-env-config wrapper reads
+    # the collector YAML from CHQ_COLLECTOR_CONFIG_YAML at task start. We
+    # ship a sensible default (cardinal-otel-config.yaml) and pass it via
+    # If(HasOtelConfigOverride, Ref(OtelConfigYaml), default).
     t.add_parameter(
         Parameter(
             "OtelConfigYaml",
             Type="String",
             Default="",
             Description=(
-                "Optional inline OTEL collector config YAML. Surfaced to the "
-                "container as the OTEL_CONFIG_OVERRIDE env var; empty leaves "
-                "the image's baked-in config in place."
+                "Optional inline OTEL collector config YAML. Empty uses the "
+                "default ingest-to-S3 pipeline shipped with this stack."
             ),
         )
     )
@@ -214,6 +215,9 @@ def build() -> Template:
     # Conditions
     # ---------------------------------------------------------------------
     t.add_condition("ExposeOtelOnAlb", Equals(Ref("OtelExposeOnAlb"), "Yes"))
+    t.add_condition(
+        "HasOtelConfigOverride", Not(Equals(Ref("OtelConfigYaml"), ""))
+    )
 
     # ---------------------------------------------------------------------
     # Console parameter grouping
@@ -271,9 +275,30 @@ def build() -> Template:
         )
     )
 
+    storage_profiles = defaults.get("storage_profiles") or []
+    default_org = (
+        storage_profiles[0].get("organization_id")
+        if storage_profiles else "default"
+    )
+    default_collector = (
+        otel_cfg.get("collector_name")
+        or (storage_profiles[0].get("collector_name") if storage_profiles else None)
+        or "lakerunner"
+    )
+
     env = [
-        Environment(Name="OTEL_CONFIG_OVERRIDE", Value=Ref("OtelConfigYaml")),
+        Environment(
+            Name="CHQ_COLLECTOR_CONFIG_YAML",
+            Value=If(
+                "HasOtelConfigOverride",
+                Ref("OtelConfigYaml"),
+                load_otel_default_config(),
+            ),
+        ),
         Environment(Name="LRDB_S3_BUCKET", Value=Ref("BucketName")),
+        Environment(Name="LRDB_S3_REGION", Value=Ref("AWS::Region")),
+        Environment(Name="ORG", Value=default_org),
+        Environment(Name="COLLECTOR", Value=default_collector),
         Environment(Name=_API_KEYS_ENV, Value=Ref("ApiKeysParamName")),
         Environment(Name=_STORAGE_PROFILES_ENV, Value=Ref("StorageProfilesParamName")),
     ] + _service_specific_env(otel_cfg)
