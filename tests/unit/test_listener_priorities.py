@@ -13,7 +13,7 @@ def test_known_services_have_unique_priorities():
 def test_priority_for_known_service_returns_int():
     assert priority_for("query-api") == 100
     assert priority_for("admin-api") == 110
-    assert priority_for("maestro-https") == 200
+    assert priority_for("maestro-https") == 49999
     assert priority_for("maestro-dex") == 210
     assert priority_for("otel-grpc") == 300
 

@@ -10,7 +10,7 @@ The maestro container DependsOn db-init=SUCCESS, so the service won't come up
 until the database is provisioned. Both maestro and dex are attached to the
 shared cardinal HTTPS listener via two ListenerRules:
 
-  /maestro/*  -> maestro container, priority 200
+  /*          -> maestro container, priority 49999 (catch-all default app)
   /dex/*      -> dex container,     priority 210
 
 Scope cuts vs. the pre-refactor generator: no self-signed cert Lambda, no
@@ -516,7 +516,7 @@ def build() -> Template:
             service_key=_MAESTRO_LISTENER_KEY,
             target_group_ref=maestro_tg,
             listener_arn_param="HttpsListenerArn",
-            path_patterns=["/maestro/*"],
+            path_patterns=["/*"],
         )
     )
 
@@ -585,7 +585,7 @@ def build() -> Template:
     # ---------------------------------------------------------------------
     # Outputs
     # ---------------------------------------------------------------------
-    t.add_output(Output("MaestroUrl", Value=Sub("https://${AlbDnsName}/maestro/")))
+    t.add_output(Output("MaestroUrl", Value=Sub("https://${AlbDnsName}/")))
     t.add_output(Output("DexUrl", Value=Sub("https://${AlbDnsName}/dex/")))
     t.add_output(Output("MaestroServiceName", Value=GetAtt(service, "Name")))
     t.add_output(Output("MaestroDbSecretArn", Value=Ref(maestro_db_secret)))

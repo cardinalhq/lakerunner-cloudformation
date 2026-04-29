@@ -143,7 +143,7 @@ def test_two_listener_rules_with_correct_priorities(td):
         if r["Type"] == "AWS::ElasticLoadBalancingV2::ListenerRule"
     ]
     priorities = sorted(r["Properties"]["Priority"] for r in rules)
-    assert priorities == [200, 210]
+    assert priorities == [210, 49999]
 
 
 def test_listener_rule_path_patterns(td):
@@ -153,11 +153,11 @@ def test_listener_rule_path_patterns(td):
     ]
     by_priority = {r["Properties"]["Priority"]: r for r in rules}
 
-    maestro_conds = by_priority[200]["Properties"]["Conditions"]
+    maestro_conds = by_priority[49999]["Properties"]["Conditions"]
     found_maestro = False
     for c in maestro_conds:
         if c.get("Field") == "path-pattern":
-            assert c["PathPatternConfig"]["Values"] == ["/maestro/*"]
+            assert c["PathPatternConfig"]["Values"] == ["/*"]
             found_maestro = True
     assert found_maestro
 
