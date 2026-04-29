@@ -24,7 +24,7 @@ python3 -m cardinal_cfn.cardinal_vpc > generated-templates/cardinal-vpc.yaml
 echo "Generating cardinal-lakerunner.yaml (root)..."
 python3 -m cardinal_cfn.root > generated-templates/cardinal-lakerunner.yaml
 
-for child in cluster database storage alb config migration \
+for child in cluster database storage alb config cert migration \
              services_query services_process services_control otel maestro; do
   out_name=$(echo "$child" | tr '_' '-')
   echo "Generating cardinal-lakerunner/${out_name}.yaml..."
