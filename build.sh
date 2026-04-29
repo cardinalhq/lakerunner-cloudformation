@@ -1,78 +1,43 @@
 #!/bin/sh
-# Copyright (C) 2025 CardinalHQ, Inc
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU Affero General Public License as
-# published by the Free Software Foundation, version 3.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU Affero General Public License for more details.
-#
-# You should have received a copy of the GNU Affero General Public License
-# along with this program. If not, see <http://www.gnu.org/licenses/>.
+# Generate all Cardinal CloudFormation templates.
 
-# Activate virtual environment
+set -e
+
 if [ -d ".venv" ]; then
-  echo "Activating virtual environment..."
   . .venv/bin/activate
 else
-  echo "Virtual environment not found. Creating one..."
   python3 -m venv .venv
   . .venv/bin/activate
-  echo "Installing dependencies..."
   pip install -r requirements.txt
 fi
 
 if [ -d "generated-templates" ]; then
   rm -rf generated-templates
 fi
-mkdir generated-templates
+mkdir -p generated-templates/cardinal-lakerunner
 
-echo "00. Generating Lakerunner VPC..."
-python3 src/lakerunner_vpc.py > generated-templates/lakerunner-00-vpc.yaml
-cfn-lint generated-templates/lakerunner-00-vpc.yaml
+export PYTHONPATH="$(pwd)/src${PYTHONPATH:+:$PYTHONPATH}"
 
-echo "01. Generating Lakerunner Common Infrastructure..."
-python3 src/lakerunner_common.py > generated-templates/lakerunner-01-common.yaml
-cfn-lint generated-templates/lakerunner-01-common.yaml
+echo "Generating cardinal-vpc.yaml..."
+python3 -m cardinal_cfn.cardinal_vpc > generated-templates/cardinal-vpc.yaml
 
-echo "02. Generating Lakerunner Migration Task..."
-python3 src/lakerunner_migration.py > generated-templates/lakerunner-02-migration.yaml
-cfn-lint generated-templates/lakerunner-02-migration.yaml
+echo "Generating cardinal-lakerunner.yaml (root)..."
+python3 -m cardinal_cfn.root > generated-templates/cardinal-lakerunner.yaml
 
-echo "03. Generating Lakerunner Services..."
-python3 src/lakerunner_services.py > generated-templates/lakerunner-03-services.yaml
-cfn-lint generated-templates/lakerunner-03-services.yaml
+for child in cluster database storage alb config migration \
+             services_query services_process services_control otel maestro; do
+  out_name=$(echo "$child" | tr '_' '-')
+  echo "Generating cardinal-lakerunner/${out_name}.yaml..."
+  python3 -m "cardinal_cfn.children.${child}" > "generated-templates/cardinal-lakerunner/${out_name}.yaml"
+done
 
-echo "04. Generating Lakerunner Alerting..."
-python3 src/lakerunner_alerting.py > generated-templates/lakerunner-04-alerting.yaml
-cfn-lint generated-templates/lakerunner-04-alerting.yaml
+echo
+echo "Linting..."
+cfn-lint generated-templates/cardinal-vpc.yaml \
+         generated-templates/cardinal-lakerunner.yaml \
+         generated-templates/cardinal-lakerunner/*.yaml || \
+  echo "cfn-lint completed with warnings"
 
-echo "05. Generating Lakerunner Grafana Service..."
-python3 src/lakerunner_grafana_service.py > generated-templates/lakerunner-05-grafana-service.yaml
-cfn-lint generated-templates/lakerunner-05-grafana-service.yaml
-
-echo "06. Generating Lakerunner OTEL Collector Service..."
-python3 src/lakerunner_otel_collector_service.py > generated-templates/lakerunner-06-otel-collector-service.yaml
-cfn-lint generated-templates/lakerunner-06-otel-collector-service.yaml
-
-echo "07. Generating Lakerunner Maestro Service..."
-python3 src/lakerunner_maestro_service.py > generated-templates/lakerunner-07-maestro-service.yaml
-cfn-lint generated-templates/lakerunner-07-maestro-service.yaml
-
-echo "98. Generating Lakerunner Bedrock Setup..."
-python3 src/lakerunner_bedrock_setup.py > generated-templates/lakerunner-98-bedrock-setup.yaml
-cfn-lint generated-templates/lakerunner-98-bedrock-setup.yaml
-
-echo "99. Generating Lakerunner Debug Utility..."
-python3 src/lakerunner_debug_utility.py > generated-templates/lakerunner-99-debug-utility.yaml
-cfn-lint generated-templates/lakerunner-99-debug-utility.yaml
-
-echo -e "\nGenerated CloudFormation templates:"
-ls -la generated-templates/
-
-echo -e "\nNote: cfn-lint warnings above are safe to ignore:"
-echo "  - W1030: Empty PublicSubnets parameter is expected when using internal ALB"
-echo "  - W1020: Unnecessary Fn::Sub warnings are cosmetic and don't affect functionality"
+echo
+echo "Generated templates:"
+ls generated-templates/ generated-templates/cardinal-lakerunner/
