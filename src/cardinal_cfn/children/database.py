@@ -48,15 +48,20 @@ def build() -> Template:
         Parameter(
             "DbInstanceClass",
             Type="String",
-            Default="db.t3.medium",
-            Description="RDS DB instance class.",
+            Default="db.t4g.xlarge",
+            Description=(
+                "RDS DB instance class. Default is db.t4g.xlarge (Graviton burstable, "
+                "16 GiB RAM, ~1700 max_connections) — enough headroom for lakerunner's "
+                "many concurrent service replicas without exhausting connection slots. "
+                "Bump higher (e.g. db.r7g.xlarge) for sustained heavy workloads."
+            ),
         )
     )
     t.add_parameter(
         Parameter(
             "DbAllocatedStorage",
             Type="Number",
-            Default=20,
+            Default=100,
             MinValue=20,
             Description="RDS allocated storage in GiB.",
         )
@@ -65,7 +70,7 @@ def build() -> Template:
         Parameter(
             "DbEngineVersion",
             Type="String",
-            Default="17",
+            Default="18.3",
             Description="PostgreSQL engine version.",
         )
     )
