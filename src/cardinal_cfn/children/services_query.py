@@ -302,6 +302,7 @@ def build() -> Template:
             environment=api_env,
             secrets=base_secrets,
             log_group_ref=api_lg,
+            container_port=api_container_port,
         )
     )
     api_service = t.add_resource(
@@ -368,7 +369,7 @@ def build() -> Template:
             FromPort=worker_port,
             ToPort=worker_port,
             SourceSecurityGroupId=Ref("TaskSecurityGroupId"),
-            Description="query-api -> query-worker (task-to-task)",
+            Description="query-api to query-worker task-to-task",
         )
     )
 

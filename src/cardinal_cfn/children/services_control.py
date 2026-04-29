@@ -243,6 +243,7 @@ def build() -> Template:
             environment=admin_env,
             secrets=base_secrets,
             log_group_ref=admin_lg,
+            container_port=admin_container_port,
         )
     )
     admin_service = t.add_resource(
