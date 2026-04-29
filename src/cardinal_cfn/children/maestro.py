@@ -470,6 +470,13 @@ def build() -> Template:
             ),
             Environment(Name="OIDC_CLIENT_ID", Value=Ref("DexClientId")),
             Environment(Name="OIDC_AUDIENCE", Value=Ref("DexClientId")),
+            # Maestro defaults to Keycloak's JWKS path
+            # (<issuer>/protocol/openid-connect/certs) but Dex serves keys
+            # at <issuer>/keys, so we have to override it here.
+            Environment(
+                Name="OIDC_JWKS_URL",
+                Value=Sub("https://${AlbDnsName}/dex/keys"),
+            ),
             # DEX_* kept for any tooling that still reads the legacy names.
             Environment(
                 Name="DEX_ISSUER_URL",
