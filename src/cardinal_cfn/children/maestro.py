@@ -476,6 +476,12 @@ def build() -> Template:
                 Value=Sub("https://${AlbDnsName}/dex"),
             ),
             Environment(Name="DEX_CLIENT_ID", Value=Ref("DexClientId")),
+            # Maestro fetches the JWKS from the ALB's HTTPS endpoint, but the
+            # bundled self-signed cert isn't trusted by Node's TLS stack so
+            # undici's fetch fails before it can read the keys, surfacing as
+            # "JWT verification failed: fetch failed" and a 401 on /api/me.
+            # The CA-signed-cert path leaves this unset.
+            Environment(Name="NODE_TLS_REJECT_UNAUTHORIZED", Value="0"),
         ],
         Secrets=list(db_secrets) + [
             Secret(Name="LICENSE_DATA", ValueFrom=Ref("LicenseSecretArn")),
