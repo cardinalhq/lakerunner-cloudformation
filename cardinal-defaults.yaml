@@ -34,7 +34,7 @@ storage_profiles:
 # ---------------------------------------------------------------------------
 images:
   lakerunner: "public.ecr.aws/cardinalhq.io/lakerunner:v1.19.0"
-  maestro:    "public.ecr.aws/cardinalhq.io/maestro:v1.8.4"
+  maestro:    "public.ecr.aws/cardinalhq.io/maestro:v1.8.6"
   otel:       "public.ecr.aws/cardinalhq.io/cardinalhq-otel-collector:v1.7.0"
   dex:        "ghcr.io/dexidp/dex:v2.41.1"
   dex_init:   "public.ecr.aws/docker/library/busybox:1.37"
