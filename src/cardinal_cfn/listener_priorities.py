@@ -11,9 +11,11 @@ future per-service stack splits collision-free.
 LISTENER_PRIORITIES: dict = {
     "query-api":     100,
     "admin-api":     110,
-    "maestro-https": 200,
     "maestro-dex":   210,
     "otel-grpc":     300,
+    # Maestro is the default app: a true catch-all "/*" rule. It MUST be
+    # numerically the highest (lowest priority) so all other rules win.
+    "maestro-https": 49999,
 }
 
 
