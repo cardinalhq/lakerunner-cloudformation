@@ -12,6 +12,7 @@ from troposphere.ecs import Cluster as ECSCluster, ClusterSetting
 from troposphere.ec2 import SecurityGroup, SecurityGroupIngress
 from troposphere.iam import Policy, Role
 from troposphere.logs import LogGroup
+from troposphere.servicediscovery import PrivateDnsNamespace
 
 from cardinal_cfn.naming import cardinal_tags
 from cardinal_cfn.parameters import add_install_id_parameters
@@ -152,11 +153,25 @@ def build() -> Template:
     )
     apply_policy(base_lg, "log-group")
 
+    # Cloud Map private DNS namespace for in-cluster service-to-service routing
+    # (e.g. alert-evaluator -> query-api). Services can register and resolve
+    # each other via DNS without going through the ALB.
+    sd_namespace = t.add_resource(
+        PrivateDnsNamespace(
+            "ServiceNamespace",
+            Name=Sub("cardinal-${InstallIdShort}.local"),
+            Vpc=Ref("VpcId"),
+            Description="Internal service-to-service DNS for the Cardinal cluster.",
+        )
+    )
+
     t.add_output(Output("ClusterArn", Value=GetAtt(cluster_res, "Arn")))
     t.add_output(Output("ClusterName", Value=Ref(cluster_res)))
     t.add_output(Output("TaskSecurityGroupId", Value=Ref(task_sg)))
     t.add_output(Output("ExecutionRoleArn", Value=GetAtt(exec_role, "Arn")))
     t.add_output(Output("BaseLogGroupName", Value=Ref(base_lg)))
+    t.add_output(Output("ServiceNamespaceId", Value=Ref(sd_namespace)))
+    t.add_output(Output("ServiceNamespaceName", Value=Sub("cardinal-${InstallIdShort}.local")))
 
     return t
 

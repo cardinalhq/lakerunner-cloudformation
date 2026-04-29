@@ -15,6 +15,11 @@ from troposphere import (
 )
 from troposphere.ec2 import SecurityGroupIngress
 from troposphere.ecs import Environment, Secret
+from troposphere.servicediscovery import (
+    DnsConfig,
+    DnsRecord,
+    Service as DiscoveryService,
+)
 
 from cardinal_cfn.children import services_common
 from cardinal_cfn.defaults import load_defaults
@@ -74,6 +79,13 @@ def build() -> Template:
     )
     t.add_parameter(
         Parameter("VpcId", Type="AWS::EC2::VPC::Id", Description="VPC ID (forwarded from root).")
+    )
+    t.add_parameter(
+        Parameter(
+            "ServiceNamespaceId",
+            Type="String",
+            Description="Cloud Map private DNS namespace ID for in-cluster service discovery.",
+        )
     )
     t.add_parameter(Parameter("DbEndpoint", Type="String", Description="RDS endpoint hostname."))
     t.add_parameter(Parameter("DbPort", Type="String", Default="5432", Description="RDS port."))
@@ -311,6 +323,20 @@ def build() -> Template:
             container_port=api_container_port,
         )
     )
+    # Register query-api in Cloud Map so other services in the cluster can
+    # reach it at http://query-api.<namespace>:<port> without going through
+    # the ALB (alert-evaluator does this).
+    api_discovery = t.add_resource(
+        DiscoveryService(
+            "QueryApiDiscoveryService",
+            Name="query-api",
+            NamespaceId=Ref("ServiceNamespaceId"),
+            DnsConfig=DnsConfig(
+                DnsRecords=[DnsRecord(Type="A", TTL="10")],
+                RoutingPolicy="MULTIVALUE",
+            ),
+        )
+    )
     api_service = t.add_resource(
         services_common.build_ecs_service(
             service_key="query-api",
@@ -322,6 +348,7 @@ def build() -> Template:
             target_group_ref=api_tg,
             container_name="query-api",
             container_port=api_container_port,
+            service_registry_ref=api_discovery,
         )
     )
 
