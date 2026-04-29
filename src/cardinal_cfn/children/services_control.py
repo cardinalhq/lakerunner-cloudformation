@@ -80,6 +80,17 @@ def build() -> Template:
         Parameter("HttpsListenerArn", Type="String", Description="ARN of the ALB HTTPS listener.")
     )
     t.add_parameter(
+        Parameter(
+            "AdminHttpsListenerArn",
+            Type="String",
+            Description=(
+                "ARN of the dedicated admin-api HTTPS listener (port 9443). "
+                "admin-api owns the catch-all on this listener so the "
+                "container sees unprefixed paths."
+            ),
+        )
+    )
+    t.add_parameter(
         Parameter("VpcId", Type="AWS::EC2::VPC::Id", Description="VPC ID (forwarded from root).")
     )
     t.add_parameter(
@@ -235,12 +246,16 @@ def build() -> Template:
             health_check_path=admin_health_path,
         )
     )
+    # admin-api gets a dedicated HTTPS listener (9443) so the lakerunner
+    # binary's mux sees request paths verbatim (no /admin/ prefix to strip).
+    # This is the only rule on that listener; the listener's default action
+    # is a 503 fixed response.
     t.add_resource(
         services_common.build_listener_rule(
-            service_key="admin-api",
+            service_key="admin-api-https",
             target_group_ref=admin_tg,
-            listener_arn_param="HttpsListenerArn",
-            path_patterns=["/admin/*"],
+            listener_arn_param="AdminHttpsListenerArn",
+            path_patterns=["/*"],
         )
     )
     admin_env = list(base_env) + _service_specific_env(admin_cfg)

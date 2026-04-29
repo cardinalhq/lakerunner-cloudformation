@@ -93,7 +93,14 @@ def build() -> Template:
                     "ToPort": 443,
                     "CidrIp": "0.0.0.0/0",
                     "Description": "HTTPS from anywhere",
-                }
+                },
+                {
+                    "IpProtocol": "tcp",
+                    "FromPort": 9443,
+                    "ToPort": 9443,
+                    "CidrIp": "0.0.0.0/0",
+                    "Description": "Admin-API HTTPS (dedicated listener)",
+                },
             ],
             Tags=cardinal_tags(component="networking", role="alb-sg"),
         )
@@ -135,6 +142,33 @@ def build() -> Template:
         )
     )
 
+    # Dedicated listener for the lakerunner admin-api. The admin-api binary
+    # serves its embedded UI at "/" so we can't share a path-prefixed rule
+    # on 443 without either breaking the API (no path stripping in ALB) or
+    # breaking the UI's react-router. Giving admin-api its own listener at
+    # 9443 lets the container see request paths verbatim. The default
+    # action is a 503; admin-api owns a single catch-all rule on this
+    # listener (registered from services_control.py).
+    admin_listener = t.add_resource(
+        Listener(
+            "AdminHttpsListener",
+            LoadBalancerArn=Ref(alb),
+            Port=9443,
+            Protocol="HTTPS",
+            Certificates=[Certificate(CertificateArn=Ref("CertificateArn"))],
+            DefaultActions=[
+                Action(
+                    Type="fixed-response",
+                    FixedResponseConfig=FixedResponseConfig(
+                        StatusCode="503",
+                        ContentType="text/plain",
+                        MessageBody="admin-api listener rule not registered",
+                    ),
+                )
+            ],
+        )
+    )
+
     # Allow ALB to reach ECS tasks on all ports
     t.add_resource(
         SecurityGroupIngress(
@@ -152,6 +186,7 @@ def build() -> Template:
     t.add_output(Output("AlbDnsName", Value=GetAtt(alb, "DNSName")))
     t.add_output(Output("AlbSecurityGroupId", Value=Ref(alb_sg)))
     t.add_output(Output("HttpsListenerArn", Value=Ref(listener)))
+    t.add_output(Output("AdminHttpsListenerArn", Value=Ref(admin_listener)))
 
     return t
 

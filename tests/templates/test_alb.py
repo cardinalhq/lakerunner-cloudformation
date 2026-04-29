@@ -24,11 +24,12 @@ def test_creates_load_balancer(template_dict):
     assert len(lbs) == 1
 
 
-def test_creates_https_listener_on_443(template_dict):
+def test_creates_https_listeners_on_443_and_9443(template_dict):
     listeners = [r for r in template_dict["Resources"].values()
                  if r["Type"] == "AWS::ElasticLoadBalancingV2::Listener"]
-    assert len(listeners) == 1
-    assert listeners[0]["Properties"]["Port"] == 443
+    assert len(listeners) == 2
+    ports = sorted(l["Properties"]["Port"] for l in listeners)
+    assert ports == [443, 9443]
 
 
 def test_creates_alb_to_task_ingress(template_dict):
@@ -46,5 +47,11 @@ def test_alb_uses_delete_policy(template_dict):
 
 
 def test_outputs_required(template_dict):
-    for n in ("AlbArn", "AlbDnsName", "AlbSecurityGroupId", "HttpsListenerArn"):
+    for n in (
+        "AlbArn",
+        "AlbDnsName",
+        "AlbSecurityGroupId",
+        "HttpsListenerArn",
+        "AdminHttpsListenerArn",
+    ):
         assert n in template_dict["Outputs"]
