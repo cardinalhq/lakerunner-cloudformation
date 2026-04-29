@@ -288,7 +288,7 @@ def build() -> Template:
         Secret(Name="CONFIGDB_USER", ValueFrom=Sub("${DbSecretArn}:username::")),
         Secret(Name="CONFIGDB_PASSWORD", ValueFrom=Sub("${DbSecretArn}:password::")),
         Secret(Name="LRDB_INTERNAL_KEYS", ValueFrom=Ref("InternalServiceKeysSecretArn")),
-        Secret(Name="LRDB_LICENSE", ValueFrom=Ref("LicenseSecretArn")),
+        Secret(Name="LICENSE_DATA", ValueFrom=Ref("LicenseSecretArn")),
     ]
 
     # ---------------------------------------------------------------------

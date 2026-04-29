@@ -424,7 +424,7 @@ def build() -> Template:
             Environment(Name="DEX_CLIENT_ID", Value=Ref("DexClientId")),
         ],
         Secrets=list(db_secrets) + [
-            Secret(Name="LRDB_LICENSE", ValueFrom=Ref("LicenseSecretArn")),
+            Secret(Name="LICENSE_DATA", ValueFrom=Ref("LicenseSecretArn")),
             Secret(Name="LRDB_INTERNAL_KEYS", ValueFrom=Ref("InternalServiceKeysSecretArn")),
         ],
         DependsOn=[
