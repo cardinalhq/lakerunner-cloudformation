@@ -313,9 +313,14 @@ def build() -> Template:
         Image=db_init_image_ref,
         Essential=False,
         EntryPoint=["sh", "-c"],
-        # CREATE-IF-NOT-EXISTS is approximated via "|| true". The image must
-        # have psql installed; the default db_init image (initcontainer-grafana)
-        # is assumed to be psql-capable.
+        # Idempotent provisioning of the maestro DB / role / extensions.
+        # The "|| true" fallbacks tolerate "already exists" on re-runs.
+        # PG 15+ revokes CREATE on the public schema from PUBLIC, so we
+        # transfer ownership of the database and schema to the maestro
+        # role. The pgvector / pgcrypto / citext extensions must be created
+        # by an rds_superuser (the lakerunner master) — mcp-gateway's
+        # migrations run as the maestro role and use IF NOT EXISTS so
+        # they no-op once these are in place.
         Command=[
             (
                 "PGPASSWORD=$LRDB_PASSWORD psql -h $LRDB_HOST -p $LRDB_PORT "
@@ -327,7 +332,18 @@ def build() -> Template:
                 "|| true; "
                 "PGPASSWORD=$LRDB_PASSWORD psql -h $LRDB_HOST -p $LRDB_PORT "
                 "-U $LRDB_USER -d postgres -v ON_ERROR_STOP=1 "
-                "-c \"GRANT ALL ON DATABASE maestro TO maestro\""
+                "-c \"GRANT ALL ON DATABASE maestro TO maestro\"; "
+                "PGPASSWORD=$LRDB_PASSWORD psql -h $LRDB_HOST -p $LRDB_PORT "
+                "-U $LRDB_USER -d postgres -v ON_ERROR_STOP=1 "
+                "-c \"ALTER DATABASE maestro OWNER TO maestro\"; "
+                "PGPASSWORD=$LRDB_PASSWORD psql -h $LRDB_HOST -p $LRDB_PORT "
+                "-U $LRDB_USER -d maestro -v ON_ERROR_STOP=1 "
+                "-c \"ALTER SCHEMA public OWNER TO maestro\"; "
+                "for ext in vector pgcrypto citext; do "
+                "PGPASSWORD=$LRDB_PASSWORD psql -h $LRDB_HOST -p $LRDB_PORT "
+                "-U $LRDB_USER -d maestro -v ON_ERROR_STOP=1 "
+                "-c \"CREATE EXTENSION IF NOT EXISTS $ext\"; "
+                "done"
             )
         ],
         Environment=[
@@ -509,6 +525,9 @@ def build() -> Template:
             service_key=_DEX_LISTENER_KEY,
             vpc_id_param="VpcId",
             port=dex_port,
+            # Dex serves all routes under its configured path_prefix; the
+            # default "/healthz" returns 404 once the prefix is set.
+            health_check_path="/dex/healthz",
         )
     )
     t.add_resource(
