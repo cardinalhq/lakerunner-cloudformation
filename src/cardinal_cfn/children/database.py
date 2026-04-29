@@ -9,6 +9,7 @@ from troposphere import (
     Split,
     Sub,
 )
+from troposphere.ec2 import SecurityGroup, SecurityGroupIngress
 from troposphere.rds import DBInstance, DBSubnetGroup
 from troposphere.secretsmanager import GenerateSecretString, Secret
 
@@ -22,6 +23,20 @@ def build() -> Template:
     t.set_description("Cardinal database: RDS instance and master secret.")
 
     add_install_id_parameters(t)
+    t.add_parameter(
+        Parameter(
+            "VpcId",
+            Type="AWS::EC2::VPC::Id",
+            Description="VPC ID (forwarded from root) — required for the DB security group.",
+        )
+    )
+    t.add_parameter(
+        Parameter(
+            "TaskSecurityGroupId",
+            Type="AWS::EC2::SecurityGroup::Id",
+            Description="ECS task security group permitted to reach the DB on 5432.",
+        )
+    )
     t.add_parameter(
         Parameter(
             "PrivateSubnetsCsv",
@@ -77,6 +92,26 @@ def build() -> Template:
         )
     )
 
+    db_sg = t.add_resource(
+        SecurityGroup(
+            "DbSecurityGroup",
+            GroupDescription="Cardinal RDS access - Postgres 5432 from ECS tasks only.",
+            VpcId=Ref("VpcId"),
+            Tags=cardinal_tags(component="database", role="db-sg"),
+        )
+    )
+    t.add_resource(
+        SecurityGroupIngress(
+            "DbIngressFromTasks",
+            GroupId=Ref(db_sg),
+            IpProtocol="tcp",
+            FromPort=5432,
+            ToPort=5432,
+            SourceSecurityGroupId=Ref("TaskSecurityGroupId"),
+            Description="Postgres 5432 from ECS tasks",
+        )
+    )
+
     db = t.add_resource(
         DBInstance(
             "Db",
@@ -87,6 +122,7 @@ def build() -> Template:
             AllocatedStorage=Ref("DbAllocatedStorage"),
             PubliclyAccessible=False,
             DBSubnetGroupName=Ref(subnet_group),
+            VPCSecurityGroups=[Ref(db_sg)],
             MasterUsername="lakerunner",
             # CFN dynamic reference; ${DbMasterSecret} is substituted by Fn::Sub
             # at deploy time, then CFN resolves the secretsmanager value.

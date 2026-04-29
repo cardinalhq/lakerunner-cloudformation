@@ -265,3 +265,18 @@ def test_outputs_service_name(td):
 
 def test_outputs_db_secret_arn(td):
     assert "MaestroDbSecretArn" in td["Outputs"]
+
+
+# ---------------------------------------------------------------------------
+# Security: AssignPublicIp DISABLED
+# ---------------------------------------------------------------------------
+
+
+def test_all_services_disable_public_ip(td):
+    services = [r for r in td["Resources"].values() if r["Type"] == "AWS::ECS::Service"]
+    assert services
+    for svc in services:
+        awsvpc = svc["Properties"]["NetworkConfiguration"]["AwsvpcConfiguration"]
+        assert awsvpc["AssignPublicIp"] == "DISABLED", (
+            f"AssignPublicIp must be DISABLED; got {awsvpc['AssignPublicIp']!r}"
+        )

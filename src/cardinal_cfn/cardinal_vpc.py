@@ -145,8 +145,8 @@ def build() -> Template:
         Subnet(
             "PublicSubnet1",
             VpcId=Ref(vpc),
-            AvailabilityZone=Select("0", GetAZs()),
-            CidrBlock=Select("0", Cidr(Ref("VpcCidr"), 4, 8)),
+            AvailabilityZone=Select(0, GetAZs()),
+            CidrBlock=Select(0, Cidr(Ref("VpcCidr"), 4, 8)),
             MapPublicIpOnLaunch=True,
             Tags=_vpc_tags(role="public-1"),
         )
@@ -155,8 +155,8 @@ def build() -> Template:
         Subnet(
             "PublicSubnet2",
             VpcId=Ref(vpc),
-            AvailabilityZone=Select("1", GetAZs()),
-            CidrBlock=Select("1", Cidr(Ref("VpcCidr"), 4, 8)),
+            AvailabilityZone=Select(1, GetAZs()),
+            CidrBlock=Select(1, Cidr(Ref("VpcCidr"), 4, 8)),
             MapPublicIpOnLaunch=True,
             Tags=_vpc_tags(role="public-2"),
         )
@@ -165,8 +165,8 @@ def build() -> Template:
         Subnet(
             "PrivateSubnet1",
             VpcId=Ref(vpc),
-            AvailabilityZone=Select("0", GetAZs()),
-            CidrBlock=Select("2", Cidr(Ref("VpcCidr"), 4, 8)),
+            AvailabilityZone=Select(0, GetAZs()),
+            CidrBlock=Select(2, Cidr(Ref("VpcCidr"), 4, 8)),
             MapPublicIpOnLaunch=False,
             Tags=_vpc_tags(role="private-1"),
         )
@@ -175,8 +175,8 @@ def build() -> Template:
         Subnet(
             "PrivateSubnet2",
             VpcId=Ref(vpc),
-            AvailabilityZone=Select("1", GetAZs()),
-            CidrBlock=Select("3", Cidr(Ref("VpcCidr"), 4, 8)),
+            AvailabilityZone=Select(1, GetAZs()),
+            CidrBlock=Select(3, Cidr(Ref("VpcCidr"), 4, 8)),
             MapPublicIpOnLaunch=False,
             Tags=_vpc_tags(role="private-2"),
         )

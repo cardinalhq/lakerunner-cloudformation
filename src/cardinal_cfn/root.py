@@ -222,6 +222,8 @@ def build() -> Template:
     t.add_parameter(Parameter(
         "MigrationImageDigest",
         Type="String",
+        AllowedPattern=r"^sha256:[0-9a-f]{64}$",
+        ConstraintDescription="Must be a sha256 image digest (sha256:<64 hex chars>).",
         Description=(
             "Image digest (sha256:...) for the migrator. Required; tags are "
             "not accepted. Changing this triggers a re-run of migrations."
@@ -281,11 +283,13 @@ def build() -> Template:
     database_stack = _add_child(t, "DatabaseStack", "database.yaml", {
         "InstallIdShort": install_short,
         "InstallIdLong": install_long,
+        "VpcId": Ref("VpcId"),
+        "TaskSecurityGroupId": GetAtt(cluster_stack, "Outputs.TaskSecurityGroupId"),
         "PrivateSubnetsCsv": private_subnets_csv,
         "DbInstanceClass": Ref("DbInstanceClass"),
         "DbAllocatedStorage": Ref("DbAllocatedStorage"),
         "DbEngineVersion": Ref("DbEngineVersion"),
-    })
+    }, depends_on=["ClusterStack"])
 
     storage_stack = _add_child(t, "StorageStack", "storage.yaml", {
         "InstallIdShort": install_short,

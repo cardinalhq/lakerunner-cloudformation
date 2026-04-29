@@ -77,11 +77,21 @@ def test_creates_target_group_and_listener_rule_for_query_api(td):
 
 def test_query_worker_does_not_attach_to_alb(td):
     """query-worker is internal; no listener rule should reference its target group."""
+    worker_tg_logical_ids = {
+        logical_id
+        for logical_id, res in td["Resources"].items()
+        if res["Type"] == "AWS::ElasticLoadBalancingV2::TargetGroup"
+        and "Worker" in logical_id
+    }
     rules = [r for r in td["Resources"].values()
              if r["Type"] == "AWS::ElasticLoadBalancingV2::ListenerRule"]
     for rule in rules:
-        priority = rule["Properties"]["Priority"]
-        assert priority != 8081
+        for action in rule["Properties"].get("Actions", []):
+            tg_arn = action.get("TargetGroupArn")
+            if isinstance(tg_arn, dict) and "Ref" in tg_arn:
+                assert tg_arn["Ref"] not in worker_tg_logical_ids, (
+                    f"query-worker target group is attached to a listener rule: {tg_arn!r}"
+                )
 
 
 def test_only_one_listener_rule_and_one_target_group(td):
@@ -191,3 +201,53 @@ def test_security_group_ingress_for_query_worker_port(td):
 def test_outputs_required(td):
     for n in ("QueryApiServiceName", "QueryWorkerServiceName"):
         assert n in td["Outputs"], f"missing output: {n}"
+
+
+# ---------------------------------------------------------------------------
+# Security: AssignPublicIp DISABLED + LRDB_SSLMODE require
+# ---------------------------------------------------------------------------
+
+
+def test_all_services_disable_public_ip(td):
+    """Hard security requirement: no Fargate task may receive a public IP."""
+    services = [r for r in td["Resources"].values() if r["Type"] == "AWS::ECS::Service"]
+    for svc in services:
+        awsvpc = svc["Properties"]["NetworkConfiguration"]["AwsvpcConfiguration"]
+        assert awsvpc["AssignPublicIp"] == "DISABLED", (
+            f"AssignPublicIp must be DISABLED; got {awsvpc['AssignPublicIp']!r}"
+        )
+
+
+def test_all_task_definitions_set_ssl_required(td):
+    """Database connections must always require SSL."""
+    task_defs = [r for r in td["Resources"].values() if r["Type"] == "AWS::ECS::TaskDefinition"]
+    for tdef in task_defs:
+        for container in tdef["Properties"]["ContainerDefinitions"]:
+            env = {e["Name"]: e["Value"] for e in container.get("Environment", [])}
+            assert env.get("LRDB_SSLMODE") == "require", (
+                f"{container.get('Name')} LRDB_SSLMODE must be 'require'; got {env.get('LRDB_SSLMODE')!r}"
+            )
+
+
+# ---------------------------------------------------------------------------
+# B → C boundary: per-service stack must own only per-service resources.
+# ---------------------------------------------------------------------------
+
+
+def test_no_shared_resources_in_services_query(td):
+    """services-query owns only per-service resources; shared ones live elsewhere."""
+    forbidden = {
+        "AWS::ECS::Cluster",
+        "AWS::ElasticLoadBalancingV2::LoadBalancer",
+        "AWS::ElasticLoadBalancingV2::Listener",
+        "AWS::SecretsManager::Secret",
+        "AWS::SSM::Parameter",
+        "AWS::S3::Bucket",
+        "AWS::SQS::Queue",
+        "AWS::SQS::QueuePolicy",
+        "AWS::RDS::DBInstance",
+        "AWS::RDS::DBSubnetGroup",
+        "AWS::EC2::SecurityGroup",
+    }
+    found = {r["Type"] for r in td["Resources"].values()} & forbidden
+    assert not found, f"services-query must not own shared resources; found {found}"

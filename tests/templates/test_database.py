@@ -14,7 +14,14 @@ def template_dict():
 
 def test_required_parameters(template_dict):
     params = template_dict["Parameters"]
-    for name in ("InstallIdShort", "InstallIdLong", "PrivateSubnetsCsv", "DbInstanceClass"):
+    for name in (
+        "InstallIdShort",
+        "InstallIdLong",
+        "VpcId",
+        "TaskSecurityGroupId",
+        "PrivateSubnetsCsv",
+        "DbInstanceClass",
+    ):
         assert name in params, f"missing parameter: {name}"
 
 
@@ -53,3 +60,34 @@ def test_no_explicit_db_instance_identifier(template_dict):
         v["Properties"] for v in template_dict["Resources"].values() if v["Type"] == "AWS::RDS::DBInstance"
     )
     assert "DBInstanceIdentifier" not in rds_props
+
+
+def test_db_instance_has_dedicated_security_group(template_dict):
+    """RDS must reference a dedicated SG; relying on the VPC default SG breaks task connectivity."""
+    rds_props = next(
+        v["Properties"] for v in template_dict["Resources"].values() if v["Type"] == "AWS::RDS::DBInstance"
+    )
+    sgs = rds_props.get("VPCSecurityGroups")
+    assert sgs and len(sgs) == 1, f"DBInstance must declare exactly one VPCSecurityGroups entry; got {sgs!r}"
+    assert sgs[0] == {"Ref": "DbSecurityGroup"}, f"DBInstance must reference DbSecurityGroup; got {sgs[0]!r}"
+
+
+def test_db_security_group_present(template_dict):
+    sgs = [r for r in template_dict["Resources"].values() if r["Type"] == "AWS::EC2::SecurityGroup"]
+    assert len(sgs) == 1
+    assert sgs[0]["Properties"]["VpcId"] == {"Ref": "VpcId"}
+
+
+def test_db_ingress_only_from_task_sg_on_5432(template_dict):
+    """Postgres 5432 ingress must be limited to the ECS task security group."""
+    ingresses = [
+        r for r in template_dict["Resources"].values()
+        if r["Type"] == "AWS::EC2::SecurityGroupIngress"
+    ]
+    assert len(ingresses) == 1, f"expected exactly one ingress rule; got {len(ingresses)}"
+    props = ingresses[0]["Properties"]
+    assert props["FromPort"] == 5432
+    assert props["ToPort"] == 5432
+    assert props["IpProtocol"] == "tcp"
+    assert props["SourceSecurityGroupId"] == {"Ref": "TaskSecurityGroupId"}
+    assert props["GroupId"] == {"Ref": "DbSecurityGroup"}

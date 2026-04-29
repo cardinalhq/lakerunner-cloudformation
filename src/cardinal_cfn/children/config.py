@@ -61,7 +61,7 @@ def build() -> Template:
             Tags=cardinal_tags(component="config", role="license-secret"),
         )
     )
-    apply_policy(license_secret, "admin-api-key-secret")
+    apply_policy(license_secret, "license-secret")
 
     # Auto-generated, AWS-managed name — Delete on delete.
     internal_keys = t.add_resource(

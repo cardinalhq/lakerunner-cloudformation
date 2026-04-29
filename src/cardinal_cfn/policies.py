@@ -12,6 +12,7 @@ POLICIES: dict = {
     "db-master-secret":             ("Retain", "Retain"),
     "internal-service-keys-secret": ("Delete", "Delete"),
     "admin-api-key-secret":         ("Retain", "Retain"),
+    "license-secret":               ("Retain", "Retain"),
     "sqs-ingest-queue":             ("Delete", "Delete"),
     "alb":                          ("Delete", "Delete"),
     "ecs-cluster":                  ("Delete", "Delete"),

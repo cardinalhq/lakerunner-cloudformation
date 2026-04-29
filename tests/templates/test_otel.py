@@ -156,3 +156,18 @@ def test_outputs_endpoint(td):
 
 def test_outputs_service_name(td):
     assert "OtelServiceName" in td["Outputs"]
+
+
+# ---------------------------------------------------------------------------
+# Security: AssignPublicIp DISABLED
+# ---------------------------------------------------------------------------
+
+
+def test_otel_service_disables_public_ip(td):
+    services = [r for r in td["Resources"].values() if r["Type"] == "AWS::ECS::Service"]
+    assert services
+    for svc in services:
+        awsvpc = svc["Properties"]["NetworkConfiguration"]["AwsvpcConfiguration"]
+        assert awsvpc["AssignPublicIp"] == "DISABLED", (
+            f"AssignPublicIp must be DISABLED; got {awsvpc['AssignPublicIp']!r}"
+        )

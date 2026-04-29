@@ -40,9 +40,33 @@ def build() -> Template:
     )
     apply_policy(queue, "sqs-ingest-queue")
 
+    # The queue policy must exist before the bucket so S3 can validate the
+    # NotificationConfiguration target permissions at bucket-create time.
+    queue_policy = t.add_resource(
+        QueuePolicy(
+            "IngestQueuePolicy",
+            Queues=[Ref(queue)],
+            PolicyDocument={
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Effect": "Allow",
+                        "Principal": {"Service": "s3.amazonaws.com"},
+                        "Action": ["sqs:GetQueueAttributes", "sqs:GetQueueUrl", "sqs:SendMessage"],
+                        "Resource": GetAtt(queue, "Arn"),
+                        "Condition": {
+                            "StringEquals": {"aws:SourceAccount": Ref("AWS::AccountId")}
+                        },
+                    }
+                ],
+            },
+        )
+    )
+
     bucket = t.add_resource(
         Bucket(
             "IngestBucket",
+            DependsOn=queue_policy.title,
             BucketName=Sub("cardinal-ingest-${AWS::AccountId}-${AWS::Region}-${InstallIdLong}"),
             LifecycleConfiguration=LifecycleConfiguration(
                 Rules=[
@@ -70,27 +94,6 @@ def build() -> Template:
         )
     )
     apply_policy(bucket, "s3-ingest-bucket")
-
-    t.add_resource(
-        QueuePolicy(
-            "IngestQueuePolicy",
-            Queues=[Ref(queue)],
-            PolicyDocument={
-                "Version": "2012-10-17",
-                "Statement": [
-                    {
-                        "Effect": "Allow",
-                        "Principal": {"Service": "s3.amazonaws.com"},
-                        "Action": ["sqs:GetQueueAttributes", "sqs:GetQueueUrl", "sqs:SendMessage"],
-                        "Resource": GetAtt(queue, "Arn"),
-                        "Condition": {
-                            "StringEquals": {"aws:SourceAccount": Ref("AWS::AccountId")}
-                        },
-                    }
-                ],
-            },
-        )
-    )
 
     t.add_output(Output("BucketName", Value=Ref(bucket)))
     t.add_output(Output("BucketArn", Value=GetAtt(bucket, "Arn")))

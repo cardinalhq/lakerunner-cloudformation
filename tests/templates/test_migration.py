@@ -19,6 +19,14 @@ def test_required_parameters(template_dict):
         assert n in template_dict["Parameters"], f"missing parameter: {n}"
 
 
+def test_migration_image_digest_pattern_rejects_tags(template_dict):
+    """Spec: tags must be rejected; only sha256:<64 hex> digests are valid."""
+    p = template_dict["Parameters"]["MigrationImageDigest"]
+    assert p.get("AllowedPattern") == r"^sha256:[0-9a-f]{64}$", (
+        f"MigrationImageDigest needs AllowedPattern to reject tags; got {p.get('AllowedPattern')!r}"
+    )
+
+
 def test_creates_lambda_and_custom_resource(template_dict):
     types = [r["Type"] for r in template_dict["Resources"].values()]
     assert "AWS::Lambda::Function" in types
@@ -31,9 +39,34 @@ def test_creates_task_definition(template_dict):
     assert "AWS::ECS::TaskDefinition" in types
 
 
-def test_custom_resource_passes_migration_version(template_dict):
+def test_custom_resource_uses_image_digest_as_trigger(template_dict):
+    """MigrationVersion must be wired to the digest parameter (not the mutable image tag)."""
     cr = next(
         r for r in template_dict["Resources"].values()
         if r["Type"] == "AWS::CloudFormation::CustomResource" or r["Type"] == "Custom::MigrationRunner"
     )
-    assert "MigrationVersion" in cr["Properties"]
+    mv = cr["Properties"].get("MigrationVersion")
+    assert mv == {"Ref": "MigrationImageDigest"}, (
+        f"MigrationVersion must be Ref(MigrationImageDigest); got {mv!r}"
+    )
+
+
+def test_migrator_task_uses_ssl_required(template_dict):
+    """Database connections must always require SSL."""
+    task_def = next(
+        r for r in template_dict["Resources"].values() if r["Type"] == "AWS::ECS::TaskDefinition"
+    )
+    container = task_def["Properties"]["ContainerDefinitions"][0]
+    env = {e["Name"]: e["Value"] for e in container["Environment"]}
+    assert env.get("LRDB_SSLMODE") == "require", (
+        f"LRDB_SSLMODE must be 'require'; got {env.get('LRDB_SSLMODE')!r}"
+    )
+
+
+def test_migration_lambda_source_disables_public_ip(template_dict):
+    """The migration Lambda runs the migrator ECS task; it must not assign public IPs."""
+    fn = next(
+        r for r in template_dict["Resources"].values() if r["Type"] == "AWS::Lambda::Function"
+    )
+    src = fn["Properties"]["Code"]["ZipFile"]
+    assert '"assignPublicIp": "DISABLED"' in src, "Lambda must call run_task with assignPublicIp=DISABLED"

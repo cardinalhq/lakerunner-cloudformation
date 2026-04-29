@@ -62,6 +62,8 @@ def build() -> Template:
         Parameter(
             "MigrationImageDigest",
             Type="String",
+            AllowedPattern=r"^sha256:[0-9a-f]{64}$",
+            ConstraintDescription="Must be a sha256 image digest (sha256:<64 hex chars>).",
             Description="Image digest (sha256:...) used to trigger re-runs on upgrade.",
         )
     )

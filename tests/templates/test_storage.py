@@ -53,6 +53,55 @@ def test_bucket_has_three_notification_prefixes(template_dict):
     assert set(prefixes) == {"otel-raw/", "logs-raw/", "metrics-raw/"}
 
 
+def test_bucket_depends_on_queue_policy(template_dict):
+    """S3 validates queue write permissions when the bucket is created.
+
+    Without a DependsOn on the queue policy, CFN sometimes builds the bucket
+    first and fails with 'Unable to validate destination configurations'.
+    """
+    bucket = next(
+        v for v in template_dict["Resources"].values() if v["Type"] == "AWS::S3::Bucket"
+    )
+    depends_on = bucket.get("DependsOn")
+    if isinstance(depends_on, str):
+        depends_on = [depends_on]
+    assert depends_on and "IngestQueuePolicy" in depends_on, (
+        f"IngestBucket must DependsOn IngestQueuePolicy; got {depends_on!r}"
+    )
+
+
+def test_bucket_notification_targets_rendered_queue(template_dict):
+    """Each NotificationConfiguration entry must reference the queue we just created."""
+    bucket_props = next(
+        v["Properties"] for v in template_dict["Resources"].values() if v["Type"] == "AWS::S3::Bucket"
+    )
+    queue_logical_ids = [
+        k for k, v in template_dict["Resources"].items() if v["Type"] == "AWS::SQS::Queue"
+    ]
+    assert len(queue_logical_ids) == 1
+    queue_arn = {"Fn::GetAtt": [queue_logical_ids[0], "Arn"]}
+    for cfg in bucket_props["NotificationConfiguration"]["QueueConfigurations"]:
+        assert cfg["Queue"] == queue_arn, (
+            f"queue config must target rendered queue ARN, got {cfg['Queue']!r}"
+        )
+
+
+def test_queue_policy_allows_only_s3_with_account_condition(template_dict):
+    """The SQS policy must scope the s3:SendMessage permission to this account."""
+    policies = [
+        r for r in template_dict["Resources"].values() if r["Type"] == "AWS::SQS::QueuePolicy"
+    ]
+    assert len(policies) == 1
+    statement = policies[0]["Properties"]["PolicyDocument"]["Statement"][0]
+    assert statement["Effect"] == "Allow"
+    assert statement["Principal"] == {"Service": "s3.amazonaws.com"}
+    assert "sqs:SendMessage" in statement["Action"]
+    cond = statement.get("Condition", {})
+    assert cond.get("StringEquals", {}).get("aws:SourceAccount") == {"Ref": "AWS::AccountId"}, (
+        "missing aws:SourceAccount condition — would let any account's S3 publish"
+    )
+
+
 def test_outputs_required(template_dict):
     for n in ("BucketName", "BucketArn", "QueueUrl", "QueueArn"):
         assert n in template_dict["Outputs"]

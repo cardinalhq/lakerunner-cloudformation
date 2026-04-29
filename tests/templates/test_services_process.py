@@ -219,3 +219,50 @@ def test_outputs_required(td):
         "PubsubSqsServiceName",
     ):
         assert n in td["Outputs"], f"missing output: {n}"
+
+
+# ---------------------------------------------------------------------------
+# Security: AssignPublicIp DISABLED + LRDB_SSLMODE require
+# ---------------------------------------------------------------------------
+
+
+def test_all_services_disable_public_ip(td):
+    services = [r for r in td["Resources"].values() if r["Type"] == "AWS::ECS::Service"]
+    for svc in services:
+        awsvpc = svc["Properties"]["NetworkConfiguration"]["AwsvpcConfiguration"]
+        assert awsvpc["AssignPublicIp"] == "DISABLED", (
+            f"AssignPublicIp must be DISABLED; got {awsvpc['AssignPublicIp']!r}"
+        )
+
+
+def test_all_task_definitions_set_ssl_required(td):
+    task_defs = [r for r in td["Resources"].values() if r["Type"] == "AWS::ECS::TaskDefinition"]
+    for tdef in task_defs:
+        for container in tdef["Properties"]["ContainerDefinitions"]:
+            env = {e["Name"]: e["Value"] for e in container.get("Environment", [])}
+            assert env.get("LRDB_SSLMODE") == "require", (
+                f"{container.get('Name')} LRDB_SSLMODE must be 'require'; got {env.get('LRDB_SSLMODE')!r}"
+            )
+
+
+# ---------------------------------------------------------------------------
+# B → C boundary
+# ---------------------------------------------------------------------------
+
+
+def test_no_shared_resources_in_services_process(td):
+    forbidden = {
+        "AWS::ECS::Cluster",
+        "AWS::ElasticLoadBalancingV2::LoadBalancer",
+        "AWS::ElasticLoadBalancingV2::Listener",
+        "AWS::SecretsManager::Secret",
+        "AWS::SSM::Parameter",
+        "AWS::S3::Bucket",
+        "AWS::SQS::Queue",
+        "AWS::SQS::QueuePolicy",
+        "AWS::RDS::DBInstance",
+        "AWS::RDS::DBSubnetGroup",
+        "AWS::EC2::SecurityGroup",
+    }
+    found = {r["Type"] for r in td["Resources"].values()} & forbidden
+    assert not found, f"services-process must not own shared resources; found {found}"
