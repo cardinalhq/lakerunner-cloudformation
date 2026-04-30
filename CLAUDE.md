@@ -1,22 +1,22 @@
-# Cardinal CloudFormation Development Instructions
+# CLAUDE.md
 
-This file contains instructions for Claude on how to work with this CloudFormation repository.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Repository Status
+## Repository overview
 
-This branch (`cardinal-cfn-refactor`) is mid-refactor. The old 10-template flat layout has been deleted and is being replaced by a thin-root + nested-children architecture. See:
+Generators (Python + troposphere) emit two customer-facing CloudFormation roots and twelve nested child templates. Design context lives in:
 
 - `docs/superpowers/specs/2026-04-28-cardinal-cfn-refactor-design.md` — design spec (source of truth)
-- `docs/superpowers/plans/2026-04-28-cardinal-cfn-refactor.md` — phase-by-phase implementation plan
+- `docs/superpowers/plans/2026-04-28-cardinal-cfn-refactor.md` — phased implementation plan
 
-When in doubt, the design spec wins. The plan tells you the order of operations.
+When in doubt, the design spec wins.
 
 ## Target architecture
 
 Two customer-facing CloudFormation root templates:
 
 - `cardinal-vpc.yaml` — optional VPC (skipped by customers using their own VPC)
-- `cardinal-lakerunner.yaml` — application root, composed of eleven nested children
+- `cardinal-lakerunner.yaml` — application root, composed of twelve nested children
 
 The lakerunner root nests these children:
 
@@ -27,16 +27,17 @@ The lakerunner root nests these children:
 | 3 | `storage.yaml` | S3 ingest bucket + lifecycle, SQS queue + policy, S3 → SQS notifications |
 | 4 | `alb.yaml` | ALB, default 443 listener, ALB security group |
 | 5 | `config.yaml` | SSM params, license/admin/internal-keys secrets |
-| 6 | `migration.yaml` | One-shot DB migration custom resource |
-| 7 | `services-query.yaml` | query-api, query-worker |
-| 8 | `services-process.yaml` | process-{logs,metrics,traces}, pubsub-sqs |
-| 9 | `services-control.yaml` | sweeper, monitoring, admin-api, alert-evaluator |
-| 10 | `otel.yaml` | otel-collector |
-| 11 | `maestro.yaml` | Maestro + bundled DEX OIDC |
+| 6 | `cert.yaml` | Optional ACM cert importer (Lambda-backed custom resource) |
+| 7 | `migration.yaml` | One-shot DB migration custom resource |
+| 8 | `services-query.yaml` | query-api, query-worker |
+| 9 | `services-process.yaml` | process-{logs,metrics,traces}, pubsub-sqs |
+| 10 | `services-control.yaml` | sweeper, monitoring, admin-api, alert-evaluator |
+| 11 | `otel.yaml` | otel-collector |
+| 12 | `maestro.yaml` | Maestro + bundled DEX OIDC |
 
 Cross-stack wiring goes through the root via `Fn::GetAtt childStack.Outputs.X` → child parameter. Sibling children never reference each other directly.
 
-## Repo / generator code layout (target)
+## Repo / generator code layout
 
 ```
 src/
@@ -51,9 +52,10 @@ src/
     defaults.py              # cardinal-defaults.yaml loader
     children/                # one module per nested-stack child
     root.py                  # parent template generator
-  cardinal_vpc.py            # standalone VPC generator
+    cardinal_vpc.py          # standalone VPC generator
 cardinal-defaults.yaml       # consolidated defaults (services, images, maestro, otel)
 tests/
+  conftest.py                # adds src/ to sys.path; no pip install -e needed
   unit/                      # helper-level tests
   templates/                 # per-template assertions via cloud-radar
 .github/workflows/
@@ -132,31 +134,27 @@ The three service tier stacks (`services-query`, `services-process`, `services-c
 
 ## Build and testing
 
-The build script and Makefile are being rewritten in Phase 8. Until then, generators are run individually via:
+Canonical workflow uses the Makefile:
 
 ```sh
-python3 -m cardinal_cfn.children.<child>      # emits YAML to stdout
-python3 -m cardinal_cfn.root                  # emits root YAML
-python3 src/cardinal_vpc.py                   # emits VPC YAML
+make install        # one-time: create .venv and install requirements.txt
+make build          # generate every template into generated-templates/, then cfn-lint
+make test           # all tests (helper unit + per-template)
+make test-unit      # helper unit tests only
+make test-templates # cloud-radar per-template assertions only
+make lint           # cfn-lint over generated-templates/
+make check          # alias for `make test` (pre-push gate)
 ```
 
-Tests:
+For debugging a single template, generators can be invoked directly (PYTHONPATH=src):
 
 ```sh
-pytest tests/unit/        # helper unit tests
-pytest tests/templates/   # per-template assertions
-pytest tests/             # everything
+python3 -m cardinal_cfn.children.<child>   # emits child YAML to stdout
+python3 -m cardinal_cfn.root               # emits root YAML
+python3 -m cardinal_cfn.cardinal_vpc       # emits VPC YAML
 ```
 
-Linting:
-
-```sh
-cfn-lint generated-templates/cardinal-vpc.yaml \
-         generated-templates/cardinal-lakerunner.yaml \
-         generated-templates/cardinal-lakerunner/*.yaml
-```
-
-All templates must pass cfn-lint with no errors. Warnings are tolerable when explainable.
+All templates must pass cfn-lint with no errors. Warnings are tolerable when explainable; `.cfnlintrc` carries the project-wide ignores.
 
 ## Publishing (Phase 8)
 
