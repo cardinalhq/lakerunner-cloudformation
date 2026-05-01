@@ -392,14 +392,21 @@ def build() -> Template:
     # The monitoring service drives ECS autoscaling of the process-* services.
     # Env vars match cmd/monitoring.go + config/autoscaler.go in the lakerunner
     # repo; IAM is scoped per-service to UpdateService/DescribeServices.
+    # The lakerunner binary defaults Autoscaler.ObserveOnly=true and per-service
+    # MinReplicas=0, which would log decisions but never scale and would scale
+    # services to zero on idle. Override both: the customer set max replicas to
+    # opt into actual scaling, and 1 is the documented floor (lakerunner
+    # docs/guides/admin/autoscaling.md: "Set to 1 to prevent scale-to-zero").
     monitoring_extra_env = [
         Environment(Name="LAKERUNNER_AUTOSCALER_ENABLED", Value="true"),
+        Environment(Name="LAKERUNNER_AUTOSCALER_OBSERVE_ONLY", Value="false"),
         Environment(Name="LAKERUNNER_AUTOSCALER_PLATFORM", Value="ecs"),
         Environment(Name="ECS_CLUSTER", Value=Ref("ClusterName")),
         Environment(
             Name="LAKERUNNER_AUTOSCALER_SERVICES_LOGS_DEPLOYMENT",
             Value=Ref("ProcessLogsServiceName"),
         ),
+        Environment(Name="LAKERUNNER_AUTOSCALER_SERVICES_LOGS_MIN_REPLICAS", Value="1"),
         Environment(
             Name="LAKERUNNER_AUTOSCALER_SERVICES_LOGS_MAX_REPLICAS",
             Value=Ref("ProcessLogsReplicas"),
@@ -408,6 +415,7 @@ def build() -> Template:
             Name="LAKERUNNER_AUTOSCALER_SERVICES_METRICS_DEPLOYMENT",
             Value=Ref("ProcessMetricsServiceName"),
         ),
+        Environment(Name="LAKERUNNER_AUTOSCALER_SERVICES_METRICS_MIN_REPLICAS", Value="1"),
         Environment(
             Name="LAKERUNNER_AUTOSCALER_SERVICES_METRICS_MAX_REPLICAS",
             Value=Ref("ProcessMetricsReplicas"),
@@ -416,6 +424,7 @@ def build() -> Template:
             Name="LAKERUNNER_AUTOSCALER_SERVICES_TRACES_DEPLOYMENT",
             Value=Ref("ProcessTracesServiceName"),
         ),
+        Environment(Name="LAKERUNNER_AUTOSCALER_SERVICES_TRACES_MIN_REPLICAS", Value="1"),
         Environment(
             Name="LAKERUNNER_AUTOSCALER_SERVICES_TRACES_MAX_REPLICAS",
             Value=Ref("ProcessTracesReplicas"),
