@@ -150,6 +150,63 @@ def build() -> Template:
         )
     )
 
+    # Inputs the monitoring service uses to drive ECS-based autoscaling of the
+    # process-* services. ClusterName is the ECS cluster name (not ARN) — both
+    # the autoscaler's ECS_CLUSTER env var and the IAM resource ARNs need the
+    # name form. The three service-name inputs come from services-process stack
+    # outputs; the three replica inputs are the same Refs that gate the
+    # process-* DesiredCount in services-process, so the autoscaler's max
+    # tracks whatever the customer set at deploy time.
+    t.add_parameter(
+        Parameter(
+            "ClusterName",
+            Type="String",
+            Description="ECS cluster name (not ARN), used by the monitoring autoscaler.",
+        )
+    )
+    t.add_parameter(
+        Parameter(
+            "ProcessLogsServiceName",
+            Type="String",
+            Description="ECS service name for lakerunner-process-logs.",
+        )
+    )
+    t.add_parameter(
+        Parameter(
+            "ProcessMetricsServiceName",
+            Type="String",
+            Description="ECS service name for lakerunner-process-metrics.",
+        )
+    )
+    t.add_parameter(
+        Parameter(
+            "ProcessTracesServiceName",
+            Type="String",
+            Description="ECS service name for lakerunner-process-traces.",
+        )
+    )
+    t.add_parameter(
+        Parameter(
+            "ProcessLogsReplicas",
+            Type="Number",
+            Description="Maximum desired replicas for lakerunner-process-logs.",
+        )
+    )
+    t.add_parameter(
+        Parameter(
+            "ProcessMetricsReplicas",
+            Type="Number",
+            Description="Maximum desired replicas for lakerunner-process-metrics.",
+        )
+    )
+    t.add_parameter(
+        Parameter(
+            "ProcessTracesReplicas",
+            Type="Number",
+            Description="Maximum desired replicas for lakerunner-process-traces.",
+        )
+    )
+
     # MigrationComplete is unused inside this stack on purpose. The root passes
     # the migration-stack output through this parameter; CloudFormation cannot
     # render this nested stack until the migration stack finishes producing
@@ -203,6 +260,13 @@ def build() -> Template:
                     "ApiKeysParamName",
                     "StorageProfilesParamName",
                     "MigrationComplete",
+                    "ClusterName",
+                    "ProcessLogsServiceName",
+                    "ProcessMetricsServiceName",
+                    "ProcessTracesServiceName",
+                    "ProcessLogsReplicas",
+                    "ProcessMetricsReplicas",
+                    "ProcessTracesReplicas",
                 ],
             },
             {
@@ -325,24 +389,80 @@ def build() -> Template:
         ),
     ]
 
+    # The monitoring service drives ECS autoscaling of the process-* services.
+    # Env vars match cmd/monitoring.go + config/autoscaler.go in the lakerunner
+    # repo; IAM is scoped per-service to UpdateService/DescribeServices.
+    monitoring_extra_env = [
+        Environment(Name="LAKERUNNER_AUTOSCALER_ENABLED", Value="true"),
+        Environment(Name="LAKERUNNER_AUTOSCALER_PLATFORM", Value="ecs"),
+        Environment(Name="ECS_CLUSTER", Value=Ref("ClusterName")),
+        Environment(
+            Name="LAKERUNNER_AUTOSCALER_SERVICES_LOGS_DEPLOYMENT",
+            Value=Ref("ProcessLogsServiceName"),
+        ),
+        Environment(
+            Name="LAKERUNNER_AUTOSCALER_SERVICES_LOGS_MAX_REPLICAS",
+            Value=Ref("ProcessLogsReplicas"),
+        ),
+        Environment(
+            Name="LAKERUNNER_AUTOSCALER_SERVICES_METRICS_DEPLOYMENT",
+            Value=Ref("ProcessMetricsServiceName"),
+        ),
+        Environment(
+            Name="LAKERUNNER_AUTOSCALER_SERVICES_METRICS_MAX_REPLICAS",
+            Value=Ref("ProcessMetricsReplicas"),
+        ),
+        Environment(
+            Name="LAKERUNNER_AUTOSCALER_SERVICES_TRACES_DEPLOYMENT",
+            Value=Ref("ProcessTracesServiceName"),
+        ),
+        Environment(
+            Name="LAKERUNNER_AUTOSCALER_SERVICES_TRACES_MAX_REPLICAS",
+            Value=Ref("ProcessTracesReplicas"),
+        ),
+    ]
+    monitoring_extra_statements = [
+        {
+            "Effect": "Allow",
+            "Action": ["ecs:DescribeServices", "ecs:UpdateService"],
+            "Resource": [
+                Sub(
+                    "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:service/"
+                    "${ClusterName}/${ProcessLogsServiceName}"
+                ),
+                Sub(
+                    "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:service/"
+                    "${ClusterName}/${ProcessMetricsServiceName}"
+                ),
+                Sub(
+                    "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:service/"
+                    "${ClusterName}/${ProcessTracesServiceName}"
+                ),
+            ],
+        },
+    ]
+
     internal_services = [
         {
             "service_key": "sweeper",
             "config": sweeper_cfg,
             "output_name": "SweeperServiceName",
             "extra_env": [],
+            "extra_statements": [],
         },
         {
             "service_key": "monitoring",
             "config": monitoring_cfg,
             "output_name": "MonitoringServiceName",
-            "extra_env": [],
+            "extra_env": monitoring_extra_env,
+            "extra_statements": monitoring_extra_statements,
         },
         {
             "service_key": "alert-evaluator",
             "config": alert_cfg,
             "output_name": "AlertEvaluatorServiceName",
             "extra_env": alert_extra_env,
+            "extra_statements": [],
         },
     ]
 
@@ -355,6 +475,7 @@ def build() -> Template:
             base_env=base_env,
             base_secrets=base_secrets,
             extra_env=spec["extra_env"],
+            extra_statements=spec["extra_statements"],
         )
         t.add_output(Output(spec["output_name"], Value=GetAtt(ecs_service, "Name")))
 
@@ -370,13 +491,17 @@ def _build_internal_service_block(
     base_env: list,
     base_secrets: list,
     extra_env: list | None = None,
+    extra_statements: list | None = None,
 ):
     """Wire up log group, task role, task def, and ECS service for one internal service."""
     log_group = t.add_resource(services_common.build_log_group(service_key=service_key))
     task_role = t.add_resource(
         services_common.build_task_role(
             service_key=service_key,
-            statements=_task_role_statements(log_group),
+            statements=_task_role_statements(
+                log_group,
+                extra_statements=extra_statements,
+            ),
         )
     )
     env = list(base_env) + _service_specific_env(config) + list(extra_env or [])
@@ -413,15 +538,21 @@ def _service_specific_env(service_cfg: dict) -> list:
     return [Environment(Name=k, Value=str(v)) for k, v in env.items()]
 
 
-def _task_role_statements(log_group_ref, extra_secret_refs: list | None = None) -> list:
+def _task_role_statements(
+    log_group_ref,
+    extra_secret_refs: list | None = None,
+    extra_statements: list | None = None,
+) -> list:
     """Inline IAM policy for a control-tier task role.
 
     Grants S3 (bucket+objects), SQS (consume+send), SSM GetParameter on the
     two config params, Secrets Manager GetSecretValue on the three shared
     secrets plus any per-service `extra_secret_refs`, and CloudWatch Logs
-    writes to the per-service log group.
+    writes to the per-service log group. Per-service `extra_statements` are
+    appended verbatim — used by the monitoring service for ECS UpdateService.
     """
     extra_secret_refs = list(extra_secret_refs or [])
+    extra_statements = list(extra_statements or [])
     return [
         {
             "Effect": "Allow",
@@ -469,7 +600,7 @@ def _task_role_statements(log_group_ref, extra_secret_refs: list | None = None) 
             "Action": ["logs:CreateLogStream", "logs:PutLogEvents"],
             "Resource": GetAtt(log_group_ref, "Arn"),
         },
-    ]
+    ] + extra_statements
 
 
 if __name__ == "__main__":
