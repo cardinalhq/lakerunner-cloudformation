@@ -258,6 +258,9 @@ def test_monitoring_container_has_autoscaler_env(td):
     _, container = _task_def_for(td, "monitoring")
     env = {e["Name"]: e["Value"] for e in container.get("Environment", [])}
     assert env.get("LAKERUNNER_AUTOSCALER_ENABLED") == "true"
+    # Without ObserveOnly=false the autoscaler defaults to compute-don't-write,
+    # which would silently no-op the whole feature.
+    assert env.get("LAKERUNNER_AUTOSCALER_OBSERVE_ONLY") == "false"
     assert env.get("LAKERUNNER_AUTOSCALER_PLATFORM") == "ecs"
     assert env.get("ECS_CLUSTER") == {"Ref": "ClusterName"}
     expected = {
@@ -272,6 +275,9 @@ def test_monitoring_container_has_autoscaler_env(td):
         assert env.get(env_name) == {"Ref": param_name}, (
             f"{env_name} must Ref {param_name}; got {env.get(env_name)!r}"
         )
+    for signal in ("LOGS", "METRICS", "TRACES"):
+        key = f"LAKERUNNER_AUTOSCALER_SERVICES_{signal}_MIN_REPLICAS"
+        assert env.get(key) == "1", f"{key} must default to 1, got {env.get(key)!r}"
 
 
 def test_only_monitoring_has_autoscaler_env(td):
