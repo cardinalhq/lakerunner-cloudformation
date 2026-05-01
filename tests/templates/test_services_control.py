@@ -39,6 +39,13 @@ def test_required_cross_stack_parameters(td):
         "StorageProfilesParamName",
         "MigrationComplete",
         "LakerunnerImage",
+        "ClusterName",
+        "ProcessLogsServiceName",
+        "ProcessMetricsServiceName",
+        "ProcessTracesServiceName",
+        "ProcessLogsReplicas",
+        "ProcessMetricsReplicas",
+        "ProcessTracesReplicas",
     ):
         assert n in td["Parameters"], f"missing parameter: {n}"
 
@@ -224,6 +231,99 @@ def test_all_task_definitions_set_ssl_required(td):
             env = {e["Name"]: e["Value"] for e in container.get("Environment", [])}
             assert env.get("LRDB_SSLMODE") == "require", (
                 f"{container.get('Name')} LRDB_SSLMODE must be 'require'; got {env.get('LRDB_SSLMODE')!r}"
+            )
+
+
+# ---------------------------------------------------------------------------
+# B → C boundary
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Monitoring autoscaler wiring
+# ---------------------------------------------------------------------------
+
+
+def _task_def_for(td, container_name):
+    for res in td["Resources"].values():
+        if res["Type"] != "AWS::ECS::TaskDefinition":
+            continue
+        for container in res["Properties"]["ContainerDefinitions"]:
+            if container["Name"] == container_name:
+                return res, container
+    raise AssertionError(f"no task definition with container {container_name!r}")
+
+
+def test_monitoring_container_has_autoscaler_env(td):
+    _, container = _task_def_for(td, "monitoring")
+    env = {e["Name"]: e["Value"] for e in container.get("Environment", [])}
+    assert env.get("LAKERUNNER_AUTOSCALER_ENABLED") == "true"
+    assert env.get("LAKERUNNER_AUTOSCALER_PLATFORM") == "ecs"
+    assert env.get("ECS_CLUSTER") == {"Ref": "ClusterName"}
+    expected = {
+        "LAKERUNNER_AUTOSCALER_SERVICES_LOGS_DEPLOYMENT": "ProcessLogsServiceName",
+        "LAKERUNNER_AUTOSCALER_SERVICES_LOGS_MAX_REPLICAS": "ProcessLogsReplicas",
+        "LAKERUNNER_AUTOSCALER_SERVICES_METRICS_DEPLOYMENT": "ProcessMetricsServiceName",
+        "LAKERUNNER_AUTOSCALER_SERVICES_METRICS_MAX_REPLICAS": "ProcessMetricsReplicas",
+        "LAKERUNNER_AUTOSCALER_SERVICES_TRACES_DEPLOYMENT": "ProcessTracesServiceName",
+        "LAKERUNNER_AUTOSCALER_SERVICES_TRACES_MAX_REPLICAS": "ProcessTracesReplicas",
+    }
+    for env_name, param_name in expected.items():
+        assert env.get(env_name) == {"Ref": param_name}, (
+            f"{env_name} must Ref {param_name}; got {env.get(env_name)!r}"
+        )
+
+
+def test_only_monitoring_has_autoscaler_env(td):
+    """Sweeper / admin-api / alert-evaluator must not see the autoscaler env."""
+    for container_name in ("admin-api", "sweeper", "alert-evaluator"):
+        _, container = _task_def_for(td, container_name)
+        env_names = {e["Name"] for e in container.get("Environment", [])}
+        leaked = {n for n in env_names if n.startswith("LAKERUNNER_AUTOSCALER_")}
+        leaked.update(env_names & {"ECS_CLUSTER"})
+        assert not leaked, f"{container_name} unexpectedly has {leaked}"
+
+
+def _task_role_for(td, service_key):
+    """Return the IAM role whose logical id starts with the title-cased service_key."""
+    title = "".join(p.capitalize() for p in service_key.split("-")) + "TaskRole"
+    return td["Resources"][title]
+
+
+def _flatten_actions(stmt_actions):
+    return [stmt_actions] if isinstance(stmt_actions, str) else list(stmt_actions)
+
+
+def test_monitoring_task_role_grants_ecs_update(td):
+    role = _task_role_for(td, "monitoring")
+    statements = role["Properties"]["Policies"][0]["PolicyDocument"]["Statement"]
+    found = False
+    for stmt in statements:
+        actions = _flatten_actions(stmt.get("Action", []))
+        if "ecs:UpdateService" in actions and "ecs:DescribeServices" in actions:
+            found = True
+            resources = stmt["Resource"]
+            assert isinstance(resources, list) and len(resources) == 3
+            joined = json.dumps(resources)
+            for param in (
+                "ProcessLogsServiceName",
+                "ProcessMetricsServiceName",
+                "ProcessTracesServiceName",
+            ):
+                assert param in joined, f"{param} not referenced in monitoring ECS resource ARNs"
+            assert "ClusterName" in joined
+    assert found, "monitoring role missing ecs:DescribeServices/UpdateService"
+
+
+def test_other_roles_lack_ecs_update(td):
+    """Only monitoring should see ecs:UpdateService."""
+    for service_key in ("admin-api", "sweeper", "alert-evaluator"):
+        role = _task_role_for(td, service_key)
+        statements = role["Properties"]["Policies"][0]["PolicyDocument"]["Statement"]
+        for stmt in statements:
+            actions = _flatten_actions(stmt.get("Action", []))
+            assert "ecs:UpdateService" not in actions, (
+                f"{service_key} unexpectedly has ecs:UpdateService"
             )
 
 

@@ -94,6 +94,40 @@ def test_service_tier_stacks_depend_on_migration(td):
         assert "MigrationStack" in deps, f"{logical_id} missing MigrationStack DependsOn"
 
 
+def test_services_control_depends_on_services_process(td):
+    """The monitoring service in services-control consumes services-process
+    outputs (process-* service names) for its ECS autoscaler wiring."""
+    deps = td["Resources"]["ServicesControlStack"].get("DependsOn", [])
+    if isinstance(deps, str):
+        deps = [deps]
+    assert "ServicesProcessStack" in deps
+
+
+def test_services_control_receives_monitoring_autoscaler_inputs(td):
+    """Root must thread the cluster name + 3 process service names + 3 replica
+    parameters into services-control so the monitoring autoscaler can scale."""
+    params = td["Resources"]["ServicesControlStack"]["Properties"]["Parameters"]
+    for n in (
+        "ClusterName",
+        "ProcessLogsServiceName",
+        "ProcessMetricsServiceName",
+        "ProcessTracesServiceName",
+        "ProcessLogsReplicas",
+        "ProcessMetricsReplicas",
+        "ProcessTracesReplicas",
+    ):
+        assert n in params, f"ServicesControlStack missing parameter: {n}"
+    for n, src_output in (
+        ("ProcessLogsServiceName", "ProcessLogsServiceName"),
+        ("ProcessMetricsServiceName", "ProcessMetricsServiceName"),
+        ("ProcessTracesServiceName", "ProcessTracesServiceName"),
+    ):
+        getatt = params[n].get("Fn::GetAtt")
+        assert getatt == ["ServicesProcessStack", f"Outputs.{src_output}"], (
+            f"{n} must come from ServicesProcessStack output; got {params[n]!r}"
+        )
+
+
 def test_maestro_stack_depends_on_migration(td):
     deps = td["Resources"]["MaestroStack"].get("DependsOn", [])
     if isinstance(deps, str):

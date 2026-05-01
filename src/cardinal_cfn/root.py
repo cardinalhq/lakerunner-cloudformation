@@ -457,8 +457,9 @@ def build() -> Template:
         "ProcessTracesMemory": Ref("ProcessTracesMemory"),
         "PubsubSqsReplicas": Ref("PubsubSqsReplicas"),
     })
-    _add_child(t, "ServicesProcessStack", "services-process.yaml",
-               services_process_params, depends_on=["MigrationStack"])
+    services_process_stack = _add_child(
+        t, "ServicesProcessStack", "services-process.yaml",
+        services_process_params, depends_on=["MigrationStack"])
 
     services_control_params = _service_tier_common()
     services_control_params.update({
@@ -467,9 +468,24 @@ def build() -> Template:
         "AdminApiKeySecretArn": GetAtt(config_stack, "Outputs.AdminApiKeySecretArn"),
         "VpcId": Ref("VpcId"),
         "ServiceNamespaceName": GetAtt(cluster_stack, "Outputs.ServiceNamespaceName"),
+        # Inputs for the monitoring service's ECS autoscaler. The service-name
+        # outputs come from services-process; the replica Refs are the same
+        # values that gate process-* DesiredCount in services-process so the
+        # autoscaler max tracks the customer's deploy-time setting.
+        "ClusterName": GetAtt(cluster_stack, "Outputs.ClusterName"),
+        "ProcessLogsServiceName":
+            GetAtt(services_process_stack, "Outputs.ProcessLogsServiceName"),
+        "ProcessMetricsServiceName":
+            GetAtt(services_process_stack, "Outputs.ProcessMetricsServiceName"),
+        "ProcessTracesServiceName":
+            GetAtt(services_process_stack, "Outputs.ProcessTracesServiceName"),
+        "ProcessLogsReplicas": Ref("ProcessLogsReplicas"),
+        "ProcessMetricsReplicas": Ref("ProcessMetricsReplicas"),
+        "ProcessTracesReplicas": Ref("ProcessTracesReplicas"),
     })
     _add_child(t, "ServicesControlStack", "services-control.yaml",
-               services_control_params, depends_on=["MigrationStack"])
+               services_control_params,
+               depends_on=["MigrationStack", "ServicesProcessStack"])
 
     _add_child(t, "OtelStack", "otel.yaml", {
         "InstallIdShort": install_short,
