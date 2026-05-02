@@ -24,6 +24,7 @@ refresh_image_defaults="true"
 no_execute="false"
 internal_resolve_params=""
 internal_resolve_params_arg2=""
+internal_resolve_params_tbu=""
 internal_classify_status=""
 internal_classify_reason=""
 
@@ -73,6 +74,10 @@ resolve_params() {
     new_template_file="$1"
     current_stack_file="$2"
     refresh_images="$3"
+    # Optional: an explicit value for the TemplateBaseUrl parameter.  Carried
+    # forward from the previous stack value would point nested children at the
+    # OLD version, so we always override here when provided.
+    explicit_template_base_url="${4:-}"
 
     if [ ! -r "$new_template_file" ]; then
         fail 2 "cannot read template-summary file: $new_template_file"
@@ -86,6 +91,7 @@ resolve_params() {
         --slurpfile newp "$new_template_file" \
         --slurpfile curp "$current_stack_file" \
         --arg refresh "$refresh_images" \
+        --arg tbu "$explicit_template_base_url" \
         '
         ($newp[0] // []) as $newparams
         | ($curp[0] // []) as $current
@@ -94,10 +100,13 @@ resolve_params() {
         | map(
             . as $p
             | $p.ParameterKey as $k
+            | (($k == "TemplateBaseUrl") and ($tbu != "")) as $rule_tbu_override
             | (($k | endswith("Image")) and ($refresh == "true") and (has("DefaultValue"))) as $rule_image_refresh
             | ($current_by_key | has($k)) as $rule_carry
             | (has("DefaultValue")) as $rule_new_default
-            | if $rule_image_refresh then
+            | if $rule_tbu_override then
+                {ParameterKey: $k, ParameterValue: $tbu}
+              elif $rule_image_refresh then
                 {ParameterKey: $k, ParameterValue: $p.DefaultValue}
               elif $rule_carry then
                 {ParameterKey: $k, UsePreviousValue: true}
@@ -225,6 +234,10 @@ parse_args() {
                 internal_resolve_params_arg2="$3"
                 shift 3
                 ;;
+            --internal-template-base-url)
+                internal_resolve_params_tbu="$2"
+                shift 2
+                ;;
             --internal-classify-changeset-status)
                 internal_classify_status="$2"
                 internal_classify_reason="$3"
@@ -248,7 +261,8 @@ main() {
         resolve_params \
             "$internal_resolve_params" \
             "$internal_resolve_params_arg2" \
-            "$refresh_image_defaults"
+            "$refresh_image_defaults" \
+            "$internal_resolve_params_tbu"
         return 0
     fi
     if [ -n "$internal_classify_status" ]; then
@@ -296,11 +310,18 @@ main() {
         --query 'Stacks[0].Parameters' \
         --output json >"$work_dir/current-params.json"
 
-    log "resolving parameters (refresh-image-defaults=$refresh_image_defaults)"
+    # The TemplateBaseUrl parameter encodes the version path nested children
+    # are loaded from.  It MUST track the version we're upgrading to, otherwise
+    # the new root will load the OLD nested templates and fail in confusing
+    # ways.  Compute it from the same flags used to fetch the root template.
+    effective_template_base_url="$template_base_url/$version/cardinal-lakerunner/"
+
+    log "resolving parameters (refresh-image-defaults=$refresh_image_defaults, TemplateBaseUrl=$effective_template_base_url)"
     resolve_params \
         "$work_dir/new-params.json" \
         "$work_dir/current-params.json" \
         "$refresh_image_defaults" \
+        "$effective_template_base_url" \
         >"$work_dir/parameters.json"
 
     change_set_name="${CHANGE_SET_PREFIX}$(date +%s)"

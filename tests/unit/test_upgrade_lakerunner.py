@@ -127,6 +127,62 @@ def test_non_image_param_carries_forward(tmp_path):
     assert out["VpcId"] == {"ParameterKey": "VpcId", "UsePreviousValue": True}
 
 
+def test_template_base_url_takes_explicit_override_not_carry_forward(tmp_path):
+    """TemplateBaseUrl drives nested-stack TemplateURL Subs and MUST track the
+    upgrade target's version path, even if the running stack has an older
+    value. Carrying it forward would point the new root at the OLD nested
+    templates and fail in confusing ways."""
+    _require_jq()
+    new_template = [
+        {
+            "ParameterKey": "TemplateBaseUrl",
+            "DefaultValue": "https://cardinal-cfn.s3.us-east-2.amazonaws.com/lakerunner/v9.9.9/cardinal-lakerunner/",
+            "ParameterType": "String",
+        }
+    ]
+    current = [
+        {
+            "ParameterKey": "TemplateBaseUrl",
+            "ParameterValue": "https://cardinal-cfn.s3.us-east-2.amazonaws.com/lakerunner/v0.0.29/cardinal-lakerunner/",
+        }
+    ]
+    explicit = "https://my-mirror.example.com/lakerunner/v9.9.9/cardinal-lakerunner/"
+    result = _run_resolve(
+        tmp_path, new_template, current,
+        "--internal-template-base-url", explicit,
+    )
+    assert result.returncode == 0, result.stderr
+    out = _by_key(json.loads(result.stdout))
+    assert out["TemplateBaseUrl"] == {
+        "ParameterKey": "TemplateBaseUrl",
+        "ParameterValue": explicit,
+    }
+
+
+def test_template_base_url_falls_back_to_template_default_when_no_override(tmp_path):
+    """If the script doesn't pass an explicit TemplateBaseUrl (e.g., a test
+    invoking resolve_params directly), the carry-forward rule still applies
+    when the param exists in the current stack."""
+    _require_jq()
+    new_template = [
+        {
+            "ParameterKey": "TemplateBaseUrl",
+            "DefaultValue": "https://example.com/v9.9.9/",
+            "ParameterType": "String",
+        }
+    ]
+    current = [
+        {"ParameterKey": "TemplateBaseUrl", "ParameterValue": "https://example.com/v0.0.29/"},
+    ]
+    result = _run_resolve(tmp_path, new_template, current)
+    assert result.returncode == 0, result.stderr
+    out = _by_key(json.loads(result.stdout))
+    assert out["TemplateBaseUrl"] == {
+        "ParameterKey": "TemplateBaseUrl",
+        "UsePreviousValue": True,
+    }
+
+
 def test_new_param_takes_template_default(tmp_path):
     _require_jq()
     new_template = [
