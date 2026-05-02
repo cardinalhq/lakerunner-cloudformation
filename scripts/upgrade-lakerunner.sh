@@ -172,6 +172,10 @@ EOF
 
 # ---------------------------------------------------------------------------
 # CFN call wrapper that adds --role-arn when configured.
+#
+# Only use for stack-mutation calls (create/update/delete stack, create/execute
+# change set).  Read-only calls (get-template-summary, describe-*, wait, ...)
+# do not accept --role-arn and must invoke `aws cloudformation` directly.
 # ---------------------------------------------------------------------------
 cfn() {
     if [ -n "$deployer_role_arn" ]; then
@@ -275,7 +279,8 @@ main() {
     work_dir=$(mktemp -d)
 
     log "fetching new template parameter schema via get-template-summary"
-    cfn get-template-summary \
+    # get-template-summary is read-only and does not accept --role-arn.
+    aws cloudformation get-template-summary \
         --template-url "$template_url" \
         --region "$region" \
         --query 'Parameters' \
