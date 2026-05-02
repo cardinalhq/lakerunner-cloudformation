@@ -10,10 +10,10 @@ Multiple installs are managed by copying the Jenkinsfile per install and editing
 
 ## Deliverables
 
-- `scripts/upgrade_lakerunner.py` — Python driving script that does the actual deploy and reports success or failure via exit code.
+- `scripts/upgrade-lakerunner.sh` — POSIX shell driving script that does the actual deploy and reports success or failure via exit code.
 - `jenkins/Jenkinsfile.upgrade-lakerunner` — declarative Jenkins pipeline that binds AWS credentials and invokes the script.
 - `docs/operations/jenkins-upgrade.md` — operator documentation.
-- `tests/unit/test_upgrade_lakerunner.py` — unit tests covering parameter resolution and no-op detection.
+- `tests/unit/test_upgrade_lakerunner.py` — pytest unit tests that drive the script's `--internal-resolve-params` mode against fixture inputs to validate parameter resolution and no-op detection.
 
 ## Non-goals
 
@@ -24,13 +24,20 @@ Multiple installs are managed by copying the Jenkinsfile per install and editing
 - Drift detection.
 - Application-level health probes after the upgrade. Confirmation is "did CloudFormation reach `UPDATE_COMPLETE`" — nothing more.
 - A standalone Cardinal-internal pipeline. The customer-facing template is the canonical artifact and Cardinal uses it directly.
-- New runtime dependencies on the Jenkins worker beyond `python3`, `pyyaml` (already in `requirements.txt`), and the `aws` CLI.
+- Any runtime dependency on the `cardinal_cfn` Python package or other contents of this repo. The script is self-contained — at runtime it sees only the published `cardinal-lakerunner.yaml` in S3 and the AWS CLI.
 
-## Driving script — `scripts/upgrade_lakerunner.py`
+## Runtime dependencies on the Jenkins worker
 
-The script is the single source of truth for upgrade behavior. The Jenkinsfile is a thin wrapper around it.
+- POSIX shell (`/bin/sh`).
+- `aws` CLI v2.
+- `jq` (1.6 or later — for building and inspecting JSON).
+- `curl` (for the HTTP HEAD probe of the template URL).
 
-Implemented in Python because the parameter-resolution logic is non-trivial and benefits from pytest coverage. It shells out to the `aws` CLI for all AWS API calls, avoiding a `boto3` dependency. It uses `pyyaml` to parse the new template (already in `requirements.txt`).
+No Python, no `boto3`, no `pyyaml`. The script does not parse the template YAML directly — it uses `aws cloudformation get-template-summary` to discover the new template's parameter schema, which returns names, types, defaults, and `NoEcho` flags as structured JSON.
+
+## Driving script — `scripts/upgrade-lakerunner.sh`
+
+The script is the single source of truth for upgrade behavior. The Jenkinsfile is a thin wrapper around it. It is also runnable standalone from an operator laptop or any other CI system, so customers can use it outside Jenkins for emergency upgrades or dry runs.
 
 ### Inputs
 
@@ -56,7 +63,7 @@ The script runs these stages in order. Any non-zero result from a stage aborts t
 
 2. **Resolve template URL.** `${template_base_url}/${version}/cardinal-lakerunner.yaml`. Probe with an HTTP HEAD; abort on 404.
 
-3. **Fetch new template** to a temp file and parse its `Parameters` block with `pyyaml`. Capture each parameter's name, default (or absence of default), and type.
+3. **Discover new template parameters.** `aws cloudformation get-template-summary --template-url <resolved url> --query 'Parameters'` returns the new template's parameter schema as JSON: name, type, default (when present), `NoEcho` flag. No local YAML parsing.
 
 4. **Resolve parameters.** Walk the new template's parameter list. For each parameter, choose exactly one of these outcomes:
 
@@ -110,8 +117,8 @@ A declarative pipeline. Customers copy this file once per install and edit the `
 
 ### Stages
 
-1. **Setup** — `withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: params.AwsCredentialsId]])`. Verify `aws` and `python3` are on PATH.
-2. **Plan** — invoke `python3 scripts/upgrade_lakerunner.py --no-execute ...`. The build log captures the change set summary. Always runs.
+1. **Setup** — `withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: params.AwsCredentialsId]])`. Verify `aws`, `jq`, and `curl` are on PATH.
+2. **Plan** — invoke `sh scripts/upgrade-lakerunner.sh --no-execute ...`. The build log captures the change set summary. Always runs.
 3. **Approval** — only when `params.AutoApprove == false`: a Jenkins `input` step. Skipped entirely when `true` (no human required).
 4. **Apply** — invoke the script again *without* `--no-execute`. The script's no-op detector ensures this second run is cheap when the Plan stage already created an equivalent change set, and the operator (or auto-approval) is committing to applying whatever the live state requires at apply time.
 5. **Post (always)** — best-effort cleanup pass: list change sets on the stack and `delete-change-set` any whose name starts with `cardinal-upgrade-` and is still in a pending (non-executed) state.
@@ -128,7 +135,7 @@ The script's exit code is the build's exit code. Jenkins shows the build red on 
 
 Covers:
 
-- Pre-reqs (AWS Credentials plugin, deployer role, Jenkins agent with `aws` CLI and `python3` available, `pyyaml` available).
+- Pre-reqs (AWS Credentials plugin, deployer role, Jenkins agent with `aws` CLI v2, `jq`, and `curl` available).
 - Per-install setup: copy the Jenkinsfile, set the parameter defaults at the top, point a Jenkins job at it.
 - AWS auth alternatives: AWS Credentials plugin (default), IAM instance profile on the worker, assume-role from the worker.
 - Air-gapped variant: customer-mirrored `TemplateBaseUrl` plus image override parameters.
@@ -138,9 +145,19 @@ Covers:
 
 ## Testing
 
-- **Unit, parameter resolution.** Pure-function pytest of the resolution function. Inputs: a fixture template parsed dict, a fixture current-stack parameters list, the resolution flags. Output: the expected `parameters.json` array. Covers all four resolution rules and a known-bad case (rule 4 hard-fail).
-- **Unit, no-op detection.** Feed the no-op detector each documented `StatusReason` phrasing AWS has used for empty change sets, plus a real failure phrasing. Assert the function classifies them correctly.
-- **Lint, Jenkinsfile.** A pytest test that loads the file and runs the Groovy parser via `groovy -e` if available; soft-skips when Groovy is not installed (so PRs without Groovy on the runner still pass).
+To make the shell script testable in isolation, it exposes two internal-only flags used by tests:
+
+- `--internal-resolve-params <new-template-summary.json> <current-stack-params.json>` — given two pre-fetched JSON blobs (instead of calling AWS), runs the parameter-resolution function and prints the resulting `parameters.json` to stdout. No AWS calls. No side effects. Pure data transform.
+- `--internal-classify-changeset-status <status> <status-reason>` — classifies a change set status into `success`, `noop`, or `failure`. No AWS calls.
+
+These flags are documented as test hooks only and are not part of the public CLI surface.
+
+Tests:
+
+- **Unit, parameter resolution** (`tests/unit/test_upgrade_lakerunner.py`). Each pytest case writes JSON fixtures to a temp dir, invokes the script via `subprocess` with `--internal-resolve-params`, captures stdout, and asserts on the JSON. Coverage: all four resolution rules (image refresh, carry forward, take new default, hard fail) plus the `--no-refresh-image-defaults` variant.
+- **Unit, no-op detection.** Same harness, calling `--internal-classify-changeset-status` with each documented AWS phrasing for empty change sets, plus a real failure phrasing.
+- **Lint, shell.** `shellcheck scripts/upgrade-lakerunner.sh` run from a pytest test that soft-skips if `shellcheck` is not on PATH (so contributor environments without shellcheck still pass).
+- **Lint, Jenkinsfile.** A pytest test that runs `groovy -e` against the file if Groovy is available; soft-skips when not.
 - **No live AWS test.** The `aws cloudformation` surface is well-trusted; integration tests against real stacks are out of scope.
 
 The Makefile gains a `make test-jenkins` target that runs the new tests in isolation, and `make check` (the pre-push gate) includes them via the existing test runner.
