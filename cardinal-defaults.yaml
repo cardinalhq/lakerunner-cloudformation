@@ -143,7 +143,7 @@ services:
 
   lakerunner-monitoring:
     signal_type: common
-    command: ["/app/bin/lakerunner", "monitoring", "serve", "--grpc-port=9090"]
+    command: ["/app/bin/lakerunner", "monitoring", "serve"]
     cpu: 256
     memory_mib: 512
     replicas: 1
