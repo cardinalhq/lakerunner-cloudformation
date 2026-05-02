@@ -1,6 +1,6 @@
 # Makefile for Cardinal CloudFormation project.
 
-.PHONY: help install build test test-unit test-templates check lint clean all
+.PHONY: help install build test test-unit test-templates test-jenkins check lint clean all
 
 VENV_DIR := .venv
 PYTHON   := $(VENV_DIR)/bin/python
@@ -28,6 +28,9 @@ test-unit:	## Run unit tests only
 
 test-templates:	## Run per-template tests only
 	$(PYTEST) tests/templates/ -v
+
+test-jenkins:	## Run Jenkins/upgrade-script tests only
+	$(PYTEST) tests/unit/test_upgrade_lakerunner.py tests/unit/test_upgrade_lakerunner_lint.py tests/unit/test_jenkinsfile_upgrade.py -v
 
 check: test	## Pre-push gate (alias for test)
 
