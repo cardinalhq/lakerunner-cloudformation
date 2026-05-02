@@ -50,13 +50,16 @@ def build() -> Template:
     t.add_parameter(Parameter("DbName", Type="String", Default="lakerunner", Description="Database name."))
     t.add_parameter(Parameter("DbSecretArn", Type="String", Description="ARN of the DB master secret."))
 
-    # Image parameters
+    # Image parameters.  The migrator uses the same image as the lakerunner
+    # service tasks (LakerunnerImage) so the two cannot drift.  The custom
+    # resource keys its trigger off this same value, so any change to
+    # LakerunnerImage reruns migrations.
     t.add_parameter(
         Parameter(
-            "MigrationImage",
+            "LakerunnerImage",
             Type="String",
-            Default=defaults["images"]["migration"],
-            Description="Container image for the DB migrator.",
+            Default=defaults["images"]["lakerunner"],
+            Description="Container image used for both lakerunner tasks and the DB migrator.",
         )
     )
     t.add_parameter(
@@ -65,15 +68,6 @@ def build() -> Template:
             Type="String",
             Default=defaults["images"]["db_init"],
             Description="Image used by the configdb-init container (must include psql).",
-        )
-    )
-    t.add_parameter(
-        Parameter(
-            "MigrationImageDigest",
-            Type="String",
-            AllowedPattern=r"^sha256:[0-9a-f]{64}$",
-            ConstraintDescription="Must be a sha256 image digest (sha256:<64 hex chars>).",
-            Description="Image digest (sha256:...) used to trigger re-runs on upgrade.",
         )
     )
 
@@ -190,7 +184,7 @@ def build() -> Template:
 
     migrator_container = ContainerDefinition(
         Name="migrator",
-        Image=Ref("MigrationImage"),
+        Image=Ref("LakerunnerImage"),
         Command=["/app/bin/lakerunner", "migrate", "--databases=lrdb,configdb"],
         Essential=True,
         DependsOn=[ContainerDependency(ContainerName="configdb-init", Condition="COMPLETE")],
@@ -321,7 +315,7 @@ def build() -> Template:
         CustomResource(
             "MigrationRunner",
             ServiceToken=GetAtt(migration_fn, "Arn"),
-            MigrationVersion=Ref("MigrationImageDigest"),
+            MigrationVersion=Ref("LakerunnerImage"),
             InstallIdLong=Ref("InstallIdLong"),
             ClusterArn=Ref("ClusterArn"),
             TaskDefinitionArn=Ref(task_def),

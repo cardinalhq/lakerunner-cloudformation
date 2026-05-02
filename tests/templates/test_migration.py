@@ -15,16 +15,16 @@ def template_dict():
 def test_required_parameters(template_dict):
     for n in ("InstallIdShort", "InstallIdLong", "ClusterArn", "ClusterName",
               "TaskSecurityGroupId", "ExecutionRoleArn", "PrivateSubnetsCsv",
-              "DbEndpoint", "DbSecretArn", "MigrationImage", "MigrationImageDigest"):
+              "DbEndpoint", "DbSecretArn", "LakerunnerImage"):
         assert n in template_dict["Parameters"], f"missing parameter: {n}"
 
 
-def test_migration_image_digest_pattern_rejects_tags(template_dict):
-    """Spec: tags must be rejected; only sha256:<64 hex> digests are valid."""
-    p = template_dict["Parameters"]["MigrationImageDigest"]
-    assert p.get("AllowedPattern") == r"^sha256:[0-9a-f]{64}$", (
-        f"MigrationImageDigest needs AllowedPattern to reject tags; got {p.get('AllowedPattern')!r}"
-    )
+def test_migration_image_params_are_unified(template_dict):
+    """Spec: migrator and lakerunner tasks share LakerunnerImage; the legacy
+    MigrationImage / MigrationImageDigest parameters must not reappear."""
+    params = template_dict["Parameters"]
+    assert "MigrationImage" not in params
+    assert "MigrationImageDigest" not in params
 
 
 def test_creates_lambda_and_custom_resource(template_dict):
@@ -39,15 +39,30 @@ def test_creates_task_definition(template_dict):
     assert "AWS::ECS::TaskDefinition" in types
 
 
-def test_custom_resource_uses_image_digest_as_trigger(template_dict):
-    """MigrationVersion must be wired to the digest parameter (not the mutable image tag)."""
+def test_custom_resource_uses_lakerunner_image_as_trigger(template_dict):
+    """MigrationVersion must be wired to LakerunnerImage so any image change
+    reruns the migrator and the migrator can never drift from the tasks."""
     cr = next(
         r for r in template_dict["Resources"].values()
         if r["Type"] == "AWS::CloudFormation::CustomResource" or r["Type"] == "Custom::MigrationRunner"
     )
     mv = cr["Properties"].get("MigrationVersion")
-    assert mv == {"Ref": "MigrationImageDigest"}, (
-        f"MigrationVersion must be Ref(MigrationImageDigest); got {mv!r}"
+    assert mv == {"Ref": "LakerunnerImage"}, (
+        f"MigrationVersion must be Ref(LakerunnerImage); got {mv!r}"
+    )
+
+
+def test_migrator_container_uses_lakerunner_image(template_dict):
+    """The migrator container must run the same image as the lakerunner tasks."""
+    task_def = next(
+        r for r in template_dict["Resources"].values() if r["Type"] == "AWS::ECS::TaskDefinition"
+    )
+    container = next(
+        c for c in task_def["Properties"]["ContainerDefinitions"]
+        if c["Name"] == "migrator"
+    )
+    assert container["Image"] == {"Ref": "LakerunnerImage"}, (
+        f"migrator container must use Ref(LakerunnerImage); got {container['Image']!r}"
     )
 
 

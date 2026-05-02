@@ -271,21 +271,6 @@ def build() -> Template:
         t, name="DexInitImage",
         default=defaults["images"]["dex_init"],
         description="BusyBox-style image used to render the dex config.yaml.")
-    add_image_override(
-        t, name="MigrationImage",
-        default=defaults["images"]["migration"],
-        description="DB migrator container image.")
-    t.add_parameter(Parameter(
-        "MigrationImageDigest",
-        Type="String",
-        AllowedPattern=r"^sha256:[0-9a-f]{64}$",
-        ConstraintDescription="Must be a sha256 image digest (sha256:<64 hex chars>).",
-        Description=(
-            "Image digest (sha256:...) for the migrator. Required; tags are "
-            "not accepted. Changing this triggers a re-run of migrations."
-        ),
-    ))
-
     image_param_names = [
         "LakerunnerImage",
         "MaestroImage",
@@ -293,8 +278,6 @@ def build() -> Template:
         "DexImage",
         "DbInitImage",
         "DexInitImage",
-        "MigrationImage",
-        "MigrationImageDigest",
     ]
 
     # ---------------------------------------------------------------------
@@ -398,8 +381,7 @@ def build() -> Template:
         "DbPort": GetAtt(database_stack, "Outputs.DbPort"),
         "DbName": GetAtt(database_stack, "Outputs.DbName"),
         "DbSecretArn": GetAtt(database_stack, "Outputs.DbSecretArn"),
-        "MigrationImage": Ref("MigrationImage"),
-        "MigrationImageDigest": Ref("MigrationImageDigest"),
+        "LakerunnerImage": lakerunner_image,
         "DbInitImage": Ref("DbInitImage"),
     })
 
