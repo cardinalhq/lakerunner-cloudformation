@@ -2,7 +2,10 @@
 
 Embedded in migration.yaml as Code.ZipFile. Behavior contract:
 - PhysicalResourceId is stable: cardinal-migration-<InstallIdLong>.
-- Trigger property MigrationVersion: image digest (sha256:<64 hex>). Tags are rejected.
+- Trigger property MigrationVersion: the LakerunnerImage value (tag or
+  image@sha256:...). Any change reruns the migrator. Mutable tags like :latest
+  are not supported by Cardinal policy and the Lambda treats them like any
+  other string — equal value, no rerun.
 - Create runs the migrator ECS task; success on exit-code 0.
 - Update reruns the migrator only if MigrationVersion changed.
 - Delete is a no-op.
@@ -13,7 +16,6 @@ Embedded in migration.yaml as Code.ZipFile. Behavior contract:
 SOURCE = '''\
 import json
 import os
-import re
 import time
 import traceback
 import urllib.request
@@ -24,7 +26,6 @@ import boto3
 ecs = boto3.client("ecs")
 
 MAX_REASON_LEN = 1000
-DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 def _send(event, context, status, reason="", physical_id=None, data=None):
@@ -49,13 +50,6 @@ def _send(event, context, status, reason="", physical_id=None, data=None):
 def _physical_id(event):
     install_id_long = event["ResourceProperties"]["InstallIdLong"]
     return f"cardinal-migration-{install_id_long}"
-
-
-def _validate_digest(value):
-    if not value or not DIGEST_RE.match(value):
-        raise ValueError(
-            f"MigrationVersion must be a sha256 image digest (sha256:<64 hex>); got {value!r}"
-        )
 
 
 def _run_migration(event):
@@ -125,7 +119,8 @@ def lambda_handler(event, context):
             _send(event, context, "SUCCESS", physical_id=physical_id)
             return
         new = event["ResourceProperties"].get("MigrationVersion")
-        _validate_digest(new)
+        if not new:
+            raise ValueError("MigrationVersion property is required")
         if event["RequestType"] == "Update":
             old = event.get("OldResourceProperties", {}).get("MigrationVersion")
             if old == new:

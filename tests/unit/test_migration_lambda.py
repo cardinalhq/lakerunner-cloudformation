@@ -7,7 +7,7 @@ CloudFormation events to verify the behavior contract:
 
 - Delete is a no-op SUCCESS.
 - Update with unchanged MigrationVersion skips run_task and returns SUCCESS.
-- Create with a non-digest MigrationVersion fails.
+- Create with an empty MigrationVersion fails (any non-empty image string is fine).
 - Container exitCode != 0 fails (treated as migration failure).
 - Container exitCode is None (e.g. ECS killed the task before the container ran) fails.
 - run_task failures array (non-empty) fails.
@@ -25,8 +25,8 @@ import pytest
 from cardinal_cfn.children import migration_lambda
 
 
-VALID_DIGEST = "sha256:" + "a" * 64
-ANOTHER_DIGEST = "sha256:" + "b" * 64
+VALID_VERSION = "public.ecr.aws/cardinalhq.io/lakerunner:v1.19.2"
+ANOTHER_VERSION = "public.ecr.aws/cardinalhq.io/lakerunner:v1.19.3"
 
 
 @pytest.fixture
@@ -51,7 +51,7 @@ def lambda_module():
             sys.modules["boto3"] = saved
 
 
-def _event(request_type, *, install_id_long="abcdef012345", migration_version=VALID_DIGEST,
+def _event(request_type, *, install_id_long="abcdef012345", migration_version=VALID_VERSION,
            old_version=None):
     event = {
         "RequestType": request_type,
@@ -104,7 +104,7 @@ def test_delete_is_noop_success(lambda_module):
 
 def test_update_unchanged_skips_run_task(lambda_module):
     lambda_module["lambda_handler"](
-        _event("Update", migration_version=VALID_DIGEST, old_version=VALID_DIGEST),
+        _event("Update", migration_version=VALID_VERSION, old_version=VALID_VERSION),
         _context(),
     )
     body = _last_response_payload(lambda_module)
@@ -130,7 +130,7 @@ def test_update_changed_runs_migration(lambda_module):
         }],
     }
     lambda_module["lambda_handler"](
-        _event("Update", migration_version=ANOTHER_DIGEST, old_version=VALID_DIGEST),
+        _event("Update", migration_version=ANOTHER_VERSION, old_version=VALID_VERSION),
         _context(),
     )
     body = _last_response_payload(lambda_module)
@@ -139,18 +139,19 @@ def test_update_changed_runs_migration(lambda_module):
 
 
 # ---------------------------------------------------------------------------
-# Digest validation — non-digest values must fail.
+# MigrationVersion is required (any non-empty string is acceptable; the
+# template enforces no-:latest as a deployment policy, not in the Lambda).
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("bad", ["", "v1.2.3", ":latest", "latest", "sha256:short", None])
-def test_create_rejects_non_digest_migration_version(lambda_module, bad):
+@pytest.mark.parametrize("bad", ["", None])
+def test_create_rejects_empty_migration_version(lambda_module, bad):
     lambda_module["lambda_handler"](
         _event("Create", migration_version=bad),
         _context(),
     )
     body = _last_response_payload(lambda_module)
     assert body["Status"] == "FAILED"
-    assert "sha256" in body["Reason"]
+    assert "MigrationVersion" in body["Reason"]
     assert not lambda_module["ecs"].run_task.called
 
 
@@ -240,7 +241,7 @@ def test_polling_deadline_is_under_lambda_timeout():
 def test_physical_id_is_stable_across_request_types(lambda_module):
     for rt in ("Delete", "Update"):
         lambda_module["lambda_handler"](
-            _event(rt, migration_version=VALID_DIGEST, old_version=VALID_DIGEST),
+            _event(rt, migration_version=VALID_VERSION, old_version=VALID_VERSION),
             _context(),
         )
         body = _last_response_payload(lambda_module)

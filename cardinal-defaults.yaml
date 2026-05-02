@@ -29,8 +29,8 @@ storage_profiles:
 
 # ---------------------------------------------------------------------------
 # Container images. Each can be overridden via *Image parameters on the root.
-# MigrationImageDigest is mandatory and digest-pinned (sha256:...) — that's a
-# root-template concern, not a default here.
+# The migrator runs from the same image as the lakerunner tasks (LakerunnerImage)
+# so the two cannot drift; any change to LakerunnerImage retriggers migrations.
 # ---------------------------------------------------------------------------
 images:
   lakerunner: "public.ecr.aws/cardinalhq.io/lakerunner:v1.19.2"
@@ -39,7 +39,6 @@ images:
   dex:        "ghcr.io/dexidp/dex:v2.41.1"
   dex_init:   "public.ecr.aws/docker/library/busybox:1.37"
   db_init:    "ghcr.io/cardinalhq/initcontainer-grafana:latest"
-  migration:  "public.ecr.aws/cardinalhq.io/lakerunner:v1.19.2"
 
 # ---------------------------------------------------------------------------
 # Lakerunner microservices. Each entry's tier (query / process / control) is

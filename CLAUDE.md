@@ -125,7 +125,7 @@ Pre-allocated, registered in `src/cardinal_cfn/listener_priorities.py`. Each ser
 Lambda-backed, runs the lakerunner migrator as a one-shot ECS task. Behavior:
 
 - Stable `PhysicalResourceId`: `cardinal-migration-<InstallIdLong>`.
-- Trigger: `MigrationVersion` property = lakerunner image **digest** (`sha256:...`). Tags are rejected.
+- Trigger: `MigrationVersion` property = `LakerunnerImage` value. The migrator runs from the same image as the lakerunner service tasks (single `LakerunnerImage` parameter), so any image change reruns migrations and the two cannot drift. Customers who want digest pinning use `image@sha256:...` as the `LakerunnerImage` value. Mutable tags like `:latest` are not supported.
 - Create runs the migrator. Update reruns only if `MigrationVersion` changed. Delete is a no-op.
 
 ### Service tier rule (B → C safe)
