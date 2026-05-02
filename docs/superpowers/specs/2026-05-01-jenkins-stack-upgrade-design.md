@@ -59,13 +59,15 @@ The script reads `AWS_*` environment variables for credentials. It does not touc
 
 The script runs these stages in order. Any non-zero result from a stage aborts the script with a clear error pointing at the failed stage.
 
-1. **Validate inputs.** Confirm required flags are present and `aws --version` runs. Confirm `--stack-name` exists in `--region` via `describe-stacks`. If the stack doesn't exist, exit code 2 — this script does upgrades, not initial creates.
+1. **Pre-flight tool check.** The script's first action, before parsing flags or making AWS calls. It runs `aws --version`, `jq --version`, and `curl --version` (each piped to `>/dev/null 2>&1`) and on any failure exits code 2 with a single-line message naming the missing tool and a hint at how to install it on the common runner OSes (`apt-get install jq`, `yum install jq`, `apk add jq`, etc.). This is the bulkhead that turns "missing tool" into an obvious operator error rather than a confusing failure halfway through the upgrade.
 
-2. **Resolve template URL.** `${template_base_url}/${version}/cardinal-lakerunner.yaml`. Probe with an HTTP HEAD; abort on 404.
+2. **Validate inputs.** Confirm required flags are present. Confirm `--stack-name` exists in `--region` via `describe-stacks`. If the stack doesn't exist, exit code 2 — this script does upgrades, not initial creates.
 
-3. **Discover new template parameters.** `aws cloudformation get-template-summary --template-url <resolved url> --query 'Parameters'` returns the new template's parameter schema as JSON: name, type, default (when present), `NoEcho` flag. No local YAML parsing.
+3. **Resolve template URL.** `${template_base_url}/${version}/cardinal-lakerunner.yaml`. Probe with an HTTP HEAD; abort on 404.
 
-4. **Resolve parameters.** Walk the new template's parameter list. For each parameter, choose exactly one of these outcomes:
+4. **Discover new template parameters.** `aws cloudformation get-template-summary --template-url <resolved url> --query 'Parameters'` returns the new template's parameter schema as JSON: name, type, default (when present), `NoEcho` flag. No local YAML parsing.
+
+5. **Resolve parameters.** Walk the new template's parameter list. For each parameter, choose exactly one of these outcomes:
 
    1. **Refresh image default.** Name ends in `Image`, `--refresh-image-defaults` is on, and the new template declares a default. Result: `{ParameterKey, ParameterValue=<new template default>}`.
    2. **Carry forward.** The parameter exists in the current stack's parameter set (per `describe-stacks`). Result: `{ParameterKey, UsePreviousValue=true}`.
@@ -74,27 +76,27 @@ The script runs these stages in order. Any non-zero result from a stage aborts t
 
    The script never sets `--use-previous-parameters`; every decision is explicit and visible in the resolved `parameters.json`.
 
-5. **Create change set.** `aws cloudformation create-change-set --change-set-type UPDATE` with the resolved parameters. Change set name is `cardinal-upgrade-<unix-timestamp>` so cleanup logic can identify and remove change sets created by this script. Pass `--role-arn` when set. Wait for the change set to reach a terminal state.
+6. **Create change set.** `aws cloudformation create-change-set --change-set-type UPDATE` with the resolved parameters. Change set name is `cardinal-upgrade-<unix-timestamp>` so cleanup logic can identify and remove change sets created by this script. Pass `--role-arn` when set. Wait for the change set to reach a terminal state.
 
    - Terminal `CREATE_COMPLETE`: proceed.
    - Terminal `FAILED` whose `StatusReason` contains the no-op marker (AWS uses several phrasings; the script matches a small set including `didn't contain changes` and `The submitted information didn't contain changes`): delete the change set and exit success. No-op upgrades are normal and quiet.
    - Any other terminal state: delete the change set and exit non-zero with the AWS-supplied reason.
 
-6. **Describe and print change set summary.** Always print the resource changes — additions, modifications, replacements, removals — to stdout via `aws cloudformation describe-change-set`. Always printed regardless of `--no-execute`.
+7. **Describe and print change set summary.** Always print the resource changes — additions, modifications, replacements, removals — to stdout via `aws cloudformation describe-change-set`. Always printed regardless of `--no-execute`.
 
-7. **Stop here on `--no-execute`.** Do not delete the change set. Print its name and ARN so the operator can inspect or execute it manually. Exit success.
+8. **Stop here on `--no-execute`.** Do not delete the change set. Print its name and ARN so the operator can inspect or execute it manually. Exit success.
 
-8. **Execute change set.** `aws cloudformation execute-change-set`, then `aws cloudformation wait stack-update-complete`. The waiter exits non-zero if the stack lands in any state other than `UPDATE_COMPLETE`.
+9. **Execute change set.** `aws cloudformation execute-change-set`, then `aws cloudformation wait stack-update-complete`. The waiter exits non-zero if the stack lands in any state other than `UPDATE_COMPLETE`.
 
-9. **Cleanup on abort.** If any stage between 5 and 8 fails or the script is interrupted, attempt a best-effort `delete-change-set`. Failure to delete the change set does not change the script's exit code.
+10. **Cleanup on abort.** If any stage between 6 and 9 fails or the script is interrupted, attempt a best-effort `delete-change-set`. Failure to delete the change set does not change the script's exit code.
 
-10. **Print stack outputs** on success — `AlbDnsName`, `MaestroUrl`, `QueryApiUrl`, etc.
+11. **Print stack outputs** on success — `AlbDnsName`, `MaestroUrl`, `QueryApiUrl`, etc.
 
 ### Exit codes
 
 - `0` — change set executed and stack reached `UPDATE_COMPLETE`, or change set was a no-op, or `--no-execute` completed.
 - `1` — generic error (AWS API failure, change set failed, stack ended in a non-`UPDATE_COMPLETE` state).
-- `2` — input validation failure (missing flag, stack not found, parameter has no resolvable value).
+- `2` — pre-flight or input validation failure (missing tool, missing flag, stack not found, parameter has no resolvable value).
 
 CloudFormation does its own automatic rollback on update failure; the per-service deployment circuit breaker (already configured in the stack) handles bad image deploys at the ECS level. The script does not implement its own rollback.
 
@@ -117,7 +119,7 @@ A declarative pipeline. Customers copy this file once per install and edit the `
 
 ### Stages
 
-1. **Setup** — `withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: params.AwsCredentialsId]])`. Verify `aws`, `jq`, and `curl` are on PATH.
+1. **Setup** — `withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: params.AwsCredentialsId]])`. The script's pre-flight check handles tool verification; the Jenkinsfile does not duplicate it.
 2. **Plan** — invoke `sh scripts/upgrade-lakerunner.sh --no-execute ...`. The build log captures the change set summary. Always runs.
 3. **Approval** — only when `params.AutoApprove == false`: a Jenkins `input` step. Skipped entirely when `true` (no human required).
 4. **Apply** — invoke the script again *without* `--no-execute`. The script's no-op detector ensures this second run is cheap when the Plan stage already created an equivalent change set, and the operator (or auto-approval) is committing to applying whatever the live state requires at apply time.
