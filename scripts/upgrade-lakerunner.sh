@@ -173,9 +173,12 @@ EOF
 # ---------------------------------------------------------------------------
 # CFN call wrapper that adds --role-arn when configured.
 #
-# Only use for stack-mutation calls (create/update/delete stack, create/execute
-# change set).  Read-only calls (get-template-summary, describe-*, wait, ...)
-# do not accept --role-arn and must invoke `aws cloudformation` directly.
+# In this script the only call that accepts --role-arn is create-change-set:
+# CFN attaches the role to the change set itself, then uses that role during
+# execute-change-set automatically.  All other AWS CLI calls (including
+# execute-change-set, get-template-summary, describe-*, wait) reject --role-arn
+# and must invoke `aws cloudformation` directly.  Tests/test_upgrade_lakerunner_lint.py
+# enforces this — keep it that way.
 # ---------------------------------------------------------------------------
 cfn() {
     if [ -n "$deployer_role_arn" ]; then
@@ -368,7 +371,9 @@ main() {
     fi
 
     log "executing change set"
-    cfn execute-change-set \
+    # execute-change-set does not accept --role-arn; the role attached to the
+    # change set at create time is used automatically during execution.
+    aws cloudformation execute-change-set \
         --stack-name "$stack_name" \
         --change-set-name "$change_set_name" \
         --region "$region" >/dev/null

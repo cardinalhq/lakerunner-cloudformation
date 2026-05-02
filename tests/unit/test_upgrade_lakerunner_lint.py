@@ -47,3 +47,37 @@ def test_runs_with_no_args_and_fails_loudly():
     assert result.returncode == 2, (
         f"expected exit 2, got {result.returncode}: {result.stderr}"
     )
+
+
+# ---------------------------------------------------------------------------
+# AWS CLI accepts --role-arn only on create-change-set in this script.  Wrapping
+# any other subcommand in `cfn ...` causes the AWS CLI to error out with
+# "Unknown options: --role-arn".  This regression bit us twice: once on
+# get-template-summary, once on execute-change-set.  Guard it.
+# ---------------------------------------------------------------------------
+
+ALLOWED_CFN_WRAPPED_SUBCOMMANDS = {"create-change-set"}
+
+
+def test_cfn_wrapper_only_wraps_role_capable_subcommands():
+    text = SCRIPT.read_text().splitlines()
+    offenders = []
+    for i, line in enumerate(text, 1):
+        stripped = line.strip()
+        # Skip comments, the function definition itself, and the inline help.
+        if stripped.startswith("#"):
+            continue
+        if not stripped.startswith("cfn "):
+            continue
+        # Extract the first token after `cfn `.
+        token = stripped.split()[1] if len(stripped.split()) > 1 else ""
+        # Skip lines that aren't actually CFN subcommands (e.g. nothing).
+        if not token:
+            continue
+        if token not in ALLOWED_CFN_WRAPPED_SUBCOMMANDS:
+            offenders.append((i, stripped))
+    assert not offenders, (
+        "cfn() wrapper used on subcommand(s) that don't accept --role-arn:\n"
+        + "\n".join(f"  {i}: {ln}" for i, ln in offenders)
+        + f"\nAllowed: {sorted(ALLOWED_CFN_WRAPPED_SUBCOMMANDS)}"
+    )
