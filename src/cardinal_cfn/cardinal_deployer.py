@@ -239,6 +239,7 @@ _POLICY_STATEMENTS = [
             "secretsmanager:UpdateSecret",
             "secretsmanager:GetSecretValue",
             "secretsmanager:PutSecretValue",
+            "secretsmanager:GetRandomPassword",
             "secretsmanager:TagResource",
             "secretsmanager:UntagResource",
         ],
