@@ -8,6 +8,7 @@ One Jenkins job per install. Multi-install operators copy the Jenkinsfile into a
 
 1. **Pre-flight** — the script verifies `aws`, `jq`, and `curl` are on `PATH`. Missing tools fail fast with an actionable message naming the missing tool.
 2. **Resolve parameters** — for each parameter declared by the new template:
+    - `TemplateBaseUrl` is always set to `<--template-base-url>/<--version>/cardinal-lakerunner/`. This parameter encodes the version path nested children load from, so it must track the upgrade target — never carry forward, even if the customer overrode `--template-base-url` for an air-gapped mirror.
     - `*Image` parameters with a default in the new template take that default (refresh the image set on every upgrade).
     - Parameters present in the running stack carry forward via `UsePreviousValue=true`.
     - Parameters new in the new template that have a default take the default.
