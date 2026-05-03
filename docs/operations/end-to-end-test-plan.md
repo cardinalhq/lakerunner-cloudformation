@@ -145,13 +145,39 @@ Confirm:
 - The count is non-trivial (dozens of ARNs — at minimum the bucket, the
   queue, the DB, log groups, target groups, services, the cluster, the
   ALB, and the secrets).
-- A second query filtered by `Key=Name,Values=cardinal-*-<InstallIdShort>`
-  returns the same set scoped to *this* install — confirms the
-  `Name` tag carries the per-install discriminator.
-- Spot-check the RDS DB and the ingest bucket: their `TagList` /
-  `TagSet` includes `Project=cardinal`, `ManagedBy=cardinal-cfn`,
-  `Component=database` / `Component=storage`, and a `Name` whose suffix is
-  the captured `InstallIdShort`.
+- The Resource Groups Tagging API only supports prefix-`*` wildcards
+  (`Values=cardinal-` matches `cardinal-anything`), so a single tag query
+  cannot scope to a specific install via the `Name` tag. To narrow to
+  *this* install, run the query above and then post-filter the ARN list
+  for the captured `InstallIdShort`:
+
+  ```sh
+  aws resourcegroupstaggingapi get-resources \
+    --tag-filters Key=Project,Values=cardinal \
+                  Key=ManagedBy,Values=cardinal-cfn \
+    --region $REGION \
+    --query 'ResourceTagMappingList[].[ResourceARN, Tags[?Key==`Name`]|[0].Value]' \
+    --output text \
+    | grep "$INSTALL_ID_SHORT" | wc -l
+  ```
+
+  The filtered count should match what you'd expect for this install
+  (bucket, queue, DB, target groups, services, cluster, ALB, secrets,
+  log groups, SSM params).
+- Spot-check the RDS DB and the ingest bucket directly by their
+  deterministic names:
+
+  ```sh
+  aws rds describe-db-instances --region $REGION \
+    --db-instance-identifier cardinal-lakerunner-databasestack-... \
+    --query 'DBInstances[0].TagList'
+  aws s3api get-bucket-tagging --region $REGION \
+    --bucket cardinal-ingest-$ACCOUNT-$REGION-$INSTALL_ID_LONG
+  ```
+
+  Both should report `Project=cardinal`, `ManagedBy=cardinal-cfn`,
+  `Component=database` / `Component=storage`, and a `Name` whose suffix
+  is the captured `InstallIdShort` / `InstallIdLong`.
 - Anything **without** these tags is a bug — file an issue against the
   child template that owns it.
 
@@ -286,21 +312,31 @@ Confirm:
 
 ### 3d. Resource sweep
 
-Re-run the tag query from Phase 1d:
+Re-run the prefix tag query and post-filter for the captured
+`InstallIdShort` (the RGT API does not support middle-wildcards):
 
 ```sh
 aws resourcegroupstaggingapi get-resources \
-  --tag-filters Key=Name,Values=cardinal-*-<InstallIdShort> \
-  --region $REGION
+  --tag-filters Key=Project,Values=cardinal \
+                Key=ManagedBy,Values=cardinal-cfn \
+  --region $REGION \
+  --query 'ResourceTagMappingList[].[ResourceARN, Tags[?Key==`Name`]|[0].Value]' \
+  --output text \
+  | grep "$INSTALL_ID_SHORT"
 ```
 
 Confirm:
 
 - Result is empty. *Every* tagged resource for this install is gone.
-- If non-empty, every returned ARN is one of the documented survivors
-  (this would mean the script failed to clean it; investigate). The
-  documented survivors are: the ingest bucket, three secrets, RDS
-  snapshot. The script should have already deleted these — anything
+- The RGT API caches tag mappings for some minutes after a resource is
+  actually deleted. If the prefix query still returns ECS clusters /
+  services / target groups for *this* install, cross-check with a live
+  call — `aws ecs list-clusters | grep cardinal`, `aws elbv2
+  describe-target-groups`, etc. — before treating it as a bug. Stale
+  RGT entries age out within ~10 minutes.
+- Live entries that survive after that window must be one of the
+  documented survivors (ingest bucket, three secrets, RDS snapshot) —
+  and the script should have already deleted those, so anything
   surviving is a bug in the script.
 
 Spot-check by service:
@@ -336,10 +372,14 @@ Run Phases 1 and 3 again, end-to-end. Confirm:
 
 Even after Phase 3 runs cleanly, sweep for anything that might have leaked:
 
-- Tag query `Key=Project,Values=cardinal` across the region — should be
-  empty.
+- Tag query `Key=Project,Values=cardinal` across the region — should
+  contain only entries that age out within ~10 minutes (stale RGT
+  cache after delete) and ECS task-definition ARNs (AWS retains
+  every TaskDefinition revision indefinitely; deregistering is a
+  cosmetic clean-up, not a correctness issue). Anything else is a
+  leak.
 - Tag query `Key=ManagedBy,Values=cardinal-cfn` across the region —
-  should be empty.
+  same caveats.
 - `aws cloudformation list-stacks --stack-status-filter CREATE_COMPLETE
   UPDATE_COMPLETE DELETE_FAILED` filtered to `cardinal-*` — should show
   only `cardinal-cfn-deployer` and (if you deployed it) `cardinal-vpc`.
@@ -385,3 +425,10 @@ A single failed bullet blocks the release.
 - Consider automating Phase 1d / 3d / 5 as a single Bash check script
   invoked at the end of each phase. The data inputs (region, install id)
   are already captured; the queries are stable.
+- Per-install discovery currently relies on the `Name` tag carrying the
+  `InstallIdShort` suffix, but the Resource Groups Tagging API only
+  supports prefix wildcards, so post-filtering with `grep` is required.
+  Adding a dedicated `InstallIdShort` (or `InstallId`) tag to every
+  resource emitted by the templates would let a single tag query scope
+  to a specific install without the post-filter step. Worth doing if
+  test automation grows beyond ad-hoc shell.
