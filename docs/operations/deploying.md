@@ -92,3 +92,11 @@ resource type, update `_POLICY_STATEMENTS` in `cardinal_deployer.py` so
 customers running the template get the new permission. The drift test in
 `tests/templates/test_cardinal_deployer.py` will fail if the template adds a
 resource type that isn't represented in the policy.
+
+## Tearing down
+
+`delete-stack` does not remove every resource — the ingest bucket, the
+license / admin-api-key / db-master secrets, and the RDS final snapshot are
+intentionally retained. See [`tearing-down.md`](tearing-down.md) for the
+full survivor list and a companion script
+(`scripts/teardown-lakerunner.sh`) that handles the cleanup pass.
