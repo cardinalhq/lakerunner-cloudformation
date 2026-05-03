@@ -317,6 +317,30 @@ _POLICY_STATEMENTS = [
         "Resource": "*",
     },
     {
+        # AWS::ServiceDiscovery::PrivateDnsNamespace creates a Route 53 private
+        # hosted zone under the hood and associates it with the VPC. The
+        # deployer principal needs the matching route53 perms or namespace
+        # creation fails with AccessDenied on route53:CreateHostedZone.
+        "Sid": "Route53ForPrivateDns",
+        "Effect": "Allow",
+        "Action": [
+            "route53:CreateHostedZone",
+            "route53:DeleteHostedZone",
+            "route53:GetHostedZone",
+            "route53:GetChange",
+            "route53:ChangeResourceRecordSets",
+            "route53:AssociateVPCWithHostedZone",
+            "route53:DisassociateVPCFromHostedZone",
+            "route53:ListHostedZonesByName",
+            "route53:ListHostedZonesByVPC",
+            "route53:CreateVPCAssociationAuthorization",
+            "route53:DeleteVPCAssociationAuthorization",
+            "route53:ChangeTagsForResource",
+            "route53:ListTagsForResource",
+        ],
+        "Resource": "*",
+    },
+    {
         "Sid": "AcmForImportedCerts",
         "Effect": "Allow",
         "Action": [
