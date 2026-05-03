@@ -87,6 +87,38 @@ def test_yes_flag_required_for_destruction():
 # / secretsmanager / rds calls would fail twice over.  Guard it.
 # ---------------------------------------------------------------------------
 
+def test_nested_stack_logical_ids_match_root_template():
+    """The script discovers retained-resource state by looking up nested
+    stacks under the root by logical id (`get_nested_stack_id ROOT
+    LOGICAL_ID`).  If a logical id in the script does not exist in the
+    generated root template the lookup silently returns empty and
+    cleanup skips every retained resource — exactly the bug fixed in
+    this commit.  Pin the logical ids the script depends on against
+    what `cardinal_cfn.root.build()` actually emits."""
+    import re
+
+    # Build the root template fresh so the test never lies about what's in
+    # generated-templates/.
+    from cardinal_cfn.root import build as build_root
+
+    root = build_root()
+    nested_ids = {
+        name
+        for name, res in root.resources.items()
+        if res.resource_type == "AWS::CloudFormation::Stack"
+    }
+    assert {"StorageStack", "DatabaseStack", "ConfigStack"}.issubset(nested_ids), (
+        f"expected StorageStack/DatabaseStack/ConfigStack in root nested ids, got {sorted(nested_ids)}"
+    )
+
+    raw = SCRIPT.read_text()
+    referenced = set(re.findall(r'get_nested_stack_id\s+"\$stack_name"\s+"([^"]+)"', raw))
+    missing = referenced - nested_ids
+    assert not missing, (
+        f"teardown script references nested logical ids that do not exist in the root template: {sorted(missing)}"
+    )
+
+
 def test_role_arn_only_passed_to_cloudformation_calls():
     """Collapse backslash-continued lines first, then check that every
     `--role-arn` occurrence is either docs, a variable assignment, the arg

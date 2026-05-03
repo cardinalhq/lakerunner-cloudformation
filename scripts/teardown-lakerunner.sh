@@ -194,9 +194,9 @@ get_stack_output() {
 # ---------------------------------------------------------------------------
 capture_state() {
     log "discovering nested stacks under $stack_name"
-    storage_stack=$(get_nested_stack_id "$stack_name" "Storage")
-    database_stack=$(get_nested_stack_id "$stack_name" "Database")
-    config_stack=$(get_nested_stack_id "$stack_name" "Config")
+    storage_stack=$(get_nested_stack_id "$stack_name" "StorageStack")
+    database_stack=$(get_nested_stack_id "$stack_name" "DatabaseStack")
+    config_stack=$(get_nested_stack_id "$stack_name" "ConfigStack")
 
     install_id_long=$(get_stack_output "$stack_name" "InstallIdLong")
 
