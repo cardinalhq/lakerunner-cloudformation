@@ -96,3 +96,27 @@ def test_policy_covers_resource_types_used_by_lakerunner(td):
 def test_policy_includes_passrole(td):
     """ECS/Lambda task roles get attached at deploy time -> iam:PassRole required."""
     assert "iam:PassRole" in _all_actions(td)
+
+
+def test_policy_can_take_rds_final_snapshot_on_delete(td):
+    """The database has DeletionPolicy: Snapshot, so delete-stack triggers a
+    final snapshot. Without CreateDBSnapshot the stack lands in DELETE_FAILED
+    and the customer is wedged. Describe + Delete are needed for cleanup."""
+    actions = set(_all_actions(td))
+    for a in ("rds:CreateDBSnapshot", "rds:DescribeDBSnapshots", "rds:DeleteDBSnapshot"):
+        assert a in actions, f"deployer role must allow {a} so stack delete can finish"
+
+
+def test_policy_can_drain_and_delete_retained_bucket(td):
+    """The ingest bucket has DeletionPolicy: Retain. Post-stack-delete cleanup
+    via this role requires draining objects (and any versions/markers) before
+    DeleteBucket — bucket-level perms alone aren't enough."""
+    actions = set(_all_actions(td))
+    for a in (
+        "s3:ListBucket",
+        "s3:ListBucketVersions",
+        "s3:DeleteObject",
+        "s3:DeleteObjectVersion",
+        "s3:GetBucketVersioning",
+    ):
+        assert a in actions, f"deployer role must allow {a} to clean up retained ingest bucket"

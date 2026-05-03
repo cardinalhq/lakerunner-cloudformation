@@ -161,6 +161,12 @@ _POLICY_STATEMENTS = [
             "rds:DeleteDBSubnetGroup",
             "rds:DescribeDBSubnetGroups",
             "rds:ModifyDBSubnetGroup",
+            # Snapshot verbs are required for stack delete: the database has
+            # DeletionPolicy: Snapshot, so CFN takes a final snapshot during
+            # delete-stack. Without these, delete-stack fails with AccessDenied.
+            "rds:CreateDBSnapshot",
+            "rds:DescribeDBSnapshots",
+            "rds:DeleteDBSnapshot",
             "rds:AddTagsToResource",
             "rds:RemoveTagsFromResource",
             "rds:ListTagsForResource",
@@ -176,6 +182,7 @@ _POLICY_STATEMENTS = [
             "s3:GetBucketLocation",
             "s3:GetBucketTagging",
             "s3:PutBucketTagging",
+            "s3:GetBucketVersioning",
             "s3:GetBucketPolicy",
             "s3:PutBucketPolicy",
             "s3:DeleteBucketPolicy",
@@ -189,6 +196,18 @@ _POLICY_STATEMENTS = [
             "s3:PutLifecycleConfiguration",
             "s3:GetBucketPublicAccessBlock",
             "s3:PutBucketPublicAccessBlock",
+            # Object-level verbs are required so an operator using this role
+            # can drain the retained ingest bucket post-stack-delete.  Without
+            # them DeleteBucket fails because S3 will not delete a non-empty
+            # bucket and the role can't list/remove objects to empty it.
+            "s3:ListBucket",
+            "s3:ListBucketVersions",
+            "s3:GetObject",
+            "s3:GetObjectVersion",
+            "s3:DeleteObject",
+            "s3:DeleteObjectVersion",
+            "s3:AbortMultipartUpload",
+            "s3:ListMultipartUploadParts",
         ],
         "Resource": "*",
     },
