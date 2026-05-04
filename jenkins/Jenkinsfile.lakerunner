@@ -99,26 +99,26 @@ pipeline {
             description: 'INSTALL: comma-separated maestro superadmin email allowlist.  Defaults to DexAdminEmail when empty.'
         )
 
-        // ---- Install-only secrets, sourced from Jenkins credentials ----
-        string(
-            name: 'DexAdminPasswordHashCredentialId',
+        // ---- Install-only inputs, pasted directly into the job form ----
+        password(
+            name: 'DexAdminPasswordHash',
             defaultValue: '',
-            description: 'INSTALL: Jenkins Secret Text credential ID containing the bcrypt hash of the DEX admin password.  Required for install.'
+            description: 'INSTALL: bcrypt hash ($2a$/$2b$/$2y$) of the DEX admin password.  Required for install.'
         )
-        string(
-            name: 'CertificateBodyCredentialId',
+        text(
+            name: 'CertificateBody',
             defaultValue: '',
-            description: 'INSTALL (optional): Jenkins Secret File credential ID with the PEM certificate.  Used only when CertificateArn is empty.'
+            description: 'INSTALL (optional): PEM certificate.  Paste the full -----BEGIN CERTIFICATE----- block.  Used only when CertificateArn is empty.'
         )
-        string(
-            name: 'CertificatePrivateKeyCredentialId',
+        text(
+            name: 'CertificatePrivateKey',
             defaultValue: '',
-            description: 'INSTALL (optional): Jenkins Secret File credential ID with the PEM private key.  Used only when CertificateArn is empty.'
+            description: 'INSTALL (optional): PEM private key.  Paste the full -----BEGIN PRIVATE KEY----- block.  Used only when CertificateArn is empty.'
         )
-        string(
-            name: 'CertificateChainCredentialId',
+        text(
+            name: 'CertificateChain',
             defaultValue: '',
-            description: 'INSTALL (optional): Jenkins Secret File credential ID with the intermediate chain PEM.'
+            description: 'INSTALL (optional): PEM intermediate chain.  Paste the concatenated intermediate certs.'
         )
     }
 
@@ -205,49 +205,35 @@ pipeline {
 // Run the deploy script.  When planOnly is true, --no-execute is appended.
 //
 // The shell line is built dynamically so install-only flags are only emitted
-// when their corresponding job parameter is non-empty.  Secrets (DEX hash,
-// PEMs) are bound via Jenkins credentials and reach the shell as env vars
-// (DEX_ADMIN_PASSWORD_HASH) or file paths (CERT_*_FILE).
+// when their corresponding job parameter is non-empty.  Multi-line / special-
+// char inputs (LicenseData, the PEMs) are materialized to workspace files so
+// they survive the shell hop intact.
 def runDeploy(boolean planOnly) {
-    def secretBindings = []
-    secretBindings << [
-        $class: 'AmazonWebServicesCredentialsBinding',
-        credentialsId: params.AwsCredentialsId
-    ]
-    if (params.DexAdminPasswordHashCredentialId?.trim()) {
-        secretBindings << string(
-            credentialsId: params.DexAdminPasswordHashCredentialId,
-            variable: 'DEX_ADMIN_PASSWORD_HASH'
-        )
-    }
-    if (params.CertificateBodyCredentialId?.trim()) {
-        secretBindings << file(
-            credentialsId: params.CertificateBodyCredentialId,
-            variable: 'CERT_BODY_FILE'
-        )
-    }
-    if (params.CertificatePrivateKeyCredentialId?.trim()) {
-        secretBindings << file(
-            credentialsId: params.CertificatePrivateKeyCredentialId,
-            variable: 'CERT_PRIVATE_KEY_FILE'
-        )
-    }
-    if (params.CertificateChainCredentialId?.trim()) {
-        secretBindings << file(
-            credentialsId: params.CertificateChainCredentialId,
-            variable: 'CERT_CHAIN_FILE'
-        )
-    }
-
-    // The license text is visible by design.  Materialize it to a workspace
-    // file so multi-line / special-char content survives the shell hop.
     def licenseFile = ''
     if (params.LicenseData?.trim()) {
         licenseFile = "${env.WORKSPACE}/license-data.json"
         writeFile file: licenseFile, text: params.LicenseData
     }
+    def certBodyFile = ''
+    if (params.CertificateBody?.trim()) {
+        certBodyFile = "${env.WORKSPACE}/certificate-body.pem"
+        writeFile file: certBodyFile, text: params.CertificateBody
+    }
+    def certKeyFile = ''
+    if (params.CertificatePrivateKey?.trim()) {
+        certKeyFile = "${env.WORKSPACE}/certificate-private-key.pem"
+        writeFile file: certKeyFile, text: params.CertificatePrivateKey
+    }
+    def certChainFile = ''
+    if (params.CertificateChain?.trim()) {
+        certChainFile = "${env.WORKSPACE}/certificate-chain.pem"
+        writeFile file: certChainFile, text: params.CertificateChain
+    }
 
-    withCredentials(secretBindings) {
+    withCredentials([[
+        $class: 'AmazonWebServicesCredentialsBinding',
+        credentialsId: params.AwsCredentialsId
+    ]]) {
         def args = []
         args << "--stack-name '${params.StackName}'"
         args << "--region '${params.Region}'"
@@ -267,22 +253,16 @@ def runDeploy(boolean planOnly) {
         if (params.OidcSuperadminEmails?.trim()) args << "--oidc-superadmin-emails '${params.OidcSuperadminEmails}'"
         if (licenseFile)                        args << "--license-data-file '${licenseFile}'"
 
-        // Secrets reference the env vars that withCredentials populated.
-        // Single-quote the flag name and let the shell expand the var inside
-        // double quotes so the value is not echoed in the build console.
+        // Pasted-in install secrets.  The hash goes on the command line; the
+        // PEMs go through workspace files written above.  Jenkins masks the
+        // password() value in the build log automatically.
         def secretArgs = []
-        if (params.DexAdminPasswordHashCredentialId?.trim()) {
-            secretArgs << "--dex-admin-password-hash \"\$DEX_ADMIN_PASSWORD_HASH\""
+        if (params.DexAdminPasswordHash?.trim()) {
+            secretArgs << "--dex-admin-password-hash '${params.DexAdminPasswordHash}'"
         }
-        if (params.CertificateBodyCredentialId?.trim()) {
-            secretArgs << "--certificate-body-file \"\$CERT_BODY_FILE\""
-        }
-        if (params.CertificatePrivateKeyCredentialId?.trim()) {
-            secretArgs << "--certificate-private-key-file \"\$CERT_PRIVATE_KEY_FILE\""
-        }
-        if (params.CertificateChainCredentialId?.trim()) {
-            secretArgs << "--certificate-chain-file \"\$CERT_CHAIN_FILE\""
-        }
+        if (certBodyFile)  secretArgs << "--certificate-body-file '${certBodyFile}'"
+        if (certKeyFile)   secretArgs << "--certificate-private-key-file '${certKeyFile}'"
+        if (certChainFile) secretArgs << "--certificate-chain-file '${certChainFile}'"
 
         def joined = (args + secretArgs).join(' \\\n    ')
         def tail = planOnly ? ' \\\n    --no-execute' : ''
