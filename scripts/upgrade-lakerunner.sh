@@ -189,7 +189,7 @@ EOF
 # and must invoke `aws cloudformation` directly.  Tests/test_upgrade_lakerunner_lint.py
 # enforces this — keep it that way.
 # ---------------------------------------------------------------------------
-cfn() {
+cfntool() {
     if [ -n "$deployer_role_arn" ]; then
         aws cloudformation "$@" --role-arn "$deployer_role_arn"
     else
@@ -326,7 +326,7 @@ main() {
 
     change_set_name="${CHANGE_SET_PREFIX}$(date +%s)"
     log "creating change set: $change_set_name"
-    cfn create-change-set \
+    cfntool create-change-set \
         --stack-name "$stack_name" \
         --change-set-name "$change_set_name" \
         --change-set-type UPDATE \
