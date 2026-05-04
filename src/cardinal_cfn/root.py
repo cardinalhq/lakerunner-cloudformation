@@ -188,39 +188,47 @@ def build() -> Template:
                           description="Optional YAML override for API keys.")
     add_no_echo_parameter(t, "StorageProfilesOverride",
                           description="Optional YAML override for storage profiles.")
-    add_no_echo_parameter(
-        t, "CertificateBody",
-        description=(
+    t.add_parameter(Parameter(
+        "CertificateBody",
+        Type="String",
+        Default="",
+        Description=(
             "PEM-encoded certificate. Required when CertificateArn is empty; "
             "ignored otherwise."
         ),
-    )
-    add_no_echo_parameter(
-        t, "CertificatePrivateKey",
-        description=(
+    ))
+    t.add_parameter(Parameter(
+        "CertificatePrivateKey",
+        Type="String",
+        Default="",
+        Description=(
             "PEM-encoded private key. Required when CertificateArn is empty; "
             "ignored otherwise."
         ),
-    )
-    add_no_echo_parameter(
-        t, "CertificateChain",
-        description=(
+    ))
+    t.add_parameter(Parameter(
+        "CertificateChain",
+        Type="String",
+        Default="",
+        Description=(
             "Optional PEM-encoded chain of intermediate certificates. Used "
             "when CertificateArn is empty."
         ),
-    )
+    ))
     t.add_parameter(Parameter(
         "DexAdminEmail",
         Type="String",
         Default="admin@cardinal.local",
         Description="Email address for the DEX local-DB admin login.",
     ))
-    add_no_echo_parameter(
-        t, "DexAdminPasswordHash",
-        description=(
+    t.add_parameter(Parameter(
+        "DexAdminPasswordHash",
+        Type="String",
+        Default="",
+        Description=(
             "Bcrypt hash ($2a$/$2b$/$2y$) of the DEX admin password. Required."
         ),
-    )
+    ))
     t.add_parameter(Parameter(
         "OidcSuperadminEmails",
         Type="String",

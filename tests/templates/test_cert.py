@@ -19,10 +19,10 @@ def test_required_parameters(template_dict):
         assert n in template_dict["Parameters"], f"missing parameter: {n}"
 
 
-def test_pem_parameters_are_no_echo(template_dict):
+def test_pem_parameters_not_no_echo(template_dict):
     for n in ("CertificateBody", "CertificatePrivateKey", "CertificateChain"):
-        assert template_dict["Parameters"][n].get("NoEcho") is True, (
-            f"{n} must be NoEcho=true"
+        assert "NoEcho" not in template_dict["Parameters"][n], (
+            f"{n} must be a plain text parameter, not NoEcho"
         )
 
 

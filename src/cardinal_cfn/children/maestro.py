@@ -52,7 +52,6 @@ from cardinal_cfn.images import add_image_override
 from cardinal_cfn.naming import cardinal_tags
 from cardinal_cfn.parameters import (
     add_install_id_parameters,
-    add_no_echo_parameter,
     add_parameter_group_metadata,
 )
 
@@ -248,15 +247,16 @@ def build() -> Template:
             ),
         )
     )
-    add_no_echo_parameter(
-        t,
+    t.add_parameter(Parameter(
         "DexAdminPasswordHash",
-        description=(
+        Type="String",
+        Default="",
+        Description=(
             "Bcrypt hash of the DEX admin password. Generate with "
-            "`htpasswd -bnBC 10 \"\" 'your-password' | tr -d ':\\n' | sed 's/^/$/' | sed 's/2y/2a/'` "
-            "(or any bcrypt $2a$/$2b$/$2y$ hash). Required."
+            "`htpasswd -bnBC 10 \"\" 'your-password' | cut -d: -f2`. "
+            "Accepts $2a$/$2b$/$2y$. Required."
         ),
-    )
+    ))
 
     # ---------------------------------------------------------------------
     # Console parameter grouping

@@ -51,21 +51,18 @@ def build() -> Template:
         "CertificateBody",
         Type="String",
         Default="",
-        NoEcho=True,
         Description="PEM-encoded certificate. Required when CertificateArn is empty.",
     ))
     t.add_parameter(Parameter(
         "CertificatePrivateKey",
         Type="String",
         Default="",
-        NoEcho=True,
         Description="PEM-encoded private key. Required when CertificateArn is empty.",
     ))
     t.add_parameter(Parameter(
         "CertificateChain",
         Type="String",
         Default="",
-        NoEcho=True,
         Description="Optional PEM-encoded chain of intermediate certificates.",
     ))
 
