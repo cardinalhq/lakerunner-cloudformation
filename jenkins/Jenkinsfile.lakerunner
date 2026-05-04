@@ -1,0 +1,294 @@
+// Jenkins pipeline that deploys a single cardinal-lakerunner CloudFormation
+// stack via scripts/deploy-lakerunner.sh.  The script auto-detects mode:
+// missing stack -> install (CREATE), existing stack -> upgrade (UPDATE).
+// Install-only parameters (Vpc, subnets, license, DEX hash, etc.) are passed
+// on every run but ignored on UPDATE.
+//
+// Per-install setup: copy this file into a Jenkins job (Pipeline script from
+// SCM), then edit the parameter defaults below to match that install's stack
+// name, region, credentials binding ID, and -- for install -- networking
+// values plus the credential IDs of the secret bindings.  All deploy
+// behaviour lives in the shell script; this file is a thin wrapper.
+//
+// See docs/operations/jenkins-deploy.md for prerequisites and usage.
+
+pipeline {
+    agent any
+
+    parameters {
+        string(
+            name: 'StackName',
+            defaultValue: 'cardinal-lakerunner',
+            description: 'CloudFormation stack name.  Missing stack -> install; existing stack -> upgrade.'
+        )
+        string(
+            name: 'Region',
+            defaultValue: 'us-east-2',
+            description: 'AWS region.'
+        )
+        string(
+            name: 'TemplateBaseUrl',
+            defaultValue: 'https://cardinal-cfn.s3.us-east-2.amazonaws.com/lakerunner',
+            description: 'Published template prefix.  Override for air-gapped mirrors.'
+        )
+        string(
+            name: 'Version',
+            defaultValue: '',
+            description: 'Published template tag (e.g. v0.0.38). REQUIRED. There is no "latest" tag in the published bucket; every deploy is to an explicit version.'
+        )
+        string(
+            name: 'DeployerRoleArn',
+            defaultValue: '',
+            description: 'Optional CloudFormation service role ARN (--role-arn).  Strongly recommended; see docs/operations/deploying.md.'
+        )
+        booleanParam(
+            name: 'AutoApprove',
+            defaultValue: true,
+            description: 'When false, the pipeline pauses for manual approval after the change set is described.'
+        )
+        booleanParam(
+            name: 'RefreshImageDefaults',
+            defaultValue: true,
+            description: 'UPGRADE only: when true, *Image parameters take the new template defaults; when false, they carry forward.'
+        )
+        string(
+            name: 'AwsCredentialsId',
+            defaultValue: 'aws-cardinal-deploy',
+            description: 'Jenkins AWS Credentials plugin binding ID.'
+        )
+
+        // ---- Install-only (ignored on upgrade) ----
+        string(
+            name: 'VpcId',
+            defaultValue: '',
+            description: 'INSTALL: VPC ID (e.g. vpc-0abc...).  Required for new installs.'
+        )
+        string(
+            name: 'PrivateSubnets',
+            defaultValue: '',
+            description: 'INSTALL: comma-separated private subnet IDs.  Required for new installs.'
+        )
+        string(
+            name: 'PublicSubnets',
+            defaultValue: '',
+            description: 'INSTALL: comma-separated public subnet IDs.  Required if AlbScheme=internet-facing.'
+        )
+        string(
+            name: 'AlbScheme',
+            defaultValue: 'internal',
+            description: 'INSTALL: ALB scheme (internal or internet-facing).'
+        )
+        string(
+            name: 'CertificateArn',
+            defaultValue: '',
+            description: 'INSTALL: existing ACM cert ARN.  Leave empty to import PEMs via the credential bindings below.'
+        )
+        text(
+            name: 'LicenseData',
+            defaultValue: '',
+            description: 'INSTALL: license JSON content.  Visible in the build UI on purpose so you can verify it before running.'
+        )
+        string(
+            name: 'DexAdminEmail',
+            defaultValue: 'admin@cardinal.local',
+            description: 'INSTALL: DEX admin login email.'
+        )
+        string(
+            name: 'OidcSuperadminEmails',
+            defaultValue: '',
+            description: 'INSTALL: comma-separated maestro superadmin email allowlist.  Defaults to DexAdminEmail when empty.'
+        )
+
+        // ---- Install-only secrets, sourced from Jenkins credentials ----
+        string(
+            name: 'DexAdminPasswordHashCredentialId',
+            defaultValue: '',
+            description: 'INSTALL: Jenkins Secret Text credential ID containing the bcrypt hash of the DEX admin password.  Required for install.'
+        )
+        string(
+            name: 'CertificateBodyCredentialId',
+            defaultValue: '',
+            description: 'INSTALL (optional): Jenkins Secret File credential ID with the PEM certificate.  Used only when CertificateArn is empty.'
+        )
+        string(
+            name: 'CertificatePrivateKeyCredentialId',
+            defaultValue: '',
+            description: 'INSTALL (optional): Jenkins Secret File credential ID with the PEM private key.  Used only when CertificateArn is empty.'
+        )
+        string(
+            name: 'CertificateChainCredentialId',
+            defaultValue: '',
+            description: 'INSTALL (optional): Jenkins Secret File credential ID with the intermediate chain PEM.'
+        )
+    }
+
+    options {
+        timestamps()
+        disableConcurrentBuilds()
+        timeout(time: 60, unit: 'MINUTES')
+    }
+
+    stages {
+        stage('Setup') {
+            steps {
+                script {
+                    if (!params.StackName?.trim()) {
+                        error('StackName is required.')
+                    }
+                    if (!params.Region?.trim()) {
+                        error('Region is required.')
+                    }
+                    if (!params.Version?.trim()) {
+                        error('Version is required (e.g. v0.0.38). There is no "latest" tag.')
+                    }
+                }
+                echo "Stack: ${params.StackName}  Region: ${params.Region}  Version: ${params.Version}"
+            }
+        }
+
+        stage('Plan') {
+            steps {
+                script {
+                    runDeploy(true)
+                }
+            }
+        }
+
+        stage('Approval') {
+            when {
+                expression { return !params.AutoApprove }
+            }
+            steps {
+                input(message: 'Apply this change set?', ok: 'Apply')
+            }
+        }
+
+        stage('Apply') {
+            steps {
+                script {
+                    runDeploy(false)
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            withCredentials([[
+                $class: 'AmazonWebServicesCredentialsBinding',
+                credentialsId: params.AwsCredentialsId
+            ]]) {
+                sh """
+                    set +e
+                    aws cloudformation list-change-sets \\
+                        --stack-name '${params.StackName}' \\
+                        --region '${params.Region}' \\
+                        --query "Summaries[?starts_with(ChangeSetName, 'cardinal-deploy-') && (Status=='CREATE_COMPLETE' || Status=='CREATE_PENDING')].ChangeSetName" \\
+                        --output text 2>/dev/null \\
+                    | tr '\\t' '\\n' \\
+                    | while read cs; do
+                        if [ -n "\$cs" ]; then
+                            echo "cleanup: deleting pending change set \$cs"
+                            aws cloudformation delete-change-set \\
+                                --stack-name '${params.StackName}' \\
+                                --change-set-name "\$cs" \\
+                                --region '${params.Region}' >/dev/null 2>&1 || true
+                        fi
+                    done
+                    exit 0
+                """
+            }
+        }
+    }
+}
+
+// Run the deploy script.  When planOnly is true, --no-execute is appended.
+//
+// The shell line is built dynamically so install-only flags are only emitted
+// when their corresponding job parameter is non-empty.  Secrets (DEX hash,
+// PEMs) are bound via Jenkins credentials and reach the shell as env vars
+// (DEX_ADMIN_PASSWORD_HASH) or file paths (CERT_*_FILE).
+def runDeploy(boolean planOnly) {
+    def secretBindings = []
+    secretBindings << [
+        $class: 'AmazonWebServicesCredentialsBinding',
+        credentialsId: params.AwsCredentialsId
+    ]
+    if (params.DexAdminPasswordHashCredentialId?.trim()) {
+        secretBindings << string(
+            credentialsId: params.DexAdminPasswordHashCredentialId,
+            variable: 'DEX_ADMIN_PASSWORD_HASH'
+        )
+    }
+    if (params.CertificateBodyCredentialId?.trim()) {
+        secretBindings << file(
+            credentialsId: params.CertificateBodyCredentialId,
+            variable: 'CERT_BODY_FILE'
+        )
+    }
+    if (params.CertificatePrivateKeyCredentialId?.trim()) {
+        secretBindings << file(
+            credentialsId: params.CertificatePrivateKeyCredentialId,
+            variable: 'CERT_PRIVATE_KEY_FILE'
+        )
+    }
+    if (params.CertificateChainCredentialId?.trim()) {
+        secretBindings << file(
+            credentialsId: params.CertificateChainCredentialId,
+            variable: 'CERT_CHAIN_FILE'
+        )
+    }
+
+    // The license text is visible by design.  Materialize it to a workspace
+    // file so multi-line / special-char content survives the shell hop.
+    def licenseFile = ''
+    if (params.LicenseData?.trim()) {
+        licenseFile = "${env.WORKSPACE}/license-data.json"
+        writeFile file: licenseFile, text: params.LicenseData
+    }
+
+    withCredentials(secretBindings) {
+        def args = []
+        args << "--stack-name '${params.StackName}'"
+        args << "--region '${params.Region}'"
+        args << "--template-base-url '${params.TemplateBaseUrl}'"
+        args << "--version '${params.Version}'"
+        if (params.DeployerRoleArn?.trim()) {
+            args << "--deployer-role-arn '${params.DeployerRoleArn}'"
+        }
+        args << (params.RefreshImageDefaults ? '--refresh-image-defaults' : '--no-refresh-image-defaults')
+
+        if (params.VpcId?.trim())               args << "--vpc-id '${params.VpcId}'"
+        if (params.PrivateSubnets?.trim())      args << "--private-subnets '${params.PrivateSubnets}'"
+        if (params.PublicSubnets?.trim())       args << "--public-subnets '${params.PublicSubnets}'"
+        if (params.AlbScheme?.trim())           args << "--alb-scheme '${params.AlbScheme}'"
+        if (params.CertificateArn?.trim())      args << "--certificate-arn '${params.CertificateArn}'"
+        if (params.DexAdminEmail?.trim())       args << "--dex-admin-email '${params.DexAdminEmail}'"
+        if (params.OidcSuperadminEmails?.trim()) args << "--oidc-superadmin-emails '${params.OidcSuperadminEmails}'"
+        if (licenseFile)                        args << "--license-data-file '${licenseFile}'"
+
+        // Secrets reference the env vars that withCredentials populated.
+        // Single-quote the flag name and let the shell expand the var inside
+        // double quotes so the value is not echoed in the build console.
+        def secretArgs = []
+        if (params.DexAdminPasswordHashCredentialId?.trim()) {
+            secretArgs << "--dex-admin-password-hash \"\$DEX_ADMIN_PASSWORD_HASH\""
+        }
+        if (params.CertificateBodyCredentialId?.trim()) {
+            secretArgs << "--certificate-body-file \"\$CERT_BODY_FILE\""
+        }
+        if (params.CertificatePrivateKeyCredentialId?.trim()) {
+            secretArgs << "--certificate-private-key-file \"\$CERT_PRIVATE_KEY_FILE\""
+        }
+        if (params.CertificateChainCredentialId?.trim()) {
+            secretArgs << "--certificate-chain-file \"\$CERT_CHAIN_FILE\""
+        }
+
+        def joined = (args + secretArgs).join(' \\\n    ')
+        def tail = planOnly ? ' \\\n    --no-execute' : ''
+        sh """
+            sh scripts/deploy-lakerunner.sh \\
+    ${joined}${tail}
+        """
+    }
+}

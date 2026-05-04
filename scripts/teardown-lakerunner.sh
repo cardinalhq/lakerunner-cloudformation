@@ -3,7 +3,7 @@
 # the resources it intentionally retains: the ingest S3 bucket, the license /
 # admin-api-key / db-master secrets, and the RDS final snapshot.
 #
-# Companion to scripts/upgrade-lakerunner.sh.  Self-contained: depends only on
+# Companion to scripts/deploy-lakerunner.sh.  Self-contained: depends only on
 # a POSIX shell, the AWS CLI v2, and jq.
 #
 # Resources retained by design (see src/cardinal_cfn/policies.py):
