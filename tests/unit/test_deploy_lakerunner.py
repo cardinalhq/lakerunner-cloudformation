@@ -1,13 +1,14 @@
-"""Tests for the standalone upgrade-lakerunner.sh script.
+"""Tests for the standalone deploy-lakerunner.sh script.
 
 The script is shell + jq + AWS CLI. To keep its parameter-resolution logic
-testable without AWS or shellcheck-style guesswork, the script exposes two
+testable without AWS or shellcheck-style guesswork, the script exposes
 internal-only flags used by these tests:
 
 - --internal-resolve-params <new-template-params.json> <current-stack-params.json>
+- --internal-resolve-create-params <new-template-params.json> <overrides.json>
 - --internal-classify-changeset-status <status> <status-reason>
 
-Both run pure data transforms with no AWS calls and no side effects.
+All three run pure data transforms with no AWS calls and no side effects.
 """
 
 import json
@@ -19,7 +20,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-SCRIPT = REPO_ROOT / "scripts" / "upgrade-lakerunner.sh"
+SCRIPT = REPO_ROOT / "scripts" / "deploy-lakerunner.sh"
 
 
 def _write(path: Path, payload):
@@ -328,3 +329,139 @@ def test_classify_real_failure_is_failure():
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "failure"
+
+
+# ---------------------------------------------------------------------------
+# CREATE-mode parameter resolution.
+# ---------------------------------------------------------------------------
+
+def _run_resolve_create(tmp_path, new_template_params, overrides):
+    new_path = tmp_path / "new.json"
+    ovr_path = tmp_path / "overrides.json"
+    _write(new_path, new_template_params)
+    _write(ovr_path, overrides)
+    return subprocess.run(
+        [
+            "sh",
+            str(SCRIPT),
+            "--internal-resolve-create-params",
+            str(new_path),
+            str(ovr_path),
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_create_uses_override_when_supplied(tmp_path):
+    _require_jq()
+    new_template = [
+        {"ParameterKey": "VpcId", "ParameterType": "AWS::EC2::VPC::Id"},
+    ]
+    overrides = {"VpcId": "vpc-0abc123"}
+    result = _run_resolve_create(tmp_path, new_template, overrides)
+    assert result.returncode == 0, result.stderr
+    out = _by_key(json.loads(result.stdout))
+    assert out["VpcId"] == {"ParameterKey": "VpcId", "ParameterValue": "vpc-0abc123"}
+
+
+def test_create_uses_template_default_when_no_override(tmp_path):
+    _require_jq()
+    new_template = [
+        {
+            "ParameterKey": "AlbScheme",
+            "DefaultValue": "internal",
+            "ParameterType": "String",
+        },
+    ]
+    overrides = {}
+    result = _run_resolve_create(tmp_path, new_template, overrides)
+    assert result.returncode == 0, result.stderr
+    out = _by_key(json.loads(result.stdout))
+    assert out["AlbScheme"] == {"ParameterKey": "AlbScheme", "ParameterValue": "internal"}
+
+
+def test_create_override_beats_template_default(tmp_path):
+    _require_jq()
+    new_template = [
+        {
+            "ParameterKey": "DexAdminEmail",
+            "DefaultValue": "admin@cardinal.local",
+            "ParameterType": "String",
+        },
+    ]
+    overrides = {"DexAdminEmail": "ops@example.com"}
+    result = _run_resolve_create(tmp_path, new_template, overrides)
+    assert result.returncode == 0, result.stderr
+    out = _by_key(json.loads(result.stdout))
+    assert out["DexAdminEmail"] == {
+        "ParameterKey": "DexAdminEmail",
+        "ParameterValue": "ops@example.com",
+    }
+
+
+def test_create_required_param_missing_fails_loudly(tmp_path):
+    _require_jq()
+    new_template = [
+        {"ParameterKey": "VpcId", "ParameterType": "AWS::EC2::VPC::Id"},
+        {"ParameterKey": "PrivateSubnets", "ParameterType": "CommaDelimitedList"},
+        {"ParameterKey": "LicenseData", "ParameterType": "String"},
+    ]
+    overrides = {"VpcId": "vpc-0abc123"}  # PrivateSubnets and LicenseData missing
+    result = _run_resolve_create(tmp_path, new_template, overrides)
+    assert result.returncode == 2, (
+        f"expected exit 2, got {result.returncode}: {result.stderr}"
+    )
+    assert "PrivateSubnets" in result.stderr
+    assert "LicenseData" in result.stderr
+
+
+def test_create_full_install_mix(tmp_path):
+    """Realistic install: VpcId/Subnets/License from CLI overrides, *Image and
+    AlbScheme from template defaults, DexAdminEmail overridden by CLI."""
+    _require_jq()
+    new_template = [
+        {"ParameterKey": "VpcId", "ParameterType": "AWS::EC2::VPC::Id"},
+        {"ParameterKey": "PrivateSubnets", "ParameterType": "CommaDelimitedList"},
+        {
+            "ParameterKey": "AlbScheme",
+            "DefaultValue": "internal",
+            "ParameterType": "String",
+        },
+        {
+            "ParameterKey": "LakerunnerImage",
+            "DefaultValue": "public.ecr.aws/cardinalhq/lakerunner:1.20.0",
+            "ParameterType": "String",
+        },
+        {
+            "ParameterKey": "DexAdminEmail",
+            "DefaultValue": "admin@cardinal.local",
+            "ParameterType": "String",
+        },
+        {"ParameterKey": "DexAdminPasswordHash", "ParameterType": "String"},
+        {"ParameterKey": "LicenseData", "ParameterType": "String"},
+        {
+            "ParameterKey": "TemplateBaseUrl",
+            "DefaultValue": "https://example.com/v9.9.9/cardinal-lakerunner/",
+            "ParameterType": "String",
+        },
+    ]
+    overrides = {
+        "VpcId": "vpc-0abc123",
+        "PrivateSubnets": "subnet-1,subnet-2",
+        "DexAdminEmail": "ops@example.com",
+        "DexAdminPasswordHash": "$2b$12$abcdef",
+        "LicenseData": '{"customer":"acme"}',
+        "TemplateBaseUrl": "https://my-mirror.example.com/v9.9.9/cardinal-lakerunner/",
+    }
+    result = _run_resolve_create(tmp_path, new_template, overrides)
+    assert result.returncode == 0, result.stderr
+    out = _by_key(json.loads(result.stdout))
+    assert out["VpcId"]["ParameterValue"] == "vpc-0abc123"
+    assert out["PrivateSubnets"]["ParameterValue"] == "subnet-1,subnet-2"
+    assert out["AlbScheme"]["ParameterValue"] == "internal"  # template default
+    assert out["LakerunnerImage"]["ParameterValue"].endswith("1.20.0")
+    assert out["DexAdminEmail"]["ParameterValue"] == "ops@example.com"  # CLI overrides default
+    assert out["DexAdminPasswordHash"]["ParameterValue"].startswith("$2b$12$")
+    assert out["LicenseData"]["ParameterValue"] == '{"customer":"acme"}'
+    assert out["TemplateBaseUrl"]["ParameterValue"].startswith("https://my-mirror.example.com")

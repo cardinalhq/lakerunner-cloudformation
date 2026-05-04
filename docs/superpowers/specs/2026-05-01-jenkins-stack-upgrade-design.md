@@ -2,6 +2,13 @@
 
 Date: 2026-05-01
 
+> **Historical note (2026-05-04):** The pipeline grew to handle initial install
+> in addition to upgrade. Current names are `scripts/deploy-lakerunner.sh`,
+> `jenkins/Jenkinsfile.lakerunner`, and `docs/operations/jenkins-deploy.md`.
+> Mode is auto-detected from `describe-stacks`. The parameter-resolution rules
+> below still describe the UPDATE path; CREATE-mode resolution is documented
+> in the operator doc.
+
 ## Goal
 
 Ship a Jenkins job template plus an extracted driving script that customers (and Cardinal itself) use to safely upgrade an existing `cardinal-lakerunner` CloudFormation stack to a newer published template version. Design favors the common case — published templates ship with refreshed image defaults — while leaving every other parameter untouched.

@@ -1,30 +1,53 @@
 #!/bin/sh
-# Safely upgrade an existing cardinal-lakerunner CloudFormation stack to a
-# newer published template version.
+# Deploy a cardinal-lakerunner CloudFormation stack -- create it if missing,
+# otherwise upgrade it in place to the requested template version.
 #
 # Self-contained: depends only on a POSIX shell, the AWS CLI v2, jq, and curl.
 # Does not depend on the cardinal_cfn Python package or any other contents of
 # the lakerunner-cloudformation repo.
 #
-# See docs/superpowers/specs/2026-05-01-jenkins-stack-upgrade-design.md for the
-# full design.
+# Mode is auto-detected from describe-stacks: missing stack -> CREATE,
+# existing stack -> UPDATE.  Install-only flags are ignored on UPDATE.
+#
+# See docs/operations/jenkins-deploy.md for operator documentation and
+# docs/superpowers/specs/2026-05-01-jenkins-stack-upgrade-design.md for the
+# original upgrade-only design (this script is the create-or-update successor).
 
 set -eu
 
 DEFAULT_TEMPLATE_BASE_URL="https://cardinal-cfn.s3.us-east-2.amazonaws.com/lakerunner"
-DEFAULT_VERSION="latest"
-CHANGE_SET_PREFIX="cardinal-upgrade-"
+CHANGE_SET_PREFIX="cardinal-deploy-"
 
+# There is no "latest" tag in the published template bucket -- only versioned
+# tags (vX.Y.Z).  --version is required; defaulting to "latest" silently 404s.
 stack_name=""
 region=""
 template_base_url="$DEFAULT_TEMPLATE_BASE_URL"
-version="$DEFAULT_VERSION"
+version=""
 deployer_role_arn=""
 refresh_image_defaults="true"
 no_execute="false"
+
+# Install-only flags.  Ignored on UPDATE.
+cli_vpc_id=""
+cli_private_subnets=""
+cli_public_subnets=""
+cli_alb_scheme=""
+cli_certificate_arn=""
+cli_dex_admin_email=""
+cli_dex_admin_password_hash=""
+cli_oidc_superadmin_emails=""
+cli_license_data_file=""
+cli_certificate_body_file=""
+cli_certificate_private_key_file=""
+cli_certificate_chain_file=""
+
+# Internal test hooks.
 internal_resolve_params=""
 internal_resolve_params_arg2=""
 internal_resolve_params_tbu=""
+internal_resolve_create_params=""
+internal_resolve_create_params_arg2=""
 internal_classify_status=""
 internal_classify_reason=""
 
@@ -34,18 +57,32 @@ work_dir=""
 
 usage() {
     cat <<'EOF'
-Usage: upgrade-lakerunner.sh [options]
+Usage: deploy-lakerunner.sh [options]
 
 Required:
-  --stack-name NAME           Existing stack to upgrade.
-  --region    REGION          AWS region of the stack.
+  --stack-name NAME           Stack to create or upgrade.
+  --region    REGION          AWS region.
+  --version   VERSION         Published template tag, e.g. v0.0.38.
 
-Optional:
+Optional (both modes):
   --template-base-url URL     Default: https://cardinal-cfn.s3.us-east-2.amazonaws.com/lakerunner
-  --version VERSION           Default: latest
-  --deployer-role-arn ARN     Pass via --role-arn to all CloudFormation calls.
-  --no-refresh-image-defaults Carry image params forward instead of taking new template defaults.
+  --deployer-role-arn ARN     Pass via --role-arn to create-change-set.
+  --no-refresh-image-defaults UPDATE only: carry image params forward.
   --no-execute                Create and describe the change set, then stop.
+
+Install-only (used when the stack does not yet exist; ignored on UPDATE):
+  --vpc-id VPC                Required for install.
+  --private-subnets CSV       Required for install (comma-separated subnet IDs).
+  --public-subnets CSV        Required when --alb-scheme=internet-facing.
+  --alb-scheme SCHEME         internal | internet-facing
+  --certificate-arn ARN       Existing ACM cert (alternative to PEM import).
+  --certificate-body-file PATH         PEM cert (used when --certificate-arn empty).
+  --certificate-private-key-file PATH  PEM private key (used when --certificate-arn empty).
+  --certificate-chain-file PATH        Optional intermediate chain PEM.
+  --dex-admin-email EMAIL     DEX admin login (default: admin@cardinal.local).
+  --dex-admin-password-hash HASH       Bcrypt hash for the DEX admin password. Required for install.
+  --oidc-superadmin-emails CSV         Comma-separated maestro superadmin allowlist.
+  --license-data-file PATH    Path to license JSON. Required for install.
 
 Exit codes:
   0  success or no-op
@@ -55,20 +92,19 @@ EOF
 }
 
 log() {
-    printf '[%s] %s\n' "upgrade-lakerunner" "$*" >&2
+    printf '[%s] %s\n' "deploy-lakerunner" "$*" >&2
 }
 
 fail() {
     code="$1"
     shift
-    printf '[upgrade-lakerunner] ERROR: %s\n' "$*" >&2
+    printf '[deploy-lakerunner] ERROR: %s\n' "$*" >&2
     exit "$code"
 }
 
 # ---------------------------------------------------------------------------
-# Internal: pure parameter-resolution function used by tests and by the main
-# pipeline.  Reads two JSON files, prints the resolved parameters list to
-# stdout.
+# Internal: pure parameter-resolution function for UPDATE mode.  Reads two
+# JSON files, prints the resolved parameters list to stdout.
 # ---------------------------------------------------------------------------
 resolve_params() {
     new_template_file="$1"
@@ -129,6 +165,53 @@ resolve_params() {
 }
 
 # ---------------------------------------------------------------------------
+# Internal: pure parameter-resolution function for CREATE mode.  Reads the
+# new template params and a JSON object of CLI-supplied overrides keyed by
+# ParameterKey, prints the resolved parameters list to stdout.
+# ---------------------------------------------------------------------------
+resolve_create_params() {
+    new_template_file="$1"
+    overrides_file="$2"
+
+    if [ ! -r "$new_template_file" ]; then
+        fail 2 "cannot read template-summary file: $new_template_file"
+    fi
+    if [ ! -r "$overrides_file" ]; then
+        fail 2 "cannot read overrides file: $overrides_file"
+    fi
+
+    resolved=$(jq -nc \
+        --slurpfile newp "$new_template_file" \
+        --slurpfile ovr "$overrides_file" \
+        '
+        ($newp[0] // []) as $newparams
+        | ($ovr[0] // {}) as $overrides
+        | $newparams
+        | map(
+            . as $p
+            | $p.ParameterKey as $k
+            | ($overrides | has($k)) as $rule_override
+            | (has("DefaultValue")) as $rule_default
+            | if $rule_override then
+                {ParameterKey: $k, ParameterValue: $overrides[$k]}
+              elif $rule_default then
+                {ParameterKey: $k, ParameterValue: $p.DefaultValue}
+              else
+                {ParameterKey: $k, _missing: true}
+              end
+          )
+        '
+    )
+
+    missing=$(printf '%s' "$resolved" | jq -r '[.[] | select(._missing == true) | .ParameterKey] | join(", ")')
+    if [ -n "$missing" ]; then
+        fail 2 "create requires values for parameter(s) with no default and no flag: $missing"
+    fi
+
+    printf '%s\n' "$resolved" | jq '.'
+}
+
+# ---------------------------------------------------------------------------
 # Internal: classify a change set status + reason as one of {success, noop,
 # failure}.  Used by tests and by the main pipeline.
 # ---------------------------------------------------------------------------
@@ -168,7 +251,7 @@ preflight() {
     done
     if [ -n "$missing" ]; then
         cat >&2 <<EOF
-[upgrade-lakerunner] ERROR: required tool(s) not found:$missing
+[deploy-lakerunner] ERROR: required tool(s) not found:$missing
 Install hints:
   Debian/Ubuntu : sudo apt-get install -y awscli jq curl
   Amazon Linux  : sudo yum install -y aws-cli jq curl
@@ -186,8 +269,8 @@ EOF
 # CFN attaches the role to the change set itself, then uses that role during
 # execute-change-set automatically.  All other AWS CLI calls (including
 # execute-change-set, get-template-summary, describe-*, wait) reject --role-arn
-# and must invoke `aws cloudformation` directly.  Tests/test_upgrade_lakerunner_lint.py
-# enforces this — keep it that way.
+# and must invoke `aws cloudformation` directly.  tests/test_deploy_lakerunner_lint.py
+# enforces this -- keep it that way.
 # ---------------------------------------------------------------------------
 cfntool() {
     if [ -n "$deployer_role_arn" ]; then
@@ -229,6 +312,18 @@ parse_args() {
             --refresh-image-defaults) refresh_image_defaults="true"; shift ;;
             --no-refresh-image-defaults) refresh_image_defaults="false"; shift ;;
             --no-execute) no_execute="true"; shift ;;
+            --vpc-id) cli_vpc_id="$2"; shift 2 ;;
+            --private-subnets) cli_private_subnets="$2"; shift 2 ;;
+            --public-subnets) cli_public_subnets="$2"; shift 2 ;;
+            --alb-scheme) cli_alb_scheme="$2"; shift 2 ;;
+            --certificate-arn) cli_certificate_arn="$2"; shift 2 ;;
+            --certificate-body-file) cli_certificate_body_file="$2"; shift 2 ;;
+            --certificate-private-key-file) cli_certificate_private_key_file="$2"; shift 2 ;;
+            --certificate-chain-file) cli_certificate_chain_file="$2"; shift 2 ;;
+            --dex-admin-email) cli_dex_admin_email="$2"; shift 2 ;;
+            --dex-admin-password-hash) cli_dex_admin_password_hash="$2"; shift 2 ;;
+            --oidc-superadmin-emails) cli_oidc_superadmin_emails="$2"; shift 2 ;;
+            --license-data-file) cli_license_data_file="$2"; shift 2 ;;
             --internal-resolve-params)
                 internal_resolve_params="$2"
                 internal_resolve_params_arg2="$3"
@@ -237,6 +332,11 @@ parse_args() {
             --internal-template-base-url)
                 internal_resolve_params_tbu="$2"
                 shift 2
+                ;;
+            --internal-resolve-create-params)
+                internal_resolve_create_params="$2"
+                internal_resolve_create_params_arg2="$3"
+                shift 3
                 ;;
             --internal-classify-changeset-status)
                 internal_classify_status="$2"
@@ -247,6 +347,61 @@ parse_args() {
             *) fail 2 "unknown argument: $1" ;;
         esac
     done
+}
+
+# Read a file's full contents into stdout.  Empty path -> empty output.
+read_file_or_empty() {
+    path="$1"
+    if [ -z "$path" ]; then
+        printf ''
+        return 0
+    fi
+    if [ ! -r "$path" ]; then
+        fail 2 "cannot read file: $path"
+    fi
+    cat "$path"
+}
+
+# Build the create-mode overrides JSON object from CLI flags.  Empty values
+# are omitted so the new-template default applies for those keys.
+build_create_overrides() {
+    out_file="$1"
+    effective_tbu="$2"
+
+    license_data=$(read_file_or_empty "$cli_license_data_file")
+    cert_body=$(read_file_or_empty "$cli_certificate_body_file")
+    cert_pkey=$(read_file_or_empty "$cli_certificate_private_key_file")
+    cert_chain=$(read_file_or_empty "$cli_certificate_chain_file")
+
+    jq -n \
+        --arg vpc_id "$cli_vpc_id" \
+        --arg private_subnets "$cli_private_subnets" \
+        --arg public_subnets "$cli_public_subnets" \
+        --arg alb_scheme "$cli_alb_scheme" \
+        --arg cert_arn "$cli_certificate_arn" \
+        --arg cert_body "$cert_body" \
+        --arg cert_pkey "$cert_pkey" \
+        --arg cert_chain "$cert_chain" \
+        --arg license_data "$license_data" \
+        --arg dex_email "$cli_dex_admin_email" \
+        --arg dex_hash "$cli_dex_admin_password_hash" \
+        --arg oidc_emails "$cli_oidc_superadmin_emails" \
+        --arg tbu "$effective_tbu" \
+        '{
+            VpcId: $vpc_id,
+            PrivateSubnets: $private_subnets,
+            PublicSubnets: $public_subnets,
+            AlbScheme: $alb_scheme,
+            CertificateArn: $cert_arn,
+            CertificateBody: $cert_body,
+            CertificatePrivateKey: $cert_pkey,
+            CertificateChain: $cert_chain,
+            LicenseData: $license_data,
+            DexAdminEmail: $dex_email,
+            DexAdminPasswordHash: $dex_hash,
+            OidcSuperadminEmails: $oidc_emails,
+            TemplateBaseUrl: $tbu
+        } | with_entries(select(.value != ""))' >"$out_file"
 }
 
 main() {
@@ -265,6 +420,15 @@ main() {
             "$internal_resolve_params_tbu"
         return 0
     fi
+    if [ -n "$internal_resolve_create_params" ]; then
+        if ! command -v jq >/dev/null 2>&1; then
+            fail 2 "jq is required for --internal-resolve-create-params"
+        fi
+        resolve_create_params \
+            "$internal_resolve_create_params" \
+            "$internal_resolve_create_params_arg2"
+        return 0
+    fi
     if [ -n "$internal_classify_status" ]; then
         classify_status "$internal_classify_status" "$internal_classify_reason"
         return 0
@@ -272,17 +436,46 @@ main() {
 
     preflight
 
-    if [ -z "$stack_name" ] || [ -z "$region" ]; then
+    if [ -z "$stack_name" ] || [ -z "$region" ] || [ -z "$version" ]; then
         usage >&2
-        fail 2 "--stack-name and --region are required"
+        fail 2 "--stack-name, --region, and --version are required"
     fi
 
-    log "verifying stack $stack_name exists in $region"
-    if ! aws cloudformation describe-stacks \
+    log "checking whether stack $stack_name exists in $region"
+    # REVIEW_IN_PROGRESS is the state CloudFormation puts a stack in after
+    # a CREATE-type change set has been described but never executed (i.e.
+    # `--no-execute` was used and either the change set is still pending
+    # or was deleted manually).  No real resources exist yet; the stack
+    # must be deleted before a new CREATE can be issued, and treating it
+    # as UPDATE would fail because UsePreviousValue cannot supply install-
+    # only parameters.  We auto-recover by deleting it and treating the
+    # stack as nonexistent for mode selection.
+    existing_status=$(aws cloudformation describe-stacks \
             --stack-name "$stack_name" \
-            --region "$region" >/dev/null 2>&1; then
-        fail 2 "stack '$stack_name' not found in region '$region'"
+            --region "$region" \
+            --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo "")
+    if [ "$existing_status" = "REVIEW_IN_PROGRESS" ]; then
+        log "found stale REVIEW_IN_PROGRESS stack; deleting before CREATE"
+        aws cloudformation delete-stack \
+            --stack-name "$stack_name" \
+            --region "$region" >/dev/null 2>&1 || true
+        aws cloudformation wait stack-delete-complete \
+            --stack-name "$stack_name" \
+            --region "$region" >/dev/null 2>&1 || true
+        existing_status=""
     fi
+    if [ -n "$existing_status" ]; then
+        mode="update"
+        cs_type="UPDATE"
+        wait_target="stack-update-complete"
+        target_status="UPDATE_COMPLETE"
+    else
+        mode="create"
+        cs_type="CREATE"
+        wait_target="stack-create-complete"
+        target_status="CREATE_COMPLETE"
+    fi
+    log "mode: $mode"
 
     account_id=$(aws sts get-caller-identity --query Account --output text 2>/dev/null || echo "unknown")
     log "AWS account: $account_id  region: $region  stack: $stack_name"
@@ -303,33 +496,43 @@ main() {
         --query 'Parameters' \
         --output json >"$work_dir/new-params.json"
 
-    log "fetching current stack parameters"
-    aws cloudformation describe-stacks \
-        --stack-name "$stack_name" \
-        --region "$region" \
-        --query 'Stacks[0].Parameters' \
-        --output json >"$work_dir/current-params.json"
-
     # The TemplateBaseUrl parameter encodes the version path nested children
-    # are loaded from.  It MUST track the version we're upgrading to, otherwise
-    # the new root will load the OLD nested templates and fail in confusing
-    # ways.  Compute it from the same flags used to fetch the root template.
+    # are loaded from.  It MUST track the version we're deploying, otherwise
+    # the root will load the OLD nested templates and fail in confusing ways.
     effective_template_base_url="$template_base_url/$version/cardinal-lakerunner/"
 
-    log "resolving parameters (refresh-image-defaults=$refresh_image_defaults, TemplateBaseUrl=$effective_template_base_url)"
-    resolve_params \
-        "$work_dir/new-params.json" \
-        "$work_dir/current-params.json" \
-        "$refresh_image_defaults" \
-        "$effective_template_base_url" \
-        >"$work_dir/parameters.json"
+    if [ "$mode" = "update" ]; then
+        log "fetching current stack parameters"
+        aws cloudformation describe-stacks \
+            --stack-name "$stack_name" \
+            --region "$region" \
+            --query 'Stacks[0].Parameters' \
+            --output json >"$work_dir/current-params.json"
+
+        log "resolving parameters (refresh-image-defaults=$refresh_image_defaults, TemplateBaseUrl=$effective_template_base_url)"
+        resolve_params \
+            "$work_dir/new-params.json" \
+            "$work_dir/current-params.json" \
+            "$refresh_image_defaults" \
+            "$effective_template_base_url" \
+            >"$work_dir/parameters.json"
+    else
+        log "building create-mode overrides from CLI flags"
+        build_create_overrides "$work_dir/overrides.json" "$effective_template_base_url"
+
+        log "resolving parameters (TemplateBaseUrl=$effective_template_base_url)"
+        resolve_create_params \
+            "$work_dir/new-params.json" \
+            "$work_dir/overrides.json" \
+            >"$work_dir/parameters.json"
+    fi
 
     change_set_name="${CHANGE_SET_PREFIX}$(date +%s)"
-    log "creating change set: $change_set_name"
+    log "creating change set: $change_set_name (type=$cs_type)"
     cfntool create-change-set \
         --stack-name "$stack_name" \
         --change-set-name "$change_set_name" \
-        --change-set-type UPDATE \
+        --change-set-type "$cs_type" \
         --template-url "$template_url" \
         --parameters "file://$work_dir/parameters.json" \
         --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
@@ -399,15 +602,15 @@ main() {
         --change-set-name "$change_set_name" \
         --region "$region" >/dev/null
 
-    log "waiting for stack-update-complete"
-    if ! aws cloudformation wait stack-update-complete \
+    log "waiting for $wait_target"
+    if ! aws cloudformation wait "$wait_target" \
             --stack-name "$stack_name" \
             --region "$region"; then
         final_status=$(aws cloudformation describe-stacks \
             --stack-name "$stack_name" \
             --region "$region" \
             --query 'Stacks[0].StackStatus' --output text)
-        fail 1 "stack did not reach UPDATE_COMPLETE; final status: $final_status"
+        fail 1 "stack did not reach $target_status; final status: $final_status"
     fi
 
     change_set_name=""
@@ -419,7 +622,7 @@ main() {
         --query 'Stacks[0].Outputs' \
         --output table
 
-    log "upgrade complete"
+    log "deploy complete (mode=$mode)"
     return 0
 }
 

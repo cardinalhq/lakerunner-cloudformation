@@ -1,4 +1,4 @@
-"""Lint tests for the upgrade-lakerunner.sh script.
+"""Lint tests for the deploy-lakerunner.sh script.
 
 These tests soft-skip when their respective tools are not on PATH so that
 contributors and CI runners without shellcheck installed are not blocked.
@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-SCRIPT = REPO_ROOT / "scripts" / "upgrade-lakerunner.sh"
+SCRIPT = REPO_ROOT / "scripts" / "deploy-lakerunner.sh"
 
 
 def test_script_is_executable():
@@ -46,6 +46,22 @@ def test_runs_with_no_args_and_fails_loudly():
     # an expected validation-class failure.)
     assert result.returncode == 2, (
         f"expected exit 2, got {result.returncode}: {result.stderr}"
+    )
+
+
+def test_review_in_progress_handling_present():
+    """When --no-execute is used, the prior change set leaves the stack in
+    REVIEW_IN_PROGRESS.  Without explicit handling the next invocation
+    auto-detects mode=update and fails because install-only params can't
+    UsePreviousValue.  The script must auto-recover by deleting the
+    REVIEW_IN_PROGRESS stack and re-entering CREATE mode.  Discovered in
+    a real test-account install on 2026-05-04."""
+    text = SCRIPT.read_text()
+    assert "REVIEW_IN_PROGRESS" in text, (
+        "deploy script must handle REVIEW_IN_PROGRESS state explicitly"
+    )
+    assert "delete-stack" in text and "stack-delete-complete" in text, (
+        "REVIEW_IN_PROGRESS recovery must delete the stale stack"
     )
 
 

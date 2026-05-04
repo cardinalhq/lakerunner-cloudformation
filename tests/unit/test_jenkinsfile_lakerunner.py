@@ -1,4 +1,4 @@
-"""Lint and structural smoke tests for the upgrade Jenkinsfile.
+"""Lint and structural smoke tests for the deploy Jenkinsfile.
 
 These tests soft-skip when Groovy is not installed, so contributors and CI
 runners without a Groovy parser are not blocked.
@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-JENKINSFILE = REPO_ROOT / "jenkins" / "Jenkinsfile.upgrade-lakerunner"
+JENKINSFILE = REPO_ROOT / "jenkins" / "Jenkinsfile.lakerunner"
 
 
 def test_jenkinsfile_exists():
@@ -58,8 +58,13 @@ def test_jenkinsfile_required_blocks_present():
         "stage('Apply')",
         "stage('Approval')",
         "post {",
-        "scripts/upgrade-lakerunner.sh",
+        "scripts/deploy-lakerunner.sh",
         "AmazonWebServicesCredentialsBinding",
+        # Install-mode params must be exposed.
+        "VpcId",
+        "PrivateSubnets",
+        "LicenseData",
+        "DexAdminPasswordHashCredentialId",
     ]:
         assert marker in text, f"Jenkinsfile missing expected block: {marker}"
 

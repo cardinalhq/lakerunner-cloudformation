@@ -1,434 +1,433 @@
-# End-to-end test plan: deploy, upgrade, tear down
+# End-to-end test plan: install, verify, tear down, re-install
 
-This is the manual / semi-automated acceptance test for a release candidate of
-the `cardinal-lakerunner` CloudFormation stack. It exercises the full
-lifecycle from a clean account through deploy, runtime convergence, in-place
-update, tear-down, and final cleanup of intentionally-retained resources.
+This is the manual / semi-automated acceptance test for a release candidate of the `cardinal-lakerunner` CloudFormation stack. It is constrained to **only the parameter set** the `jenkins/Jenkinsfile.lakerunner` job exposes, and it uses **no CloudFormation deployer service role** -- the Jenkins AWS Credentials plugin's bound IAM identity drives every API call.
+
+A `params.json` file is permitted as a convenience input format for the test driver (the script accepts file-path flags for multi-line content like license JSON and PEMs; bulk values can be staged in a single file). The hard rule: every key in `params.json` must correspond to a parameter the Jenkins job exposes. If the test discovers a need for a parameter the Jenkinsfile does not yet expose, **first add it to the Jenkinsfile** (and to this spec) in a separate PR, then resume the trial. This keeps `params.json` and the Jenkins job in lock-step.
+
+The test exercises a full first install, runtime convergence, browser-level OIDC login, tear-down, and a clean re-install in the same account / VPC.
 
 ## Scope
 
 In scope:
 
-- The `cardinal-lakerunner` root template and its twelve nested children.
-- The `cardinal-cfn-deployer` role (assumed pre-existing — its lifecycle is
-  separate).
-- The customer VPC (assumed pre-existing — either `cardinal-vpc.yaml` from a
-  prior run, or a customer-owned VPC).
-- `scripts/teardown-lakerunner.sh` and the retained-resource cleanup it
-  performs.
+- The Jenkins job `jenkins/Jenkinsfile.lakerunner` end-to-end, including the install (CREATE) path and the upgrade (UPDATE) path on re-run.
+- All twelve nested children of `cardinal-lakerunner.yaml`.
+- DEX OIDC bring-up (admin login + maestro `/api/me`).
+- Self-signed TLS cert generation and PEM-based import via the Jenkinsfile credentials.
+- License acceptance.
+- `scripts/teardown-lakerunner.sh` and the retained-resource cleanup.
 
-Out of scope:
+Out of scope (one-time setup, persists across trials):
 
-- The `cardinal-vpc.yaml` template lifecycle (covered by a separate VPC test).
-- The `cardinal-cfn-deployer` template lifecycle.
-- Customer-paid traffic load tests (this is a deployment / lifecycle test).
+- VPC + subnets. Pre-existing in the test account; either deployed once from `cardinal-vpc.yaml` via Console / `aws cloudformation create-stack`, or a customer-supplied VPC. Customers will already have a working VPC -- this test mirrors that assumption.
+- Region: **us-east-1** in the test account. The published template bucket lives in us-east-2; cross-region template fetch is fine, leave `TemplateBaseUrl` at its default.
 
-## Pre-flight (run once before the whole pass)
+Explicitly NOT in scope (intentional simplifications because there is no public DNS available for the test environment):
 
-Confirm before starting any of the test phases:
+- Real DNS / Route 53 record pointing at the ALB. We hit the ALB DNS directly with `curl -k`. Browsers will warn for two reasons: self-signed cert, and (probably) hostname mismatch. Both are accepted noise for this test.
 
-- AWS account ID, region, and profile are noted in the test log. Tear-down
-  scripts target by region; getting this wrong is destructive.
-- `cardinal-cfn-deployer` role exists and its ARN is captured. `aws iam
-  get-role --role-name cardinal-cfn-deployer` should succeed.
-- The role's policy has `rds:CreateDBSnapshot`, `rds:DescribeDBSnapshots`,
-  and `s3:DeleteObject` (these were added in PRs #65 / #66 — older roles
-  will fail tear-down). Re-deploy the role from the current
-  `cardinal-deployer-role.yaml` if in doubt.
-- VPC has at least two private subnets in distinct AZs and at least two
-  public subnets (for an internet-facing ALB) — capture all subnet IDs.
-- Test account has *no* leftover `cardinal-*` resources from prior runs.
-  Run the discovery query from the "Tag-based discovery" check below; if
-  it returns anything, run the final cleanup phase before starting.
-- Release version under test is recorded (git SHA + tag, S3 prefix, image
-  tags / digests).
-- A scratch directory is created for captured state files; one
-  `state-<phase>.json` per phase will be archived there.
+## Pre-flight (run once per test account; persists across trials)
 
-## Phase 1: deploy from clean state
-
-### 1a. Create the stack
-
-- Template: `cardinal-lakerunner.yaml` from the release candidate's S3 prefix
-  (or `--template-body` from the local `generated-templates/` dir for an
-  unreleased SHA).
-- Parameters: from the test-account `params.json` (see memory:
-  "Deploy params location").
-- Use `--role-arn $DEPLOYER_ROLE_ARN`. Without it, IAM-touching rollbacks
-  can wedge the stack.
-- Capabilities: `CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND`.
-
-Confirm:
-
-- `create-stack` returns a StackId without error.
-- The `cardinal-cfn-deployer` role is the role recorded under the stack's
-  `RoleARN` (visible in the console or via `describe-stacks`).
-
-### 1b. Wait for create to complete
-
-`aws cloudformation wait stack-create-complete --stack-name <name>`.
-
-Confirm:
-
-- Final `StackStatus` is `CREATE_COMPLETE`. Anything ending in `_FAILED` or
-  `ROLLBACK_*` is a hard fail — capture all events
-  (`describe-stack-events`) and the events of every nested child before
-  retrying.
-- Wall-clock time is within the expected window (10-25 minutes is typical;
-  >40 minutes suggests something is stuck).
-- Outputs are present and non-empty: `InstallIdShort`, `InstallIdLong`,
-  `AlbDnsName`, `MaestroUrl` (if applicable).
-- All twelve nested children reached `CREATE_COMPLETE` — list with
-  `aws cloudformation list-stack-resources --stack-name <name>
-   --query 'StackResourceSummaries[?ResourceType==`AWS::CloudFormation::Stack`]'`.
-
-### 1c. Service convergence
-
-For each ECS service (across `services-query`, `services-process`,
-`services-control`, `otel`, `maestro`):
-
-- `aws ecs describe-services` → `runningCount == desiredCount` and
-  `deployments[0].rolloutState == COMPLETED`.
-- `deployments` length is 1 (no in-flight rollout left over from create).
-- Most recent log stream for the service has at least one application log
-  line within the last 5 minutes (proves the task actually started its
-  process, not just that ECS placed it).
-
-For the database:
-
-- `aws rds describe-db-instances` → `DBInstanceStatus == available`.
-- `aws rds describe-db-instances --query 'DBInstances[0].TagList'` includes
-  the standard cardinal tag set (see "Tag-based discovery" below).
-
-For the migration:
-
-- The migration custom resource shows `CREATE_COMPLETE` in stack events.
-- The migration ECS task ran exactly once — find it in the cluster's
-  stopped tasks, exit code 0.
-- Stack event for the custom resource includes the
-  `cardinal-migration-<InstallIdLong>` physical id.
-
-For the ALB:
-
-- `aws elbv2 describe-target-health` for every target group → all targets
-  `healthy`.
-- HTTP HEAD against `https://<AlbDnsName>/` returns a non-5xx status (the
-  exact status depends on routing rules; the goal is "ALB + listener +
-  target groups responsive").
-
-For Maestro / DEX (if enabled):
-
-- `https://<MaestroUrl>/api/me` returns 401 unauthenticated (proves the
-  /api routes are reachable; the Dex OIDC gotchas live in memory).
-- DEX login page renders at `/dex/auth`.
-
-Capture: `state-phase1.json` from `scripts/teardown-lakerunner.sh
---internal-format-plan` (run with `--stack-name ... --region ...` but
-without `--yes` — the dry-run prints the survivor list and exits 0). Save
-the install id, bucket name, and DB instance id from the captured state.
-
-### 1d. Tag-based discovery
-
-Run a Resource Groups Tagging API query to confirm everything is
-discoverable:
+### A. AWS identity and connectivity
 
 ```sh
-aws resourcegroupstaggingapi get-resources \
-  --tag-filters Key=Project,Values=cardinal \
-                Key=ManagedBy,Values=cardinal-cfn \
-  --region $REGION \
-  --query 'ResourceTagMappingList[].ResourceARN' --output text | wc -l
+aws sts get-caller-identity --output table
 ```
 
-Confirm:
+Capture the account ID and the IAM identity (user or assumed role) the Jenkins AWS Credentials binding will use. This identity needs every IAM, EC2, ECS, ELB, RDS, S3, SQS, Secrets Manager, SSM, Lambda, Logs, KMS, and CloudFormation permission the stack touches. **No deployer service role is used.** If a permission is missing, install will fail; capture the error and either grant the perm or open a PR to document the minimum required policy (see "Expected follow-up PRs" at the end).
 
-- The count is non-trivial (dozens of ARNs — at minimum the bucket, the
-  queue, the DB, log groups, target groups, services, the cluster, the
-  ALB, and the secrets).
-- The Resource Groups Tagging API only supports prefix-`*` wildcards
-  (`Values=cardinal-` matches `cardinal-anything`), so a single tag query
-  cannot scope to a specific install via the `Name` tag. To narrow to
-  *this* install, run the query above and then post-filter the ARN list
-  for the captured `InstallIdShort`:
+### B. VPC
 
-  ```sh
-  aws resourcegroupstaggingapi get-resources \
-    --tag-filters Key=Project,Values=cardinal \
-                  Key=ManagedBy,Values=cardinal-cfn \
-    --region $REGION \
-    --query 'ResourceTagMappingList[].[ResourceARN, Tags[?Key==`Name`]|[0].Value]' \
-    --output text \
-    | grep "$INSTALL_ID_SHORT" | wc -l
-  ```
+Either:
 
-  The filtered count should match what you'd expect for this install
-  (bucket, queue, DB, target groups, services, cluster, ALB, secrets,
-  log groups, SSM params).
-- Spot-check the RDS DB and the ingest bucket directly by their
-  deterministic names:
+- **Use an existing VPC** in the account. Capture VpcId and at least two private subnet IDs in distinct AZs. For an internet-facing ALB, also capture at least two public subnet IDs.
+- **Or deploy the Cardinal VPC stack once** via the AWS Console or CLI (this stack survives all subsequent trials):
 
-  ```sh
-  aws rds describe-db-instances --region $REGION \
-    --db-instance-identifier cardinal-lakerunner-databasestack-... \
-    --query 'DBInstances[0].TagList'
-  aws s3api get-bucket-tagging --region $REGION \
-    --bucket cardinal-ingest-$ACCOUNT-$REGION-$INSTALL_ID_LONG
-  ```
+    ```sh
+    aws cloudformation create-stack \
+        --region us-east-1 \
+        --stack-name cardinal-vpc \
+        --template-url https://cardinal-cfn.s3.us-east-2.amazonaws.com/lakerunner/<version>/cardinal-vpc.yaml \
+        --capabilities CAPABILITY_NAMED_IAM
+    aws cloudformation wait stack-create-complete \
+        --region us-east-1 --stack-name cardinal-vpc
+    aws cloudformation describe-stacks \
+        --region us-east-1 --stack-name cardinal-vpc \
+        --query 'Stacks[0].Outputs' --output table
+    ```
 
-  Both should report `Project=cardinal`, `ManagedBy=cardinal-cfn`,
-  `Component=database` / `Component=storage`, and a `Name` whose suffix
-  is the captured `InstallIdShort` / `InstallIdLong`.
-- Anything **without** these tags is a bug — file an issue against the
-  child template that owns it.
+    Note `VpcId`, `PublicSubnetsCsv`, `PrivateSubnetsCsv` from the outputs.
 
-### 1e. Multi-install discrimination
+### C. ALB scheme decision
 
-Deploy a second copy of the same release into the same account + region with
-a different stack name (e.g. `cardinal-lakerunner-b`) and the same VPC.
+Pick **one** for the test; the spec assumes internet-facing because there is no DNS / VPN / bastion in the test environment and we need to curl the ALB from the operator's laptop:
 
-Confirm:
+- **`internet-facing`** (recommended for this test). Requires `PublicSubnets` to be set. ALB gets a public DNS that is reachable from anywhere.
+- `internal`. Cheaper, more secure, but requires a way to reach the ALB from inside the VPC (e.g. SSM Session Manager into an EC2 in a private subnet, then `curl` from there). Not the default for this spec.
 
-- Both stacks reach `CREATE_COMPLETE`.
-- The two installs have *different* `InstallIdShort` and `InstallIdLong`
-  outputs (these are derived from each root's `AWS::StackId`, so collision
-  is essentially impossible — the test is "did we propagate them
-  correctly").
-- A tag query for `Key=Name,Values=cardinal-*-<InstallIdShort-A>`
-  returns only stack-A resources; the same query with the B id returns
-  only stack-B resources. Zero overlap.
-- Both DB instances exist in parallel and are independently identifiable
-  by their `Name` tag.
-- Both ingest buckets exist in parallel —
-  `cardinal-ingest-<account>-<region>-<InstallIdLong-A>` and
-  `...-<InstallIdLong-B>` — no name collision.
-- SSM parameters for the two installs live under disjoint prefixes
-  (`/cardinal/<InstallIdLong-A>/...` vs `/cardinal/<InstallIdLong-B>/...`).
+### D. Self-signed TLS cert
 
-If the dual-deploy passes, **delete stack B immediately** with the tear-down
-script (Phase 3 procedure) before continuing to Phase 2 — the rest of the
-test only exercises stack A. Confirm afterwards (via the same tag query)
-that stack-A resources are untouched.
-
-## Phase 2: in-place update (mimic upgrade)
-
-The goal is to trigger enough resource churn to exercise the rolling
-deployment path on every service tier without replacing the stateful
-resources (DB, bucket, secrets).
-
-### 2a. Pick a parameter delta
-
-Use a delta that touches multiple service tiers and at least one shared
-resource. Suggested set (any one of these is enough; doing all three
-exercises more):
-
-- Bump `LakerunnerImage` to a different tag/digest. This **also reruns the
-  migration custom resource** (see CLAUDE.md). Records confirm the
-  `MigrationVersion` trigger works.
-- Change `MaxPods` (or the equivalent service desired-count parameter) on
-  one service to force an ECS deployment.
-- Edit a tunable env-var parameter (e.g. log level) to force a new task
-  definition revision on every service that consumes it.
-
-Avoid for this phase: parameter changes that *replace* the DB or the
-bucket. Those are tested elsewhere (and are by design destructive).
-
-### 2b. Apply the update
-
-`aws cloudformation update-stack ... --role-arn $DEPLOYER_ROLE_ARN
---use-previous-parameters` with the changed parameter(s) overridden.
-
-Confirm before waiting:
-
-- A change set preview (or `update-stack` events) shows only the expected
-  resource updates. Replacements of `AWS::RDS::DBInstance`,
-  `AWS::S3::Bucket`, or any of the retained secrets are a hard fail —
-  cancel the update.
-
-### 2c. Wait for update to complete
-
-`aws cloudformation wait stack-update-complete`.
-
-Confirm:
-
-- Final status is `UPDATE_COMPLETE`.
-- For each service expected to restart: a *new* deployment appeared in
-  `describe-services`, ran to `rolloutState == COMPLETED`, and the
-  previous deployment was drained. `runningCount == desiredCount`
-  throughout (no scale-to-zero).
-- If the migration was expected to rerun (image change): the migration
-  custom resource emitted a stack event in this update, and a new ECS
-  task ran to exit code 0.
-- DB instance identifier is unchanged from Phase 1c (no replacement).
-- Ingest bucket name is unchanged from Phase 1c (no replacement).
-- ALB DNS name is unchanged.
-- All tags from Phase 1d are still present and unchanged on every
-  resource. Re-run the same tag query and confirm the count and ARN list
-  are unchanged.
-- Re-run the smoke checks from Phase 1c (target health, /api/me, DEX
-  page) — all should still pass.
-
-## Phase 3: tear down
-
-### 3a. Dry run
+Generate once on the operator's laptop, store as Jenkins **Secret File** credentials.
 
 ```sh
-scripts/teardown-lakerunner.sh \
-  --stack-name <name> --region <region>
+mkdir -p /tmp/cardinal-cert && cd /tmp/cardinal-cert
+
+openssl req -x509 -newkey rsa:2048 -nodes \
+    -keyout private.key \
+    -out cert.pem \
+    -days 365 \
+    -subj "/CN=cardinal.test.local" \
+    -addext "subjectAltName=DNS:cardinal.test.local,DNS:*.cardinal.test.local"
 ```
 
-(no `--yes` — dry run prints the plan and exits.)
+The CN does not need to match anything reachable in DNS -- browsers and curl will warn about both self-signed and (probably) hostname mismatch. We will use `curl -k` and click through browser warnings. That is the entire point of the "no DNS" simplification.
 
-Confirm:
+In Jenkins -> **Manage Credentials** -> add two **Secret File** credentials:
 
-- Plan output lists the bucket name, all three retained secrets ARNs, and
-  the DB instance identifier — none of them blank or `(not found)`.
-- The captured state matches the values archived in Phase 1.
+- ID `cardinal-test-cert-body` -> upload `cert.pem`
+- ID `cardinal-test-cert-key`  -> upload `private.key`
 
-### 3b. Run the tear-down
+There is no chain file for a self-signed cert.
+
+### E. DEX admin password and bcrypt hash
+
+Generate once. The maestro Go services accept `$2a` / `$2b`; htpasswd emits `$2y` which must be rewritten:
 
 ```sh
-scripts/teardown-lakerunner.sh \
-  --stack-name <name> --region <region> \
-  --deployer-role-arn $DEPLOYER_ROLE_ARN \
-  --yes
+PASSWORD='choose-a-strong-one'
+htpasswd -bnBC 12 "" "$PASSWORD" | tr -d ':\n' | sed 's/^\$2y/\$2a/'
+# -> $2a$12$.... (a 60-char bcrypt hash)
 ```
 
-Confirm during run:
+Store as a Jenkins **Secret Text** credential, ID `cardinal-test-dex-hash`. Keep the plaintext password somewhere secure -- you will type it during browser login in Phase 3.
 
-- `delete-stack` is called with `--role-arn`.
-- The script blocks on `wait stack-delete-complete` (this is normal — can
-  take 10+ minutes).
-- After delete completes, the script drains the bucket, force-deletes the
-  three secrets, and deletes the RDS final snapshot, in that order.
-- Exit code is 0.
+The DEX admin email is decided by you (e.g. `admin@cardinal.test`). Default in the Jenkinsfile is `admin@cardinal.local`.
 
-### 3c. Stack delete completed
+### F. License JSON
 
-Confirm:
+Stage the license content somewhere copy-pasteable. It will be pasted into the Jenkins job UI on each trial -- visible by design.
 
-- `describe-stacks --stack-name <name>` returns "does not exist" (the
-  stack is fully gone, not in `DELETE_FAILED`).
-- All twelve nested children are also gone.
+### G. Jenkins job
 
-### 3d. Resource sweep
+Copy `jenkins/Jenkinsfile.lakerunner` into a Jenkins **Pipeline** job (inline or "Pipeline script from SCM"). Edit defaults at the top to match the test account:
 
-Re-run the prefix tag query and post-filter for the captured
-`InstallIdShort` (the RGT API does not support middle-wildcards):
+| Param | Value for this test |
+|---|---|
+| `StackName` | `cardinal-lakerunner-test` |
+| `Region` | `us-east-1` |
+| `TemplateBaseUrl` | leave default (`https://cardinal-cfn.s3.us-east-2.amazonaws.com/lakerunner`) |
+| `Version` | the explicit release tag under test (e.g. `v0.0.38`). There is no `latest` -- every deploy is to a versioned tag |
+| `DeployerRoleArn` | **leave empty** -- intentional for this test |
+| `AwsCredentialsId` | the binding for the test account |
+| `VpcId` | from B |
+| `PrivateSubnets` | comma-separated IDs from B |
+| `PublicSubnets` | comma-separated IDs from B |
+| `AlbScheme` | `internet-facing` |
+| `CertificateArn` | leave empty (we are importing PEMs) |
+| `LicenseData` | paste the JSON from F |
+| `DexAdminEmail` | from E (e.g. `admin@cardinal.test`) |
+| `OidcSuperadminEmails` | same as `DexAdminEmail`, or comma-separated allowlist |
+| `DexAdminPasswordHashCredentialId` | `cardinal-test-dex-hash` (from E) |
+| `CertificateBodyCredentialId` | `cardinal-test-cert-body` (from D) |
+| `CertificatePrivateKeyCredentialId` | `cardinal-test-cert-key` (from D) |
+| `CertificateChainCredentialId` | empty (self-signed -- no chain) |
+
+Keep `AutoApprove=false` for trial runs so you can read the change-set summary before applying.
+
+## Trial structure
+
+A trial is one full pass: **Install -> Verify -> Tear-down**. After tear-down, the VPC + Jenkins credentials + DEX hash + cert files all persist; only the lakerunner stack itself is removed. The next trial starts again at "Install" with the existing Jenkins job re-run.
+
+The first trial below is documented in detail. Subsequent trials follow the same steps; capture only deltas.
+
+## Trial 1 / Phase 1: install via Jenkins
+
+### 1a. Run with `AutoApprove=false`
+
+Click "Build with Parameters" on the Jenkins job. Confirm the values match the table above. Build.
+
+### 1b. Inspect the Plan stage
+
+Pipeline pauses after the `cardinal-deploy-<timestamp>` change set is described. Read the change-set table in the build log.
+
+Pass criteria:
+
+- A long list of `Add` rows -- one per resource the stack creates. Expect IAM roles, IAM policies, Lambda functions, Secrets Manager secrets, SSM parameters, RDS instance + subnet group, S3 bucket, SQS queue, ECS cluster, ECS task definitions, ECS services, ALB + listener + target groups + listener rules, CloudWatch log groups, the cert-import custom resource, the migration custom resource, and the twelve nested-stack resources.
+- **Zero `Remove` rows.**
+- **Zero `Replacement: True` rows on stateful resources** (RDS, S3, persistent EBS). On install, everything is `Add`, so this should be trivially satisfied.
+
+Capture the change set summary in the test log.
+
+### 1c. Approve
+
+Click "Apply" on the input prompt. Pipeline executes the change set and waits for `CREATE_COMPLETE`.
+
+Pass criteria:
+
+- Build status: green.
+- Final stack status: `CREATE_COMPLETE`.
+- Total wall time recorded (typical: 15-25 minutes; the RDS instance is the long pole).
+
+If the build fails, capture the failing stack event:
 
 ```sh
-aws resourcegroupstaggingapi get-resources \
-  --tag-filters Key=Project,Values=cardinal \
-                Key=ManagedBy,Values=cardinal-cfn \
-  --region $REGION \
-  --query 'ResourceTagMappingList[].[ResourceARN, Tags[?Key==`Name`]|[0].Value]' \
-  --output text \
-  | grep "$INSTALL_ID_SHORT"
+aws cloudformation describe-stack-events \
+    --region us-east-1 --stack-name cardinal-lakerunner-test \
+    --query 'StackEvents[?contains(ResourceStatus, `FAILED`)].[LogicalResourceId,ResourceStatus,ResourceStatusReason]' \
+    --output table
 ```
 
-Confirm:
+Most likely failure modes for the no-deployer-role install:
 
-- Result is empty. *Every* tagged resource for this install is gone.
-- The RGT API caches tag mappings for some minutes after a resource is
-  actually deleted. If the prefix query still returns ECS clusters /
-  services / target groups for *this* install, cross-check with a live
-  call — `aws ecs list-clusters | grep cardinal`, `aws elbv2
-  describe-target-groups`, etc. — before treating it as a bug. Stale
-  RGT entries age out within ~10 minutes.
-- Live entries that survive after that window must be one of the
-  documented survivors (ingest bucket, three secrets, RDS snapshot) —
-  and the script should have already deleted those, so anything
-  surviving is a bug in the script.
+- **`AccessDenied` on iam:CreateRole / iam:PassRole / iam:AttachRolePolicy** -- the bound IAM identity needs IAM-write perms. Either grant them or open a PR adding a "test user" policy template.
+- **`AccessDenied` on lambda:CreateFunction** -- both the cert-import and migration custom resources are Lambda-backed.
+- **Cert import Lambda timeout** -- the cert-import custom resource imports the PEMs via ACM API. If it hangs, the most likely cause is malformed PEMs (CRLF line endings, missing trailing newline, encrypted key). See `docs/operations/certificates.md` "Format gotchas".
 
-Spot-check by service:
+## Trial 1 / Phase 2: post-install discovery
 
-- `aws s3api head-bucket --bucket
-  cardinal-ingest-<account>-<region>-<InstallIdLong>` returns 404.
-- `aws secretsmanager describe-secret --secret-id
-  cardinal/<InstallIdLong>/license` returns `ResourceNotFoundException`
-  (same for `admin-api-key`, and for the auto-named DB master secret by
-  ARN captured in Phase 1).
-- `aws rds describe-db-snapshots --db-snapshot-identifier <stack>-Db-*`
-  returns no matches (snapshot deleted).
-- `aws ecs list-clusters | grep cardinal` is empty.
-- `aws elbv2 describe-load-balancers` shows no `cardinal-*` ALBs.
-- `aws logs describe-log-groups --log-group-name-prefix /cardinal/`
-  is empty (or contains only orphan log groups that are documented in
-  `tearing-down.md` as expected).
+### 2a. Capture stack outputs
 
-## Phase 4: re-deploy and second tear-down
+```sh
+aws cloudformation describe-stacks \
+    --region us-east-1 --stack-name cardinal-lakerunner-test \
+    --query 'Stacks[0].Outputs' --output table
+```
 
-The first deploy used a clean account; the second deploy validates that
-no leftover state from Phase 1-3 interferes (no name collisions, no
-orphaned tags pinning anything in place).
+Note the ALB DNS name (an output of the root stack -- look for the `AlbDnsName` or similarly named output). This is what we will hit with curl. Example: `cardinal-lakerunner-test-Alb-XYZ-1234567890.us-east-1.elb.amazonaws.com`.
 
-Run Phases 1 and 3 again, end-to-end. Confirm:
+### 2b. Capture nested stack identifiers
 
-- The new install gets a *different* `InstallIdShort` / `InstallIdLong`
-  than the prior install (different StackId).
-- All of Phase 1's checks pass.
-- All of Phase 3's checks pass.
+```sh
+aws cloudformation describe-stack-resources \
+    --region us-east-1 --stack-name cardinal-lakerunner-test \
+    --query 'StackResources[?ResourceType==`AWS::CloudFormation::Stack`].[LogicalResourceId,PhysicalResourceId]' \
+    --output table
+```
 
-## Phase 5: final cleanup pass
+Note the physical IDs of `MigrationStack`, `ServicesQueryStack`, `ServicesProcessStack`, `ServicesControlStack`, `MaestroStack`, `OtelStack`. These let you scope `describe-stack-resources` calls during debugging.
 
-Even after Phase 3 runs cleanly, sweep for anything that might have leaked:
+### 2c. Capture the InstallIdLong
 
-- Tag query `Key=Project,Values=cardinal` across the region — should
-  contain only entries that age out within ~10 minutes (stale RGT
-  cache after delete) and ECS task-definition ARNs (AWS retains
-  every TaskDefinition revision indefinitely; deregistering is a
-  cosmetic clean-up, not a correctness issue). Anything else is a
-  leak.
-- Tag query `Key=ManagedBy,Values=cardinal-cfn` across the region —
-  same caveats.
-- `aws cloudformation list-stacks --stack-status-filter CREATE_COMPLETE
-  UPDATE_COMPLETE DELETE_FAILED` filtered to `cardinal-*` — should show
-  only `cardinal-cfn-deployer` and (if you deployed it) `cardinal-vpc`.
-- Manual sweep for un-tagged remnants (rare but possible):
-  - `aws s3 ls | grep cardinal-ingest`
-  - `aws rds describe-db-snapshots --snapshot-type manual --query
-    'DBSnapshots[?contains(DBSnapshotIdentifier,`cardinal`) ||
-                       contains(DBSnapshotIdentifier,`Db`)]'`
-  - `aws secretsmanager list-secrets --query
-    'SecretList[?starts_with(Name,`cardinal/`)]'`
-  - `aws logs describe-log-groups --log-group-name-prefix /cardinal/`
+```sh
+aws cloudformation describe-stacks \
+    --region us-east-1 --stack-name cardinal-lakerunner-test \
+    --query 'Stacks[0].Outputs[?OutputKey==`InstallIdLong`].OutputValue' \
+    --output text
+```
 
-If anything turns up, document it in the test report and either delete
-manually or file an issue against the script / templates depending on root
-cause.
+(If no such output exists, derive it from the stack ID per the rule in CLAUDE.md.) This shows up in the names of the ingest bucket, secrets, and log groups, and is the key for tear-down later.
+
+## Trial 1 / Phase 3: runtime verification
+
+Run each check; record pass / fail / observed value. **Do not skip checks because earlier ones passed** -- some failures only surface downstream.
+
+### 3a. Migration custom resource succeeded
+
+```sh
+aws cloudformation describe-stack-resource \
+    --region us-east-1 --stack-name cardinal-lakerunner-test \
+    --logical-resource-id MigrationStack \
+    --query 'StackResourceDetail.PhysicalResourceId' --output text
+# Then for that nested stack:
+aws cloudformation describe-stack-events \
+    --region us-east-1 --stack-name <migration-nested-physical-id> \
+    --query 'StackEvents[?ResourceType==`AWS::CloudFormation::CustomResource`]' \
+    --output table
+```
+
+Pass: the custom resource shows `CREATE_COMPLETE` with no failure events. Tail its CloudWatch log group (`/aws/lambda/cardinal-migration-<InstallIdLong>`) -- it should show the migrator container exit-0.
+
+### 3b. ECS service convergence
+
+For each service in the cluster:
+
+```sh
+CLUSTER=$(aws cloudformation describe-stack-resource \
+    --region us-east-1 --stack-name cardinal-lakerunner-test \
+    --logical-resource-id ClusterStack \
+    --query 'StackResourceDetail.PhysicalResourceId' --output text \
+    | xargs -I{} aws cloudformation describe-stack-resource \
+        --region us-east-1 --stack-name {} \
+        --logical-resource-id Cluster \
+        --query 'StackResourceDetail.PhysicalResourceId' --output text)
+
+aws ecs list-services --cluster "$CLUSTER" --region us-east-1 --output text \
+    --query 'serviceArns' \
+| tr '\t' '\n' \
+| while read svc; do
+    aws ecs describe-services --cluster "$CLUSTER" --services "$svc" --region us-east-1 \
+        --query 'services[0].[serviceName,desiredCount,runningCount,pendingCount,deployments[0].rolloutState]' \
+        --output text
+done
+```
+
+Pass: every service shows `runningCount == desiredCount`, `pendingCount == 0`, `rolloutState == COMPLETED`. If a service is stuck in `IN_PROGRESS` or has `runningCount < desiredCount`, the deployment circuit breaker has not fired yet -- wait up to 10 minutes; if still wrong, dump the latest stopped task:
+
+```sh
+aws ecs list-tasks --cluster "$CLUSTER" --service-name <svc> \
+    --desired-status STOPPED --region us-east-1 --query 'taskArns[0]' --output text \
+| xargs -I{} aws ecs describe-tasks --cluster "$CLUSTER" --tasks {} --region us-east-1 \
+    --query 'tasks[0].containers[*].[name,exitCode,reason]' --output table
+```
+
+### 3c. ALB target groups healthy
+
+```sh
+ALB_TGS=$(aws elbv2 describe-target-groups --region us-east-1 \
+    --query 'TargetGroups[?contains(TargetGroupName,`cardinal`) || contains(LoadBalancerArns[0],`cardinal-lakerunner-test`)].TargetGroupArn' \
+    --output text)
+for tg in $ALB_TGS; do
+    aws elbv2 describe-target-health --region us-east-1 --target-group-arn "$tg" \
+        --query 'TargetHealthDescriptions[*].[Target.Id,TargetHealth.State,TargetHealth.Reason]' \
+        --output table
+done
+```
+
+Pass: every target shows `State: healthy`. `unhealthy` targets are usually a healthcheck path mismatch or a service that never came up -- correlate with 3b.
+
+### 3d. ALB HTTPS listener responds
+
+```sh
+ALB_DNS=<from 2a>
+
+# Confirm TLS handshake succeeds (will warn about self-signed -- expected):
+curl -kv "https://${ALB_DNS}/" 2>&1 | grep -E "(SSL connection|HTTP/|Server certificate)"
+
+# Confirm we see the cert we generated:
+echo | openssl s_client -connect "${ALB_DNS}:443" -servername cardinal.test.local 2>/dev/null \
+    | openssl x509 -noout -subject -issuer -dates
+```
+
+Pass: TLS handshake completes; the served cert's subject matches `CN=cardinal.test.local` (what we generated in pre-flight D); the dates show the 365-day validity.
+
+### 3e. Dex OIDC discovery endpoint
+
+```sh
+curl -ksS "https://${ALB_DNS}/dex/.well-known/openid-configuration" | jq .
+```
+
+Pass: returns a JSON document with a non-empty `issuer`, `authorization_endpoint`, `token_endpoint`, `jwks_uri`. The issuer should reflect the configured maestro hostname.
+
+### 3f. Browser login flow
+
+This step is manual (browser), with a `--resolve` workaround if the maestro UI insists on a specific hostname:
+
+```sh
+# Option 1: just hit the ALB and click through the warning.
+open "https://${ALB_DNS}/"
+
+# Option 2: pin a hostname locally so the maestro UI's same-origin checks pass
+# (no /etc/hosts mutation required if you stay in the test browser session):
+chrome --host-resolver-rules="MAP cardinal.test.local ${ALB_DNS}" \
+    "https://cardinal.test.local/"
+```
+
+In the browser:
+
+1. Click through the self-signed warning.
+2. You should land on the maestro login page (or be redirected to `/dex/auth/...`).
+3. Click "Login with Cardinal" (or whichever tile is wired to the local DEX connector).
+4. Enter the DEX admin email + plaintext password from pre-flight E.
+5. You should land back on the maestro UI, logged in.
+
+Pass: login succeeds without 4xx/5xx; you can see the maestro home page; the user menu shows your admin email.
+
+### 3g. maestro `/api/me` returns 200 with superadmin
+
+While logged in, in the browser dev tools or via curl with the session cookie:
+
+```sh
+# After logging in via browser, copy the session cookie from dev tools, then:
+curl -ksS "https://${ALB_DNS}/api/me" \
+    -H "Cookie: <session-cookie>" | jq .
+```
+
+Pass: HTTP 200, JSON includes the admin email and `role` / `roles` indicating superadmin.
+
+### 3h. License acceptance
+
+Confirm via the maestro admin UI (organization / settings page) that the license is recognized -- the customer name / seat count / expiry from the JSON you pasted in pre-flight F should be visible. If maestro shows "no license" or "evaluation mode," the license param did not flow through correctly -- check the `cardinal/<InstallIdLong>/license` secret in Secrets Manager and confirm the secret value matches what you pasted into the Jenkins job.
+
+### 3i. Optional smoke: end-to-end signal
+
+Send a sample log line via the OTEL collector endpoint (also fronted by the ALB), wait ~60s, query it back via the maestro query UI. Pass: the line appears.
+
+## Trial 1 / Phase 4: tear down
+
+`scripts/teardown-lakerunner.sh` is run **without** the deployer role flag (matches the no-role constraint of this test).
+
+```sh
+sh scripts/teardown-lakerunner.sh \
+    --stack-name cardinal-lakerunner-test \
+    --region us-east-1 \
+    --yes
+```
+
+The script handles: deleting the stack, draining the ingest bucket so it can be removed, deleting the retained `license` / `admin-api-key` / `db-master` secrets, and the RDS final snapshot.
+
+Pass criteria:
+
+- Script exits 0.
+- `aws cloudformation describe-stacks --stack-name cardinal-lakerunner-test` returns `does not exist`.
+- The VPC stack is **untouched** -- still exists, still healthy.
+- Tag-based discovery finds zero `cardinal-*` resources tagged for this install:
+
+    ```sh
+    aws resourcegroupstaggingapi get-resources --region us-east-1 \
+        --tag-filters Key=cardinal:install,Values=<InstallIdLong> \
+        --query 'ResourceTagMappingList[*].ResourceARN' --output table
+    ```
+
+If the tag query returns rows, capture them and document. Most likely culprits historically: orphaned ENIs from the cert-import Lambda or the migration ECS task; orphaned target groups whose ALB listener was already deleted.
+
+## Trial 2: re-install on the same VPC
+
+Re-run the Jenkins job with the same parameters. Mode auto-detects to CREATE again (the previous stack is gone). Run the same Phase 1 -> Phase 4 steps; record any deltas from Trial 1.
+
+Pass: Trial 2 reaches `CREATE_COMPLETE` and passes the same Phase 3 verification as Trial 1, with no manual fixup between trials.
+
+If Trial 2 fails where Trial 1 passed, the suspect list is:
+
+- Tear-down left state behind (orphaned resource still bound to a name the new install wants).
+- The retained `license` secret has stale state that conflicts with the new install -- but secrets are keyed on `InstallIdLong`, which is freshly derived per install, so this should not happen. If it does, that is a CLAUDE.md-violating bug in the install-id derivation -- file a PR.
+
+## Final cleanup pass (optional, end of test session)
+
+After all trials are done and you want a truly clean account:
+
+```sh
+# Tear down the lakerunner stack from the most recent trial (if still present).
+sh scripts/teardown-lakerunner.sh --stack-name cardinal-lakerunner-test --region us-east-1 --yes
+
+# Tear down the VPC stack (only if you deployed it for this test session;
+# otherwise leave it for next time).
+aws cloudformation delete-stack --stack-name cardinal-vpc --region us-east-1
+aws cloudformation wait stack-delete-complete --stack-name cardinal-vpc --region us-east-1
+
+# Delete Jenkins credentials staged in pre-flight D + E if no longer needed.
+```
 
 ## Reporting
 
-For each test run, capture:
+For each trial, capture:
 
-- Release version (git SHA, tag, S3 prefix).
-- AWS account ID and region.
-- `InstallIdShort` and `InstallIdLong` for every install in the run.
-- Wall-clock time per phase.
-- Final pass/fail for each numbered confirm-bullet (or the failure mode).
-- Any unexpected resources found in Phase 3d or Phase 5.
+- Trial number, date, version (git SHA + tag), region.
+- Wall time per phase (1, 2, 3, 4).
+- Pass / fail per check in Phase 3 (3a through 3i).
+- Any failure logs, stack-event captures, or test diffs.
+- A final summary: `PASS` / `FAIL` / `PASS WITH FOLLOW-UPS` and a list of opened PRs.
 
-A run is **passing** only when every confirm-bullet in every phase passes.
-A single failed bullet blocks the release.
+Archive the trial log to `docs/operations/test-runs/<date>-<version>.md` so future runs have a baseline to compare to.
 
-## Open items to revisit
+## Expected follow-up PRs
 
-- The "two installs in the same VPC" sub-test in 1e shares subnets across
-  installs. Confirm the security-group rules actually allow both sets of
-  task ENIs to talk to both DBs (each DB SG should only accept from its
-  own install's task SG). This validates the install-id-scoped SG rules
-  in `cluster.yaml` / `database.yaml`.
-- If the multi-install test ever fails on a name collision, the fix is
-  *not* a new random tag — the existing `InstallIdShort`/`InstallIdLong`
-  derived from `AWS::StackId` is already unique per stack. A collision
-  means a child template hardcoded a name that should have included the
-  install id. File against the offending child.
-- Consider automating Phase 1d / 3d / 5 as a single Bash check script
-  invoked at the end of each phase. The data inputs (region, install id)
-  are already captured; the queries are stable.
-- Per-install discovery currently relies on the `Name` tag carrying the
-  `InstallIdShort` suffix, but the Resource Groups Tagging API only
-  supports prefix wildcards, so post-filtering with `grep` is required.
-  Adding a dedicated `InstallIdShort` (or `InstallId`) tag to every
-  resource emitted by the templates would let a single tag query scope
-  to a specific install without the post-filter step. Worth doing if
-  test automation grows beyond ad-hoc shell.
+Discovered as the test runs; not all will hit. Track each as a separate PR.
+
+- **Minimum IAM policy doc** for the no-deployer-role install path. Likely outcome: a new section in `docs/operations/deploying.md` enumerating every action the stack needs the bound identity to have, plus an optional `cardinal-test-user-policy.json` for copy-paste into a test IAM user.
+- **Jenkinsfile param polish** -- if the Jenkins version in the test environment does not support `text(...)` parameter type, fall back to `string()` with a JSON-on-one-line constraint and a doc note.
+- **Cert-import Lambda robustness** -- if the self-signed PEMs from the openssl one-liner trip a format check, fix the importer to accept what openssl emits or document the workaround.
+- **Healthcheck path tuning** -- if any service shows 3b green but 3c (target group health) red, the service's healthcheck path may not match what the container actually serves; service-stack PR to fix.
+- **Tear-down survivor cleanup** -- if Phase 4 leaves anything tagged `cardinal:install=<id>` behind, extend `scripts/teardown-lakerunner.sh` to clean it.
+- **Stack output additions** -- if Phase 2 has to derive `InstallIdLong` or the ALB DNS via `Fn::Split` instead of reading a stack output, add the missing outputs to the root template.
+
+The intent of this test is to drive these out by running it. Each fix is its own PR; the test plan stays stable across them.
