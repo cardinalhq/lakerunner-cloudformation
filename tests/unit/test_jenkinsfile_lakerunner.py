@@ -64,7 +64,7 @@ def test_jenkinsfile_required_blocks_present():
         "VpcId",
         "PrivateSubnets",
         "LicenseData",
-        "DexAdminPasswordHashCredentialId",
+        "DexAdminPasswordHash",
     ]:
         assert marker in text, f"Jenkinsfile missing expected block: {marker}"
 
