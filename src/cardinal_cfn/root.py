@@ -12,9 +12,7 @@ from troposphere import (
     Parameter,
     Ref,
     GetAtt,
-    Equals,
     Join,
-    Not,
     Output,
     Sub,
 )
@@ -157,19 +155,6 @@ def build() -> Template:
         Description="Private subnet IDs (>=2 across different AZs).",
     ))
     t.add_parameter(Parameter(
-        "PublicSubnets",
-        Type="List<AWS::EC2::Subnet::Id>",
-        Default="",
-        Description="Public subnet IDs. Required only when AlbScheme=internet-facing.",
-    ))
-    t.add_parameter(Parameter(
-        "AlbScheme",
-        Type="String",
-        Default="internal",
-        AllowedValues=["internal", "internet-facing"],
-        Description="ALB scheme.",
-    ))
-    t.add_parameter(Parameter(
         "CertificateArn",
         Type="String",
         Default="",
@@ -281,20 +266,13 @@ def build() -> Template:
     ]
 
     # ---------------------------------------------------------------------
-    # Conditions
-    # ---------------------------------------------------------------------
-    t.add_condition("HasPublicSubnets",
-                    Not(Equals(Join(",", Ref("PublicSubnets")), "")))
-
-    # ---------------------------------------------------------------------
     # Console grouping
     # ---------------------------------------------------------------------
     add_parameter_group_metadata(
         t,
         groups=[
             {"label": "Networking",
-             "parameters": ["VpcId", "PrivateSubnets", "PublicSubnets",
-                            "AlbScheme", "CertificateArn",
+             "parameters": ["VpcId", "PrivateSubnets", "CertificateArn",
                             "CertificateBody", "CertificatePrivateKey",
                             "CertificateChain"]},
             {"label": "Sizing", "parameters": sizing_param_names},
@@ -314,7 +292,6 @@ def build() -> Template:
     install_short = install_id_short()
     install_long = install_id_long()
     private_subnets_csv = Join(",", Ref("PrivateSubnets"))
-    public_subnets_csv = Join(",", Ref("PublicSubnets"))
 
     # ---------------------------------------------------------------------
     # Nested children
@@ -362,9 +339,7 @@ def build() -> Template:
         "InstallIdShort": install_short,
         "InstallIdLong": install_long,
         "VpcId": Ref("VpcId"),
-        "PublicSubnetsCsv": public_subnets_csv,
         "PrivateSubnetsCsv": private_subnets_csv,
-        "AlbScheme": Ref("AlbScheme"),
         "TaskSecurityGroupId": GetAtt(cluster_stack, "Outputs.TaskSecurityGroupId"),
         "CertificateArn": GetAtt(cert_stack, "Outputs.EffectiveCertificateArn"),
     }, depends_on=["ClusterStack", "CertStack"])

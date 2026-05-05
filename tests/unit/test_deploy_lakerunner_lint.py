@@ -65,6 +65,17 @@ def test_review_in_progress_handling_present():
     )
 
 
+def test_rollback_complete_handling_present():
+    """A failed initial CREATE leaves the stack in ROLLBACK_COMPLETE.
+    CloudFormation refuses any UPDATE against such a stack, so the deploy
+    script must auto-recover the same way it does for REVIEW_IN_PROGRESS:
+    delete the empty stack and re-enter CREATE mode."""
+    text = SCRIPT.read_text()
+    assert "ROLLBACK_COMPLETE" in text, (
+        "deploy script must handle ROLLBACK_COMPLETE state explicitly"
+    )
+
+
 # ---------------------------------------------------------------------------
 # AWS CLI accepts --role-arn only on create-change-set in this script.  Wrapping
 # any other subcommand in `cfntool ...` causes the AWS CLI to error out with

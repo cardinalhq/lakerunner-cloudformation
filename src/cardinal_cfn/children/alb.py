@@ -7,8 +7,6 @@ from troposphere import (
     GetAtt,
     Output,
     Split,
-    If,
-    Equals,
 )
 from troposphere.elasticloadbalancingv2 import (
     LoadBalancer,
@@ -41,26 +39,9 @@ def build() -> Template:
     )
     t.add_parameter(
         Parameter(
-            "PublicSubnetsCsv",
-            Type="String",
-            Default="",
-            Description="Comma-separated public subnet IDs. Required when AlbScheme is internet-facing.",
-        )
-    )
-    t.add_parameter(
-        Parameter(
             "PrivateSubnetsCsv",
             Type="String",
             Description="Comma-separated private subnet IDs.",
-        )
-    )
-    t.add_parameter(
-        Parameter(
-            "AlbScheme",
-            Type="String",
-            Default="internal",
-            AllowedValues=["internal", "internet-facing"],
-            Description="ALB scheme: internal (private subnets) or internet-facing (public subnets).",
         )
     )
     t.add_parameter(
@@ -77,9 +58,6 @@ def build() -> Template:
             Description="ACM certificate ARN for the HTTPS listener. Must be a valid certificate ARN.",
         )
     )
-
-    # Conditions
-    t.add_condition("IsInternetFacing", Equals(Ref("AlbScheme"), "internet-facing"))
 
     alb_sg = t.add_resource(
         SecurityGroup(
@@ -109,12 +87,8 @@ def build() -> Template:
     alb = t.add_resource(
         LoadBalancer(
             "Alb",
-            Scheme=Ref("AlbScheme"),
-            Subnets=If(
-                "IsInternetFacing",
-                Split(",", Ref("PublicSubnetsCsv")),
-                Split(",", Ref("PrivateSubnetsCsv")),
-            ),
+            Scheme="internal",
+            Subnets=Split(",", Ref("PrivateSubnetsCsv")),
             SecurityGroups=[Ref(alb_sg)],
             Type="application",
             Tags=cardinal_tags(component="networking", role="alb"),

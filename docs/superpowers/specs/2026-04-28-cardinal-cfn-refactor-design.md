@@ -102,7 +102,6 @@ The install suffix is computed from `AWS::StackId`, which is fixed for the lifet
 The root template `cardinal-lakerunner.yaml` is an orchestrator. It contains:
 
 - Customer-facing parameters and `Metadata` for console parameter groups
-- Conditions (e.g. `HasPublicSubnets`)
 - The `InstallId` derivation
 - One `AWS::CloudFormation::Stack` resource per nested child, with `TemplateURL` pointing at the vendor S3 bucket and parameters threaded through
 - Top-level `Outputs` (ALB DNS name, Maestro URL, query API URL)
@@ -156,7 +155,7 @@ CloudFormation does not allow sibling nested stacks to reference each other dire
 
 Root template generator code centralizes this wiring so that adding a new dependency between children is a one-line change.
 
-**List-typed parameters and nested stacks.** CloudFormation passes nested-stack parameters as strings. List parameters such as `PrivateSubnets` and `PublicSubnets` cannot be reliably forwarded as `List<AWS::EC2::Subnet::Id>` from root → child; the conversion is unstable and AWS warns against it. The convention is: every child template that needs a subnet list declares the parameter as `String` (a comma-separated list), and the child uses `Fn::Split(",", ...)` internally. The root template joins lists with `Fn::Join(",", ...)` before passing.
+**List-typed parameters and nested stacks.** CloudFormation passes nested-stack parameters as strings. A list parameter such as `PrivateSubnets` cannot be reliably forwarded as `List<AWS::EC2::Subnet::Id>` from root → child; the conversion is unstable and AWS warns against it. The convention is: every child template that needs a subnet list declares the parameter as `String` (a comma-separated list), and the child uses `Fn::Split(",", ...)` internally. The root template joins lists with `Fn::Join(",", ...)` before passing.
 
 ### Service tier model
 
@@ -216,8 +215,7 @@ Each priority is hard-coded into the per-service ListenerRule in its current tie
 
 ### Networking
 
-- `PublicSubnets` (List<AWS::EC2::Subnet::Id>, default empty — required only if `AlbScheme=internet-facing`)
-- `AlbScheme` — `internal` (default) or `internet-facing`
+The application stack runs entirely in private subnets behind an **internal** ALB. The ALB scheme is hard-coded — there is no `PublicSubnets` or `AlbScheme` parameter on the root template. Customers who need to expose the ALB externally must do so out-of-band (e.g. an upstream NLB/ALB, API Gateway, VPN, or peering). The standalone `cardinal-vpc.yaml` template still creates public subnets for its own NAT gateway, but those subnets are not consumed by the application stack.
 
 ### Sizing (with defaults from `lakerunner-stack-defaults.yaml`)
 

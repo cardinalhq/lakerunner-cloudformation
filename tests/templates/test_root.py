@@ -16,8 +16,6 @@ def test_required_parameters(td):
     for n in (
         "VpcId",
         "PrivateSubnets",
-        "PublicSubnets",
-        "AlbScheme",
         "CertificateArn",
         "LicenseData",
         "ApiKeysOverride",
@@ -25,6 +23,21 @@ def test_required_parameters(td):
         "TemplateBaseUrl",
     ):
         assert n in td["Parameters"], f"missing parameter: {n}"
+
+
+def test_no_public_subnet_or_alb_scheme_parameters(td):
+    for n in ("PublicSubnets", "AlbScheme"):
+        assert n not in td["Parameters"], (
+            f"parameter {n} should have been removed"
+        )
+
+
+def test_alb_stack_does_not_receive_public_subnets_or_scheme(td):
+    params = td["Resources"]["AlbStack"]["Properties"]["Parameters"]
+    for n in ("PublicSubnetsCsv", "AlbScheme"):
+        assert n not in params, (
+            f"AlbStack should no longer be passed {n}"
+        )
 
 
 def test_template_base_url_default_pattern(td):
@@ -157,5 +170,5 @@ def test_outputs(td):
         assert n in td["Outputs"], f"missing output: {n}"
 
 
-def test_has_public_subnets_condition(td):
-    assert "HasPublicSubnets" in td.get("Conditions", {})
+def test_no_public_subnets_condition(td):
+    assert "HasPublicSubnets" not in td.get("Conditions", {})
