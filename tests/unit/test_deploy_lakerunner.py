@@ -369,8 +369,8 @@ def test_create_uses_template_default_when_no_override(tmp_path):
     _require_jq()
     new_template = [
         {
-            "ParameterKey": "AlbScheme",
-            "DefaultValue": "internal",
+            "ParameterKey": "DbInstanceClass",
+            "DefaultValue": "db.t4g.xlarge",
             "ParameterType": "String",
         },
     ]
@@ -378,7 +378,10 @@ def test_create_uses_template_default_when_no_override(tmp_path):
     result = _run_resolve_create(tmp_path, new_template, overrides)
     assert result.returncode == 0, result.stderr
     out = _by_key(json.loads(result.stdout))
-    assert out["AlbScheme"] == {"ParameterKey": "AlbScheme", "ParameterValue": "internal"}
+    assert out["DbInstanceClass"] == {
+        "ParameterKey": "DbInstanceClass",
+        "ParameterValue": "db.t4g.xlarge",
+    }
 
 
 def test_create_override_beats_template_default(tmp_path):
@@ -418,14 +421,14 @@ def test_create_required_param_missing_fails_loudly(tmp_path):
 
 def test_create_full_install_mix(tmp_path):
     """Realistic install: VpcId/Subnets/License from CLI overrides, *Image and
-    AlbScheme from template defaults, DexAdminEmail overridden by CLI."""
+    DbInstanceClass from template defaults, DexAdminEmail overridden by CLI."""
     _require_jq()
     new_template = [
         {"ParameterKey": "VpcId", "ParameterType": "AWS::EC2::VPC::Id"},
         {"ParameterKey": "PrivateSubnets", "ParameterType": "CommaDelimitedList"},
         {
-            "ParameterKey": "AlbScheme",
-            "DefaultValue": "internal",
+            "ParameterKey": "DbInstanceClass",
+            "DefaultValue": "db.t4g.xlarge",
             "ParameterType": "String",
         },
         {
@@ -459,7 +462,7 @@ def test_create_full_install_mix(tmp_path):
     out = _by_key(json.loads(result.stdout))
     assert out["VpcId"]["ParameterValue"] == "vpc-0abc123"
     assert out["PrivateSubnets"]["ParameterValue"] == "subnet-1,subnet-2"
-    assert out["AlbScheme"]["ParameterValue"] == "internal"  # template default
+    assert out["DbInstanceClass"]["ParameterValue"] == "db.t4g.xlarge"  # template default
     assert out["LakerunnerImage"]["ParameterValue"].endswith("1.20.0")
     assert out["DexAdminEmail"]["ParameterValue"] == "ops@example.com"  # CLI overrides default
     assert out["DexAdminPasswordHash"]["ParameterValue"].startswith("$2b$12$")

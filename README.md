@@ -13,7 +13,7 @@ The stack creates RDS, S3, SQS, ALB, all ECS services, runs the migration, and o
 
 ## Quick start (you need a VPC)
 
-Deploy `https://cardinal-cfn.s3.us-east-2.amazonaws.com/lakerunner/latest/cardinal-vpc.yaml` first, then use its `VpcId`, `PrivateSubnetsCsv`, and `PublicSubnetsCsv` outputs as inputs to the `cardinal-lakerunner.yaml` deploy.
+Deploy `https://cardinal-cfn.s3.us-east-2.amazonaws.com/lakerunner/latest/cardinal-vpc.yaml` first, then use its `VpcId` and `PrivateSubnetsCsv` outputs as inputs to the `cardinal-lakerunner.yaml` deploy. The application stack runs entirely in private subnets behind an internal ALB; the VPC's `PublicSubnetsCsv` output is exposed for completeness but is not required by the application stack.
 
 ## Versioned URLs
 

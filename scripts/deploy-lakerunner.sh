@@ -31,8 +31,6 @@ no_execute="false"
 # Install-only flags.  Ignored on UPDATE.
 cli_vpc_id=""
 cli_private_subnets=""
-cli_public_subnets=""
-cli_alb_scheme=""
 cli_certificate_arn=""
 cli_dex_admin_email=""
 cli_dex_admin_password_hash=""
@@ -73,8 +71,6 @@ Optional (both modes):
 Install-only (used when the stack does not yet exist; ignored on UPDATE):
   --vpc-id VPC                Required for install.
   --private-subnets CSV       Required for install (comma-separated subnet IDs).
-  --public-subnets CSV        Required when --alb-scheme=internet-facing.
-  --alb-scheme SCHEME         internal | internet-facing
   --certificate-arn ARN       Existing ACM cert (alternative to PEM import).
   --certificate-body-file PATH         PEM cert (used when --certificate-arn empty).
   --certificate-private-key-file PATH  PEM private key (used when --certificate-arn empty).
@@ -314,8 +310,6 @@ parse_args() {
             --no-execute) no_execute="true"; shift ;;
             --vpc-id) cli_vpc_id="$2"; shift 2 ;;
             --private-subnets) cli_private_subnets="$2"; shift 2 ;;
-            --public-subnets) cli_public_subnets="$2"; shift 2 ;;
-            --alb-scheme) cli_alb_scheme="$2"; shift 2 ;;
             --certificate-arn) cli_certificate_arn="$2"; shift 2 ;;
             --certificate-body-file) cli_certificate_body_file="$2"; shift 2 ;;
             --certificate-private-key-file) cli_certificate_private_key_file="$2"; shift 2 ;;
@@ -376,8 +370,6 @@ build_create_overrides() {
     jq -n \
         --arg vpc_id "$cli_vpc_id" \
         --arg private_subnets "$cli_private_subnets" \
-        --arg public_subnets "$cli_public_subnets" \
-        --arg alb_scheme "$cli_alb_scheme" \
         --arg cert_arn "$cli_certificate_arn" \
         --arg cert_body "$cert_body" \
         --arg cert_pkey "$cert_pkey" \
@@ -390,8 +382,6 @@ build_create_overrides() {
         '{
             VpcId: $vpc_id,
             PrivateSubnets: $private_subnets,
-            PublicSubnets: $public_subnets,
-            AlbScheme: $alb_scheme,
             CertificateArn: $cert_arn,
             CertificateBody: $cert_body,
             CertificatePrivateKey: $cert_pkey,
@@ -442,28 +432,33 @@ main() {
     fi
 
     log "checking whether stack $stack_name exists in $region"
-    # REVIEW_IN_PROGRESS is the state CloudFormation puts a stack in after
-    # a CREATE-type change set has been described but never executed (i.e.
-    # `--no-execute` was used and either the change set is still pending
-    # or was deleted manually).  No real resources exist yet; the stack
-    # must be deleted before a new CREATE can be issued, and treating it
-    # as UPDATE would fail because UsePreviousValue cannot supply install-
-    # only parameters.  We auto-recover by deleting it and treating the
-    # stack as nonexistent for mode selection.
+    # REVIEW_IN_PROGRESS and ROLLBACK_COMPLETE both indicate a stack record
+    # with no live resources:
+    #   - REVIEW_IN_PROGRESS: a CREATE-type change set was described but
+    #     never executed (`--no-execute` followed by no Apply, or a manual
+    #     change-set delete).
+    #   - ROLLBACK_COMPLETE: the initial CREATE failed and CloudFormation
+    #     rolled everything back; the empty stack record remains and CFN
+    #     refuses any further UPDATE against it.
+    # Both must be deleted before a fresh CREATE can succeed, and both are
+    # safe to delete (no surviving resources).  Treat the stack as
+    # nonexistent for mode selection.
     existing_status=$(aws cloudformation describe-stacks \
             --stack-name "$stack_name" \
             --region "$region" \
             --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo "")
-    if [ "$existing_status" = "REVIEW_IN_PROGRESS" ]; then
-        log "found stale REVIEW_IN_PROGRESS stack; deleting before CREATE"
-        aws cloudformation delete-stack \
-            --stack-name "$stack_name" \
-            --region "$region" >/dev/null 2>&1 || true
-        aws cloudformation wait stack-delete-complete \
-            --stack-name "$stack_name" \
-            --region "$region" >/dev/null 2>&1 || true
-        existing_status=""
-    fi
+    case "$existing_status" in
+        REVIEW_IN_PROGRESS|ROLLBACK_COMPLETE)
+            log "found stale $existing_status stack; deleting before CREATE"
+            aws cloudformation delete-stack \
+                --stack-name "$stack_name" \
+                --region "$region" >/dev/null 2>&1 || true
+            aws cloudformation wait stack-delete-complete \
+                --stack-name "$stack_name" \
+                --region "$region" >/dev/null 2>&1 || true
+            existing_status=""
+            ;;
+    esac
     if [ -n "$existing_status" ]; then
         mode="update"
         cs_type="UPDATE"

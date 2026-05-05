@@ -40,7 +40,7 @@ Capture the account ID and the IAM identity (user or assumed role) the Jenkins A
 
 Either:
 
-- **Use an existing VPC** in the account. Capture VpcId and at least two private subnet IDs in distinct AZs. For an internet-facing ALB, also capture at least two public subnet IDs.
+- **Use an existing VPC** in the account. Capture VpcId and at least two private subnet IDs in distinct AZs. The application stack runs entirely in private subnets behind an internal ALB; public subnets are not used by this stack.
 - **Or deploy the Cardinal VPC stack once** via the AWS Console or CLI (this stack survives all subsequent trials):
 
     ```sh
@@ -56,14 +56,11 @@ Either:
         --query 'Stacks[0].Outputs' --output table
     ```
 
-    Note `VpcId`, `PublicSubnetsCsv`, `PrivateSubnetsCsv` from the outputs.
+    Note `VpcId` and `PrivateSubnetsCsv` from the outputs. (`PublicSubnetsCsv` is also exposed but is not used by the lakerunner application stack.)
 
-### C. ALB scheme decision
+### C. ALB reachability
 
-Pick **one** for the test; the spec assumes internet-facing because there is no DNS / VPN / bastion in the test environment and we need to curl the ALB from the operator's laptop:
-
-- **`internet-facing`** (recommended for this test). Requires `PublicSubnets` to be set. ALB gets a public DNS that is reachable from anywhere.
-- `internal`. Cheaper, more secure, but requires a way to reach the ALB from inside the VPC (e.g. SSM Session Manager into an EC2 in a private subnet, then `curl` from there). Not the default for this spec.
+The lakerunner ALB is always **internal** -- the application stack does not provision or attach to public subnets. To reach the ALB from outside the VPC during testing you need a route in: SSM Session Manager into an EC2 instance in a private subnet, a bastion host, a VPN, Direct Connect, or VPC peering. The simplest path for a one-off test account is `aws ssm start-session` into a small Amazon Linux EC2 in one of the private subnets and `curl -k https://<alb-dns>/...` from there.
 
 ### D. Self-signed TLS cert
 
@@ -121,8 +118,6 @@ Copy `jenkins/Jenkinsfile.lakerunner` into a Jenkins **Pipeline** job (inline or
 | `AwsCredentialsId` | the binding for the test account |
 | `VpcId` | from B |
 | `PrivateSubnets` | comma-separated IDs from B |
-| `PublicSubnets` | comma-separated IDs from B |
-| `AlbScheme` | `internet-facing` |
 | `CertificateArn` | leave empty (we are importing PEMs) |
 | `LicenseData` | paste the JSON from F |
 | `DexAdminEmail` | from E (e.g. `admin@cardinal.test`) |

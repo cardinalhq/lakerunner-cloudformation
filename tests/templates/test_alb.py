@@ -13,9 +13,26 @@ def template_dict():
 
 
 def test_required_parameters(template_dict):
-    for n in ("InstallIdShort", "InstallIdLong", "VpcId", "PublicSubnetsCsv",
-              "PrivateSubnetsCsv", "AlbScheme", "TaskSecurityGroupId"):
+    for n in ("InstallIdShort", "InstallIdLong", "VpcId",
+              "PrivateSubnetsCsv", "TaskSecurityGroupId"):
         assert n in template_dict["Parameters"], f"missing parameter: {n}"
+
+
+def test_no_public_subnet_or_alb_scheme_parameters(template_dict):
+    for n in ("PublicSubnetsCsv", "AlbScheme"):
+        assert n not in template_dict["Parameters"], (
+            f"parameter {n} should have been removed"
+        )
+
+
+def test_alb_is_internal(template_dict):
+    alb_def = next(
+        v for v in template_dict["Resources"].values()
+        if v["Type"] == "AWS::ElasticLoadBalancingV2::LoadBalancer"
+    )
+    assert alb_def["Properties"]["Scheme"] == "internal"
+    subnets = alb_def["Properties"]["Subnets"]
+    assert subnets == {"Fn::Split": [",", {"Ref": "PrivateSubnetsCsv"}]}
 
 
 def test_creates_load_balancer(template_dict):

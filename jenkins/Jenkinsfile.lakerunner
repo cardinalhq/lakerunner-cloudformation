@@ -69,16 +69,6 @@ pipeline {
             description: 'INSTALL: comma-separated private subnet IDs.  Required for new installs.'
         )
         string(
-            name: 'PublicSubnets',
-            defaultValue: '',
-            description: 'INSTALL: comma-separated public subnet IDs.  Required if AlbScheme=internet-facing.'
-        )
-        string(
-            name: 'AlbScheme',
-            defaultValue: 'internal',
-            description: 'INSTALL: ALB scheme (internal or internet-facing).'
-        )
-        string(
             name: 'CertificateArn',
             defaultValue: '',
             description: 'INSTALL: existing ACM cert ARN.  Leave empty to import PEMs via the credential bindings below.'
@@ -246,8 +236,6 @@ def runDeploy(boolean planOnly) {
 
         if (params.VpcId?.trim())               args << "--vpc-id '${params.VpcId}'"
         if (params.PrivateSubnets?.trim())      args << "--private-subnets '${params.PrivateSubnets}'"
-        if (params.PublicSubnets?.trim())       args << "--public-subnets '${params.PublicSubnets}'"
-        if (params.AlbScheme?.trim())           args << "--alb-scheme '${params.AlbScheme}'"
         if (params.CertificateArn?.trim())      args << "--certificate-arn '${params.CertificateArn}'"
         if (params.DexAdminEmail?.trim())       args << "--dex-admin-email '${params.DexAdminEmail}'"
         if (params.OidcSuperadminEmails?.trim()) args << "--oidc-superadmin-emails '${params.OidcSuperadminEmails}'"
