@@ -2,7 +2,7 @@
 # Deploy a cardinal-lakerunner CloudFormation stack -- create it if missing,
 # otherwise upgrade it in place to the requested template version.
 #
-# Self-contained: depends only on a POSIX shell, the AWS CLI v2, jq, and curl.
+# Self-contained: depends only on a POSIX shell, the AWS CLI v2, and jq.
 # Does not depend on the cardinal_cfn Python package or any other contents of
 # the lakerunner-cloudformation repo.
 #
@@ -240,7 +240,7 @@ classify_status() {
 # ---------------------------------------------------------------------------
 preflight() {
     missing=""
-    for tool in aws jq curl; do
+    for tool in aws jq; do
         if ! command -v "$tool" >/dev/null 2>&1; then
             missing="$missing $tool"
         fi
@@ -249,10 +249,10 @@ preflight() {
         cat >&2 <<EOF
 [deploy-lakerunner] ERROR: required tool(s) not found:$missing
 Install hints:
-  Debian/Ubuntu : sudo apt-get install -y awscli jq curl
-  Amazon Linux  : sudo yum install -y aws-cli jq curl
-  Alpine        : sudo apk add aws-cli jq curl
-  macOS (brew)  : brew install awscli jq curl
+  Debian/Ubuntu : sudo apt-get install -y awscli jq
+  Amazon Linux  : sudo yum install -y aws-cli jq
+  Alpine        : sudo apk add aws-cli jq
+  macOS (brew)  : brew install awscli jq
 EOF
         exit 2
     fi
@@ -398,7 +398,7 @@ main() {
     parse_args "$@"
 
     # Internal test hooks.  These do not touch AWS and bypass the rest of the
-    # pipeline.  jq is required; aws and curl are not.
+    # pipeline.  jq is required; aws is not.
     if [ -n "$internal_resolve_params" ]; then
         if ! command -v jq >/dev/null 2>&1; then
             fail 2 "jq is required for --internal-resolve-params"
@@ -477,9 +477,6 @@ main() {
 
     template_url="$template_base_url/$version/cardinal-lakerunner.yaml"
     log "resolving template: $template_url"
-    if ! curl -sIfL "$template_url" >/dev/null; then
-        fail 1 "template URL not reachable (HTTP HEAD failed): $template_url"
-    fi
 
     work_dir=$(mktemp -d)
 
