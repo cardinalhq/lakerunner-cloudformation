@@ -1,48 +1,49 @@
-# Permissions
+# Permissions — lakerunner + maestro (runtime)
 
-Reference for security review of a Cardinal Lakerunner install. Lists every
-IAM role, resource policy, and security group the templates create, scoped
-to the install only — nothing here grants cross-account or cross-install
-access.
+What the **running application** has access to. Every role here is
+created and assumed inside the customer account at install time and
+deleted on stack teardown. ARN scopes use `${InstallIdLong}` (12 hex
+chars derived from the root stack ID) so multiple installs in one
+account stay isolated.
+
+This is the "what does the running software actually do?" half of the
+permissions story. The deployer / install-time permissions live in
+`permissions-infrastructure.md`.
 
 Source of truth: `src/cardinal_cfn/children/*.py`.
 
 ## IAM roles
 
-All roles below are created inside the customer account at install time and
-deleted on stack teardown. ARN scopes use `${InstallIdLong}` (12 hex chars
-derived from the root stack ID) so multiple installs in one account remain
-isolated.
+### Service-launch role (shared)
 
-### Service-launch roles
-
-| Role | Trust | Why it exists | Permissions (summary) |
+| Role | Trust | Why | Permissions |
 |---|---|---|---|
-| `ExecutionRole` (cluster) | `ecs-tasks.amazonaws.com` | ECS uses this at task launch on every Fargate task. | AWS-managed `AmazonECSTaskExecutionRolePolicy` (ECR pull, base logs) + `secretsmanager:GetSecretValue` on `cardinal/${InstallIdLong}/*`, `DbMasterSecret-*`, `MaestroDbSecret-*`, `InternalServiceKeysSecret-*` + `ssm:GetParameter*` on `parameter/cardinal/${InstallIdLong}/*`. |
+| `ExecutionRole` | `ecs-tasks.amazonaws.com` | ECS uses this at task launch on every Fargate task to pull the image, write the bootstrap log stream, and resolve `secrets:` blocks on container definitions. | AWS-managed `AmazonECSTaskExecutionRolePolicy` (ECR pull, base CW Logs) + `secretsmanager:GetSecretValue` on `cardinal/${InstallIdLong}/*`, `DbMasterSecret-*`, `MaestroDbSecret-*`, `InternalServiceKeysSecret-*` + `ssm:GetParameter*` on `parameter/cardinal/${InstallIdLong}/*`. |
 
 ### ECS task roles (application identities)
 
-One per service. All trust `ecs-tasks.amazonaws.com`. Base = S3 RW on the
-ingest bucket, SQS consume+send on the ingest queue, SSM read on the two
-config params, Secrets Manager read on `DbMasterSecret`, `LicenseSecret`,
-`InternalServiceKeysSecret`, and CW Logs writes to its own log group.
+One per service. All trust `ecs-tasks.amazonaws.com`. **Base** = S3 RW
+on the ingest bucket, SQS consume+send on the ingest queue, SSM read on
+the two config params, Secrets Manager read on `DbMasterSecret`,
+`LicenseSecret`, `InternalServiceKeysSecret`, and CW Logs writes to its
+own log group.
 
 | Role | Why | Deviation from base |
 |---|---|---|
 | `QueryWorkerTaskRole` | Runs query workers. | Base only. |
-| `QueryApiTaskRole` | Runs the query API; discovers live workers via ECS. | Base + `ecs:DescribeServices/ListTasks/DescribeTasks` (resource `*`, condition `ecs:cluster = ${ClusterArn}` — these actions don't accept ARN scopes). |
+| `QueryApiTaskRole` | Runs the query API; discovers live workers via the ECS API. | Base + `ecs:DescribeServices/ListTasks/DescribeTasks` (resource `*`, condition `ecs:cluster = ${ClusterArn}` — these actions don't accept ARN scopes). |
 | `ProcessLogsTaskRole`, `ProcessMetricsTaskRole`, `ProcessTracesTaskRole`, `PubsubSqsTaskRole` | Log/metric/trace ingest workers. | Base only. |
 | `SweeperTaskRole`, `AlertEvaluatorTaskRole` | Background control-plane jobs. | Base only. |
 | `MonitoringTaskRole` | Autoscales the three `process-*` services. | Base + `ecs:DescribeServices`, `ecs:UpdateService` scoped to the three process service ARNs. |
-| `AdminApiTaskRole` | Admin API service; needs to seed first admin key. | Base + extra ARN (`AdminApiKeySecretArn`) added to the existing Secrets Manager statement. |
+| `AdminApiTaskRole` | Admin API; needs to seed first admin key on first boot. | Base + extra ARN (`AdminApiKeySecretArn`) added to the existing Secrets Manager statement. |
 | `OtelTaskRole` | OTel collector; writes raw bytes to S3, no queue work. | S3 R/W/list + SSM + `LicenseSecret`/`InternalServiceKeysSecret` + own log group. **No SQS, no DB.** |
-| `MaestroTaskRole` | Maestro UI + bundled DEX; talks only to Postgres and Bedrock. | DB master + maestro DB + license + internal-keys secrets, two SSM params, four maestro log groups, plus `bedrock:InvokeModel(WithResponseStream)` on `arn:aws:bedrock:${AWS::Region}::foundation-model/*`. **No S3, no SQS.** |
-| `MigratorTaskRole` | One-shot DB migrator container. | `secretsmanager:GetSecretValue` on `DbMasterSecret` + `logs:*` on `*` (self-creates its log group). **No S3, no SQS, no app secrets.** |
+| `MaestroTaskRole` | Maestro UI + bundled DEX OIDC; talks only to Postgres and Bedrock. | DB master + maestro DB + license + internal-keys secrets, two SSM params, four maestro log groups, plus `bedrock:InvokeModel(WithResponseStream)` on `arn:aws:bedrock:${AWS::Region}::foundation-model/*`. **No S3, no SQS.** |
+| `MigratorTaskRole` | One-shot DB migrator container (runs at install/upgrade only). | `secretsmanager:GetSecretValue` on `DbMasterSecret` + `logs:*` on `*` (self-creates its log group). **No S3, no SQS, no app secrets.** |
 
 ### Lambda roles (CloudFormation custom resources)
 
-Both trust `lambda.amazonaws.com`. Logs are inline (not via the AWS-managed
-basic-execution policy) so scopes stay deliberate.
+Both trust `lambda.amazonaws.com`. Logs are inline (not via the
+AWS-managed basic-execution policy) so scopes stay deliberate.
 
 | Role | Why | Permissions |
 |---|---|---|
