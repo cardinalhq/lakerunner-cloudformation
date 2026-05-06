@@ -13,7 +13,6 @@ from troposphere import (
     Sub,
     Template,
 )
-from troposphere.ec2 import SecurityGroupIngress
 from troposphere.ecs import Environment, Secret
 from troposphere.servicediscovery import (
     DnsConfig,
@@ -321,20 +320,12 @@ def build() -> Template:
     )
 
     # query-api reaches query-worker on its task port over the shared task SG.
-    # The cluster stack already permits all task-to-task traffic via TaskSGAllSelf,
-    # but we add a narrow self-referential ingress here so the wiring is explicit
-    # and the port is documented at the service-tier level.
-    t.add_resource(
-        SecurityGroupIngress(
-            "QueryWorkerIngress",
-            GroupId=Ref("TaskSecurityGroupId"),
-            IpProtocol="tcp",
-            FromPort=worker_port,
-            ToPort=worker_port,
-            SourceSecurityGroupId=Ref("TaskSecurityGroupId"),
-            Description="query-api to query-worker task-to-task",
-        )
-    )
+    # No SecurityGroupIngress resource is created here -- the customer-supplied
+    # TaskSgId already permits all task-to-task ingress (TCP 0-65535 from self),
+    # per docs/operations/required-roles.md. Adding an ingress rule here would
+    # require the deployer principal to hold ec2:AuthorizeSecurityGroupIngress
+    # on a customer-managed SG, which violates the Phase 2 boundary
+    # (the lakerunner stack does not create or mutate SGs).
 
     # ---------------------------------------------------------------------
     # query-api
