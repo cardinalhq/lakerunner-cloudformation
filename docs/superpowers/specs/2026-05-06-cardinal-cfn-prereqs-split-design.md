@@ -136,10 +136,33 @@ Why the app and lakerunner layers stay in CFN:
 | `cardinal-alb-sg` | SG | TCP 443 + TCP 9443 from `0.0.0.0/0` (= VPC-local since ALB is internal). Egress all. |
 | `cardinal-db-sg` | SG | TCP 5432 from `cardinal-task-sg`. Egress all. |
 
-Idempotency contract: matching resource → no-op, drifted resource →
-exit 2 with a diff. There is no update path. If a policy must change,
-IT removes the affected role/SG out-of-band and the operator re-runs
-the script.
+Idempotency model: **per-config-item, not per-resource.** Each AWS
+resource needs multiple API calls to fully configure (`create-role` +
+`put-role-policy` + optional `attach-role-policy`; `create-security-group`
++ one or more `authorize-security-group-ingress`), and any of those calls
+can fail independently. The script can't be "for each resource: skip if
+exists, else create" — a partial run leaves resources half-configured.
+Instead, the script is a sequence of `ensure_*` steps:
+
+```
+ensure_role(name, trust_policy, tags)
+ensure_inline_policy(role, policy_name, policy_document)
+ensure_managed_policy_attached(role, policy_arn)
+ensure_security_group(name, vpc_id, tags)
+ensure_ingress_rule(sg, protocol, port, source)
+```
+
+Each `ensure_*` does one `describe-*` + at-most-one mutation. Partial
+runs converge on re-execution. SG ingress rules that reference other
+SGs (TaskSG ← AlbSG, DbSG ← TaskSG) require all three SGs to exist
+before any cross-SG ingress is authorized; the script orders steps
+accordingly.
+
+Drift detection (the `--verify` mode and the implicit check on every
+re-run): matching config → no-op, drifted config → exit 2 with a diff
+on the specific item. There is no update path. If a policy must
+change, IT removes the affected role/SG out-of-band and the operator
+re-runs the script.
 
 ### Shell script — `cardinal-data-setup.sh`
 
@@ -166,11 +189,32 @@ Inputs (CLI flags):
 - `--bucket-lifecycle-days` (default `7`).
 - `--output-file ./cardinal-data-setup-output.json`.
 
-Idempotency contract: same as prereqs. Each step independently checks
-"does the named resource exist with the right config?" before creating.
-Re-running after a partial failure picks up where it left off. Drift
-detection: re-running on an installed deployment with different inputs
-exits 2 with a diff (no automatic update path).
+Idempotency model: same per-config-item shape as prereqs. The
+data-setup script needs more `ensure_*` steps because each data
+resource has more configuration knobs:
+
+```
+ensure_db_subnet_group(name, subnets, tags)
+ensure_db_instance(id, subnet_group, sg_id, instance_class, ...)
+wait_db_instance_available(id)
+ensure_db_master_secret(name, db_endpoint, ...)
+ensure_s3_bucket(name, region, tags)
+ensure_s3_lifecycle(bucket, lifecycle_rules)
+ensure_sqs_queue(name, tags)
+ensure_sqs_policy(queue, policy_document)
+ensure_s3_notification(bucket, queue_arn)
+ensure_secret(name, value, tags)
+ensure_ssm_parameter(name, value, tags)
+```
+
+Each step is one `describe-*` + at-most-one mutation. Ordering matters
+between steps that reference each other's outputs: the queue must
+exist before its policy is set; the policy must exist before the S3
+notification config can validate; the DB instance must reach
+`available` before its endpoint is written into the master secret.
+The script encodes this ordering explicitly. Partial runs converge on
+re-execution. Output JSON is written incrementally, so even a partial
+run produces a usable file for diagnosis.
 
 Output JSON: `{ "DbEndpoint": "...", "DbPort": 5432, "DbName": "lakerunner", "DbMasterSecretArn": "arn:...", "MaestroDbSecretArn": "arn:...", "IngestBucketName": "...", "IngestQueueUrl": "...", "IngestQueueArn": "...", "LicenseSecretArn": "...", "InternalKeysSecretArn": "...", "AdminKeySecretArn": "...", "StorageProfilesParamName": "/cardinal/storage-profiles", "ApiKeysParamName": "/cardinal/api-keys" }`.
 
