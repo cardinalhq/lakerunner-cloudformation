@@ -69,6 +69,9 @@ def build() -> Template:
         Parameter("ExecutionRoleArn", Type="String", Description="ECS task execution role ARN.")
     )
     t.add_parameter(
+        Parameter("TaskRoleArn", Type="String", Description="ECS task role ARN (shared across all services).")
+    )
+    t.add_parameter(
         Parameter(
             "PrivateSubnetsCsv",
             Type="String",
@@ -219,6 +222,7 @@ def build() -> Template:
                     "ClusterArn",
                     "TaskSecurityGroupId",
                     "ExecutionRoleArn",
+                    "TaskRoleArn",
                     "PrivateSubnetsCsv",
                     "HttpsListenerArn",
                     "VpcId",
@@ -288,12 +292,6 @@ def build() -> Template:
     # name in QUERY_WORKER_SERVICE_NAME for ECS-based worker discovery).
     # ---------------------------------------------------------------------
     worker_lg = t.add_resource(services_common.build_log_group(service_key="query-worker"))
-    worker_role = t.add_resource(
-        services_common.build_task_role(
-            service_key="query-worker",
-            statements=_task_role_statements(worker_lg),
-        )
-    )
 
     worker_env = list(base_env) + _service_specific_env(worker_cfg)
     worker_task = t.add_resource(
@@ -304,7 +302,7 @@ def build() -> Template:
             memory_mib=Ref("QueryWorkerMemory"),
             command=worker_cfg.get("command"),
             execution_role_arn_param="ExecutionRoleArn",
-            task_role_ref=worker_role,
+            task_role_arn=Ref("TaskRoleArn"),
             environment=worker_env,
             secrets=base_secrets,
             log_group_ref=worker_lg,
@@ -342,12 +340,6 @@ def build() -> Template:
     # query-api
     # ---------------------------------------------------------------------
     api_lg = t.add_resource(services_common.build_log_group(service_key="query-api"))
-    api_role = t.add_resource(
-        services_common.build_task_role(
-            service_key="query-api",
-            statements=_api_task_role_statements(api_lg),
-        )
-    )
 
     # query-api uses ECS API to discover live query-worker tasks.
     api_env = list(base_env) + _service_specific_env(api_cfg) + [
@@ -380,7 +372,7 @@ def build() -> Template:
             memory_mib=Ref("QueryApiMemory"),
             command=api_cfg.get("command"),
             execution_role_arn_param="ExecutionRoleArn",
-            task_role_ref=api_role,
+            task_role_arn=Ref("TaskRoleArn"),
             environment=api_env,
             secrets=base_secrets,
             log_group_ref=api_lg,
@@ -429,85 +421,6 @@ def _service_specific_env(service_cfg: dict) -> list:
     """Convert the YAML environment dict into a list of ECS Environment objects."""
     env = service_cfg.get("environment") or {}
     return [Environment(Name=k, Value=str(v)) for k, v in env.items()]
-
-
-def _task_role_statements(log_group_ref) -> list:
-    """Inline IAM policy for a query-tier task role.
-
-    Grants S3 (bucket+objects), SQS (consume+send), SSM GetParameter on the
-    two config params, Secrets Manager GetSecretValue on the three secrets,
-    and CloudWatch Logs writes to the per-service log group.
-    """
-    return [
-        {
-            "Effect": "Allow",
-            "Action": [
-                "s3:GetObject",
-                "s3:PutObject",
-                "s3:DeleteObject",
-                "s3:ListBucket",
-            ],
-            "Resource": [
-                Sub("arn:aws:s3:::${BucketName}"),
-                Sub("arn:aws:s3:::${BucketName}/*"),
-            ],
-        },
-        {
-            "Effect": "Allow",
-            "Action": [
-                "sqs:ReceiveMessage",
-                "sqs:DeleteMessage",
-                "sqs:GetQueueAttributes",
-                "sqs:GetQueueUrl",
-                "sqs:SendMessage",
-            ],
-            "Resource": Ref("QueueArn"),
-        },
-        {
-            "Effect": "Allow",
-            "Action": ["ssm:GetParameter", "ssm:GetParameters"],
-            "Resource": [
-                Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ApiKeysParamName}"),
-                Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${StorageProfilesParamName}"),
-            ],
-        },
-        {
-            "Effect": "Allow",
-            "Action": ["secretsmanager:GetSecretValue"],
-            "Resource": [
-                Ref("DbSecretArn"),
-                Ref("LicenseSecretArn"),
-                Ref("InternalServiceKeysSecretArn"),
-            ],
-        },
-        {
-            "Effect": "Allow",
-            "Action": ["logs:CreateLogStream", "logs:PutLogEvents"],
-            "Resource": GetAtt(log_group_ref, "Arn"),
-        },
-    ]
-
-
-def _api_task_role_statements(log_group_ref) -> list:
-    """Query-api task role: query-tier base perms + ECS service/task discovery.
-
-    query-api uses the ECS API to discover live query-worker tasks (via
-    DescribeServices and ListTasks/DescribeTasks). Resource scoping for these
-    APIs requires an `ecs:cluster` condition rather than direct ARN matching,
-    which is why the resource is `*` with the cluster condition applied.
-    """
-    return _task_role_statements(log_group_ref) + [
-        {
-            "Effect": "Allow",
-            "Action": [
-                "ecs:DescribeServices",
-                "ecs:ListTasks",
-                "ecs:DescribeTasks",
-            ],
-            "Resource": "*",
-            "Condition": {"ArnLike": {"ecs:cluster": Ref("ClusterArn")}},
-        },
-    ]
 
 
 if __name__ == "__main__":

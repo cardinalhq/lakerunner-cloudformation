@@ -24,6 +24,7 @@ def test_required_cross_stack_parameters(td):
         "ClusterArn",
         "TaskSecurityGroupId",
         "ExecutionRoleArn",
+        "TaskRoleArn",
         "PrivateSubnetsCsv",
         "VpcId",
         "HttpsListenerArn",
@@ -31,6 +32,7 @@ def test_required_cross_stack_parameters(td):
         "DbEndpoint",
         "DbPort",
         "DbSecretArn",
+        "MaestroDbSecretArn",
         "LicenseSecretArn",
         "InternalServiceKeysSecretArn",
         "ApiKeysParamName",
@@ -119,9 +121,17 @@ def test_four_log_groups(td):
     assert len(names) == 4, "log groups must have distinct names"
 
 
-def test_one_iam_task_role(td):
+def test_no_internally_managed_iam_task_role(td):
+    """Phase 2: maestro shares the customer-supplied TaskRoleArn parameter."""
     roles = [r for r in td["Resources"].values() if r["Type"] == "AWS::IAM::Role"]
-    assert len(roles) == 1
+    assert len(roles) == 0
+
+
+def test_task_definition_uses_task_role_param(td):
+    task_def = next(
+        r for r in td["Resources"].values() if r["Type"] == "AWS::ECS::TaskDefinition"
+    )
+    assert task_def["Properties"]["TaskRoleArn"] == {"Ref": "TaskRoleArn"}
 
 
 # ---------------------------------------------------------------------------
@@ -186,16 +196,13 @@ def test_ecs_service_has_two_load_balancers(td):
 # ---------------------------------------------------------------------------
 
 
-def test_one_maestro_db_secret(td):
+def test_no_internally_managed_maestro_db_secret(td):
+    """Phase 2: the maestro DB secret is created by the data-setup Lambda."""
     secrets = [
         r for r in td["Resources"].values()
         if r["Type"] == "AWS::SecretsManager::Secret"
     ]
-    assert len(secrets) == 1
-    s = secrets[0]
-    gss = s["Properties"]["GenerateSecretString"]
-    assert gss["GenerateStringKey"] == "password"
-    assert "maestro" in gss["SecretStringTemplate"]
+    assert len(secrets) == 0
 
 
 # ---------------------------------------------------------------------------

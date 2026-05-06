@@ -26,7 +26,6 @@ from troposphere.elasticloadbalancingv2 import (
     PathPatternConfig,
     TargetGroup,
 )
-from troposphere.iam import Policy, Role
 from troposphere.logs import LogGroup
 
 from cardinal_cfn.listener_priorities import priority_for
@@ -44,33 +43,6 @@ def build_log_group(*, service_key: str, retention_days: int = 14) -> LogGroup:
     )
     apply_policy(lg, "log-group")
     return lg
-
-
-def build_task_role(*, service_key: str, statements: list) -> Role:
-    """Per-service IAM task role with the provided inline policy statements."""
-    return Role(
-        _resource_title(service_key, "TaskRole"),
-        AssumeRolePolicyDocument={
-            "Version": "2012-10-17",
-            "Statement": [
-                {
-                    "Effect": "Allow",
-                    "Principal": {"Service": "ecs-tasks.amazonaws.com"},
-                    "Action": "sts:AssumeRole",
-                }
-            ],
-        },
-        Policies=[
-            Policy(
-                PolicyName=f"cardinal-{service_key}-task-policy",
-                PolicyDocument={
-                    "Version": "2012-10-17",
-                    "Statement": statements,
-                },
-            )
-        ],
-        Tags=cardinal_tags(component="compute", role=f"{service_key}-task-role"),
-    )
 
 
 def build_target_group(
@@ -129,7 +101,7 @@ def build_task_definition(
     memory_mib,
     command: list | None = None,
     execution_role_arn_param: str,
-    task_role_ref,
+    task_role_arn,
     environment: list,
     secrets: list | None = None,
     log_group_ref,
@@ -141,6 +113,9 @@ def build_task_definition(
     (from CloudFormation parameters). Ints are coerced to strings; Refs and
     other troposphere objects pass through unchanged so they serialize as
     intrinsic functions.
+
+    task_role_arn accepts either a plain string or a troposphere object
+    (typically Ref('TaskRoleArn')) and is used verbatim as TaskRoleArn.
 
     container_port: if provided, the container exposes a tcp PortMapping at
     that port. Required whenever the corresponding ECS Service references
@@ -178,7 +153,7 @@ def build_task_definition(
         Cpu=_coerce_size(cpu),
         Memory=_coerce_size(memory_mib),
         ExecutionRoleArn=Ref(execution_role_arn_param),
-        TaskRoleArn=GetAtt(task_role_ref, "Arn"),
+        TaskRoleArn=task_role_arn,
         ContainerDefinitions=[ContainerDefinition(**container_kwargs)],
         Tags=cardinal_tags(component="compute", role=service_key),
     )

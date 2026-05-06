@@ -24,6 +24,7 @@ def test_required_cross_stack_parameters(td):
         "ClusterArn",
         "TaskSecurityGroupId",
         "ExecutionRoleArn",
+        "TaskRoleArn",
         "PrivateSubnetsCsv",
         "HttpsListenerArn",
         "VpcId",
@@ -170,9 +171,10 @@ def test_each_service_has_unique_log_group_with_14_day_retention(td):
     assert len(names) == 4, "log groups must have distinct names"
 
 
-def test_each_service_has_its_own_task_role(td):
+def test_no_internally_managed_iam_roles(td):
+    """Phase 2: all services share the customer-supplied TaskRoleArn parameter."""
     roles = [r for r in td["Resources"].values() if r["Type"] == "AWS::IAM::Role"]
-    assert len(roles) == 4
+    assert len(roles) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -290,47 +292,10 @@ def test_only_monitoring_has_autoscaler_env(td):
         assert not leaked, f"{container_name} unexpectedly has {leaked}"
 
 
-def _task_role_for(td, service_key):
-    """Return the IAM role whose logical id starts with the title-cased service_key."""
-    title = "".join(p.capitalize() for p in service_key.split("-")) + "TaskRole"
-    return td["Resources"][title]
-
-
-def _flatten_actions(stmt_actions):
-    return [stmt_actions] if isinstance(stmt_actions, str) else list(stmt_actions)
-
-
-def test_monitoring_task_role_grants_ecs_update(td):
-    role = _task_role_for(td, "monitoring")
-    statements = role["Properties"]["Policies"][0]["PolicyDocument"]["Statement"]
-    found = False
-    for stmt in statements:
-        actions = _flatten_actions(stmt.get("Action", []))
-        if "ecs:UpdateService" in actions and "ecs:DescribeServices" in actions:
-            found = True
-            resources = stmt["Resource"]
-            assert isinstance(resources, list) and len(resources) == 3
-            joined = json.dumps(resources)
-            for param in (
-                "ProcessLogsServiceName",
-                "ProcessMetricsServiceName",
-                "ProcessTracesServiceName",
-            ):
-                assert param in joined, f"{param} not referenced in monitoring ECS resource ARNs"
-            assert "ClusterName" in joined
-    assert found, "monitoring role missing ecs:DescribeServices/UpdateService"
-
-
-def test_other_roles_lack_ecs_update(td):
-    """Only monitoring should see ecs:UpdateService."""
-    for service_key in ("admin-api", "sweeper", "alert-evaluator"):
-        role = _task_role_for(td, service_key)
-        statements = role["Properties"]["Policies"][0]["PolicyDocument"]["Statement"]
-        for stmt in statements:
-            actions = _flatten_actions(stmt.get("Action", []))
-            assert "ecs:UpdateService" not in actions, (
-                f"{service_key} unexpectedly has ecs:UpdateService"
-            )
+# Phase 2: per-service IAM roles are gone — every service shares the
+# customer-supplied TaskRoleArn parameter, so monitoring's ECS UpdateService
+# permission must be granted on that role by the customer (documented in
+# required-roles.md).
 
 
 # ---------------------------------------------------------------------------

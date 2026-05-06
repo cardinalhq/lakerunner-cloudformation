@@ -1,2 +1,11 @@
 ignore_checks:
   - W1020  # Fn::Sub isn't needed because there are no variables
+  - W1030  # cfn-lint cannot resolve a Ref for an ARN-typed parameter at
+           # lint time; the customer guarantees the parameter is an ARN
+  - W2001  # parameters declared by children for documentation / future use
+           # (e.g. QueueArn so the IAM role's scope is visible in the
+           # parameter surface) but no longer referenced internally now that
+           # per-service task roles moved to the customer-supplied TaskRoleArn
+  - W3005  # nested-stack DependsOn intentionally repeats the dependency
+           # already implied by GetAtt(MigrationStack.Outputs.*) — keeping
+           # both forms makes the ordering explicit at the root level

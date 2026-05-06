@@ -1,39 +1,35 @@
 # Installing Cardinal lakerunner
 
-This is the install runbook for the Cardinal lakerunner CloudFormation
-distribution. Spec:
+Install runbook for the Cardinal lakerunner CloudFormation distribution.
+Spec:
 `docs/superpowers/specs/2026-05-06-cardinal-cfn-prereqs-split-design.md`.
 
-## Status
+## Architecture summary
 
-Phase 1 of the install layout pivot ships the data-setup Lambda + its
-CFN wrapper + the customer-facing required-roles cookbook. Customers
-can use these today to provision the data layer.
+The install splits cleanly into three layers, each owned by a different
+party:
 
-The lakerunner application stack continues to ship in its existing
-shape (`cardinal-lakerunner.yaml` root + 12 nested children) and is
-created/updated using the existing `scripts/deploy-lakerunner.sh`.
-**Phase 2** (a follow-up PR) refactors the lakerunner children to
-take the customer-supplied role ARNs / SG IDs / data-layer outputs as
-parameters; until then the lakerunner stack still creates its own
-roles internally.
-
-The transitional install path:
-
-1. Customer's IT pre-creates the IAM roles documented in
-   `required-roles.md` (only the `DataSetupLambdaRoleArn` is needed
-   for Phase 1; the lakerunner stack continues to create its own
-   roles in Phase 1).
-2. Customer creates the `cardinal-data-setup` stack (this PR).
-3. Customer harvests the data-setup stack outputs.
-4. Customer runs the existing lakerunner deploy script with the
-   harvested values plumbed into the existing parameter surface
-   (`DbEndpoint`, `DbSecretArn`, `BucketName`, `QueueUrl`, etc. --
-   parameters that already exist on `cardinal-lakerunner.yaml`).
+1. **Customer's IT** pre-creates the IAM roles and security groups
+   Cardinal needs and hands the operator a list of ARNs / IDs. The role
+   trust + policy contents come from
+   `docs/operations/required-roles.md` (generated from
+   `src/cardinal_cfn/iam_policies.py` so it can never drift from what
+   Cardinal actually requires).
+2. **Operator** deploys the `cardinal-data-setup` stack. That stack's
+   only job is to deploy a Python Lambda and invoke it once. The Lambda
+   creates the data layer (RDS, S3 ingest bucket, SQS queue, secrets,
+   SSM params) and returns a JSON document with their identifiers as
+   stack outputs.
+3. **Operator** deploys the `cardinal-lakerunner` stack with the
+   data-setup outputs and the customer-supplied role/SG ARNs/IDs as
+   parameters. The lakerunner stack creates only stateless application
+   resources (ECS cluster, ALB, ECS services, listeners, target
+   groups). It never creates IAM, security groups, RDS, S3 ingest, or
+   secrets -- everything comes in as parameters.
 
 ## Steps
 
-### 1. IT pre-creates the data-setup Lambda role
+### 1. IT pre-creates the required IAM roles and security groups
 
 Generate the cookbook locally:
 
@@ -42,10 +38,13 @@ make build
 less docs/operations/required-roles.md
 ```
 
-The customer's IT team creates a single IAM role named e.g.
-`cardinal-data-setup-lambda-role` with the trust policy and inline
-policy from the `cardinal-data-setup-lambda-role` section of the
-cookbook. Hand the resulting role ARN back to the operator.
+The customer's IT team:
+
+- Creates the IAM roles documented in `required-roles.md` (a single
+  shared role works as long as it is granted the union of every inline
+  policy in the cookbook). Hand the resulting role ARNs back.
+- Creates the three security groups documented in the cookbook
+  (`TaskSgId`, `AlbSgId`, `DbSgId`). Hand back the SG IDs.
 
 ### 2. Operator deploys the data-setup stack
 
@@ -95,30 +94,45 @@ aws cloudformation describe-stacks \
     --query 'Stacks[0].Outputs' --output table
 ```
 
-Or with jq for scripted reuse:
-
-```sh
-aws cloudformation describe-stacks \
-    --stack-name cardinal-data-setup \
-    --query 'Stacks[0].Outputs[*].[OutputKey,OutputValue]' --output text \
-    > cardinal-data-setup-outputs.tsv
-```
-
-The outputs match the Lambda's response keys: `DbEndpoint`, `DbPort`,
-`DbName`, `DbMasterSecretArn`, `MaestroDbSecretArn`,
-`IngestBucketName`, `IngestQueueUrl`, `IngestQueueArn`,
-`LicenseSecretArn`, `InternalKeysSecretArn`, `AdminKeySecretArn`,
+The data-setup outputs are 1:1 with `cardinal-lakerunner.yaml`'s
+data-setup parameter group: `DbEndpoint`, `DbPort`, `DbName`,
+`DbMasterSecretArn`, `MaestroDbSecretArn`, `IngestBucketName`,
+`IngestQueueUrl`, `IngestQueueArn`, `LicenseSecretArn`,
+`InternalKeysSecretArn`, `AdminKeySecretArn`,
 `StorageProfilesParamName`, `ApiKeysParamName`.
 
 ### 4. Deploy the lakerunner application stack
 
-Use the existing deploy script with the harvested values plumbed into
-the existing `cardinal-lakerunner.yaml` parameters. See
-`docs/operations/deploying.md` for the existing script's CLI surface.
+```sh
+aws cloudformation create-stack \
+    --stack-name cardinal-lakerunner \
+    --template-url https://cardinal-cfn.s3.us-east-2.amazonaws.com/lakerunner/<VERSION>/cardinal-lakerunner.yaml \
+    --parameters \
+        ParameterKey=VpcId,ParameterValue=vpc-... \
+        ParameterKey=PrivateSubnets,ParameterValue=subnet-a\,subnet-b\,subnet-c \
+        ParameterKey=CertificateArn,ParameterValue=arn:aws:acm:... \
+        ParameterKey=TaskRoleArn,ParameterValue=arn:aws:iam::<ACCOUNT>:role/cardinal-task-role \
+        ParameterKey=ExecutionRoleArn,ParameterValue=arn:aws:iam::<ACCOUNT>:role/cardinal-execution-role \
+        ParameterKey=MigrationLambdaRoleArn,ParameterValue=arn:aws:iam::<ACCOUNT>:role/cardinal-migration-lambda-role \
+        ParameterKey=TaskSgId,ParameterValue=sg-... \
+        ParameterKey=AlbSgId,ParameterValue=sg-... \
+        ParameterKey=DbEndpoint,ParameterValue=<from data-setup output> \
+        ParameterKey=DbMasterSecretArn,ParameterValue=<from data-setup output> \
+        ParameterKey=MaestroDbSecretArn,ParameterValue=<from data-setup output> \
+        ParameterKey=IngestBucketName,ParameterValue=<from data-setup output> \
+        ParameterKey=IngestQueueUrl,ParameterValue=<from data-setup output> \
+        ParameterKey=IngestQueueArn,ParameterValue=<from data-setup output> \
+        ParameterKey=LicenseSecretArn,ParameterValue=<from data-setup output> \
+        ParameterKey=InternalKeysSecretArn,ParameterValue=<from data-setup output> \
+        ParameterKey=AdminKeySecretArn,ParameterValue=<from data-setup output> \
+        ParameterKey=StorageProfilesParamName,ParameterValue=<from data-setup output> \
+        ParameterKey=ApiKeysParamName,ParameterValue=<from data-setup output> \
+        ParameterKey=DexAdminPasswordHash,ParameterValue=file:///path/to/hash.txt
+```
 
-(Phase 2 simplifies this step: the lakerunner stack will accept all
-data-setup outputs as parameters with matching names, so the harvest
-becomes a single `--parameter-overrides file://outputs.json`.)
+Optional: pass `CertLambdaRoleArn` (only required if `CertificateArn`
+is empty, i.e. the PEM-import path is in use). All sizing parameters
+have sensible defaults; override only the ones you need to change.
 
 ## Failure recovery
 
@@ -163,14 +177,6 @@ To actually destroy the data resources, the operator either:
 - Manually deletes the resources using the customer's break-glass
   identity.
 
-## Phase 2 -- planned
-
-- The lakerunner stack stops creating IAM roles + SGs, takes them as
-  parameters.
-- The lakerunner stack's database, storage, and config nested children
-  are removed; their outputs become parameters threaded through the
-  root from the data-setup stack's outputs.
-- The deploy / teardown / Jenkins-related operator scripts are
-  rewritten or retired.
-
-See the spec for details.
+The lakerunner stack is freely deletable by the operator's own role
+since Phase 2: it owns no IAM, no SGs, no RDS, and no S3 ingest, so
+nothing in the stack carries customer data.

@@ -30,30 +30,37 @@ def test_creates_ecs_cluster(template_dict):
     assert len(cluster_resources) == 1
 
 
-def test_creates_task_security_group(template_dict):
+def test_no_internally_managed_security_group(template_dict):
+    """cluster takes the task SG as a parameter, never creates one."""
     resources = template_dict["Resources"]
     sgs = [r for r in resources.values() if r["Type"] == "AWS::EC2::SecurityGroup"]
-    assert len(sgs) == 1
-    sg = sgs[0]
-    name_tag = next(t for t in sg["Properties"]["Tags"] if t["Key"] == "Name")
-    assert "task-sg" in str(name_tag["Value"]) or "InstallIdShort" in str(name_tag["Value"])
+    assert len(sgs) == 0
 
 
-def test_creates_execution_role(template_dict):
+def test_no_internally_managed_iam_role(template_dict):
+    """cluster takes the execution role as a parameter, never creates one."""
     resources = template_dict["Resources"]
     roles = [r for r in resources.values() if r["Type"] == "AWS::IAM::Role"]
-    assert len(roles) >= 1
-    exec_roles = [
-        r for r in roles
-        if "ecs-tasks.amazonaws.com" in json.dumps(r["Properties"].get("AssumeRolePolicyDocument", {}))
-    ]
-    assert len(exec_roles) >= 1
+    assert len(roles) == 0
+
+
+def test_declares_role_and_sg_parameters(template_dict):
+    params = template_dict["Parameters"]
+    assert "ExecutionRoleArn" in params
+    assert "TaskSgId" in params
 
 
 def test_outputs_required_values(template_dict):
     outputs = template_dict["Outputs"]
-    for name in ("ClusterArn", "ClusterName", "TaskSecurityGroupId", "ExecutionRoleArn", "BaseLogGroupName"):
+    for name in ("ClusterArn", "ClusterName", "BaseLogGroupName"):
         assert name in outputs, f"missing output: {name}"
+
+
+def test_no_legacy_outputs(template_dict):
+    """Phase 2 spec drops the previously-emitted role/SG outputs."""
+    outputs = template_dict["Outputs"]
+    assert "TaskSecurityGroupId" not in outputs
+    assert "ExecutionRoleArn" not in outputs
 
 
 def test_ecs_cluster_uses_delete_policy(template_dict):

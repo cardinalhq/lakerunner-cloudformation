@@ -14,8 +14,15 @@ def template_dict():
 
 def test_required_parameters(template_dict):
     for n in ("InstallIdShort", "InstallIdLong", "VpcId",
-              "PrivateSubnetsCsv", "TaskSecurityGroupId"):
+              "PrivateSubnetsCsv", "AlbSgId", "TaskSgId"):
         assert n in template_dict["Parameters"], f"missing parameter: {n}"
+
+
+def test_no_internally_managed_security_group(template_dict):
+    """alb takes SGs as parameters, never creates them."""
+    sgs = [r for r in template_dict["Resources"].values()
+           if r["Type"] == "AWS::EC2::SecurityGroup"]
+    assert len(sgs) == 0
 
 
 def test_no_public_subnet_or_alb_scheme_parameters(template_dict):
@@ -49,10 +56,11 @@ def test_creates_https_listeners_on_443_and_9443(template_dict):
     assert ports == [443, 9443]
 
 
-def test_creates_alb_to_task_ingress(template_dict):
+def test_no_ingress_resources_internally_managed(template_dict):
+    """ALB-to-task ingress is now arranged by the customer outside the stack."""
     ingresses = [r for r in template_dict["Resources"].values()
                  if r["Type"] == "AWS::EC2::SecurityGroupIngress"]
-    assert len(ingresses) >= 1
+    assert len(ingresses) == 0
 
 
 def test_alb_uses_delete_policy(template_dict):
@@ -67,8 +75,12 @@ def test_outputs_required(template_dict):
     for n in (
         "AlbArn",
         "AlbDnsName",
-        "AlbSecurityGroupId",
         "HttpsListenerArn",
         "AdminHttpsListenerArn",
     ):
         assert n in template_dict["Outputs"]
+
+
+def test_no_alb_security_group_output(template_dict):
+    """The ALB SG ID is supplied by the caller, so the stack does not surface it."""
+    assert "AlbSecurityGroupId" not in template_dict["Outputs"]

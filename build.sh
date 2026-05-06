@@ -25,14 +25,14 @@ echo "Generating cardinal-deployer-role.yaml..."
 python3 -m cardinal_cfn.cardinal_deployer > generated-templates/cardinal-deployer-role.yaml
 
 # ---------------------------------------------------------------------------
-# Existing lakerunner stack (root + 12 children) -- unchanged in this PR.
-# Phase 2 (separate PR) refactors children to take roles/SGs as parameters
-# and removes the database/storage/config children (work moves to Lambda).
+# Lakerunner stack (root + 9 nested children). Children take role ARNs and
+# security-group IDs as parameters from the customer; the database, storage,
+# and config children are gone (the data-setup Lambda owns those resources).
 # ---------------------------------------------------------------------------
 echo "Generating cardinal-lakerunner.yaml (root)..."
 python3 -m cardinal_cfn.root > generated-templates/cardinal-lakerunner.yaml
 
-for child in cluster database storage alb config cert migration \
+for child in cluster alb cert migration \
              services_query services_process services_control otel maestro; do
   out_name=$(echo "$child" | tr '_' '-')
   echo "Generating cardinal-lakerunner/${out_name}.yaml..."

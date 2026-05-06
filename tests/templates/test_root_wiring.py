@@ -6,17 +6,14 @@ import pytest
 
 from cardinal_cfn import root
 from cardinal_cfn.children import (
-    cluster, database, storage, alb, config, cert, migration,
+    cluster, alb, cert, migration,
     services_query, services_process, services_control, otel, maestro,
 )
 
 
 CHILDREN = {
     "ClusterStack": cluster,
-    "DatabaseStack": database,
-    "StorageStack": storage,
     "AlbStack": alb,
-    "ConfigStack": config,
     "CertStack": cert,
     "MigrationStack": migration,
     "ServicesQueryStack": services_query,

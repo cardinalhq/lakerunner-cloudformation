@@ -88,34 +88,33 @@ def test_yes_flag_required_for_destruction():
 # ---------------------------------------------------------------------------
 
 def test_nested_stack_logical_ids_match_root_template():
-    """The script discovers retained-resource state by looking up nested
-    stacks under the root by logical id (`get_nested_stack_id ROOT
-    LOGICAL_ID`).  If a logical id in the script does not exist in the
-    generated root template the lookup silently returns empty and
-    cleanup skips every retained resource — exactly the bug fixed in
-    this commit.  Pin the logical ids the script depends on against
-    what `cardinal_cfn.root.build()` actually emits."""
+    """The teardown script's retained-resource discovery references nested
+    stack logical ids under the root.  The Phase 2 prereqs-split refactor
+    removes the database/storage/config children entirely (their work moved
+    to the data-setup Lambda and is owned outside CFN), so the script's
+    references to those stack ids are now legacy: they exist for installs
+    deployed before the refactor and are tolerated by the script's
+    silent-empty-on-missing path.  This test simply asserts the script's
+    referenced ids are a subset of the legacy + current set."""
     import re
 
-    # Build the root template fresh so the test never lies about what's in
-    # generated-templates/.
     from cardinal_cfn.root import build as build_root
 
     root = build_root()
-    nested_ids = {
+    current_nested_ids = {
         name
         for name, res in root.resources.items()
         if res.resource_type == "AWS::CloudFormation::Stack"
     }
-    assert {"StorageStack", "DatabaseStack", "ConfigStack"}.issubset(nested_ids), (
-        f"expected StorageStack/DatabaseStack/ConfigStack in root nested ids, got {sorted(nested_ids)}"
-    )
+    legacy_nested_ids = {"StorageStack", "DatabaseStack", "ConfigStack"}
+    allowed_ids = current_nested_ids | legacy_nested_ids
 
     raw = SCRIPT.read_text()
     referenced = set(re.findall(r'get_nested_stack_id\s+"\$stack_name"\s+"([^"]+)"', raw))
-    missing = referenced - nested_ids
-    assert not missing, (
-        f"teardown script references nested logical ids that do not exist in the root template: {sorted(missing)}"
+    unknown = referenced - allowed_ids
+    assert not unknown, (
+        f"teardown script references nested logical ids that exist in neither "
+        f"the current root template nor the legacy retain set: {sorted(unknown)}"
     )
 
 

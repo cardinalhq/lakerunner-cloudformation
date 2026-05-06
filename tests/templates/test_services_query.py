@@ -24,6 +24,7 @@ def test_required_cross_stack_parameters(td):
         "ClusterArn",
         "TaskSecurityGroupId",
         "ExecutionRoleArn",
+        "TaskRoleArn",
         "PrivateSubnetsCsv",
         "HttpsListenerArn",
         "VpcId",
@@ -135,9 +136,10 @@ def test_each_service_has_unique_log_group_with_14_day_retention(td):
 # ---------------------------------------------------------------------------
 
 
-def test_each_service_has_its_own_task_role(td):
+def test_no_internally_managed_iam_roles(td):
+    """Phase 2: all services share the customer-supplied TaskRoleArn parameter."""
     roles = [r for r in td["Resources"].values() if r["Type"] == "AWS::IAM::Role"]
-    assert len(roles) == 2
+    assert len(roles) == 0
 
 
 # ---------------------------------------------------------------------------

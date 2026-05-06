@@ -4,6 +4,16 @@ All IAM roles Cardinal needs are pre-created by the customer's IT and passed int
 
 Substitute `${AccountId}` and `${Region}` with the install's account and region. The single shared model -- pass the same ARN for every role parameter -- works as long as the role contains the union of every policy below.
 
+## Required security groups
+
+Cardinal's CFN no longer creates security groups; the customer pre-creates three SGs and passes their IDs as parameters. Required ingress rules:
+
+| SG parameter | Required ingress | Required egress | Why |
+|---|---|---|---|
+| `TaskSgId` (ECS tasks) | TCP 0-65535 from self (task-to-task via Cloud Map); TCP 0-65535 from `AlbSgId` so the ALB can reach service target groups. | All. | Self-ingress lets services discover each other via Cloud Map; ALB-source ingress lets the ALB hit per-service target ports. |
+| `AlbSgId` (ALB) | TCP 443 from the customer's VPC CIDR (carries query / maestro / OTEL HTTPS); TCP 9443 from the same source (admin-api dedicated listener). | All. | The ALB is internal-scheme so 0.0.0.0/0 is VPC-local; narrow to a corporate CIDR if the customer's IT requires it. |
+| `DbSgId` (RDS) | TCP 5432 from `TaskSgId`. | All. | Defense-in-depth on top of `PubliclyAccessible: false` and private-subnet placement. The data-setup Lambda attaches the RDS instance to this SG; lakerunner CFN does not consume the SG ID directly. |
+
 ## Roles overview
 
 | Role name (suggested) | Trust principal | Used by |

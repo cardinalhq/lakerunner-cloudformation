@@ -21,7 +21,6 @@ from troposphere import (
 )
 from troposphere.awslambda import Code, Function
 from troposphere.cloudformation import CustomResource
-from troposphere.iam import Policy, Role
 from troposphere.logs import LogGroup
 
 from cardinal_cfn.children import cert_lambda
@@ -68,6 +67,15 @@ def build() -> Template:
         NoEcho=True,
         Description="Optional PEM-encoded chain of intermediate certificates.",
     ))
+    t.add_parameter(Parameter(
+        "CertLambdaRoleArn",
+        Type="String",
+        Default="",
+        Description=(
+            "IAM role ARN the cert-import Lambda assumes. Required when the "
+            "PEM-import path is in use (CertificateArn empty)."
+        ),
+    ))
 
     t.add_condition(
         "ImportCert",
@@ -83,56 +91,6 @@ def build() -> Template:
     ))
     apply_policy(log_group, "log-group")
 
-    lambda_role = t.add_resource(Role(
-        "CertLambdaRole",
-        Condition="ImportCert",
-        AssumeRolePolicyDocument={
-            "Version": "2012-10-17",
-            "Statement": [{
-                "Effect": "Allow",
-                "Principal": {"Service": "lambda.amazonaws.com"},
-                "Action": "sts:AssumeRole",
-            }],
-        },
-        Policies=[Policy(
-            PolicyName="cert-lambda-policy",
-            PolicyDocument={
-                "Version": "2012-10-17",
-                "Statement": [
-                    {
-                        "Effect": "Allow",
-                        "Action": [
-                            "logs:CreateLogGroup",
-                            "logs:CreateLogStream",
-                            "logs:PutLogEvents",
-                        ],
-                        "Resource": "*",
-                    },
-                    {
-                        # Create has no ARN to scope to; ACM requires ImportCertificate
-                        # on "*" for the initial import call.
-                        "Effect": "Allow",
-                        "Action": ["acm:ImportCertificate"],
-                        "Resource": "*",
-                    },
-                    {
-                        "Effect": "Allow",
-                        "Action": [
-                            "acm:DeleteCertificate",
-                            "acm:AddTagsToCertificate",
-                            "acm:RemoveTagsFromCertificate",
-                        ],
-                        "Resource": Sub(
-                            "arn:${AWS::Partition}:acm:${AWS::Region}:"
-                            "${AWS::AccountId}:certificate/*"
-                        ),
-                    },
-                ],
-            },
-        )],
-        Tags=cardinal_tags(component="cert", role="lambda-role"),
-    ))
-
     cert_fn = t.add_resource(Function(
         "CertLambda",
         Condition="ImportCert",
@@ -140,7 +98,7 @@ def build() -> Template:
         Code=Code(ZipFile=cert_lambda.SOURCE),
         Runtime="python3.11",
         Handler="index.lambda_handler",
-        Role=GetAtt(lambda_role, "Arn"),
+        Role=Ref("CertLambdaRoleArn"),
         Timeout=900,
         Tags=cardinal_tags(component="cert", role="lambda"),
     ))

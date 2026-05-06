@@ -188,6 +188,33 @@ def render_doc() -> str:
         "role parameter -- works as long as the role contains the union of "
         "every policy below.\n"
     )
+    sections.append("## Required security groups\n")
+    sections.append(
+        "Cardinal's CFN no longer creates security groups; the customer "
+        "pre-creates three SGs and passes their IDs as parameters. Required "
+        "ingress rules:\n"
+    )
+    sections.append("| SG parameter | Required ingress | Required egress | Why |")
+    sections.append("|---|---|---|---|")
+    sections.append(
+        "| `TaskSgId` (ECS tasks) | TCP 0-65535 from self (task-to-task via Cloud Map); "
+        "TCP 0-65535 from `AlbSgId` so the ALB can reach service target groups. | All. | "
+        "Self-ingress lets services discover each other via Cloud Map; ALB-source ingress "
+        "lets the ALB hit per-service target ports. |"
+    )
+    sections.append(
+        "| `AlbSgId` (ALB) | TCP 443 from the customer's VPC CIDR (carries query / "
+        "maestro / OTEL HTTPS); TCP 9443 from the same source (admin-api dedicated "
+        "listener). | All. | The ALB is internal-scheme so 0.0.0.0/0 is VPC-local; "
+        "narrow to a corporate CIDR if the customer's IT requires it. |"
+    )
+    sections.append(
+        "| `DbSgId` (RDS) | TCP 5432 from `TaskSgId`. | All. | Defense-in-depth on "
+        "top of `PubliclyAccessible: false` and private-subnet placement. The "
+        "data-setup Lambda attaches the RDS instance to this SG; lakerunner CFN "
+        "does not consume the SG ID directly. |"
+    )
+    sections.append("")
 
     table = [
         ("`cardinal-task-role`", "ECS tasks (`ecs-tasks.amazonaws.com`)", "Used as the `TaskRoleArn` parameter on every ECS task definition in the lakerunner stack."),
