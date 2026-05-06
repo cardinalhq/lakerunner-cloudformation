@@ -6,7 +6,7 @@ from cardinal_cfn.naming import (
     APPLICATION,
     PROJECT,
     LakerunnerComponent,
-    cardinal_tags,
+    cardinal_tags_v2,
     log_group_name,
     name_tag,
     secret_name,
@@ -24,13 +24,13 @@ def test_constants():
 
 
 def test_tags_carry_required_keys():
-    tags = cardinal_tags(component="task-role", managed_by="cardinal-prereqs-script")
+    tags = cardinal_tags_v2(component="task-role", managed_by="cardinal-prereqs-script")
     keys = set(_tag_dict(tags).keys())
     assert {"Application", "Component", "ManagedBy", "Name"} <= keys
 
 
 def test_tags_values_match_inputs():
-    tags = _tag_dict(cardinal_tags(component="ingest-bucket", managed_by="cardinal-data-setup-script"))
+    tags = _tag_dict(cardinal_tags_v2(component="ingest-bucket", managed_by="cardinal-data-setup-script"))
     assert tags["Application"] == APPLICATION
     assert tags["Component"] == "ingest-bucket"
     assert tags["ManagedBy"] == "cardinal-data-setup-script"
@@ -38,16 +38,16 @@ def test_tags_values_match_inputs():
 
 
 def test_tags_install_version_optional():
-    tags_without = _tag_dict(cardinal_tags(component="x", managed_by="m"))
+    tags_without = _tag_dict(cardinal_tags_v2(component="x", managed_by="m"))
     assert "cardinal:install-version" not in tags_without
 
-    tags_with = _tag_dict(cardinal_tags(component="x", managed_by="m", install_version="v1.2.3"))
+    tags_with = _tag_dict(cardinal_tags_v2(component="x", managed_by="m", install_version="v1.2.3"))
     assert tags_with["cardinal:install-version"] == "v1.2.3"
 
 
 def test_managed_by_required():
     with pytest.raises(ValueError):
-        cardinal_tags(component="x", managed_by="")
+        cardinal_tags_v2(component="x", managed_by="")
 
 
 def test_name_tag_emits_plain_string_no_install_id():

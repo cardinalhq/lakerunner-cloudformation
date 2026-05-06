@@ -21,6 +21,14 @@ export PYTHONPATH="$(pwd)/src${PYTHONPATH:+:$PYTHONPATH}"
 echo "Generating cardinal-vpc.yaml..."
 python3 -m cardinal_cfn.cardinal_vpc > generated-templates/cardinal-vpc.yaml
 
+echo "Generating cardinal-prereqs.sh..."
+python3 -m cardinal_cfn.prereqs.render > generated-templates/cardinal-prereqs.sh
+chmod +x generated-templates/cardinal-prereqs.sh
+
+echo "Generating cardinal-data-setup.sh..."
+python3 -m cardinal_cfn.data_setup.render > generated-templates/cardinal-data-setup.sh
+chmod +x generated-templates/cardinal-data-setup.sh
+
 echo "Generating cardinal-deployer-role.yaml..."
 python3 -m cardinal_cfn.cardinal_deployer > generated-templates/cardinal-deployer-role.yaml
 
