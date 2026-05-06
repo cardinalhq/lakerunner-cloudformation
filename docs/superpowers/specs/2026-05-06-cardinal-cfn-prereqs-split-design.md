@@ -154,9 +154,11 @@ def handler(event: dict, context) -> dict:
         "StorageProfilesParamName": ..., "ApiKeysParamName": ...
       }
 
-    On RequestType == "Delete", the handler is a no-op: the data
-    resources are intentionally retained. The customer's IT removes
-    them out-of-band when an install is decommissioned.
+    On RequestType == "Delete", the handler is a no-op by default:
+    the data resources are intentionally retained so an accidental
+    stack delete does not destroy customer data. A future flag can
+    opt the Lambda into actual teardown (the role has the
+    permissions; the policy decision is the customer's).
     """
 ```
 
@@ -170,10 +172,12 @@ wait-available -> master-secret connection JSON; license / internal-keys
 / admin-key / maestro-db secrets; SSM parameters.
 
 If the Lambda fails mid-way, the customer re-invokes it; the
-``ensure_*`` checks skip already-completed steps. If the Lambda
-permanently fails (e.g., name collision the operator must clear), the
-customer's IT cleans up the partially-created resources out-of-band
-with their break-glass identity.
+``ensure_*`` checks skip already-completed steps. The Lambda's
+execution role is granted update/delete on every resource it manages
+(the customer accepts that scope on the Lambda role since the Lambda
+code is auditable), so partial-state recovery does not require
+out-of-band IT involvement -- the Lambda can drop and recreate any
+resource it owns.
 
 ## Naming contract
 
