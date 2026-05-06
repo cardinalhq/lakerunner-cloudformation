@@ -240,8 +240,17 @@ def ensure_db_instance(rds, *, db_id: str, sg_id: str, instance_class: str, allo
     )
 
 
-def wait_db_available(rds, db_id: str, timeout_seconds: int = 1500) -> dict:
-    """Poll until the DB instance is available or the timeout expires."""
+def wait_db_available(rds, db_id: str, timeout_seconds: int = 840) -> dict:
+    """Poll until the DB instance is available or the timeout expires.
+
+    Default timeout 840s (14 minutes) is intentionally below the Lambda's
+    900s execution-time cap so the handler can still send a FAILED
+    response on timeout. RDS creates routinely fit in this window for
+    `db.t3.medium` / `db.t3.large` with default storage; very large
+    instance classes or busy regions may take longer, in which case the
+    Lambda exits with a TimeoutError, the customer re-invokes, and the
+    second call sees the DB is now available and skips the create step.
+    """
     deadline = time.time() + timeout_seconds
     while True:
         resp = rds.describe_db_instances(DBInstanceIdentifier=db_id)
@@ -250,29 +259,47 @@ def wait_db_available(rds, db_id: str, timeout_seconds: int = 1500) -> dict:
         if status == "available":
             return instance
         if time.time() > deadline:
-            raise TimeoutError(f"db {db_id} did not become available within {timeout_seconds}s (current: {status})")
+            raise TimeoutError(
+                f"db {db_id} did not become available within {timeout_seconds}s "
+                f"(current: {status}). Re-invoke the Lambda to continue waiting; "
+                f"ensure_* helpers will skip steps that have already completed."
+            )
         logger.info("db %s status: %s; sleeping", db_id, status)
         time.sleep(30)
 
 
-def ensure_db_master_secret(secretsmanager, *, name: str, username: str, password: str) -> str:
-    """Create or update a connection-JSON secret. Returns its ARN."""
+def ensure_db_master_secret(secretsmanager, *, name: str, username: str) -> tuple[str, str]:
+    """Idempotently materialize the DB master secret. Returns (arn, password).
+
+    Convergence rule: the password is the contract between the DB instance
+    and this secret. If the secret already exists, we return its current
+    password so the caller passes the SAME password to ``create_db_instance``
+    on a partial re-run (DB create may have failed previously, but the
+    secret was created). If the secret does not exist, we generate a fresh
+    one and write it before any DB-create attempt.
+    """
     try:
-        existing = secretsmanager.describe_secret(SecretId=name)
-        logger.info("secret %s exists", name)
-        return existing["ARN"]
+        secretsmanager.describe_secret(SecretId=name)
+        raw = secretsmanager.get_secret_value(SecretId=name)["SecretString"]
+        existing = json.loads(raw)
+        if "password" not in existing:
+            raise ValueError(f"secret {name} exists but is missing 'password' key")
+        logger.info("secret %s exists; reusing existing password", name)
+        return secretsmanager.describe_secret(SecretId=name)["ARN"], existing["password"]
     except ClientError as e:
         if e.response["Error"]["Code"] != "ResourceNotFoundException":
             raise
-    logger.info("creating secret %s", name)
+
+    password = _generate_password()
     placeholder = json.dumps({"username": username, "password": password})
+    logger.info("creating secret %s with fresh password", name)
     resp = secretsmanager.create_secret(
         Name=name,
-        Description="Cardinal RDS master credentials (placeholder; updated post-create with full connection JSON)",
+        Description="Cardinal RDS master credentials (initial placeholder; updated post-DB-create with full connection JSON)",
         SecretString=placeholder,
         Tags=_common_tags(name),
     )
-    return resp["ARN"]
+    return resp["ARN"], password
 
 
 def update_db_master_secret_value(secretsmanager, *, name: str, db_instance: dict) -> None:
@@ -480,12 +507,13 @@ def run(props: dict, region: str | None = None) -> dict:
 
     # ----------------------------------------------------------------- database
     ensure_db_subnet_group(rds, DB_SUBNET_GROUP_NAME, subnets)
-    master_password = _generate_password()
-    db_master_secret_arn = ensure_db_master_secret(
+    # The secret carries the source-of-truth password. ensure_db_master_secret
+    # generates one on first create and reuses the existing one on re-run, so
+    # ensure_db_instance always sees a password that matches the secret.
+    db_master_secret_arn, master_password = ensure_db_master_secret(
         secretsmanager,
         name=SECRET_NAMES["db_master"],
         username=DB_USERNAME,
-        password=master_password,
     )
     ensure_db_instance(
         rds,

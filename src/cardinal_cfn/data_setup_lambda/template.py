@@ -144,7 +144,11 @@ def build_template() -> Template:
         Runtime="python3.11",
         Handler="handler.handler",
         Role=Ref("DataSetupLambdaRoleArn"),
-        Timeout=900,           # 15 min -- DB create can take 10+
+        # 900 = AWS hard cap. wait_db_available()'s timeout (840s) is set
+        # to leave ~60s for the handler to send the cfn-response on slow-DB
+        # timeout, after which the operator re-invokes; ensure_* helpers
+        # skip already-completed steps.
+        Timeout=900,
         MemorySize=512,
         Code=Code(
             S3Bucket=Ref("LambdaCodeS3Bucket"),

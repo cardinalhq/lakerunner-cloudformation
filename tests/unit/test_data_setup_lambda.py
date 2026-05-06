@@ -9,6 +9,7 @@ against a live account before publish).
 import json
 
 import pytest
+from botocore.exceptions import ClientError
 
 from cardinal_cfn.data_setup_lambda import handler as h
 
@@ -142,3 +143,85 @@ def test_handler_direct_invoke_returns_run_result(monkeypatch):
     event = {"VpcId": "vpc-x", "Region": "us-east-2"}  # no RequestType, no ResponseURL
     out = h.handler(event, None)
     assert out == {"DbEndpoint": "x"}
+
+
+# ---------------------------------------------------------------------------
+# Password convergence -- the secret is the source of truth across re-runs.
+# ---------------------------------------------------------------------------
+class _FakeSecretsManager:
+    """Minimal in-memory stand-in for boto3 secretsmanager client."""
+
+    def __init__(self, *, exists: dict | None = None):
+        self._secrets: dict = {}
+        self._next_arn = 0
+        if exists:
+            for name, value in exists.items():
+                self._next_arn += 1
+                self._secrets[name] = {
+                    "ARN": f"arn:aws:secretsmanager:us-east-2:111:secret:{name}-AABBCC",
+                    "SecretString": value,
+                }
+
+    def describe_secret(self, *, SecretId):  # noqa: N803 -- boto3 kw shape
+        if SecretId not in self._secrets:
+            raise ClientError({"Error": {"Code": "ResourceNotFoundException", "Message": "not found"}}, "DescribeSecret")
+        return {"ARN": self._secrets[SecretId]["ARN"]}
+
+    def get_secret_value(self, *, SecretId):  # noqa: N803
+        if SecretId not in self._secrets:
+            raise ClientError({"Error": {"Code": "ResourceNotFoundException", "Message": "not found"}}, "GetSecretValue")
+        return {"SecretString": self._secrets[SecretId]["SecretString"]}
+
+    def create_secret(self, *, Name, Description, SecretString, Tags):  # noqa: N803
+        if Name in self._secrets:
+            raise ClientError({"Error": {"Code": "ResourceExistsException", "Message": "exists"}}, "CreateSecret")
+        self._next_arn += 1
+        arn = f"arn:aws:secretsmanager:us-east-2:111:secret:{Name}-NEW{self._next_arn:03d}"
+        self._secrets[Name] = {"ARN": arn, "SecretString": SecretString}
+        return {"ARN": arn}
+
+
+def test_db_master_secret_first_create_generates_password_and_writes_secret():
+    sm = _FakeSecretsManager()
+    arn, password = h.ensure_db_master_secret(sm, name="cardinal-db-master", username="lakerunner")
+    assert arn.startswith("arn:aws:secretsmanager:")
+    assert len(password) == 40
+    stored = json.loads(sm._secrets["cardinal-db-master"]["SecretString"])
+    assert stored["username"] == "lakerunner"
+    assert stored["password"] == password
+
+
+def test_db_master_secret_rerun_returns_existing_password():
+    """Convergence: secret is the source of truth. The DB instance must be
+    created with the password already in the secret -- not a fresh one --
+    on re-run, otherwise password drift breaks DB authentication."""
+    existing = json.dumps({"username": "lakerunner", "password": "EXISTING-PASSWORD-FROM-PRIOR-RUN"})
+    sm = _FakeSecretsManager(exists={"cardinal-db-master": existing})
+
+    arn, password = h.ensure_db_master_secret(sm, name="cardinal-db-master", username="lakerunner")
+    assert password == "EXISTING-PASSWORD-FROM-PRIOR-RUN", \
+        "ensure_db_master_secret must return the existing secret's password on re-run"
+    # Secret is unmodified (still has the original value).
+    assert sm._secrets["cardinal-db-master"]["SecretString"] == existing
+
+
+def test_db_master_secret_rejects_secret_missing_password_key():
+    """Refuse to silently degrade: a secret that exists but lacks a password
+    key is corrupted state, not something to overwrite."""
+    sm = _FakeSecretsManager(exists={"cardinal-db-master": json.dumps({"username": "lakerunner"})})
+    with pytest.raises(ValueError, match="missing 'password' key"):
+        h.ensure_db_master_secret(sm, name="cardinal-db-master", username="lakerunner")
+
+
+# ---------------------------------------------------------------------------
+# wait_db_available -- timeout sized to fit Lambda execution cap
+# ---------------------------------------------------------------------------
+def test_wait_db_available_default_timeout_below_lambda_cap():
+    """The Lambda function's Timeout in the wrapper template is 900s. The
+    poll's default deadline must leave headroom for the handler to send a
+    cfn-response on FAILED, otherwise the custom resource hangs."""
+    import inspect
+    sig = inspect.signature(h.wait_db_available)
+    default_timeout = sig.parameters["timeout_seconds"].default
+    assert default_timeout <= 880, \
+        f"wait_db_available timeout ({default_timeout}s) must leave room for cfn-response under the 900s Lambda cap"
