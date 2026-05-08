@@ -180,14 +180,6 @@ ensure_s3_bucket() {
         --tagging "$(tags_s3_envelope ingest-bucket)" >/dev/null
 }
 
-ensure_s3_block_public_access() {
-    log "applying block-public-access to $BUCKET"
-    aws_cli s3api put-public-access-block \
-        --bucket "$BUCKET" \
-        --public-access-block-configuration \
-            BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
-}
-
 ensure_s3_lifecycle() {
     log "applying lifecycle (expire after $BUCKET_LIFECYCLE_DAYS days) to $BUCKET"
     cfg=$(jq -nc --argjson d "$BUCKET_LIFECYCLE_DAYS" '{
@@ -390,7 +382,6 @@ main() {
     # ---- storage ----------------------------------------------------------
     queue_url=$(ensure_sqs_queue)
     ensure_s3_bucket
-    ensure_s3_block_public_access
     ensure_s3_lifecycle
     ensure_sqs_policy "$queue_url"
     ensure_s3_notification
