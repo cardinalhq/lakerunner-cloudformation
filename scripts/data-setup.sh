@@ -26,7 +26,13 @@ set -eu
 : "${VPC_ID:=vpc-xxxxxxxx}"
 : "${PRIVATE_SUBNETS:=subnet-aaaaaaaa,subnet-bbbbbbbb}"   # CSV, >=2 subnets in distinct AZs
 : "${DB_SG_ID:=sg-xxxxxxxx}"                              # cardinal-db-sg
-: "${LICENSE_DATA_FILE:=}"                                # path to z64:... license token
+
+# License token (z64:...). Provide exactly one of:
+#   LICENSE_DATA       -- the token itself (single-line string)
+#   LICENSE_DATA_FILE  -- path to a file whose contents are the token
+# LICENSE_DATA wins if both are set.
+: "${LICENSE_DATA:=}"
+: "${LICENSE_DATA_FILE:=}"
 
 # Optional sizing (defaults match the Lambda).
 : "${DB_INSTANCE_CLASS:=db.t3.medium}"
@@ -73,8 +79,14 @@ for tool in aws jq openssl; do
     command -v "$tool" >/dev/null 2>&1 || fail "$tool is required on PATH"
 done
 
-[ -n "${LICENSE_DATA_FILE}" ] || fail "LICENSE_DATA_FILE must point at the cardinal license token (z64:...)"
-[ -r "${LICENSE_DATA_FILE}" ] || fail "license file not readable: ${LICENSE_DATA_FILE}"
+if [ -n "${LICENSE_DATA}" ]; then
+    license_data="${LICENSE_DATA}"
+elif [ -n "${LICENSE_DATA_FILE}" ]; then
+    [ -r "${LICENSE_DATA_FILE}" ] || fail "license file not readable: ${LICENSE_DATA_FILE}"
+    license_data=$(cat "${LICENSE_DATA_FILE}")
+else
+    fail "set LICENSE_DATA (the z64:... token) or LICENSE_DATA_FILE (path to a file containing it)"
+fi
 
 aws_cli() { aws --region "$REGION" "$@"; }
 
@@ -461,7 +473,7 @@ main() {
 
     # ---- secrets ----------------------------------------------------------
     license_arn=$(ensure_secret_with_value "$SECRET_LICENSE" \
-        "$(cat "$LICENSE_DATA_FILE")" \
+        "$license_data" \
         "Cardinal lakerunner license" \
         license)
     internal_keys_arn=$(ensure_secret_with_value "$SECRET_INTERNAL_KEYS" \

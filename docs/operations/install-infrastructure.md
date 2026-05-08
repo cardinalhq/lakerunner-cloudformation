@@ -53,7 +53,7 @@ variables. The required ones:
 | `VPC_ID` | Target VPC. |
 | `PRIVATE_SUBNETS` | CSV of subnet IDs across at least two AZs. |
 | `DB_SG_ID` | Pre-created DB security group. |
-| `LICENSE_DATA_FILE` | Path to the cardinal license token (single line beginning with `z64:`). |
+| `LICENSE_DATA` *or* `LICENSE_DATA_FILE` | Cardinal license token (single line beginning with `z64:`). Set `LICENSE_DATA` to the token itself, or `LICENSE_DATA_FILE` to a file containing it. `LICENSE_DATA` wins if both are set. |
 
 Optional sizing knobs:
 
@@ -73,7 +73,7 @@ REGION=us-east-2 \
 VPC_ID=vpc-... \
 PRIVATE_SUBNETS=subnet-aaaa,subnet-bbbb \
 DB_SG_ID=sg-... \
-LICENSE_DATA_FILE=/path/to/license.token \
+LICENSE_DATA="z64:..." \
     scripts/data-setup.sh > /tmp/infra-outputs.json
 ```
 
