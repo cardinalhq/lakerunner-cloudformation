@@ -32,7 +32,7 @@ only -- production installs always bring their own VPC.
 
 ## Published templates
 
-Per release tag at `https://cardinal-cfn.s3.us-east-2.amazonaws.com/lakerunner/<VERSION>/`:
+Per release tag at `https://cardinal-cfn-us-east-1.s3.us-east-1.amazonaws.com/lakerunner/<VERSION>/`:
 
 - `cardinal-data-setup.yaml` (+ `cardinal-data-setup-lambda.zip`)
 - `cardinal-lakerunner.yaml` (+ nested children under `cardinal-lakerunner/`)

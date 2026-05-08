@@ -71,7 +71,7 @@ For multiple installs, repeat for each — one job per install. After install, t
 |---|---|---|
 | `StackName` | `cardinal-lakerunner` | Edit per install |
 | `Region` | `us-east-2` | Edit per install |
-| `TemplateBaseUrl` | `https://cardinal-cfn.s3.us-east-2.amazonaws.com/lakerunner` | Override for air-gapped customers |
+| `TemplateBaseUrl` | `https://cardinal-cfn-us-east-1.s3.us-east-1.amazonaws.com/lakerunner` | Override for air-gapped customers |
 | `Version` | (empty -- required) | Published template tag, e.g. `v0.0.38` |
 | `DeployerRoleArn` | (empty) | Strongly recommended; see `docs/operations/deploying.md` |
 | `AutoApprove` | `true` | When `false`, the pipeline pauses for manual approval after the change set is described |
@@ -102,7 +102,7 @@ The default uses the Jenkins AWS Credentials plugin (recommended). Two alternati
 
 ## Air-gapped variant
 
-Mirror `https://cardinal-cfn.s3.us-east-2.amazonaws.com/lakerunner/<version>/` to a private bucket (or any HTTPS-reachable location). Set the `TemplateBaseUrl` parameter on the Jenkins job to point at your mirror. Override per-image parameters via your stack defaults so customer images come from your private registry rather than `public.ecr.aws/...`.
+Mirror `https://cardinal-cfn-us-east-1.s3.us-east-1.amazonaws.com/lakerunner/<version>/` to a private bucket (or any HTTPS-reachable location). Set the `TemplateBaseUrl` parameter on the Jenkins job to point at your mirror. Override per-image parameters via your stack defaults so customer images come from your private registry rather than `public.ecr.aws/...`.
 
 ## Reading the change set summary
 

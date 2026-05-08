@@ -82,7 +82,7 @@ params += [
     {"ParameterKey": "DexAdminEmail",          "ParameterValue": "admin@example.com"},
     {"ParameterKey": "DexAdminPasswordHash",   "ParameterValue": hash_text},
     {"ParameterKey": "OidcSuperadminEmails",   "ParameterValue": "admin@example.com"},
-    {"ParameterKey": "TemplateBaseUrl",        "ParameterValue": "https://cardinal-cfn.s3.us-east-2.amazonaws.com/lakerunner/<VERSION>/cardinal-lakerunner/"},
+    {"ParameterKey": "TemplateBaseUrl",        "ParameterValue": "https://cardinal-cfn-us-east-1.s3.us-east-1.amazonaws.com/lakerunner/<VERSION>/cardinal-lakerunner/"},
 ]
 print(json.dumps(params, indent=2))
 PY
@@ -108,7 +108,7 @@ have sensible defaults; override only the ones you need to change.
 aws cloudformation create-stack \
     --region <REGION> \
     --stack-name cardinal-lakerunner \
-    --template-url https://cardinal-cfn.s3.us-east-2.amazonaws.com/lakerunner/<VERSION>/cardinal-lakerunner.yaml \
+    --template-url https://cardinal-cfn-us-east-1.s3.us-east-1.amazonaws.com/lakerunner/<VERSION>/cardinal-lakerunner.yaml \
     --parameters file:///tmp/lakerunner-params.json
 
 aws cloudformation wait stack-create-complete \
@@ -152,7 +152,7 @@ update the infrastructure stack) and run `update-stack`:
 ```sh
 aws cloudformation update-stack \
     --region <REGION> --stack-name cardinal-lakerunner \
-    --template-url https://cardinal-cfn.s3.us-east-2.amazonaws.com/lakerunner/<NEW_VERSION>/cardinal-lakerunner.yaml \
+    --template-url https://cardinal-cfn-us-east-1.s3.us-east-1.amazonaws.com/lakerunner/<NEW_VERSION>/cardinal-lakerunner.yaml \
     --parameters file:///tmp/lakerunner-params.json
 ```
 

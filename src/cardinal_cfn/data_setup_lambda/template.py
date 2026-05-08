@@ -45,7 +45,10 @@ from troposphere.awslambda import Code, Function
 
 
 VERSION = os.environ.get("CARDINAL_VERSION", "dev")
-DEFAULT_BUCKET = os.environ.get("CARDINAL_BUCKET_NAME", "cardinal-cfn-us-east-2")
+# us-east-1 is the publishing source-of-truth; cardinal-cfn-us-east-2 is
+# populated via S3 bucket replication. Override CARDINAL_BUCKET_NAME for
+# air-gapped builds that target a customer-owned mirror.
+DEFAULT_BUCKET = os.environ.get("CARDINAL_BUCKET_NAME", "cardinal-cfn-us-east-1")
 DEFAULT_LAMBDA_URL = (
     f"s3://{DEFAULT_BUCKET}/lakerunner/{VERSION}/cardinal-data-setup-lambda.zip"
 )

@@ -13,9 +13,12 @@ jobs:
   release:
     runs-on: ubuntu-latest
     env:
-      AWS_REGION: us-east-2
-      CARDINAL_BUCKET_NAME: cardinal-cfn
-      CARDINAL_BUCKET_REGION: us-east-2
+      # us-east-1 is the source-of-truth publishing bucket. Replication
+      # populates cardinal-cfn-us-east-2 (and any other regional mirror)
+      # at the S3 level, out of band from this workflow.
+      AWS_REGION: us-east-1
+      CARDINAL_BUCKET_NAME: cardinal-cfn-us-east-1
+      CARDINAL_BUCKET_REGION: us-east-1
     steps:
       - uses: actions/checkout@v4
 

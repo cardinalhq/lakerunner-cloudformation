@@ -20,7 +20,7 @@ exactly the AWS APIs the lakerunner templates touch. Operators only need
 aws cloudformation create-stack \
   --stack-name cardinal-cfn-deployer \
   --region us-east-1 \
-  --template-url https://cardinal-cfn.s3.us-east-2.amazonaws.com/lakerunner/<version>/cardinal-deployer-role.yaml \
+  --template-url https://cardinal-cfn-us-east-1.s3.us-east-1.amazonaws.com/lakerunner/<version>/cardinal-deployer-role.yaml \
   --capabilities CAPABILITY_NAMED_IAM
 
 # 2. Grab the ARN.
@@ -34,7 +34,7 @@ aws cloudformation update-stack \
   --stack-name cardinal-lakerunner \
   --region us-east-1 \
   --role-arn "$ROLE_ARN" \
-  --template-url https://cardinal-cfn.s3.us-east-2.amazonaws.com/lakerunner/<version>/cardinal-lakerunner.yaml \
+  --template-url https://cardinal-cfn-us-east-1.s3.us-east-1.amazonaws.com/lakerunner/<version>/cardinal-lakerunner.yaml \
   --use-previous-parameters \
   --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND
 ```

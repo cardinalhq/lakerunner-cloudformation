@@ -54,7 +54,7 @@ The `cardinal-data-setup.yaml` template takes:
 | `BucketLifecycleDays` | Optional | S3 ingest object expiry (default `7`). |
 | `DbInstanceClass` | Optional | RDS class (default `db.t3.medium`). |
 | `DbAllocatedStorage` | Optional | RDS GiB (default `100`). |
-| `LambdaCodeS3Url` | Optional | Full `s3://<bucket>/<prefix>/<version>/<file>.zip` URL of the data-setup Lambda zip. Must point at a bucket in the **same region** as this stack. Default targets us-east-2; override for any other region. See "Lambda code URL by region" below. |
+| `LambdaCodeS3Url` | Optional | Full `s3://<bucket>/<prefix>/<version>/<file>.zip` URL of the data-setup Lambda zip. Must point at a bucket in the **same region** as this stack. Default targets us-east-1 (the publishing source of truth); override for any other region. See "Lambda code URL by region" below. |
 
 There are **no DEX or OIDC parameters** on this stack -- those flow
 only into the lakerunner stack.
@@ -62,13 +62,14 @@ only into the lakerunner stack.
 ### Lambda code URL by region
 
 The data-setup Lambda's code zip must live in an S3 bucket in the
-same region as the Lambda function. The published artifact is
-mirrored to one regional bucket per supported region:
+same region as the Lambda function. The release workflow publishes
+to `cardinal-cfn-us-east-1` (the source of truth); S3 bucket
+replication populates `cardinal-cfn-us-east-2` as a regional mirror.
 
-| Region | Default `LambdaCodeS3Url` |
+| Region | `LambdaCodeS3Url` |
 |---|---|
-| `us-east-1` | `s3://cardinal-cfn-us-east-1/lakerunner/<VERSION>/cardinal-data-setup-lambda.zip` |
-| `us-east-2` | `s3://cardinal-cfn-us-east-2/lakerunner/<VERSION>/cardinal-data-setup-lambda.zip` (template default) |
+| `us-east-1` | `s3://cardinal-cfn-us-east-1/lakerunner/<VERSION>/cardinal-data-setup-lambda.zip` (template default) |
+| `us-east-2` | `s3://cardinal-cfn-us-east-2/lakerunner/<VERSION>/cardinal-data-setup-lambda.zip` |
 
 Air-gapped mirrors must preserve the same key shape -- exactly three
 slash-separated segments after the bucket -- because the template
@@ -79,7 +80,7 @@ parses `LambdaCodeS3Url` with a fixed-depth `Fn::Split`.
 Templates are published per release tag at:
 
 ```
-https://cardinal-cfn.s3.us-east-2.amazonaws.com/lakerunner/<VERSION>/<template>.yaml
+https://cardinal-cfn-us-east-1.s3.us-east-1.amazonaws.com/lakerunner/<VERSION>/<template>.yaml
 ```
 
 Replace `<VERSION>` with the explicit release tag (e.g. `v0.0.41`).
@@ -108,7 +109,7 @@ EOF
 aws cloudformation create-stack \
     --region <REGION> \
     --stack-name cardinal-data-setup \
-    --template-url https://cardinal-cfn.s3.us-east-2.amazonaws.com/lakerunner/<VERSION>/cardinal-data-setup.yaml \
+    --template-url https://cardinal-cfn-us-east-1.s3.us-east-1.amazonaws.com/lakerunner/<VERSION>/cardinal-data-setup.yaml \
     --parameters file:///tmp/data-setup-params.json
 
 aws cloudformation wait stack-create-complete \
