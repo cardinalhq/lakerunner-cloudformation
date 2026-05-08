@@ -1,5 +1,5 @@
 #!/bin/sh
-# Generate all Cardinal CloudFormation templates.
+# Generate all Cardinal CloudFormation artifacts.
 
 set -e
 
@@ -24,24 +24,48 @@ python3 -m cardinal_cfn.cardinal_vpc > generated-templates/cardinal-vpc.yaml
 echo "Generating cardinal-deployer-role.yaml..."
 python3 -m cardinal_cfn.cardinal_deployer > generated-templates/cardinal-deployer-role.yaml
 
+# ---------------------------------------------------------------------------
+# Lakerunner stack (root + 9 nested children). Children take role ARNs and
+# security-group IDs as parameters from the customer; the database, storage,
+# and config children are gone (the data-setup Lambda owns those resources).
+# ---------------------------------------------------------------------------
 echo "Generating cardinal-lakerunner.yaml (root)..."
 python3 -m cardinal_cfn.root > generated-templates/cardinal-lakerunner.yaml
 
-for child in cluster database storage alb config cert migration \
+for child in cluster alb cert migration \
              services_query services_process services_control otel maestro; do
   out_name=$(echo "$child" | tr '_' '-')
   echo "Generating cardinal-lakerunner/${out_name}.yaml..."
   python3 -m "cardinal_cfn.children.${child}" > "generated-templates/cardinal-lakerunner/${out_name}.yaml"
 done
 
+# ---------------------------------------------------------------------------
+# New artifacts (this PR): data-setup Lambda + its CFN wrapper, plus the
+# generated required-roles cookbook the customer's IT consumes.
+# ---------------------------------------------------------------------------
+echo "Generating cardinal-data-setup.yaml (Lambda wrapper)..."
+python3 -m cardinal_cfn.data_setup_lambda.template > generated-templates/cardinal-data-setup.yaml
+
+echo "Packaging cardinal-data-setup-lambda.zip..."
+LAMBDA_BUILD_DIR=$(mktemp -d)
+trap 'rm -rf "$LAMBDA_BUILD_DIR"' EXIT
+cp src/cardinal_cfn/data_setup_lambda/handler.py "$LAMBDA_BUILD_DIR/handler.py"
+( cd "$LAMBDA_BUILD_DIR" && zip -q "$OLDPWD/generated-templates/cardinal-data-setup-lambda.zip" handler.py )
+
+echo "Generating docs/operations/required-roles.md..."
+python3 -m cardinal_cfn.required_roles_doc > docs/operations/required-roles.md
+
 echo
-echo "Linting..."
+echo "Linting CFN templates..."
 cfn-lint generated-templates/cardinal-vpc.yaml \
          generated-templates/cardinal-deployer-role.yaml \
          generated-templates/cardinal-lakerunner.yaml \
-         generated-templates/cardinal-lakerunner/*.yaml || \
+         generated-templates/cardinal-lakerunner/*.yaml \
+         generated-templates/cardinal-data-setup.yaml || \
   echo "cfn-lint completed with warnings"
 
 echo
-echo "Generated templates:"
-ls generated-templates/ generated-templates/cardinal-lakerunner/
+echo "Generated artifacts:"
+ls -la generated-templates/
+echo "  cardinal-lakerunner/:"
+ls generated-templates/cardinal-lakerunner/

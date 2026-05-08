@@ -7,13 +7,11 @@ import pytest
 from cardinal_cfn.children import services_common
 
 
-def test_build_log_group_uses_install_id_in_name():
+def test_build_log_group_uses_cardinal_naming_contract():
     lg = services_common.build_log_group(service_key="query-api")
     rendered = json.loads(json.dumps(lg, default=lambda o: o.to_dict()))
     name = rendered["Properties"].get("LogGroupName")
-    assert name is not None
-    assert "InstallIdShort" in json.dumps(name)
-    assert "query-api" in json.dumps(name)
+    assert name == "/cardinal/query-api"
 
 
 def test_build_listener_rule_uses_registered_priority():
@@ -37,18 +35,14 @@ def test_build_listener_rule_unknown_service_raises():
         )
 
 
-def test_build_task_role_returns_role_with_inline_policy():
-    role = services_common.build_task_role(
-        service_key="query-worker",
-        statements=[{"Effect": "Allow", "Action": "s3:GetObject", "Resource": "*"}],
-    )
-    rendered = json.loads(json.dumps(role, default=lambda o: o.to_dict()))
-    assert rendered["Type"] == "AWS::IAM::Role"
-    policies = rendered["Properties"].get("Policies", [])
-    assert len(policies) >= 1
+def test_build_task_role_no_longer_exposed():
+    """Per the Phase 2 prereqs-split refactor, services no longer create
+    per-service IAM roles; all share a customer-supplied TaskRoleArn."""
+    assert not hasattr(services_common, "build_task_role")
 
 
 def test_build_task_definition_accepts_int_cpu_memory():
+    from troposphere import Ref
     from troposphere.logs import LogGroup
 
     lg = LogGroup("L", LogGroupName="x")
@@ -59,13 +53,14 @@ def test_build_task_definition_accepts_int_cpu_memory():
         memory_mib=2048,
         command=["/app/bin/lakerunner"],
         execution_role_arn_param="ExecutionRoleArn",
-        task_role_ref="TaskRole",
+        task_role_arn=Ref("TaskRoleArn"),
         environment=[],
         log_group_ref=lg,
     )
     rendered = json.loads(json.dumps(td, default=lambda o: o.to_dict()))
     assert rendered["Properties"]["Cpu"] == "1024"
     assert rendered["Properties"]["Memory"] == "2048"
+    assert rendered["Properties"]["TaskRoleArn"] == {"Ref": "TaskRoleArn"}
 
 
 def test_build_task_definition_accepts_ref_cpu_memory():
@@ -79,7 +74,7 @@ def test_build_task_definition_accepts_ref_cpu_memory():
         cpu=Ref("QueryApiCpu"),
         memory_mib=Ref("QueryApiMemory"),
         execution_role_arn_param="ExecutionRoleArn",
-        task_role_ref="TaskRole",
+        task_role_arn=Ref("TaskRoleArn"),
         environment=[],
         log_group_ref=lg,
     )

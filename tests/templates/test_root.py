@@ -17,12 +17,36 @@ def test_required_parameters(td):
         "VpcId",
         "PrivateSubnets",
         "CertificateArn",
-        "LicenseData",
-        "ApiKeysOverride",
-        "StorageProfilesOverride",
         "TemplateBaseUrl",
+        # IAM + SG parameters now customer-supplied
+        "TaskRoleArn",
+        "ExecutionRoleArn",
+        "MigrationLambdaRoleArn",
+        "CertLambdaRoleArn",
+        "TaskSgId",
+        "AlbSgId",
+        # Data-setup outputs threaded in
+        "DbEndpoint",
+        "DbPort",
+        "DbName",
+        "DbMasterSecretArn",
+        "MaestroDbSecretArn",
+        "IngestBucketName",
+        "IngestQueueUrl",
+        "IngestQueueArn",
+        "LicenseSecretArn",
+        "InternalKeysSecretArn",
+        "AdminKeySecretArn",
+        "StorageProfilesParamName",
+        "ApiKeysParamName",
     ):
         assert n in td["Parameters"], f"missing parameter: {n}"
+
+
+def test_no_phase1_data_or_secret_input_parameters(td):
+    """Phase 2: license/api/storage payloads are owned by the data-setup Lambda."""
+    for n in ("LicenseData", "ApiKeysOverride", "StorageProfilesOverride"):
+        assert n not in td["Parameters"], f"unexpected legacy parameter: {n}"
 
 
 def test_no_public_subnet_or_alb_scheme_parameters(td):
@@ -50,24 +74,20 @@ def test_template_base_url_default_pattern(td):
 def test_console_parameter_groups(td):
     groups = td["Metadata"]["AWS::CloudFormation::Interface"]["ParameterGroups"]
     labels = [g["Label"]["default"] for g in groups]
-    assert labels == ["Networking", "Sizing", "Images", "Advanced"]
-
-
-def test_license_data_no_echo(td):
-    assert td["Parameters"]["LicenseData"]["NoEcho"] is True
-
-
-def test_api_keys_override_no_echo(td):
-    assert td["Parameters"]["ApiKeysOverride"]["NoEcho"] is True
-
-
-def test_storage_profiles_override_no_echo(td):
-    assert td["Parameters"]["StorageProfilesOverride"]["NoEcho"] is True
+    assert labels == [
+        "Networking",
+        "IAM roles + security groups",
+        "Data-setup outputs",
+        "Sizing",
+        "Images",
+        "Advanced",
+    ]
 
 
 def test_nested_stack_count(td):
+    """Phase 2 removes database/storage/config -> 9 nested children remain."""
     nested = [r for r in td["Resources"].values() if r["Type"] == "AWS::CloudFormation::Stack"]
-    assert len(nested) == 12
+    assert len(nested) == 9
 
 
 def test_nested_stack_logical_ids(td):
@@ -75,10 +95,7 @@ def test_nested_stack_logical_ids(td):
               if v["Type"] == "AWS::CloudFormation::Stack"}
     expected = {
         "ClusterStack",
-        "DatabaseStack",
-        "StorageStack",
         "AlbStack",
-        "ConfigStack",
         "CertStack",
         "MigrationStack",
         "ServicesQueryStack",
@@ -90,13 +107,12 @@ def test_nested_stack_logical_ids(td):
     assert nested == expected
 
 
-def test_alb_depends_on_cluster(td):
-    """alb owns the TaskSG ingress, must wait on cluster."""
-    alb = td["Resources"]["AlbStack"]
-    deps = alb.get("DependsOn", [])
-    if isinstance(deps, str):
-        deps = [deps]
-    assert "ClusterStack" in deps
+def test_no_legacy_data_stacks(td):
+    """The Phase 2 spec deletes the database/storage/config children."""
+    nested = {k for k, v in td["Resources"].items()
+              if v["Type"] == "AWS::CloudFormation::Stack"}
+    for legacy in ("DatabaseStack", "StorageStack", "ConfigStack"):
+        assert legacy not in nested, f"legacy nested stack still present: {legacy}"
 
 
 def test_service_tier_stacks_depend_on_migration(td):

@@ -19,7 +19,6 @@ from troposphere.ecs import (
     Secret,
     TaskDefinition,
 )
-from troposphere.iam import Policy, Role
 from troposphere.logs import LogGroup
 
 from cardinal_cfn.children import migration_lambda
@@ -42,6 +41,8 @@ def build() -> Template:
     t.add_parameter(Parameter("ClusterName", Type="String", Description="ECS cluster name."))
     t.add_parameter(Parameter("TaskSecurityGroupId", Type="String", Description="ECS task security group ID."))
     t.add_parameter(Parameter("ExecutionRoleArn", Type="String", Description="ECS task execution role ARN."))
+    t.add_parameter(Parameter("TaskRoleArn", Type="String", Description="ECS task role ARN (used by the migrator container)."))
+    t.add_parameter(Parameter("MigrationLambdaRoleArn", Type="String", Description="IAM role ARN the migration Lambda assumes."))
     t.add_parameter(Parameter("PrivateSubnetsCsv", Type="String", Description="Comma-separated private subnet IDs."))
 
     # Database parameters
@@ -90,50 +91,6 @@ def build() -> Template:
         )
     )
     apply_policy(lambda_lg, "log-group")
-
-    # ---------------------------------------------------------------------------
-    # Migrator ECS task role
-    # ---------------------------------------------------------------------------
-    task_role = t.add_resource(
-        Role(
-            "MigratorTaskRole",
-            AssumeRolePolicyDocument={
-                "Version": "2012-10-17",
-                "Statement": [
-                    {
-                        "Effect": "Allow",
-                        "Principal": {"Service": "ecs-tasks.amazonaws.com"},
-                        "Action": "sts:AssumeRole",
-                    }
-                ],
-            },
-            Policies=[
-                Policy(
-                    PolicyName="migrator-secrets",
-                    PolicyDocument={
-                        "Version": "2012-10-17",
-                        "Statement": [
-                            {
-                                "Effect": "Allow",
-                                "Action": ["secretsmanager:GetSecretValue"],
-                                "Resource": Ref("DbSecretArn"),
-                            },
-                            {
-                                "Effect": "Allow",
-                                "Action": [
-                                    "logs:CreateLogGroup",
-                                    "logs:CreateLogStream",
-                                    "logs:PutLogEvents",
-                                ],
-                                "Resource": "*",
-                            },
-                        ],
-                    },
-                )
-            ],
-            Tags=cardinal_tags(component="migration", role="migrator-task-role"),
-        )
-    )
 
     # ---------------------------------------------------------------------------
     # Migrator ECS task definition.
@@ -217,78 +174,15 @@ def build() -> Template:
     task_def = t.add_resource(
         TaskDefinition(
             "MigratorTaskDef",
-            Family=Sub("cardinal-migration-${InstallIdShort}"),
+            Family="cardinal-migrator",
             NetworkMode="awsvpc",
             RequiresCompatibilities=["FARGATE"],
             Cpu="256",
             Memory="512",
             ExecutionRoleArn=Ref("ExecutionRoleArn"),
-            TaskRoleArn=GetAtt(task_role, "Arn"),
+            TaskRoleArn=Ref("TaskRoleArn"),
             ContainerDefinitions=[configdb_init_container, migrator_container],
             Tags=cardinal_tags(component="migration", role="migrator-task"),
-        )
-    )
-
-    # ---------------------------------------------------------------------------
-    # Lambda role
-    # ---------------------------------------------------------------------------
-    lambda_role = t.add_resource(
-        Role(
-            "MigrationLambdaRole",
-            AssumeRolePolicyDocument={
-                "Version": "2012-10-17",
-                "Statement": [
-                    {
-                        "Effect": "Allow",
-                        "Principal": {"Service": "lambda.amazonaws.com"},
-                        "Action": "sts:AssumeRole",
-                    }
-                ],
-            },
-            Policies=[
-                Policy(
-                    PolicyName="migration-lambda-policy",
-                    PolicyDocument={
-                        "Version": "2012-10-17",
-                        "Statement": [
-                            {
-                                "Effect": "Allow",
-                                "Action": [
-                                    "logs:CreateLogGroup",
-                                    "logs:CreateLogStream",
-                                    "logs:PutLogEvents",
-                                ],
-                                "Resource": "*",
-                            },
-                            {
-                                "Effect": "Allow",
-                                "Action": ["ecs:RunTask"],
-                                "Resource": Ref(task_def),
-                                "Condition": {
-                                    "ArnLike": {"ecs:cluster": Ref("ClusterArn")}
-                                },
-                            },
-                            {
-                                "Effect": "Allow",
-                                "Action": ["ecs:DescribeTasks"],
-                                "Resource": "*",
-                                "Condition": {
-                                    "ArnLike": {"ecs:cluster": Ref("ClusterArn")}
-                                },
-                            },
-                            {
-                                "Effect": "Allow",
-                                "Action": ["iam:PassRole"],
-                                "Resource": [
-                                    Ref("ExecutionRoleArn"),
-                                    GetAtt(task_role, "Arn"),
-                                ],
-                            },
-                        ],
-                    },
-                )
-            ],
-            Tags=cardinal_tags(component="migration", role="lambda-role"),
         )
     )
 
@@ -302,7 +196,7 @@ def build() -> Template:
             Code=Code(ZipFile=migration_lambda.SOURCE),
             Runtime="python3.11",
             Handler="index.lambda_handler",
-            Role=GetAtt(lambda_role, "Arn"),
+            Role=Ref("MigrationLambdaRoleArn"),
             Timeout=900,
             Tags=cardinal_tags(component="migration", role="lambda"),
         )

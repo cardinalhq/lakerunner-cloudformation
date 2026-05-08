@@ -1,4 +1,9 @@
-"""alb.yaml nested stack: ALB, HTTPS listener (443), ALB SG, TaskSG ingress."""
+"""alb.yaml nested stack: ALB and HTTPS listeners (443 / 9443).
+
+The ALB security group and the ALB-to-task ingress rules are customer-owned
+(see ``docs/operations/required-roles.md``); this stack consumes the SG ID
+and never creates or mutates security groups.
+"""
 
 from troposphere import (
     Template,
@@ -15,7 +20,6 @@ from troposphere.elasticloadbalancingv2 import (
     FixedResponseConfig,
     Certificate,
 )
-from troposphere.ec2 import SecurityGroup, SecurityGroupIngress
 
 from cardinal_cfn.naming import cardinal_tags
 from cardinal_cfn.parameters import add_install_id_parameters
@@ -25,7 +29,7 @@ from cardinal_cfn.policies import apply_policy
 def build() -> Template:
     t = Template()
     t.set_description(
-        "Cardinal ALB: Application Load Balancer, HTTPS listener (443), ALB SG, TaskSG ingress."
+        "Cardinal ALB: Application Load Balancer and HTTPS listeners (443 / 9443)."
     )
 
     add_install_id_parameters(t)
@@ -46,9 +50,9 @@ def build() -> Template:
     )
     t.add_parameter(
         Parameter(
-            "TaskSecurityGroupId",
+            "AlbSgId",
             Type="AWS::EC2::SecurityGroup::Id",
-            Description="ECS task security group ID from the cluster stack.",
+            Description="ALB security group ID (customer-supplied).",
         )
     )
     t.add_parameter(
@@ -59,37 +63,12 @@ def build() -> Template:
         )
     )
 
-    alb_sg = t.add_resource(
-        SecurityGroup(
-            "AlbSG",
-            GroupDescription="Cardinal ALB security group",
-            VpcId=Ref("VpcId"),
-            SecurityGroupIngress=[
-                {
-                    "IpProtocol": "tcp",
-                    "FromPort": 443,
-                    "ToPort": 443,
-                    "CidrIp": "0.0.0.0/0",
-                    "Description": "HTTPS from anywhere",
-                },
-                {
-                    "IpProtocol": "tcp",
-                    "FromPort": 9443,
-                    "ToPort": 9443,
-                    "CidrIp": "0.0.0.0/0",
-                    "Description": "Admin-API HTTPS (dedicated listener)",
-                },
-            ],
-            Tags=cardinal_tags(component="networking", role="alb-sg"),
-        )
-    )
-
     alb = t.add_resource(
         LoadBalancer(
             "Alb",
             Scheme="internal",
             Subnets=Split(",", Ref("PrivateSubnetsCsv")),
-            SecurityGroups=[Ref(alb_sg)],
+            SecurityGroups=[Ref("AlbSgId")],
             Type="application",
             Tags=cardinal_tags(component="networking", role="alb"),
         )
@@ -143,22 +122,8 @@ def build() -> Template:
         )
     )
 
-    # Allow ALB to reach ECS tasks on all ports
-    t.add_resource(
-        SecurityGroupIngress(
-            "AlbToTaskIngress",
-            GroupId=Ref("TaskSecurityGroupId"),
-            IpProtocol="tcp",
-            FromPort=0,
-            ToPort=65535,
-            SourceSecurityGroupId=Ref(alb_sg),
-            Description="Allow ALB to reach ECS tasks",
-        )
-    )
-
     t.add_output(Output("AlbArn", Value=Ref(alb)))
     t.add_output(Output("AlbDnsName", Value=GetAtt(alb, "DNSName")))
-    t.add_output(Output("AlbSecurityGroupId", Value=Ref(alb_sg)))
     t.add_output(Output("HttpsListenerArn", Value=Ref(listener)))
     t.add_output(Output("AdminHttpsListenerArn", Value=Ref(admin_listener)))
 

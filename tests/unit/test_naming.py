@@ -1,44 +1,92 @@
-"""Tests for naming and tag helpers."""
+"""Tests for the naming and tag conventions module."""
 
-import json
+import pytest
 
-from cardinal_cfn.naming import cardinal_tags, name_tag, ssm_param_name, secret_name
-
-
-def _render(obj):
-    return json.loads(json.dumps(obj, default=lambda o: o.to_dict()))
-
-
-def test_cardinal_tags_includes_required_keys():
-    rendered = _render(cardinal_tags(component="storage", role="ingest-bucket"))
-    keys = {tag["Key"] for tag in rendered}
-    assert keys == {"Name", "Project", "Component", "ManagedBy"}
-
-
-def test_cardinal_tags_name_includes_install_id_and_role():
-    rendered = _render(cardinal_tags(component="storage", role="ingest-bucket"))
-    name_tag_value = next(t["Value"] for t in rendered if t["Key"] == "Name")
-    assert name_tag_value == {"Fn::Sub": "cardinal-ingest-bucket-${InstallIdShort}"}
+from cardinal_cfn.naming import (
+    APPLICATION,
+    PROJECT,
+    LakerunnerComponent,
+    cardinal_tags_v2,
+    log_group_name,
+    name_tag,
+    secret_name,
+    ssm_param_name,
+)
 
 
-def test_cardinal_tags_project_constant():
-    rendered = _render(cardinal_tags(component="storage", role="ingest-bucket"))
-    project = next(t["Value"] for t in rendered if t["Key"] == "Project")
-    assert project == "cardinal"
+def _tag_dict(tags) -> dict[str, str]:
+    return {item["Key"]: item["Value"] for item in tags.to_dict()}
 
 
-def test_name_tag_returns_just_the_name_dict():
-    """name_tag() is for resources that take a single Name attribute (not Tags=)."""
-    rendered = _render(name_tag(role="ecs-cluster"))
-    assert rendered == {"Fn::Sub": "cardinal-ecs-cluster-${InstallIdShort}"}
+def test_constants():
+    assert PROJECT == "cardinal"
+    assert APPLICATION == "cardinal-lakerunner"
 
 
-def test_ssm_param_name_uses_install_id_long():
-    """SSM rejects PutParameter on names that contain slashes without a leading slash."""
-    rendered = _render(ssm_param_name(key="storage-profiles"))
-    assert rendered == {"Fn::Sub": "/cardinal/${InstallIdLong}/storage-profiles"}
+def test_tags_carry_required_keys():
+    tags = cardinal_tags_v2(component="task-role", managed_by="cardinal-prereqs-script")
+    keys = set(_tag_dict(tags).keys())
+    assert {"Application", "Component", "ManagedBy", "Name"} <= keys
 
 
-def test_secret_name_uses_install_id_long():
-    rendered = _render(secret_name(purpose="admin-api-key"))
-    assert rendered == {"Fn::Sub": "cardinal/${InstallIdLong}/admin-api-key"}
+def test_tags_values_match_inputs():
+    tags = _tag_dict(cardinal_tags_v2(component="ingest-bucket", managed_by="cardinal-data-setup-script"))
+    assert tags["Application"] == APPLICATION
+    assert tags["Component"] == "ingest-bucket"
+    assert tags["ManagedBy"] == "cardinal-data-setup-script"
+    assert tags["Name"] == "cardinal-ingest-bucket"
+
+
+def test_tags_install_version_optional():
+    tags_without = _tag_dict(cardinal_tags_v2(component="x", managed_by="m"))
+    assert "cardinal:install-version" not in tags_without
+
+    tags_with = _tag_dict(cardinal_tags_v2(component="x", managed_by="m", install_version="v1.2.3"))
+    assert tags_with["cardinal:install-version"] == "v1.2.3"
+
+
+def test_managed_by_required():
+    with pytest.raises(ValueError):
+        cardinal_tags_v2(component="x", managed_by="")
+
+
+def test_name_tag_emits_plain_string_no_install_id():
+    assert name_tag(role="ingest-bucket") == "cardinal-ingest-bucket"
+
+
+def test_secret_name_uses_dash_prefix_no_install_id():
+    assert secret_name(purpose="db-master") == "cardinal-db-master"
+
+
+def test_ssm_param_name_uses_slash_prefix_no_install_id():
+    assert ssm_param_name(key="storage-profiles") == "/cardinal/storage-profiles"
+
+
+def test_log_group_name_uses_slash_prefix():
+    assert log_group_name(service="query-api") == "/cardinal/query-api"
+
+
+def test_lakerunner_components_are_known():
+    assert LakerunnerComponent.QUERY_API.value == "query-api"
+    assert LakerunnerComponent.MIGRATOR.value == "migrator"
+    assert LakerunnerComponent.MAESTRO.value == "maestro"
+
+
+def test_lakerunner_components_complete_coverage():
+    # Lock in the full set so removing one becomes a deliberate choice.
+    assert {c.value for c in LakerunnerComponent} == {
+        "query-api",
+        "query-worker",
+        "process-logs",
+        "process-metrics",
+        "process-traces",
+        "pubsub-sqs",
+        "sweeper",
+        "monitoring",
+        "admin-api",
+        "alert-evaluator",
+        "otel-collector",
+        "maestro",
+        "dex",
+        "migrator",
+    }

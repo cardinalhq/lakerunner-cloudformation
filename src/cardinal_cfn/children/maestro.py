@@ -1,21 +1,26 @@
 """maestro.yaml nested stack: maestro + DEX ECS Fargate service.
 
-Owns a SINGLE ECS Fargate service running a multi-container task definition:
+Owns a SINGLE ECS Fargate service running a six-container task definition:
 
-  1. db-init  (Essential=False, runs psql to bootstrap DB+user, then exits)
-  2. maestro  (Essential=True, listens on the maestro and MCP gateway ports)
-  3. dex      (Essential=True, listens on the DEX OIDC port)
+  1. db-init       (Essential=False, runs psql to bootstrap maestro DB+user)
+  2. mcp-gateway   (Essential=True, runs maestro DB schema migrations on
+                    startup, then serves the MCP gateway port)
+  3. wait-for-mcp  (Essential=False, blocks until mcp-gateway has finished
+                    its on-startup migrations so maestro doesn't race them)
+  4. maestro      (Essential=True, listens on the maestro HTTPS port)
+  5. dex-init      (Essential=False, renders the DEX config from CFN-supplied
+                    OIDC params: DexAdminEmail, DexAdminPasswordHash,
+                    OidcSuperadminEmails)
+  6. dex          (Essential=True, listens on the DEX OIDC port)
 
-The maestro container DependsOn db-init=SUCCESS, so the service won't come up
-until the database is provisioned. Both maestro and dex are attached to the
-shared cardinal HTTPS listener via two ListenerRules:
+Container dependsOn graph: db-init -> mcp-gateway -> wait-for-mcp -> maestro;
+dex-init -> dex. Both maestro and dex attach to the shared cardinal HTTPS
+listener via two ListenerRules:
 
   /*          -> maestro container, priority 49999 (catch-all default app)
   /dex/*      -> dex container,     priority 210
 
-Scope cuts vs. the pre-refactor generator: no self-signed cert Lambda, no
-dex-init container, no maestro-local ALB, no HTTP-only fallback. The shared
-ALB and its certificate are owned by the alb child stack.
+The shared ALB and its certificate are owned by the alb child stack.
 """
 
 from troposphere import (
@@ -43,9 +48,6 @@ from troposphere.ecs import (
     TaskDefinition,
     Volume,
 )
-from troposphere.secretsmanager import GenerateSecretString
-from troposphere.secretsmanager import Secret as SmSecret
-
 from cardinal_cfn.children import services_common
 from cardinal_cfn.defaults import load_defaults
 from cardinal_cfn.images import add_image_override
@@ -102,6 +104,9 @@ def build() -> Template:
         Parameter("ExecutionRoleArn", Type="String", Description="ECS task execution role ARN.")
     )
     t.add_parameter(
+        Parameter("TaskRoleArn", Type="String", Description="ECS task role ARN (shared across all services).")
+    )
+    t.add_parameter(
         Parameter(
             "PrivateSubnetsCsv",
             Type="String",
@@ -128,6 +133,13 @@ def build() -> Template:
             "DbSecretArn",
             Type="String",
             Description="ARN of the master DB secret (used by db-init to provision maestro DB+user).",
+        )
+    )
+    t.add_parameter(
+        Parameter(
+            "MaestroDbSecretArn",
+            Type="String",
+            Description="ARN of the maestro application DB secret (created by data-setup Lambda).",
         )
     )
     t.add_parameter(
@@ -272,6 +284,7 @@ def build() -> Template:
                     "ClusterArn",
                     "TaskSecurityGroupId",
                     "ExecutionRoleArn",
+                    "TaskRoleArn",
                     "PrivateSubnetsCsv",
                     "VpcId",
                     "HttpsListenerArn",
@@ -283,6 +296,7 @@ def build() -> Template:
                     "InternalServiceKeysSecretArn",
                     "ApiKeysParamName",
                     "StorageProfilesParamName",
+                    "MaestroDbSecretArn",
                     "MigrationComplete",
                 ],
             },
@@ -307,47 +321,12 @@ def build() -> Template:
     )
 
     # ---------------------------------------------------------------------
-    # Maestro DB password (separate secret from the master DB secret).
-    # Generated once at stack create; the db-init container injects this
-    # password as the maestro role's password during CREATE USER.
-    # No apply_policy() — this secret has no entry in policies.py and the
-    # default Delete policy is fine (a fresh install regenerates).
-    # ---------------------------------------------------------------------
-    maestro_db_secret = t.add_resource(
-        SmSecret(
-            "MaestroDbSecret",
-            Description=Sub(
-                "Maestro application DB password for install ${InstallIdShort}."
-            ),
-            GenerateSecretString=GenerateSecretString(
-                SecretStringTemplate='{"username":"maestro"}',
-                GenerateStringKey="password",
-                ExcludePunctuation=True,
-            ),
-            Tags=cardinal_tags(component="database", role="maestro-db-secret"),
-        )
-    )
-
-    # ---------------------------------------------------------------------
     # Log groups (one per container so streams stay separable)
     # ---------------------------------------------------------------------
     db_init_lg = t.add_resource(services_common.build_log_group(service_key=_DB_INIT_KEY))
     maestro_lg = t.add_resource(services_common.build_log_group(service_key=_MAESTRO_KEY))
     dex_lg = t.add_resource(services_common.build_log_group(service_key=_DEX_KEY))
     dex_init_lg = t.add_resource(services_common.build_log_group(service_key=_DEX_INIT_KEY))
-
-    # ---------------------------------------------------------------------
-    # IAM task role (single role used by all containers in the task)
-    # ---------------------------------------------------------------------
-    task_role = t.add_resource(
-        services_common.build_task_role(
-            service_key=_SERVICE_KEY,
-            statements=_task_role_statements(
-                log_group_refs=[db_init_lg, maestro_lg, dex_lg, dex_init_lg],
-                maestro_db_secret_ref=maestro_db_secret,
-            ),
-        )
-    )
 
     # ---------------------------------------------------------------------
     # Container definitions (inlined: services_common.build_task_definition
@@ -400,7 +379,7 @@ def build() -> Template:
             Secret(Name="LRDB_PASSWORD", ValueFrom=Sub("${DbSecretArn}:password::")),
             Secret(
                 Name="MAESTRO_DB_PASSWORD",
-                ValueFrom=Sub("${MaestroDbSecret}:password::"),
+                ValueFrom=Sub("${MaestroDbSecretArn}:password::"),
             ),
         ],
         LogConfiguration=LogConfiguration(
@@ -426,7 +405,7 @@ def build() -> Template:
     db_secrets = [
         Secret(
             Name="MAESTRO_DB_PASSWORD",
-            ValueFrom=Sub("${MaestroDbSecret}:password::"),
+            ValueFrom=Sub("${MaestroDbSecretArn}:password::"),
         ),
     ]
 
@@ -624,7 +603,7 @@ def build() -> Template:
             Cpu=Ref("MaestroTaskCpu"),
             Memory=Ref("MaestroTaskMemory"),
             ExecutionRoleArn=Ref("ExecutionRoleArn"),
-            TaskRoleArn=GetAtt(task_role, "Arn"),
+            TaskRoleArn=Ref("TaskRoleArn"),
             ContainerDefinitions=[
                 db_init_container,
                 mcp_gateway_container,
@@ -653,7 +632,7 @@ def build() -> Template:
             port=maestro_port,
         )
     )
-    t.add_resource(
+    maestro_listener_rule = t.add_resource(
         services_common.build_listener_rule(
             service_key=_MAESTRO_LISTENER_KEY,
             target_group_ref=maestro_tg,
@@ -672,7 +651,7 @@ def build() -> Template:
             health_check_path="/dex/healthz",
         )
     )
-    t.add_resource(
+    dex_listener_rule = t.add_resource(
         services_common.build_listener_rule(
             service_key=_DEX_LISTENER_KEY,
             target_group_ref=dex_tg,
@@ -721,6 +700,10 @@ def build() -> Template:
                 ),
             ],
             Tags=cardinal_tags(component="compute", role=_SERVICE_KEY),
+            # ECS validates that target groups are attached to a listener at
+            # service-create time; depend on both ListenerRules to avoid the
+            # race.
+            DependsOn=[maestro_listener_rule.title, dex_listener_rule.title],
         )
     )
 
@@ -730,58 +713,9 @@ def build() -> Template:
     t.add_output(Output("MaestroUrl", Value=Sub("https://${AlbDnsName}/")))
     t.add_output(Output("DexUrl", Value=Sub("https://${AlbDnsName}/dex/")))
     t.add_output(Output("MaestroServiceName", Value=GetAtt(service, "Name")))
-    t.add_output(Output("MaestroDbSecretArn", Value=Ref(maestro_db_secret)))
+    t.add_output(Output("MaestroDbSecretArn", Value=Ref("MaestroDbSecretArn")))
 
     return t
-
-
-def _task_role_statements(*, log_group_refs: list, maestro_db_secret_ref) -> list:
-    """Inline IAM policy for the maestro task role.
-
-    Grants Secrets Manager read on the master DB secret (db-init), the
-    maestro DB secret, the license secret, and the internal-service-keys
-    secret; SSM read on the two config params; and CloudWatch Logs writes
-    to all three per-container log groups.
-    """
-    return [
-        {
-            "Effect": "Allow",
-            "Action": ["secretsmanager:GetSecretValue"],
-            "Resource": [
-                Ref("DbSecretArn"),
-                Ref(maestro_db_secret_ref),
-                Ref("LicenseSecretArn"),
-                Ref("InternalServiceKeysSecretArn"),
-            ],
-        },
-        {
-            "Effect": "Allow",
-            "Action": ["ssm:GetParameter", "ssm:GetParameters"],
-            "Resource": [
-                Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ApiKeysParamName}"),
-                Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${StorageProfilesParamName}"),
-            ],
-        },
-        {
-            "Effect": "Allow",
-            "Action": ["logs:CreateLogStream", "logs:PutLogEvents"],
-            "Resource": [GetAtt(lg, "Arn") for lg in log_group_refs],
-        },
-        # Bedrock embeddings + chat. mcp-gateway calls Titan for embeddings
-        # and Claude (or similar) for chat completion; both go through
-        # bedrock:InvokeModel and the streaming variant. Foundation-model
-        # ARNs are AWS-owned, hence the empty account segment.
-        {
-            "Effect": "Allow",
-            "Action": [
-                "bedrock:InvokeModel",
-                "bedrock:InvokeModelWithResponseStream",
-            ],
-            "Resource": [
-                Sub("arn:aws:bedrock:${AWS::Region}::foundation-model/*"),
-            ],
-        },
-    ]
 
 
 if __name__ == "__main__":

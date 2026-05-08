@@ -24,6 +24,7 @@ def test_required_cross_stack_parameters(td):
         "ClusterArn",
         "TaskSecurityGroupId",
         "ExecutionRoleArn",
+        "TaskRoleArn",
         "PrivateSubnetsCsv",
         "BucketName",
         "QueueArn",
@@ -87,9 +88,10 @@ def test_creates_one_log_group(td):
     assert log_groups[0]["Properties"]["RetentionInDays"] == 14
 
 
-def test_creates_one_iam_role(td):
+def test_no_internally_managed_iam_role(td):
+    """Phase 2: otel uses the customer-supplied TaskRoleArn parameter."""
     roles = [r for r in td["Resources"].values() if r["Type"] == "AWS::IAM::Role"]
-    assert len(roles) == 1
+    assert len(roles) == 0
 
 
 def test_creates_one_task_definition(td):

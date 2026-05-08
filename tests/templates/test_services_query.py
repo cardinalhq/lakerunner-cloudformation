@@ -24,6 +24,7 @@ def test_required_cross_stack_parameters(td):
         "ClusterArn",
         "TaskSecurityGroupId",
         "ExecutionRoleArn",
+        "TaskRoleArn",
         "PrivateSubnetsCsv",
         "HttpsListenerArn",
         "VpcId",
@@ -135,9 +136,10 @@ def test_each_service_has_unique_log_group_with_14_day_retention(td):
 # ---------------------------------------------------------------------------
 
 
-def test_each_service_has_its_own_task_role(td):
+def test_no_internally_managed_iam_roles(td):
+    """Phase 2: all services share the customer-supplied TaskRoleArn parameter."""
     roles = [r for r in td["Resources"].values() if r["Type"] == "AWS::IAM::Role"]
-    assert len(roles) == 2
+    assert len(roles) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -183,14 +185,16 @@ def test_task_definition_cpu_and_memory_are_parameter_refs(td):
     assert {"QueryApiCpu", "QueryApiMemory", "QueryWorkerCpu", "QueryWorkerMemory"} <= seen
 
 
-def test_security_group_ingress_for_query_worker_port(td):
+def test_no_security_group_ingress_resources(td):
+    # Phase 2: lakerunner stack must not create or mutate any SGs.
+    # The customer-supplied TaskSgId already includes self-ingress
+    # covering query-api -> query-worker traffic.
     ingresses = [r for r in td["Resources"].values()
                  if r["Type"] == "AWS::EC2::SecurityGroupIngress"]
-    # query-worker default port from cardinal-defaults.yaml is 8081
-    assert any(
-        i["Properties"].get("FromPort") == 8081 and i["Properties"].get("ToPort") == 8081
-        for i in ingresses
-    ), "expected SecurityGroupIngress permitting traffic to query-worker on port 8081"
+    assert ingresses == [], (
+        "services_query must not create SecurityGroupIngress resources; "
+        "the customer-supplied TaskSgId already permits intra-cluster traffic."
+    )
 
 
 # ---------------------------------------------------------------------------

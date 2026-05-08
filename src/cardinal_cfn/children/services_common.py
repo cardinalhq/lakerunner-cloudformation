@@ -4,7 +4,7 @@ Each helper constructs and returns a single troposphere object.
 The caller is responsible for adding it to a template.
 """
 
-from troposphere import GetAtt, Ref, Split, Sub
+from troposphere import GetAtt, Ref, Split
 from troposphere.ecs import (
     AwsvpcConfiguration,
     ContainerDefinition,
@@ -26,7 +26,6 @@ from troposphere.elasticloadbalancingv2 import (
     PathPatternConfig,
     TargetGroup,
 )
-from troposphere.iam import Policy, Role
 from troposphere.logs import LogGroup
 
 from cardinal_cfn.listener_priorities import priority_for
@@ -35,42 +34,19 @@ from cardinal_cfn.policies import apply_policy
 
 
 def build_log_group(*, service_key: str, retention_days: int = 14) -> LogGroup:
-    """Per-service CloudWatch log group named `/cardinal/${InstallIdShort}/<service-key>`."""
+    """Per-service CloudWatch log group named `/cardinal/<service-key>`.
+
+    Bare ``/cardinal/<svc>`` matches the IAM cookbook's ``/cardinal/*`` glob
+    on TaskRole CW Logs grants.
+    """
     lg = LogGroup(
         _resource_title(service_key, "LogGroup"),
-        LogGroupName=Sub(f"/cardinal/${{InstallIdShort}}/{service_key}"),
+        LogGroupName=f"/cardinal/{service_key}",
         RetentionInDays=retention_days,
         Tags=cardinal_tags(component="compute", role=service_key),
     )
     apply_policy(lg, "log-group")
     return lg
-
-
-def build_task_role(*, service_key: str, statements: list) -> Role:
-    """Per-service IAM task role with the provided inline policy statements."""
-    return Role(
-        _resource_title(service_key, "TaskRole"),
-        AssumeRolePolicyDocument={
-            "Version": "2012-10-17",
-            "Statement": [
-                {
-                    "Effect": "Allow",
-                    "Principal": {"Service": "ecs-tasks.amazonaws.com"},
-                    "Action": "sts:AssumeRole",
-                }
-            ],
-        },
-        Policies=[
-            Policy(
-                PolicyName=f"cardinal-{service_key}-task-policy",
-                PolicyDocument={
-                    "Version": "2012-10-17",
-                    "Statement": statements,
-                },
-            )
-        ],
-        Tags=cardinal_tags(component="compute", role=f"{service_key}-task-role"),
-    )
 
 
 def build_target_group(
@@ -129,7 +105,7 @@ def build_task_definition(
     memory_mib,
     command: list | None = None,
     execution_role_arn_param: str,
-    task_role_ref,
+    task_role_arn,
     environment: list,
     secrets: list | None = None,
     log_group_ref,
@@ -141,6 +117,9 @@ def build_task_definition(
     (from CloudFormation parameters). Ints are coerced to strings; Refs and
     other troposphere objects pass through unchanged so they serialize as
     intrinsic functions.
+
+    task_role_arn accepts either a plain string or a troposphere object
+    (typically Ref('TaskRoleArn')) and is used verbatim as TaskRoleArn.
 
     container_port: if provided, the container exposes a tcp PortMapping at
     that port. Required whenever the corresponding ECS Service references
@@ -178,7 +157,7 @@ def build_task_definition(
         Cpu=_coerce_size(cpu),
         Memory=_coerce_size(memory_mib),
         ExecutionRoleArn=Ref(execution_role_arn_param),
-        TaskRoleArn=GetAtt(task_role_ref, "Arn"),
+        TaskRoleArn=task_role_arn,
         ContainerDefinitions=[ContainerDefinition(**container_kwargs)],
         Tags=cardinal_tags(component="compute", role=service_key),
     )
@@ -203,12 +182,19 @@ def build_ecs_service(
     container_name: str,
     container_port: int | None = None,
     service_registry_ref=None,
+    listener_rule_refs: list | None = None,
 ) -> Service:
     """ECS Fargate Service with rolling deploy + circuit breaker.
 
     service_registry_ref: optional Cloud Map ServiceDiscovery::Service to attach
     so the ECS Service registers each task in private DNS for in-cluster
     routing (e.g. alert-evaluator -> query-api).
+
+    listener_rule_refs: ListenerRule resources whose creation must precede this
+    Service. ECS validates at create-time that LoadBalancer target groups are
+    already attached to a listener; without an explicit DependsOn, CFN may
+    create the Service before the ListenerRule attaches the TG, producing
+    "target group does not have an associated load balancer" failures.
     """
     kwargs: dict = dict(
         Cluster=Ref(cluster_arn_param),
@@ -246,6 +232,9 @@ def build_ecs_service(
         kwargs["ServiceRegistries"] = [
             ServiceRegistry(RegistryArn=GetAtt(service_registry_ref, "Arn"))
         ]
+
+    if listener_rule_refs:
+        kwargs["DependsOn"] = [r.title for r in listener_rule_refs]
 
     return Service(_resource_title(service_key, "Service"), **kwargs)
 

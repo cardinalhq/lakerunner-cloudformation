@@ -1,8 +1,13 @@
 """Root template generator: cardinal-lakerunner.yaml.
 
 The root is a thin orchestrator. It declares the customer-facing parameter
-surface, derives the InstallId, and stands up eleven nested children with
-TemplateURL pointing at the vendor S3 bucket.
+surface and stands up the nested children with TemplateURL pointing at the
+vendor S3 bucket.
+
+The data-bearing resources (RDS, S3 ingest bucket, SQS, secrets, SSM
+parameters) are created out-of-band by the cardinal-data-setup Lambda; their
+identifiers arrive as parameters. All IAM roles and security groups are
+pre-created by the customer's IT and passed in as ARN/ID parameters.
 """
 
 import os
@@ -106,18 +111,6 @@ def _sizing_param_specs(defaults: dict) -> list[dict]:
          "description": "When Yes, attach the otel-gateway to the shared ALB."},
         {"name": "OtelConfigYaml", "type": "String", "default": "",
          "description": "Optional inline OTEL collector config YAML override."},
-        # Database
-        {"name": "DbInstanceClass", "type": "String", "default": "db.t4g.xlarge",
-         "description": (
-             "RDS DB instance class. Default db.t4g.xlarge (Graviton burstable, "
-             "16 GiB RAM, ~1700 max_connections) — enough headroom for "
-             "lakerunner's many concurrent service replicas. Bump higher "
-             "(e.g. db.r7g.xlarge) for sustained heavy workloads."
-         )},
-        {"name": "DbAllocatedStorage", "type": "Number", "default": 100, "min": 20,
-         "description": "RDS allocated storage in GiB."},
-        {"name": "DbEngineVersion", "type": "String", "default": "18.3",
-         "description": "PostgreSQL engine version."},
     ]
 
 
@@ -133,6 +126,69 @@ def _add_sizing_parameters(t: Template, specs: list[dict]) -> None:
         if "allowed_values" in spec:
             kwargs["AllowedValues"] = spec["allowed_values"]
         t.add_parameter(Parameter(spec["name"], **kwargs))
+
+
+# ---------------------------------------------------------------------------
+# Customer-supplied IAM role + SG parameter specs.
+# ---------------------------------------------------------------------------
+_ROLE_SG_PARAMS = [
+    ("TaskRoleArn", "String", None,
+     "ARN of the ECS task role used by every lakerunner ECS task."),
+    ("ExecutionRoleArn", "String", None,
+     "ARN of the ECS task execution role (used at task launch to pull "
+     "images and resolve secrets)."),
+    ("MigrationLambdaRoleArn", "String", None,
+     "ARN of the IAM role the migration Lambda assumes."),
+    ("CertLambdaRoleArn", "String", "",
+     "ARN of the IAM role the cert-import Lambda assumes. Required only "
+     "when CertificateArn is empty (PEM-import path)."),
+    ("TaskSgId", "AWS::EC2::SecurityGroup::Id", None,
+     "Security group ID applied to every ECS task in the install."),
+    ("AlbSgId", "AWS::EC2::SecurityGroup::Id", None,
+     "Security group ID applied to the shared ALB."),
+]
+
+
+# ---------------------------------------------------------------------------
+# Data-setup Lambda output parameters: identifiers for the data resources
+# the Lambda already created. Names match the Lambda's response keys 1:1.
+# Sensitive values (license/admin/internal-keys) come in as Secret ARNs --
+# the underlying secret values stay in Secrets Manager and are never seen
+# by CloudFormation.
+# ---------------------------------------------------------------------------
+_DATA_SETUP_PARAMS = [
+    ("DbEndpoint", "String", None, "RDS endpoint hostname (data-setup output)."),
+    ("DbPort", "String", "5432", "RDS port."),
+    ("DbName", "String", "lakerunner", "Lakerunner database name."),
+    ("DbMasterSecretArn", "String", None,
+     "ARN of the master DB credentials secret (data-setup output)."),
+    ("MaestroDbSecretArn", "String", None,
+     "ARN of the maestro application DB password secret (data-setup output)."),
+    ("IngestBucketName", "String", None,
+     "Name of the S3 ingest bucket (data-setup output)."),
+    ("IngestQueueUrl", "String", None,
+     "URL of the SQS ingest queue (data-setup output)."),
+    ("IngestQueueArn", "String", None,
+     "ARN of the SQS ingest queue (data-setup output)."),
+    ("LicenseSecretArn", "String", None,
+     "ARN of the cardinal-license secret (data-setup output)."),
+    ("InternalKeysSecretArn", "String", None,
+     "ARN of the cardinal-internal-keys secret (data-setup output)."),
+    ("AdminKeySecretArn", "String", None,
+     "ARN of the cardinal-admin-key secret (data-setup output)."),
+    ("StorageProfilesParamName", "String", None,
+     "Name of the SSM parameter holding storage_profiles YAML (data-setup output)."),
+    ("ApiKeysParamName", "String", None,
+     "Name of the SSM parameter holding api_keys YAML (data-setup output)."),
+]
+
+
+def _add_string_params(t: Template, specs: list[tuple]) -> None:
+    for name, type_, default, description in specs:
+        kwargs = {"Type": type_, "Description": description}
+        if default is not None:
+            kwargs["Default"] = default
+        t.add_parameter(Parameter(name, **kwargs))
 
 
 def build() -> Template:
@@ -166,13 +222,18 @@ def build() -> Template:
     ))
 
     # ---------------------------------------------------------------------
+    # Customer-supplied IAM roles / security groups
+    # ---------------------------------------------------------------------
+    _add_string_params(t, _ROLE_SG_PARAMS)
+
+    # ---------------------------------------------------------------------
+    # Data-setup outputs threaded in as parameters
+    # ---------------------------------------------------------------------
+    _add_string_params(t, _DATA_SETUP_PARAMS)
+
+    # ---------------------------------------------------------------------
     # Sensitive / advanced parameters
     # ---------------------------------------------------------------------
-    add_no_echo_parameter(t, "LicenseData", description="License JSON content (required).")
-    add_no_echo_parameter(t, "ApiKeysOverride",
-                          description="Optional YAML override for API keys.")
-    add_no_echo_parameter(t, "StorageProfilesOverride",
-                          description="Optional YAML override for storage profiles.")
     add_no_echo_parameter(
         t, "CertificateBody",
         description=(
@@ -219,7 +280,13 @@ def build() -> Template:
         "TemplateBaseUrl",
         Type="String",
         Default=DEFAULT_TEMPLATE_BASE_URL,
-        Description="Base URL for nested-stack templates (override for air-gapped).",
+        AllowedPattern=r"^https://.+/$",
+        ConstraintDescription="TemplateBaseUrl must be an https:// URL ending with '/'.",
+        Description=(
+            "Base URL (must end with '/') for nested-stack templates. "
+            "Example: https://<bucket>.s3.<region>.amazonaws.com/lakerunner/<version>/cardinal-lakerunner/. "
+            "Override for air-gapped installs."
+        ),
     ))
 
     # ---------------------------------------------------------------------
@@ -275,12 +342,14 @@ def build() -> Template:
              "parameters": ["VpcId", "PrivateSubnets", "CertificateArn",
                             "CertificateBody", "CertificatePrivateKey",
                             "CertificateChain"]},
+            {"label": "IAM roles + security groups",
+             "parameters": [name for name, *_ in _ROLE_SG_PARAMS]},
+            {"label": "Data-setup outputs",
+             "parameters": [name for name, *_ in _DATA_SETUP_PARAMS]},
             {"label": "Sizing", "parameters": sizing_param_names},
             {"label": "Images", "parameters": image_param_names},
             {"label": "Advanced",
-             "parameters": ["LicenseData", "ApiKeysOverride",
-                            "StorageProfilesOverride",
-                            "DexAdminEmail", "DexAdminPasswordHash",
+             "parameters": ["DexAdminEmail", "DexAdminPasswordHash",
                             "OidcSuperadminEmails",
                             "TemplateBaseUrl"]},
         ],
@@ -302,30 +371,6 @@ def build() -> Template:
         "VpcId": Ref("VpcId"),
     })
 
-    database_stack = _add_child(t, "DatabaseStack", "database.yaml", {
-        "InstallIdShort": install_short,
-        "InstallIdLong": install_long,
-        "VpcId": Ref("VpcId"),
-        "TaskSecurityGroupId": GetAtt(cluster_stack, "Outputs.TaskSecurityGroupId"),
-        "PrivateSubnetsCsv": private_subnets_csv,
-        "DbInstanceClass": Ref("DbInstanceClass"),
-        "DbAllocatedStorage": Ref("DbAllocatedStorage"),
-        "DbEngineVersion": Ref("DbEngineVersion"),
-    }, depends_on=["ClusterStack"])
-
-    storage_stack = _add_child(t, "StorageStack", "storage.yaml", {
-        "InstallIdShort": install_short,
-        "InstallIdLong": install_long,
-    })
-
-    config_stack = _add_child(t, "ConfigStack", "config.yaml", {
-        "InstallIdShort": install_short,
-        "InstallIdLong": install_long,
-        "LicenseData": Ref("LicenseData"),
-        "ApiKeysOverride": Ref("ApiKeysOverride"),
-        "StorageProfilesOverride": Ref("StorageProfilesOverride"),
-    })
-
     cert_stack = _add_child(t, "CertStack", "cert.yaml", {
         "InstallIdShort": install_short,
         "InstallIdLong": install_long,
@@ -333,6 +378,7 @@ def build() -> Template:
         "CertificateBody": Ref("CertificateBody"),
         "CertificatePrivateKey": Ref("CertificatePrivateKey"),
         "CertificateChain": Ref("CertificateChain"),
+        "CertLambdaRoleArn": Ref("CertLambdaRoleArn"),
     })
 
     alb_stack = _add_child(t, "AlbStack", "alb.yaml", {
@@ -340,25 +386,27 @@ def build() -> Template:
         "InstallIdLong": install_long,
         "VpcId": Ref("VpcId"),
         "PrivateSubnetsCsv": private_subnets_csv,
-        "TaskSecurityGroupId": GetAtt(cluster_stack, "Outputs.TaskSecurityGroupId"),
+        "AlbSgId": Ref("AlbSgId"),
         "CertificateArn": GetAtt(cert_stack, "Outputs.EffectiveCertificateArn"),
-    }, depends_on=["ClusterStack", "CertStack"])
+    }, depends_on=["CertStack"])
 
     migration_stack = _add_child(t, "MigrationStack", "migration.yaml", {
         "InstallIdShort": install_short,
         "InstallIdLong": install_long,
         "ClusterArn": GetAtt(cluster_stack, "Outputs.ClusterArn"),
         "ClusterName": GetAtt(cluster_stack, "Outputs.ClusterName"),
-        "TaskSecurityGroupId": GetAtt(cluster_stack, "Outputs.TaskSecurityGroupId"),
-        "ExecutionRoleArn": GetAtt(cluster_stack, "Outputs.ExecutionRoleArn"),
+        "TaskSecurityGroupId": Ref("TaskSgId"),
+        "ExecutionRoleArn": Ref("ExecutionRoleArn"),
+        "TaskRoleArn": Ref("TaskRoleArn"),
+        "MigrationLambdaRoleArn": Ref("MigrationLambdaRoleArn"),
         "PrivateSubnetsCsv": private_subnets_csv,
-        "DbEndpoint": GetAtt(database_stack, "Outputs.DbEndpoint"),
-        "DbPort": GetAtt(database_stack, "Outputs.DbPort"),
-        "DbName": GetAtt(database_stack, "Outputs.DbName"),
-        "DbSecretArn": GetAtt(database_stack, "Outputs.DbSecretArn"),
+        "DbEndpoint": Ref("DbEndpoint"),
+        "DbPort": Ref("DbPort"),
+        "DbName": Ref("DbName"),
+        "DbSecretArn": Ref("DbMasterSecretArn"),
         "LakerunnerImage": lakerunner_image,
         "DbInitImage": Ref("DbInitImage"),
-    })
+    }, depends_on=["ClusterStack"])
 
     migration_complete = GetAtt(migration_stack, "Outputs.MigrationCustomResourceRef")
 
@@ -369,21 +417,20 @@ def build() -> Template:
             "InstallIdShort": install_short,
             "InstallIdLong": install_long,
             "ClusterArn": GetAtt(cluster_stack, "Outputs.ClusterArn"),
-            "TaskSecurityGroupId": GetAtt(cluster_stack, "Outputs.TaskSecurityGroupId"),
-            "ExecutionRoleArn": GetAtt(cluster_stack, "Outputs.ExecutionRoleArn"),
+            "TaskSecurityGroupId": Ref("TaskSgId"),
+            "ExecutionRoleArn": Ref("ExecutionRoleArn"),
+            "TaskRoleArn": Ref("TaskRoleArn"),
             "PrivateSubnetsCsv": private_subnets_csv,
-            "DbEndpoint": GetAtt(database_stack, "Outputs.DbEndpoint"),
-            "DbPort": GetAtt(database_stack, "Outputs.DbPort"),
-            "DbSecretArn": GetAtt(database_stack, "Outputs.DbSecretArn"),
-            "BucketName": GetAtt(storage_stack, "Outputs.BucketName"),
-            "QueueUrl": GetAtt(storage_stack, "Outputs.QueueUrl"),
-            "QueueArn": GetAtt(storage_stack, "Outputs.QueueArn"),
-            "LicenseSecretArn": GetAtt(config_stack, "Outputs.LicenseSecretArn"),
-            "InternalServiceKeysSecretArn":
-                GetAtt(config_stack, "Outputs.InternalServiceKeysSecretArn"),
-            "ApiKeysParamName": GetAtt(config_stack, "Outputs.ApiKeysParamName"),
-            "StorageProfilesParamName":
-                GetAtt(config_stack, "Outputs.StorageProfilesParamName"),
+            "DbEndpoint": Ref("DbEndpoint"),
+            "DbPort": Ref("DbPort"),
+            "DbSecretArn": Ref("DbMasterSecretArn"),
+            "BucketName": Ref("IngestBucketName"),
+            "QueueUrl": Ref("IngestQueueUrl"),
+            "QueueArn": Ref("IngestQueueArn"),
+            "LicenseSecretArn": Ref("LicenseSecretArn"),
+            "InternalServiceKeysSecretArn": Ref("InternalKeysSecretArn"),
+            "ApiKeysParamName": Ref("ApiKeysParamName"),
+            "StorageProfilesParamName": Ref("StorageProfilesParamName"),
             "MigrationComplete": migration_complete,
             "LakerunnerImage": lakerunner_image,
         }
@@ -422,13 +469,9 @@ def build() -> Template:
     services_control_params.update({
         "HttpsListenerArn": GetAtt(alb_stack, "Outputs.HttpsListenerArn"),
         "AdminHttpsListenerArn": GetAtt(alb_stack, "Outputs.AdminHttpsListenerArn"),
-        "AdminApiKeySecretArn": GetAtt(config_stack, "Outputs.AdminApiKeySecretArn"),
+        "AdminApiKeySecretArn": Ref("AdminKeySecretArn"),
         "VpcId": Ref("VpcId"),
         "ServiceNamespaceName": GetAtt(cluster_stack, "Outputs.ServiceNamespaceName"),
-        # Inputs for the monitoring service's ECS autoscaler. The service-name
-        # outputs come from services-process; the replica Refs are the same
-        # values that gate process-* DesiredCount in services-process so the
-        # autoscaler max tracks the customer's deploy-time setting.
         "ClusterName": GetAtt(cluster_stack, "Outputs.ClusterName"),
         "ProcessLogsServiceName":
             GetAtt(services_process_stack, "Outputs.ProcessLogsServiceName"),
@@ -448,17 +491,16 @@ def build() -> Template:
         "InstallIdShort": install_short,
         "InstallIdLong": install_long,
         "ClusterArn": GetAtt(cluster_stack, "Outputs.ClusterArn"),
-        "TaskSecurityGroupId": GetAtt(cluster_stack, "Outputs.TaskSecurityGroupId"),
-        "ExecutionRoleArn": GetAtt(cluster_stack, "Outputs.ExecutionRoleArn"),
+        "TaskSecurityGroupId": Ref("TaskSgId"),
+        "ExecutionRoleArn": Ref("ExecutionRoleArn"),
+        "TaskRoleArn": Ref("TaskRoleArn"),
         "PrivateSubnetsCsv": private_subnets_csv,
-        "BucketName": GetAtt(storage_stack, "Outputs.BucketName"),
-        "QueueArn": GetAtt(storage_stack, "Outputs.QueueArn"),
-        "LicenseSecretArn": GetAtt(config_stack, "Outputs.LicenseSecretArn"),
-        "InternalServiceKeysSecretArn":
-            GetAtt(config_stack, "Outputs.InternalServiceKeysSecretArn"),
-        "ApiKeysParamName": GetAtt(config_stack, "Outputs.ApiKeysParamName"),
-        "StorageProfilesParamName":
-            GetAtt(config_stack, "Outputs.StorageProfilesParamName"),
+        "BucketName": Ref("IngestBucketName"),
+        "QueueArn": Ref("IngestQueueArn"),
+        "LicenseSecretArn": Ref("LicenseSecretArn"),
+        "InternalServiceKeysSecretArn": Ref("InternalKeysSecretArn"),
+        "ApiKeysParamName": Ref("ApiKeysParamName"),
+        "StorageProfilesParamName": Ref("StorageProfilesParamName"),
         "HttpsListenerArn": GetAtt(alb_stack, "Outputs.HttpsListenerArn"),
         "VpcId": Ref("VpcId"),
         "OtelImage": otel_image,
@@ -473,21 +515,21 @@ def build() -> Template:
         "InstallIdShort": install_short,
         "InstallIdLong": install_long,
         "ClusterArn": GetAtt(cluster_stack, "Outputs.ClusterArn"),
-        "TaskSecurityGroupId": GetAtt(cluster_stack, "Outputs.TaskSecurityGroupId"),
-        "ExecutionRoleArn": GetAtt(cluster_stack, "Outputs.ExecutionRoleArn"),
+        "TaskSecurityGroupId": Ref("TaskSgId"),
+        "ExecutionRoleArn": Ref("ExecutionRoleArn"),
+        "TaskRoleArn": Ref("TaskRoleArn"),
         "PrivateSubnetsCsv": private_subnets_csv,
         "VpcId": Ref("VpcId"),
         "HttpsListenerArn": GetAtt(alb_stack, "Outputs.HttpsListenerArn"),
         "AlbDnsName": GetAtt(alb_stack, "Outputs.AlbDnsName"),
-        "DbEndpoint": GetAtt(database_stack, "Outputs.DbEndpoint"),
-        "DbPort": GetAtt(database_stack, "Outputs.DbPort"),
-        "DbSecretArn": GetAtt(database_stack, "Outputs.DbSecretArn"),
-        "LicenseSecretArn": GetAtt(config_stack, "Outputs.LicenseSecretArn"),
-        "InternalServiceKeysSecretArn":
-            GetAtt(config_stack, "Outputs.InternalServiceKeysSecretArn"),
-        "ApiKeysParamName": GetAtt(config_stack, "Outputs.ApiKeysParamName"),
-        "StorageProfilesParamName":
-            GetAtt(config_stack, "Outputs.StorageProfilesParamName"),
+        "DbEndpoint": Ref("DbEndpoint"),
+        "DbPort": Ref("DbPort"),
+        "DbSecretArn": Ref("DbMasterSecretArn"),
+        "MaestroDbSecretArn": Ref("MaestroDbSecretArn"),
+        "LicenseSecretArn": Ref("LicenseSecretArn"),
+        "InternalServiceKeysSecretArn": Ref("InternalKeysSecretArn"),
+        "ApiKeysParamName": Ref("ApiKeysParamName"),
+        "StorageProfilesParamName": Ref("StorageProfilesParamName"),
         "MigrationComplete": migration_complete,
         "MaestroImage": maestro_image,
         "DexImage": dex_image,

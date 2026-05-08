@@ -2,7 +2,7 @@
 
 Owns four ECS Fargate services:
 
-- admin-api (ALB-attached at priority 110, path /admin/*)
+- admin-api (ALB-attached on dedicated 9443 listener; path catch-all `/*`)
 - sweeper (internal)
 - monitoring (internal; gRPC port not exposed on the ALB)
 - alert-evaluator (internal)
@@ -68,6 +68,9 @@ def build() -> Template:
     )
     t.add_parameter(
         Parameter("ExecutionRoleArn", Type="String", Description="ECS task execution role ARN.")
+    )
+    t.add_parameter(
+        Parameter("TaskRoleArn", Type="String", Description="ECS task role ARN (shared across all services).")
     )
     t.add_parameter(
         Parameter(
@@ -246,6 +249,7 @@ def build() -> Template:
                     "ClusterArn",
                     "TaskSecurityGroupId",
                     "ExecutionRoleArn",
+                    "TaskRoleArn",
                     "PrivateSubnetsCsv",
                     "HttpsListenerArn",
                     "VpcId",
@@ -307,15 +311,6 @@ def build() -> Template:
     # admin-api: ALB-attached
     # ---------------------------------------------------------------------
     admin_lg = t.add_resource(services_common.build_log_group(service_key="admin-api"))
-    admin_role = t.add_resource(
-        services_common.build_task_role(
-            service_key="admin-api",
-            statements=_task_role_statements(
-                admin_lg,
-                extra_secret_refs=[Ref("AdminApiKeySecretArn")],
-            ),
-        )
-    )
     admin_tg = t.add_resource(
         services_common.build_target_group(
             service_key="admin-api",
@@ -328,7 +323,7 @@ def build() -> Template:
     # binary's mux sees request paths verbatim (no /admin/ prefix to strip).
     # This is the only rule on that listener; the listener's default action
     # is a 503 fixed response.
-    t.add_resource(
+    admin_listener_rule = t.add_resource(
         services_common.build_listener_rule(
             service_key="admin-api-https",
             target_group_ref=admin_tg,
@@ -355,7 +350,7 @@ def build() -> Template:
             memory_mib=admin_cfg["memory_mib"],
             command=admin_cfg.get("command"),
             execution_role_arn_param="ExecutionRoleArn",
-            task_role_ref=admin_role,
+            task_role_arn=Ref("TaskRoleArn"),
             environment=admin_env,
             secrets=admin_secrets,
             log_group_ref=admin_lg,
@@ -373,6 +368,7 @@ def build() -> Template:
             target_group_ref=admin_tg,
             container_name="admin-api",
             container_port=admin_container_port,
+            listener_rule_refs=[admin_listener_rule],
         )
     )
     t.add_output(Output("AdminApiServiceName", Value=GetAtt(admin_service, "Name")))
@@ -430,48 +426,24 @@ def build() -> Template:
             Value=Ref("ProcessTracesReplicas"),
         ),
     ]
-    monitoring_extra_statements = [
-        {
-            "Effect": "Allow",
-            "Action": ["ecs:DescribeServices", "ecs:UpdateService"],
-            "Resource": [
-                Sub(
-                    "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:service/"
-                    "${ClusterName}/${ProcessLogsServiceName}"
-                ),
-                Sub(
-                    "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:service/"
-                    "${ClusterName}/${ProcessMetricsServiceName}"
-                ),
-                Sub(
-                    "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:service/"
-                    "${ClusterName}/${ProcessTracesServiceName}"
-                ),
-            ],
-        },
-    ]
-
     internal_services = [
         {
             "service_key": "sweeper",
             "config": sweeper_cfg,
             "output_name": "SweeperServiceName",
             "extra_env": [],
-            "extra_statements": [],
         },
         {
             "service_key": "monitoring",
             "config": monitoring_cfg,
             "output_name": "MonitoringServiceName",
             "extra_env": monitoring_extra_env,
-            "extra_statements": monitoring_extra_statements,
         },
         {
             "service_key": "alert-evaluator",
             "config": alert_cfg,
             "output_name": "AlertEvaluatorServiceName",
             "extra_env": alert_extra_env,
-            "extra_statements": [],
         },
     ]
 
@@ -484,7 +456,6 @@ def build() -> Template:
             base_env=base_env,
             base_secrets=base_secrets,
             extra_env=spec["extra_env"],
-            extra_statements=spec["extra_statements"],
         )
         t.add_output(Output(spec["output_name"], Value=GetAtt(ecs_service, "Name")))
 
@@ -500,19 +471,9 @@ def _build_internal_service_block(
     base_env: list,
     base_secrets: list,
     extra_env: list | None = None,
-    extra_statements: list | None = None,
 ):
-    """Wire up log group, task role, task def, and ECS service for one internal service."""
+    """Wire up log group, task def, and ECS service for one internal service."""
     log_group = t.add_resource(services_common.build_log_group(service_key=service_key))
-    task_role = t.add_resource(
-        services_common.build_task_role(
-            service_key=service_key,
-            statements=_task_role_statements(
-                log_group,
-                extra_statements=extra_statements,
-            ),
-        )
-    )
     env = list(base_env) + _service_specific_env(config) + list(extra_env or [])
     task_def = t.add_resource(
         services_common.build_task_definition(
@@ -522,7 +483,7 @@ def _build_internal_service_block(
             memory_mib=config["memory_mib"],
             command=config.get("command"),
             execution_role_arn_param="ExecutionRoleArn",
-            task_role_ref=task_role,
+            task_role_arn=Ref("TaskRoleArn"),
             environment=env,
             secrets=base_secrets,
             log_group_ref=log_group,
@@ -545,71 +506,6 @@ def _service_specific_env(service_cfg: dict) -> list:
     """Convert the YAML environment dict into a list of ECS Environment objects."""
     env = service_cfg.get("environment") or {}
     return [Environment(Name=k, Value=str(v)) for k, v in env.items()]
-
-
-def _task_role_statements(
-    log_group_ref,
-    extra_secret_refs: list | None = None,
-    extra_statements: list | None = None,
-) -> list:
-    """Inline IAM policy for a control-tier task role.
-
-    Grants S3 (bucket+objects), SQS (consume+send), SSM GetParameter on the
-    two config params, Secrets Manager GetSecretValue on the three shared
-    secrets plus any per-service `extra_secret_refs`, and CloudWatch Logs
-    writes to the per-service log group. Per-service `extra_statements` are
-    appended verbatim — used by the monitoring service for ECS UpdateService.
-    """
-    extra_secret_refs = list(extra_secret_refs or [])
-    extra_statements = list(extra_statements or [])
-    return [
-        {
-            "Effect": "Allow",
-            "Action": [
-                "s3:GetObject",
-                "s3:PutObject",
-                "s3:DeleteObject",
-                "s3:ListBucket",
-            ],
-            "Resource": [
-                Sub("arn:aws:s3:::${BucketName}"),
-                Sub("arn:aws:s3:::${BucketName}/*"),
-            ],
-        },
-        {
-            "Effect": "Allow",
-            "Action": [
-                "sqs:ReceiveMessage",
-                "sqs:DeleteMessage",
-                "sqs:GetQueueAttributes",
-                "sqs:GetQueueUrl",
-                "sqs:SendMessage",
-            ],
-            "Resource": Ref("QueueArn"),
-        },
-        {
-            "Effect": "Allow",
-            "Action": ["ssm:GetParameter", "ssm:GetParameters"],
-            "Resource": [
-                Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ApiKeysParamName}"),
-                Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${StorageProfilesParamName}"),
-            ],
-        },
-        {
-            "Effect": "Allow",
-            "Action": ["secretsmanager:GetSecretValue"],
-            "Resource": [
-                Ref("DbSecretArn"),
-                Ref("LicenseSecretArn"),
-                Ref("InternalServiceKeysSecretArn"),
-            ] + extra_secret_refs,
-        },
-        {
-            "Effect": "Allow",
-            "Action": ["logs:CreateLogStream", "logs:PutLogEvents"],
-            "Resource": GetAtt(log_group_ref, "Arn"),
-        },
-    ] + extra_statements
 
 
 if __name__ == "__main__":

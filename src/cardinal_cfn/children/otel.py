@@ -99,6 +99,9 @@ def build() -> Template:
         Parameter("ExecutionRoleArn", Type="String", Description="ECS task execution role ARN.")
     )
     t.add_parameter(
+        Parameter("TaskRoleArn", Type="String", Description="ECS task role ARN (shared across all services).")
+    )
+    t.add_parameter(
         Parameter(
             "PrivateSubnetsCsv",
             Type="String",
@@ -233,6 +236,7 @@ def build() -> Template:
                     "ClusterArn",
                     "TaskSecurityGroupId",
                     "ExecutionRoleArn",
+                    "TaskRoleArn",
                     "PrivateSubnetsCsv",
                     "BucketName",
                     "QueueArn",
@@ -268,12 +272,6 @@ def build() -> Template:
     # Log group, task role, task definition
     # ---------------------------------------------------------------------
     log_group = t.add_resource(services_common.build_log_group(service_key=_SERVICE_KEY))
-    task_role = t.add_resource(
-        services_common.build_task_role(
-            service_key=_SERVICE_KEY,
-            statements=_task_role_statements(log_group),
-        )
-    )
 
     storage_profiles = defaults.get("storage_profiles") or []
     default_org = (
@@ -316,7 +314,7 @@ def build() -> Template:
             memory_mib=Ref("OtelMemory"),
             command=otel_cfg.get("command"),
             execution_role_arn_param="ExecutionRoleArn",
-            task_role_ref=task_role,
+            task_role_arn=Ref("TaskRoleArn"),
             environment=env,
             secrets=secrets,
             log_group_ref=log_group,
@@ -411,52 +409,6 @@ def _service_specific_env(service_cfg: dict) -> list:
     """Convert the YAML environment dict into a list of ECS Environment objects."""
     env = service_cfg.get("environment") or {}
     return [Environment(Name=k, Value=str(v)) for k, v in env.items()]
-
-
-def _task_role_statements(log_group_ref) -> list:
-    """Inline IAM policy for the otel-gateway task role.
-
-    Grants S3 (bucket+objects), SSM GetParameter on the two config params,
-    Secrets Manager GetSecretValue on the two secrets, and CloudWatch Logs
-    writes to the per-service log group. The collector writes raw bytes to
-    S3; downstream consumers fan out via bucket-event notifications, so no
-    SQS permissions are needed.
-    """
-    return [
-        {
-            "Effect": "Allow",
-            "Action": [
-                "s3:GetObject",
-                "s3:PutObject",
-                "s3:ListBucket",
-            ],
-            "Resource": [
-                Sub("arn:aws:s3:::${BucketName}"),
-                Sub("arn:aws:s3:::${BucketName}/*"),
-            ],
-        },
-        {
-            "Effect": "Allow",
-            "Action": ["ssm:GetParameter", "ssm:GetParameters"],
-            "Resource": [
-                Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ApiKeysParamName}"),
-                Sub("arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${StorageProfilesParamName}"),
-            ],
-        },
-        {
-            "Effect": "Allow",
-            "Action": ["secretsmanager:GetSecretValue"],
-            "Resource": [
-                Ref("LicenseSecretArn"),
-                Ref("InternalServiceKeysSecretArn"),
-            ],
-        },
-        {
-            "Effect": "Allow",
-            "Action": ["logs:CreateLogStream", "logs:PutLogEvents"],
-            "Resource": GetAtt(log_group_ref, "Arn"),
-        },
-    ]
 
 
 if __name__ == "__main__":
