@@ -54,11 +54,25 @@ The `cardinal-data-setup.yaml` template takes:
 | `BucketLifecycleDays` | Optional | S3 ingest object expiry (default `7`). |
 | `DbInstanceClass` | Optional | RDS class (default `db.t3.medium`). |
 | `DbAllocatedStorage` | Optional | RDS GiB (default `100`). |
-| `LambdaCodeS3Bucket` | Optional | Default `cardinal-cfn`. |
-| `LambdaCodeS3Key` | Optional | Default `lakerunner/dev/cardinal-data-setup-lambda.zip`; override to match `<VERSION>` for a release install. |
+| `LambdaCodeS3Url` | Optional | Full `s3://<bucket>/<prefix>/<version>/<file>.zip` URL of the data-setup Lambda zip. Must point at a bucket in the **same region** as this stack. Default targets us-east-2; override for any other region. See "Lambda code URL by region" below. |
 
 There are **no DEX or OIDC parameters** on this stack -- those flow
 only into the lakerunner stack.
+
+### Lambda code URL by region
+
+The data-setup Lambda's code zip must live in an S3 bucket in the
+same region as the Lambda function. The published artifact is
+mirrored to one regional bucket per supported region:
+
+| Region | Default `LambdaCodeS3Url` |
+|---|---|
+| `us-east-1` | `s3://cardinal-cfn-us-east-1/lakerunner/<VERSION>/cardinal-data-setup-lambda.zip` |
+| `us-east-2` | `s3://cardinal-cfn-us-east-2/lakerunner/<VERSION>/cardinal-data-setup-lambda.zip` (template default) |
+
+Air-gapped mirrors must preserve the same key shape -- exactly three
+slash-separated segments after the bucket -- because the template
+parses `LambdaCodeS3Url` with a fixed-depth `Fn::Split`.
 
 ## Step 2: published template URL
 
@@ -87,7 +101,7 @@ cat > /tmp/data-setup-params.json <<EOF
   {"ParameterKey": "PrivateSubnets",         "ParameterValue": "subnet-aaaa,subnet-bbbb,subnet-cccc"},
   {"ParameterKey": "DbSgId",                 "ParameterValue": "sg-..."},
   {"ParameterKey": "LicenseData",            "ParameterValue": "${LICENSE_DATA}"},
-  {"ParameterKey": "LambdaCodeS3Key",        "ParameterValue": "lakerunner/<VERSION>/cardinal-data-setup-lambda.zip"}
+  {"ParameterKey": "LambdaCodeS3Url",        "ParameterValue": "s3://cardinal-cfn-<REGION>/lakerunner/<VERSION>/cardinal-data-setup-lambda.zip"}
 ]
 EOF
 
