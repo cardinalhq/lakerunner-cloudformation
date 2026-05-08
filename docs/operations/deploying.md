@@ -95,8 +95,9 @@ resource type that isn't represented in the policy.
 
 ## Tearing down
 
-`delete-stack` does not remove every resource — the ingest bucket, the
-license / admin-api-key / db-master secrets, and the RDS final snapshot are
-intentionally retained. See [`tearing-down.md`](tearing-down.md) for the
-full survivor list and a companion script
-(`scripts/teardown-lakerunner.sh`) that handles the cleanup pass.
+The lakerunner stack owns no `Retain` or `Snapshot` resources after the
+prereqs split, so `delete-stack cardinal-lakerunner` cleans up everything
+it created. The data layer (RDS, S3 ingest, secrets, SSM, SQS) is owned
+by the data-setup Lambda outside both stacks and survives any stack
+delete by design. See [`tearing-down.md`](tearing-down.md) for the
+full layered procedure.

@@ -1,17 +1,28 @@
 #!/bin/sh
-# Tear down a deployed cardinal-lakerunner CloudFormation stack and clean up
-# the resources it intentionally retains: the ingest S3 bucket, the license /
-# admin-api-key / db-master secrets, and the RDS final snapshot.
+# Tear down a deployed cardinal-lakerunner CloudFormation stack.
 #
 # Companion to scripts/deploy-lakerunner.sh.  Self-contained: depends only on
 # a POSIX shell, the AWS CLI v2, and jq.
 #
-# Resources retained by design (see src/cardinal_cfn/policies.py):
-#   - cardinal-ingest-<account>-<region>-<InstallIdLong>   (S3, Retain)
-#   - cardinal/<InstallIdLong>/license                      (Secrets, Retain)
-#   - cardinal/<InstallIdLong>/admin-api-key                (Secrets, Retain)
-#   - DbMasterSecret (auto-named, tagged db-master)         (Secrets, Retain)
-#   - <stack>-Db-* final snapshot                           (RDS, Snapshot)
+# Two install shapes:
+#
+# 1. Post-pivot installs (current).  The lakerunner stack owns no Retain or
+#    Snapshot resources -- the data layer (RDS, S3 ingest, secrets, SSM,
+#    SQS) lives outside both stacks, managed by the cardinal-data-setup
+#    Lambda.  delete-stack alone removes everything the stack owns; the
+#    post-delete cleanup helpers below no-op because the legacy nested
+#    stacks (StorageStack, DatabaseStack, ConfigStack) are absent.  Wiping
+#    the data layer is a separate operator-driven step -- see
+#    docs/operations/tearing-down.md.
+#
+# 2. Legacy installs (pre-pivot).  The lakerunner stack still embeds the
+#    data layer with Retain / Snapshot policies:
+#      - cardinal-ingest-<account>-<region>-<InstallIdLong>   (S3, Retain)
+#      - cardinal/<InstallIdLong>/license                      (Secrets, Retain)
+#      - cardinal/<InstallIdLong>/admin-api-key                (Secrets, Retain)
+#      - DbMasterSecret (auto-named, tagged db-master)         (Secrets, Retain)
+#      - <stack>-Db-* final snapshot                           (RDS, Snapshot)
+#    This script's post-delete cleanup pass handles those survivors.
 #
 # The deployer role (cardinal-cfn-deployer) is only assumable by
 # cloudformation.amazonaws.com, so --deployer-role-arn is passed only to
