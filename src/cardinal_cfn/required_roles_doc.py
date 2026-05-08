@@ -89,9 +89,10 @@ def _migration_lambda_role_policy() -> dict:
 def _data_setup_lambda_role_policy() -> dict:
     """Lambda needs full create+update+delete on the data resources it manages.
 
-    Customer's IT accepts the broad scope on this role because the Lambda
-    code is auditable in the repo and runs only what cardinal-data-setup.yaml
-    invokes it for.
+    Permissions are intentionally scoped to the ``cardinal-*`` /
+    ``cardinal-ingest`` / ``/cardinal/*`` namespaces; combined with code
+    that is auditable in the repo, that makes the broad-but-namespaced
+    scope acceptable to customer IT.
     """
     return {
         "Version": "2012-10-17",
@@ -117,15 +118,23 @@ def _data_setup_lambda_role_policy() -> dict:
                 "Resource": "*",
             },
             {
+                # Required on the very first RDS instance ever created in an
+                # AWS account; without it, CreateDBInstance fails with an
+                # IAM error mentioning the rds.amazonaws.com service-linked role.
+                "Effect": "Allow",
+                "Action": ["iam:CreateServiceLinkedRole"],
+                "Resource": "arn:aws:iam::*:role/aws-service-role/rds.amazonaws.com/*",
+                "Condition": {"StringLike": {"iam:AWSServiceName": "rds.amazonaws.com"}},
+            },
+            {
                 "Effect": "Allow",
                 "Action": [
-                    "s3:CreateBucket", "s3:DeleteBucket", "s3:HeadBucket",
+                    "s3:CreateBucket", "s3:DeleteBucket",
                     "s3:GetBucketLocation", "s3:ListBucket",
                     "s3:PutBucketTagging", "s3:GetBucketTagging",
-                    "s3:PutBucketLifecycleConfiguration", "s3:GetBucketLifecycleConfiguration",
+                    "s3:PutLifecycleConfiguration", "s3:GetLifecycleConfiguration",
                     "s3:PutBucketNotification", "s3:GetBucketNotification",
-                    "s3:PutBucketNotificationConfiguration", "s3:GetBucketNotificationConfiguration",
-                    "s3:PutPublicAccessBlock", "s3:GetPublicAccessBlock",
+                    "s3:PutBucketPublicAccessBlock", "s3:GetBucketPublicAccessBlock",
                 ],
                 "Resource": [f"arn:aws:s3:::{_BUCKET}"],
             },
@@ -142,7 +151,7 @@ def _data_setup_lambda_role_policy() -> dict:
                 "Effect": "Allow",
                 "Action": [
                     "secretsmanager:CreateSecret", "secretsmanager:DeleteSecret",
-                    "secretsmanager:UpdateSecret", "secretsmanager:DescribeSecret",
+                    "secretsmanager:DescribeSecret",
                     "secretsmanager:GetSecretValue", "secretsmanager:PutSecretValue",
                     "secretsmanager:GetRandomPassword",
                     "secretsmanager:TagResource", "secretsmanager:UntagResource",
@@ -158,11 +167,20 @@ def _data_setup_lambda_role_policy() -> dict:
                 ],
                 "Resource": [f"arn:aws:ssm:{_REGION}:{_ACCOUNT}:parameter/cardinal/*"],
             },
+        ],
+    }
+
+
+def _cert_lambda_role_policy() -> dict:
+    return {
+        "Version": "2012-10-17",
+        "Statement": [
             {
                 "Effect": "Allow",
-                "Action": ["ec2:DescribeSubnets", "ec2:DescribeVpcs", "ec2:DescribeSecurityGroups"],
+                "Action": ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"],
                 "Resource": "*",
             },
+            *iam_policies.acm_import_policy_doc(account_id=_ACCOUNT, region=_REGION)["Statement"],
         ],
     }
 
@@ -179,14 +197,24 @@ def render_doc() -> str:
         "passed into the lakerunner CFN stack as parameters. This document "
         "is the authoritative reference for what each role's trust + inline "
         "policy must contain. It is generated from "
-        "`src/cardinal_cfn/required_roles_doc.py` so it never drifts from the "
-        "actual permissions Cardinal expects.\n"
+        "`src/cardinal_cfn/required_roles_doc.py` (which builds on the policy "
+        "fragments in `iam_policies.py`) so it never drifts from the actual "
+        "permissions Cardinal expects.\n"
     )
     sections.append(
         "Substitute `${AccountId}` and `${Region}` with the install's account "
         "and region. The single shared model -- pass the same ARN for every "
         "role parameter -- works as long as the role contains the union of "
         "every policy below.\n"
+    )
+    sections.append(
+        "**Role-name customization:** the policies below reference the "
+        "**suggested** role names `cardinal-task-role`, `cardinal-execution-role`, "
+        "and the Lambda execution roles. If your IT chooses different names, "
+        "you must substitute them in the `iam:PassRole` resources of "
+        "`cardinal-migration-lambda-role` (it passes the task and execution "
+        "roles through to ECS RunTask) AND in the lakerunner stack parameters. "
+        "Mismatched names produce `iam:PassRole` denials at migration time.\n"
     )
     sections.append("## Required security groups\n")
     sections.append(
@@ -221,6 +249,7 @@ def render_doc() -> str:
         ("`cardinal-execution-role`", "ECS tasks (`ecs-tasks.amazonaws.com`)", "Used as the `ExecutionRoleArn` parameter; ECS uses it at task launch to pull images and resolve `secrets:` blocks."),
         ("`cardinal-migration-lambda-role`", "Lambda (`lambda.amazonaws.com`)", "Used by the migration custom resource Lambda to run the one-shot migrator ECS task."),
         ("`cardinal-data-setup-lambda-role`", "Lambda (`lambda.amazonaws.com`)", "Used by the cardinal-data-setup Lambda; full create+update+delete on the data resources it manages."),
+        ("`cardinal-cert-lambda-role`", "Lambda (`lambda.amazonaws.com`)", "Optional. Used only when the customer ships a PEM bundle (CertificateBody/CertificatePrivateKey) instead of supplying a pre-existing ACM certificate ARN."),
     ]
     sections.append("## Roles overview\n")
     sections.append("| Role name (suggested) | Trust principal | Used by |")
@@ -234,6 +263,7 @@ def render_doc() -> str:
         ("cardinal-execution-role", _TASK_ROLE_TRUST, _execution_role_policy(), ["arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"], "ECS task execution role. Attach the AWS-managed `AmazonECSTaskExecutionRolePolicy` managed policy AND the inline policy below."),
         ("cardinal-migration-lambda-role", _LAMBDA_TRUST, _migration_lambda_role_policy(), [], "Migration Lambda. Triggers a one-shot RunTask of the `cardinal-migrator` task definition on stack create + on `LakerunnerImage` parameter change."),
         ("cardinal-data-setup-lambda-role", _LAMBDA_TRUST, _data_setup_lambda_role_policy(), [], "Data-setup Lambda. Executes inside `cardinal-data-setup.yaml` (or via direct `aws lambda invoke`) to create RDS, S3, SQS, secrets, and SSM params. Has full create+update+delete on its scope so it can recover from partial failures by re-running."),
+        ("cardinal-cert-lambda-role", _LAMBDA_TRUST, _cert_lambda_role_policy(), [], "Cert Lambda (optional). Imports a customer-supplied PEM bundle into ACM on stack create, deletes the imported cert on stack delete. Only required when the customer leaves `CertificateArn` blank and instead provides PEM via `CertificateBody`/`CertificatePrivateKey`."),
     ]
 
     for name, trust, inline, managed, blurb in role_specs:

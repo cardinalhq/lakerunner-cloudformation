@@ -1,19 +1,18 @@
 """Naming and tag conventions for Cardinal resources.
 
-This module is in transition between two shapes:
+Two helper sets coexist:
 
-- ``cardinal_tags(component=, role=)`` -- the legacy form used by the
-  current nested-children CFN templates. Kept while those templates still
-  exist; will retire alongside ``children/`` in Phase 2 of the refactor.
-- ``cardinal_tags_v2(component=, managed_by=)`` -- the new form, used by
-  the prereqs and data-setup shell-script generators and by the
-  to-be-written app/lakerunner CFN stacks. ``managed_by`` records which
-  layer (script or stack) owns the resource so the customer can audit.
+- ``cardinal_tags(component=, role=)`` -- used by the lakerunner nested
+  children. Carries an ``InstallIdShort`` Sub in the Name tag so per-install
+  resources are visually distinguishable in the AWS console.
+- ``cardinal_tags_v2(component=, managed_by=)`` -- used by the data-setup
+  Lambda's CFN wrapper and by callers that want explicit ``managed_by``
+  attribution (which layer owns the resource).
 
-The new ``LakerunnerComponent`` enum, ``log_group_name``, the
-``InstallId``-free ``name_tag`` / ``secret_name`` / ``ssm_param_name``
-helpers, and the ``PROJECT`` / ``APPLICATION`` constants all belong to
-the new shape and are unused by legacy code.
+``LakerunnerComponent``, ``log_group_name``, ``name_tag``, ``secret_name``,
+and ``ssm_param_name`` are constants/helpers for the bare ``cardinal-*`` /
+``/cardinal/*`` naming contract documented in
+``docs/superpowers/specs/2026-05-06-cardinal-cfn-prereqs-split-design.md``.
 """
 
 from __future__ import annotations

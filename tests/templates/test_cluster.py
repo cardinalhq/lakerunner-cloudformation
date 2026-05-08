@@ -44,10 +44,13 @@ def test_no_internally_managed_iam_role(template_dict):
     assert len(roles) == 0
 
 
-def test_declares_role_and_sg_parameters(template_dict):
-    params = template_dict["Parameters"]
-    assert "ExecutionRoleArn" in params
-    assert "TaskSgId" in params
+def test_cluster_is_named_cardinal(template_dict):
+    """The cluster physical name is part of the IAM cookbook contract."""
+    resources = template_dict["Resources"]
+    cluster_def = next(
+        v for v in resources.values() if v["Type"] == "AWS::ECS::Cluster"
+    )
+    assert cluster_def["Properties"]["ClusterName"] == "cardinal"
 
 
 def test_outputs_required_values(template_dict):

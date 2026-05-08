@@ -174,7 +174,7 @@ def build() -> Template:
     task_def = t.add_resource(
         TaskDefinition(
             "MigratorTaskDef",
-            Family=Sub("cardinal-migration-${InstallIdShort}"),
+            Family="cardinal-migrator",
             NetworkMode="awsvpc",
             RequiresCompatibilities=["FARGATE"],
             Cpu="256",

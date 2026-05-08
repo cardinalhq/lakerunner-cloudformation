@@ -4,14 +4,10 @@ The root is a thin orchestrator. It declares the customer-facing parameter
 surface and stands up the nested children with TemplateURL pointing at the
 vendor S3 bucket.
 
-Per the Phase 2 prereqs-split refactor:
-
-- The data-bearing resources (RDS, S3 ingest bucket, SQS, secrets, SSM
-  parameters) are created out-of-band by the cardinal-data-setup Lambda.
-  Their identifiers come into the root as parameters.
-- All IAM roles and security groups are pre-created by the customer's IT
-  and passed in as ARN/ID parameters.
-- The database/storage/config nested children are gone.
+The data-bearing resources (RDS, S3 ingest bucket, SQS, secrets, SSM
+parameters) are created out-of-band by the cardinal-data-setup Lambda; their
+identifiers arrive as parameters. All IAM roles and security groups are
+pre-created by the customer's IT and passed in as ARN/ID parameters.
 """
 
 import os
@@ -284,7 +280,13 @@ def build() -> Template:
         "TemplateBaseUrl",
         Type="String",
         Default=DEFAULT_TEMPLATE_BASE_URL,
-        Description="Base URL for nested-stack templates (override for air-gapped).",
+        AllowedPattern=r"^https://.+/$",
+        ConstraintDescription="TemplateBaseUrl must be an https:// URL ending with '/'.",
+        Description=(
+            "Base URL (must end with '/') for nested-stack templates. "
+            "Example: https://<bucket>.s3.<region>.amazonaws.com/lakerunner/<version>/cardinal-lakerunner/. "
+            "Override for air-gapped installs."
+        ),
     ))
 
     # ---------------------------------------------------------------------
@@ -367,8 +369,6 @@ def build() -> Template:
         "InstallIdShort": install_short,
         "InstallIdLong": install_long,
         "VpcId": Ref("VpcId"),
-        "ExecutionRoleArn": Ref("ExecutionRoleArn"),
-        "TaskSgId": Ref("TaskSgId"),
     })
 
     cert_stack = _add_child(t, "CertStack", "cert.yaml", {
@@ -387,7 +387,6 @@ def build() -> Template:
         "VpcId": Ref("VpcId"),
         "PrivateSubnetsCsv": private_subnets_csv,
         "AlbSgId": Ref("AlbSgId"),
-        "TaskSgId": Ref("TaskSgId"),
         "CertificateArn": GetAtt(cert_stack, "Outputs.EffectiveCertificateArn"),
     }, depends_on=["CertStack"])
 

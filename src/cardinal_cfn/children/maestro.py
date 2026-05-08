@@ -1,21 +1,26 @@
 """maestro.yaml nested stack: maestro + DEX ECS Fargate service.
 
-Owns a SINGLE ECS Fargate service running a multi-container task definition:
+Owns a SINGLE ECS Fargate service running a six-container task definition:
 
-  1. db-init  (Essential=False, runs psql to bootstrap DB+user, then exits)
-  2. maestro  (Essential=True, listens on the maestro and MCP gateway ports)
-  3. dex      (Essential=True, listens on the DEX OIDC port)
+  1. db-init       (Essential=False, runs psql to bootstrap maestro DB+user)
+  2. mcp-gateway   (Essential=True, runs maestro DB schema migrations on
+                    startup, then serves the MCP gateway port)
+  3. wait-for-mcp  (Essential=False, blocks until mcp-gateway has finished
+                    its on-startup migrations so maestro doesn't race them)
+  4. maestro      (Essential=True, listens on the maestro HTTPS port)
+  5. dex-init      (Essential=False, renders the DEX config from CFN-supplied
+                    OIDC params: DexAdminEmail, DexAdminPasswordHash,
+                    OidcSuperadminEmails)
+  6. dex          (Essential=True, listens on the DEX OIDC port)
 
-The maestro container DependsOn db-init=SUCCESS, so the service won't come up
-until the database is provisioned. Both maestro and dex are attached to the
-shared cardinal HTTPS listener via two ListenerRules:
+Container dependsOn graph: db-init -> mcp-gateway -> wait-for-mcp -> maestro;
+dex-init -> dex. Both maestro and dex attach to the shared cardinal HTTPS
+listener via two ListenerRules:
 
   /*          -> maestro container, priority 49999 (catch-all default app)
   /dex/*      -> dex container,     priority 210
 
-Scope cuts vs. the pre-refactor generator: no self-signed cert Lambda, no
-dex-init container, no maestro-local ALB, no HTTP-only fallback. The shared
-ALB and its certificate are owned by the alb child stack.
+The shared ALB and its certificate are owned by the alb child stack.
 """
 
 from troposphere import (
@@ -627,7 +632,7 @@ def build() -> Template:
             port=maestro_port,
         )
     )
-    t.add_resource(
+    maestro_listener_rule = t.add_resource(
         services_common.build_listener_rule(
             service_key=_MAESTRO_LISTENER_KEY,
             target_group_ref=maestro_tg,
@@ -646,7 +651,7 @@ def build() -> Template:
             health_check_path="/dex/healthz",
         )
     )
-    t.add_resource(
+    dex_listener_rule = t.add_resource(
         services_common.build_listener_rule(
             service_key=_DEX_LISTENER_KEY,
             target_group_ref=dex_tg,
@@ -695,6 +700,10 @@ def build() -> Template:
                 ),
             ],
             Tags=cardinal_tags(component="compute", role=_SERVICE_KEY),
+            # ECS validates that target groups are attached to a listener at
+            # service-create time; depend on both ListenerRules to avoid the
+            # race.
+            DependsOn=[maestro_listener_rule.title, dex_listener_rule.title],
         )
     )
 

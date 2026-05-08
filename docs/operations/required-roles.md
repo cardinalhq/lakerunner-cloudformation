@@ -1,8 +1,10 @@
 # Cardinal lakerunner -- required IAM roles
 
-All IAM roles Cardinal needs are pre-created by the customer's IT and passed into the lakerunner CFN stack as parameters. This document is the authoritative reference for what each role's trust + inline policy must contain. It is generated from `src/cardinal_cfn/required_roles_doc.py` so it never drifts from the actual permissions Cardinal expects.
+All IAM roles Cardinal needs are pre-created by the customer's IT and passed into the lakerunner CFN stack as parameters. This document is the authoritative reference for what each role's trust + inline policy must contain. It is generated from `src/cardinal_cfn/required_roles_doc.py` (which builds on the policy fragments in `iam_policies.py`) so it never drifts from the actual permissions Cardinal expects.
 
 Substitute `${AccountId}` and `${Region}` with the install's account and region. The single shared model -- pass the same ARN for every role parameter -- works as long as the role contains the union of every policy below.
+
+**Role-name customization:** the policies below reference the **suggested** role names `cardinal-task-role`, `cardinal-execution-role`, and the Lambda execution roles. If your IT chooses different names, you must substitute them in the `iam:PassRole` resources of `cardinal-migration-lambda-role` (it passes the task and execution roles through to ECS RunTask) AND in the lakerunner stack parameters. Mismatched names produce `iam:PassRole` denials at migration time.
 
 ## Required security groups
 
@@ -22,6 +24,7 @@ Cardinal's CFN no longer creates security groups; the customer pre-creates three
 | `cardinal-execution-role` | ECS tasks (`ecs-tasks.amazonaws.com`) | Used as the `ExecutionRoleArn` parameter; ECS uses it at task launch to pull images and resolve `secrets:` blocks. |
 | `cardinal-migration-lambda-role` | Lambda (`lambda.amazonaws.com`) | Used by the migration custom resource Lambda to run the one-shot migrator ECS task. |
 | `cardinal-data-setup-lambda-role` | Lambda (`lambda.amazonaws.com`) | Used by the cardinal-data-setup Lambda; full create+update+delete on the data resources it manages. |
+| `cardinal-cert-lambda-role` | Lambda (`lambda.amazonaws.com`) | Optional. Used only when the customer ships a PEM bundle (CertificateBody/CertificatePrivateKey) instead of supplying a pre-existing ACM certificate ARN. |
 
 ## `cardinal-task-role`
 
@@ -330,21 +333,30 @@ Data-setup Lambda. Executes inside `cardinal-data-setup.yaml` (or via direct `aw
     },
     {
       "Action": [
+        "iam:CreateServiceLinkedRole"
+      ],
+      "Condition": {
+        "StringLike": {
+          "iam:AWSServiceName": "rds.amazonaws.com"
+        }
+      },
+      "Effect": "Allow",
+      "Resource": "arn:aws:iam::*:role/aws-service-role/rds.amazonaws.com/*"
+    },
+    {
+      "Action": [
         "s3:CreateBucket",
         "s3:DeleteBucket",
-        "s3:HeadBucket",
         "s3:GetBucketLocation",
         "s3:ListBucket",
         "s3:PutBucketTagging",
         "s3:GetBucketTagging",
-        "s3:PutBucketLifecycleConfiguration",
-        "s3:GetBucketLifecycleConfiguration",
+        "s3:PutLifecycleConfiguration",
+        "s3:GetLifecycleConfiguration",
         "s3:PutBucketNotification",
         "s3:GetBucketNotification",
-        "s3:PutBucketNotificationConfiguration",
-        "s3:GetBucketNotificationConfiguration",
-        "s3:PutPublicAccessBlock",
-        "s3:GetPublicAccessBlock"
+        "s3:PutBucketPublicAccessBlock",
+        "s3:GetBucketPublicAccessBlock"
       ],
       "Effect": "Allow",
       "Resource": [
@@ -370,7 +382,6 @@ Data-setup Lambda. Executes inside `cardinal-data-setup.yaml` (or via direct `aw
       "Action": [
         "secretsmanager:CreateSecret",
         "secretsmanager:DeleteSecret",
-        "secretsmanager:UpdateSecret",
         "secretsmanager:DescribeSecret",
         "secretsmanager:GetSecretValue",
         "secretsmanager:PutSecretValue",
@@ -397,15 +408,63 @@ Data-setup Lambda. Executes inside `cardinal-data-setup.yaml` (or via direct `aw
       "Resource": [
         "arn:aws:ssm:${Region}:${AccountId}:parameter/cardinal/*"
       ]
-    },
+    }
+  ],
+  "Version": "2012-10-17"
+}
+```
+
+## `cardinal-cert-lambda-role`
+
+Cert Lambda (optional). Imports a customer-supplied PEM bundle into ACM on stack create, deletes the imported cert on stack delete. Only required when the customer leaves `CertificateArn` blank and instead provides PEM via `CertificateBody`/`CertificatePrivateKey`.
+
+**Trust policy:**
+```json
+{
+  "Statement": [
+    {
+      "Action": "sts:AssumeRole",
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "lambda.amazonaws.com"
+      }
+    }
+  ],
+  "Version": "2012-10-17"
+}
+```
+
+**Inline policy:**
+```json
+{
+  "Statement": [
     {
       "Action": [
-        "ec2:DescribeSubnets",
-        "ec2:DescribeVpcs",
-        "ec2:DescribeSecurityGroups"
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
       ],
       "Effect": "Allow",
       "Resource": "*"
+    },
+    {
+      "Action": [
+        "acm:ImportCertificate",
+        "acm:AddTagsToCertificate",
+        "acm:RemoveTagsFromCertificate",
+        "acm:DescribeCertificate"
+      ],
+      "Effect": "Allow",
+      "Resource": "*"
+    },
+    {
+      "Action": [
+        "acm:DeleteCertificate"
+      ],
+      "Effect": "Allow",
+      "Resource": [
+        "arn:aws:acm:${Region}:${AccountId}:certificate/*"
+      ]
     }
   ],
   "Version": "2012-10-17"

@@ -13,11 +13,11 @@ are in `required-roles.md`.
 
 VPC is bring-your-own and intentionally excluded.
 
-After the Phase 2 prereqs-split refactor, the lakerunner stack creates
-neither IAM roles nor security groups nor data-bearing resources. The
-deployer therefore no longer needs `iam:*`, `rds:*`, `s3:*`, `sqs:*`,
-`secretsmanager:*`, `ssm:*`, or `ec2:*SecurityGroup*` permissions for
-the lakerunner stack itself. Those permissions are required only by:
+The lakerunner stack creates neither IAM roles nor security groups nor
+data-bearing resources. The deployer therefore does not need `iam:*`,
+`rds:*`, `s3:*`, `sqs:*`, `secretsmanager:*`, `ssm:*`, or
+`ec2:*SecurityGroup*` permissions for the lakerunner stack itself. Those
+permissions are required only by:
 
 1. The IT principal that pre-creates the IAM roles and security groups
    (one-time, scoped to the cookbook contents).
@@ -26,8 +26,9 @@ the lakerunner stack itself. Those permissions are required only by:
 
 ## Scope assumptions
 
-- Resource ARNs match `cardinal-*` and `cardinal/${InstallIdLong}/*` where
-  the AWS API supports name-prefix scoping.
+- Resource ARNs match `cardinal-*` and `/cardinal/*` (S3 bucket, SQS
+  queue, secrets, SSM params, log groups) where the AWS API supports
+  name-prefix scoping.
 - `iam:PassRole` is scoped to `arn:aws:iam::${account}:role/cardinal-*`.
 - No `kms:*` is required — the templates rely on AWS-managed keys for
   RDS, Secrets Manager, and S3.

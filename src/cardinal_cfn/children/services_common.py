@@ -4,7 +4,7 @@ Each helper constructs and returns a single troposphere object.
 The caller is responsible for adding it to a template.
 """
 
-from troposphere import GetAtt, Ref, Split, Sub
+from troposphere import GetAtt, Ref, Split
 from troposphere.ecs import (
     AwsvpcConfiguration,
     ContainerDefinition,
@@ -34,10 +34,14 @@ from cardinal_cfn.policies import apply_policy
 
 
 def build_log_group(*, service_key: str, retention_days: int = 14) -> LogGroup:
-    """Per-service CloudWatch log group named `/cardinal/${InstallIdShort}/<service-key>`."""
+    """Per-service CloudWatch log group named `/cardinal/<service-key>`.
+
+    Bare ``/cardinal/<svc>`` matches the IAM cookbook's ``/cardinal/*`` glob
+    on TaskRole CW Logs grants.
+    """
     lg = LogGroup(
         _resource_title(service_key, "LogGroup"),
-        LogGroupName=Sub(f"/cardinal/${{InstallIdShort}}/{service_key}"),
+        LogGroupName=f"/cardinal/{service_key}",
         RetentionInDays=retention_days,
         Tags=cardinal_tags(component="compute", role=service_key),
     )
@@ -178,12 +182,19 @@ def build_ecs_service(
     container_name: str,
     container_port: int | None = None,
     service_registry_ref=None,
+    listener_rule_refs: list | None = None,
 ) -> Service:
     """ECS Fargate Service with rolling deploy + circuit breaker.
 
     service_registry_ref: optional Cloud Map ServiceDiscovery::Service to attach
     so the ECS Service registers each task in private DNS for in-cluster
     routing (e.g. alert-evaluator -> query-api).
+
+    listener_rule_refs: ListenerRule resources whose creation must precede this
+    Service. ECS validates at create-time that LoadBalancer target groups are
+    already attached to a listener; without an explicit DependsOn, CFN may
+    create the Service before the ListenerRule attaches the TG, producing
+    "target group does not have an associated load balancer" failures.
     """
     kwargs: dict = dict(
         Cluster=Ref(cluster_arn_param),
@@ -221,6 +232,9 @@ def build_ecs_service(
         kwargs["ServiceRegistries"] = [
             ServiceRegistry(RegistryArn=GetAtt(service_registry_ref, "Arn"))
         ]
+
+    if listener_rule_refs:
+        kwargs["DependsOn"] = [r.title for r in listener_rule_refs]
 
     return Service(_resource_title(service_key, "Service"), **kwargs)
 

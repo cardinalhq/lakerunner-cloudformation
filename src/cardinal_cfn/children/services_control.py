@@ -2,7 +2,7 @@
 
 Owns four ECS Fargate services:
 
-- admin-api (ALB-attached at priority 110, path /admin/*)
+- admin-api (ALB-attached on dedicated 9443 listener; path catch-all `/*`)
 - sweeper (internal)
 - monitoring (internal; gRPC port not exposed on the ALB)
 - alert-evaluator (internal)
@@ -323,7 +323,7 @@ def build() -> Template:
     # binary's mux sees request paths verbatim (no /admin/ prefix to strip).
     # This is the only rule on that listener; the listener's default action
     # is a 503 fixed response.
-    t.add_resource(
+    admin_listener_rule = t.add_resource(
         services_common.build_listener_rule(
             service_key="admin-api-https",
             target_group_ref=admin_tg,
@@ -368,6 +368,7 @@ def build() -> Template:
             target_group_ref=admin_tg,
             container_name="admin-api",
             container_port=admin_container_port,
+            listener_rule_refs=[admin_listener_rule],
         )
     )
     t.add_output(Output("AdminApiServiceName", Value=GetAtt(admin_service, "Name")))

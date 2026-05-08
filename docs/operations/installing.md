@@ -13,8 +13,9 @@ party:
    Cardinal needs and hands the operator a list of ARNs / IDs. The role
    trust + policy contents come from
    `docs/operations/required-roles.md` (generated from
-   `src/cardinal_cfn/iam_policies.py` so it can never drift from what
-   Cardinal actually requires).
+   `src/cardinal_cfn/required_roles_doc.py`, which assembles the policy
+   fragments in `src/cardinal_cfn/iam_policies.py` so the doc never drifts
+   from what Cardinal actually requires).
 2. **Operator** deploys the `cardinal-data-setup` stack. That stack's
    only job is to deploy a Python Lambda and invoke it once. The Lambda
    creates the data layer (RDS, S3 ingest bucket, SQS queue, secrets,
@@ -177,6 +178,6 @@ To actually destroy the data resources, the operator either:
 - Manually deletes the resources using the customer's break-glass
   identity.
 
-The lakerunner stack is freely deletable by the operator's own role
-since Phase 2: it owns no IAM, no SGs, no RDS, and no S3 ingest, so
-nothing in the stack carries customer data.
+The lakerunner stack is freely deletable by the operator's own role:
+it owns no IAM, no SGs, no RDS, and no S3 ingest, so nothing in the
+stack carries customer data.

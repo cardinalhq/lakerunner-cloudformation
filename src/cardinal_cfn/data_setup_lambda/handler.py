@@ -32,9 +32,6 @@ Event schema (Properties for CFN; top-level keys for direct invoke):
     PrivateSubnets               comma-separated subnet IDs (or list)
     DbSgId                       SG ID applied to the RDS instance
     LicenseData                  license JSON, raw string (NoEcho upstream)
-    DexAdminEmail                string
-    DexAdminPasswordHash         bcrypt hash, raw string (NoEcho upstream)
-    OidcSuperadminEmails         comma-separated email allowlist
     DbInstanceClass              default "db.t3.medium"
     DbAllocatedStorage           default 100 (GiB)
     BucketLifecycleDays          default 7
@@ -69,6 +66,8 @@ import json
 import logging
 import os
 import secrets
+import signal
+import sys
 import time
 import urllib.parse
 from typing import Any
@@ -132,13 +131,49 @@ def _queue_arn(account_id: str, region: str) -> str:
 # ---------------------------------------------------------------------------
 # CFN custom-resource response transport
 # ---------------------------------------------------------------------------
+# Top-level event keys that may carry secrets in the direct-invoke flow. CFN
+# delivers these as ResourceProperties (already filtered out below), but
+# `aws lambda invoke` callers can put them at the top level.
+_SENSITIVE_EVENT_KEYS = frozenset({
+    "LicenseData",
+    "DexAdminPasswordHash",
+    "OidcSuperadminEmails",
+})
+
+
+def _redact_event_for_log(event: dict) -> dict:
+    """Drop ResourceProperties (logged separately if needed) and redact known
+    sensitive top-level keys before emitting the event to CloudWatch."""
+    out: dict = {}
+    for k, v in event.items():
+        if k == "ResourceProperties":
+            continue
+        if k in _SENSITIVE_EVENT_KEYS:
+            out[k] = "<redacted>"
+        else:
+            out[k] = v
+    return out
+
+
 def _send_cfn_response(event: dict, status: str, data: dict, reason: str = "") -> None:
+    """PUT a CFN custom-resource response to the pre-signed S3 URL.
+
+    No-ops when ``ResponseURL`` is absent (direct-invoke flow). Failure to
+    send is RAISED, not swallowed: a swallowed transport error here would
+    leave CFN polling for ~1 hour before the stack times out, so we let the
+    Lambda fail loudly and rely on AWS Lambda's own retry semantics.
+    """
     response_url = event.get("ResponseURL")
     if not response_url:
         return
     body = {
         "Status": status,
-        "Reason": reason or f"See CloudWatch logs: {os.environ.get('AWS_LAMBDA_LOG_STREAM_NAME', '?')}",
+        "Reason": reason or (
+            f"Cardinal data-setup Lambda failed without a message. "
+            f"See CloudWatch logs for function 'cardinal-data-setup', "
+            f"request {event.get('RequestId', '?')}, "
+            f"log stream {os.environ.get('AWS_LAMBDA_LOG_STREAM_NAME', '?')}."
+        ),
         "PhysicalResourceId": event.get("PhysicalResourceId") or "cardinal-data-setup",
         "StackId": event["StackId"],
         "RequestId": event["RequestId"],
@@ -147,7 +182,7 @@ def _send_cfn_response(event: dict, status: str, data: dict, reason: str = "") -
     }
     encoded = json.dumps(body).encode("utf-8")
     parsed = urllib.parse.urlparse(response_url)
-    conn = http.client.HTTPSConnection(parsed.netloc)
+    conn = http.client.HTTPSConnection(parsed.netloc, timeout=10)
     try:
         conn.request(
             "PUT",
@@ -158,7 +193,7 @@ def _send_cfn_response(event: dict, status: str, data: dict, reason: str = "") -
         resp = conn.getresponse()
         resp.read()
         if resp.status >= 300:
-            logger.error("cfn-response %s: %s", resp.status, resp.reason)
+            raise RuntimeError(f"cfn-response transport failed: {resp.status} {resp.reason}")
     finally:
         conn.close()
 
@@ -167,8 +202,12 @@ def _send_cfn_response(event: dict, status: str, data: dict, reason: str = "") -
 # Idempotency helpers
 # ---------------------------------------------------------------------------
 def _props(event: dict) -> dict:
-    """Return the resource properties (CFN custom resource) or the event itself."""
-    return event.get("ResourceProperties") or event
+    """Return ResourceProperties for CFN events; for direct-invoke fall back
+    to the event dict itself. Uses ``is None`` so an explicit empty
+    ``ResourceProperties`` produces a clear "missing property" failure
+    rather than silently picking up control-plane keys."""
+    rp = event.get("ResourceProperties")
+    return event if rp is None else rp
 
 
 def _str(props: dict, key: str, default: str | None = None) -> str:
@@ -217,6 +256,9 @@ def ensure_db_instance(rds, *, db_id: str, sg_id: str, instance_class: str, allo
         logger.info("db instance %s exists", db_id)
         return
     except ClientError as e:
+        # Note: boto3 returns "DBInstanceNotFound" for DescribeDBInstances
+        # (without the "Fault" suffix used by DescribeDBSubnetGroups). This
+        # is an AWS API quirk -- the SDK error codes are not consistent.
         if e.response["Error"]["Code"] != "DBInstanceNotFound":
             raise
     logger.info("creating db instance %s (this can take 10+ minutes)", db_id)
@@ -253,10 +295,19 @@ def wait_db_available(rds, db_id: str, timeout_seconds: int = 840) -> dict:
     """
     deadline = time.time() + timeout_seconds
     while True:
-        resp = rds.describe_db_instances(DBInstanceIdentifier=db_id)
-        instance = resp["DBInstances"][0]
-        status = instance["DBInstanceStatus"]
-        if status == "available":
+        try:
+            resp = rds.describe_db_instances(DBInstanceIdentifier=db_id)
+            instance = resp["DBInstances"][0]
+            status = instance["DBInstanceStatus"]
+        except ClientError as e:
+            # RDS eventual consistency: right after create_db_instance, the
+            # first describe call may transiently return DBInstanceNotFound.
+            # Treat as "still propagating; keep polling until the deadline".
+            if e.response["Error"]["Code"] != "DBInstanceNotFound":
+                raise
+            status = "propagating"
+            instance = None
+        if instance is not None and status == "available":
             return instance
         if time.time() > deadline:
             raise TimeoutError(
@@ -303,12 +354,25 @@ def ensure_db_master_secret(secretsmanager, *, name: str, username: str) -> tupl
 
 
 def update_db_master_secret_value(secretsmanager, *, name: str, db_instance: dict) -> None:
-    """Write the full connection JSON into the existing secret."""
+    """Write the full connection JSON into the existing secret.
+
+    Re-run idempotence: the placeholder JSON written by
+    ``ensure_db_master_secret`` has only ``username`` and ``password``. Once
+    we add ``host``/``port``/``dbname`` here, a re-run sees those keys and
+    skips the rewrite. If the parsed JSON is malformed, fail loudly rather
+    than silently overwriting (the password field is the only thing keeping
+    the existing RDS instance reachable).
+    """
     raw = secretsmanager.get_secret_value(SecretId=name)["SecretString"]
-    if raw.startswith("{") and '"host"' in raw:
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"secret {name} contains non-JSON data; refusing to overwrite") from e
+    if {"host", "port", "dbname"} <= parsed.keys():
         logger.info("secret %s already contains connection JSON", name)
         return
-    parsed = json.loads(raw)
+    if "password" not in parsed:
+        raise ValueError(f"secret {name} is missing 'password'; refusing to overwrite")
     new_value = {
         "username": parsed["username"],
         "password": parsed["password"],
@@ -322,6 +386,13 @@ def update_db_master_secret_value(secretsmanager, *, name: str, db_instance: dic
 
 
 def ensure_secret_with_value(secretsmanager, *, name: str, value: str, description: str) -> str:
+    """Create a Secrets Manager secret if absent; never overwrite on re-run.
+
+    Note: this helper is *create-only* by design. Operator-supplied values
+    such as ``LicenseData`` are written on the first install and preserved
+    forever; rotating them requires ``aws secretsmanager put-secret-value``
+    out-of-band.
+    """
     try:
         resp = secretsmanager.describe_secret(SecretId=name)
         logger.info("secret %s exists; not overwriting", name)
@@ -330,13 +401,20 @@ def ensure_secret_with_value(secretsmanager, *, name: str, value: str, descripti
         if e.response["Error"]["Code"] != "ResourceNotFoundException":
             raise
     logger.info("creating secret %s", name)
-    resp = secretsmanager.create_secret(
-        Name=name,
-        Description=description,
-        SecretString=value,
-        Tags=_common_tags(name),
-    )
-    return resp["ARN"]
+    try:
+        resp = secretsmanager.create_secret(
+            Name=name,
+            Description=description,
+            SecretString=value,
+            Tags=_common_tags(name),
+        )
+        return resp["ARN"]
+    except ClientError as e:
+        # Concurrent invocation race: another caller created the secret between
+        # our describe and our create. Recover by re-describing.
+        if e.response["Error"]["Code"] == "ResourceExistsException":
+            return secretsmanager.describe_secret(SecretId=name)["ARN"]
+        raise
 
 
 def ensure_s3_bucket(s3, *, bucket: str, region: str) -> None:
@@ -346,16 +424,39 @@ def ensure_s3_bucket(s3, *, bucket: str, region: str) -> None:
         return
     except ClientError as e:
         code = e.response["Error"]["Code"]
+        status = e.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+        # 403: bucket exists but is owned by another account (or our role
+        # lacks s3:ListBucket on it). 301: bucket exists in a different region.
+        # Both produce confusing downstream "AlreadyExists" errors if we
+        # blindly fall through to create_bucket, so raise actionable messages.
+        if status == 403:
+            raise RuntimeError(
+                f"S3 bucket {bucket!r} exists but is not accessible (HTTP 403). "
+                "Either it is owned by a different AWS account, or the data-setup "
+                "Lambda role lacks s3:ListBucket on it."
+            ) from e
+        if status == 301:
+            raise RuntimeError(
+                f"S3 bucket {bucket!r} exists in a different region. "
+                "Delete it or change the install region."
+            ) from e
         if code not in ("404", "NoSuchBucket", "NotFound"):
             raise
     logger.info("creating bucket %s", bucket)
-    if region == "us-east-1":
-        s3.create_bucket(Bucket=bucket)
-    else:
-        s3.create_bucket(
-            Bucket=bucket,
-            CreateBucketConfiguration={"LocationConstraint": region},
-        )
+    try:
+        if region == "us-east-1":
+            s3.create_bucket(Bucket=bucket)
+        else:
+            s3.create_bucket(
+                Bucket=bucket,
+                CreateBucketConfiguration={"LocationConstraint": region},
+            )
+    except ClientError as e:
+        # Concurrent-invocation race: another caller created the bucket
+        # between our HEAD and our create. Treat as success.
+        if e.response["Error"]["Code"] != "BucketAlreadyOwnedByYou":
+            raise
+        logger.info("bucket %s appeared concurrently; reusing", bucket)
     s3.put_bucket_tagging(
         Bucket=bucket,
         Tagging={"TagSet": _common_tags("ingest-bucket")},
@@ -400,17 +501,24 @@ def ensure_sqs_queue(sqs, queue_name: str) -> str:
         if e.response["Error"]["Code"] != "AWS.SimpleQueueService.NonExistentQueue":
             raise
     logger.info("creating queue %s", queue_name)
-    resp = sqs.create_queue(
-        QueueName=queue_name,
-        tags={
-            "Application": APPLICATION,
-            "Project": PROJECT,
-            "ManagedBy": MANAGED_BY,
-            "Component": "ingest-queue",
-            "Name": queue_name,
-        },
-    )
-    return resp["QueueUrl"]
+    try:
+        resp = sqs.create_queue(
+            QueueName=queue_name,
+            tags={
+                "Application": APPLICATION,
+                "Project": PROJECT,
+                "ManagedBy": MANAGED_BY,
+                "Component": "ingest-queue",
+                "Name": queue_name,
+            },
+        )
+        return resp["QueueUrl"]
+    except ClientError as e:
+        # Concurrent-invocation race: another caller created the queue between
+        # our get_queue_url and our create_queue. Recover via get_queue_url.
+        if e.response["Error"]["Code"] != "QueueNameExists":
+            raise
+        return sqs.get_queue_url(QueueName=queue_name)["QueueUrl"]
 
 
 def ensure_sqs_policy(sqs, *, queue_url: str, queue_arn: str, bucket: str, account_id: str) -> None:
@@ -490,9 +598,6 @@ def run(props: dict, region: str | None = None) -> dict:
     db_allocated_storage = _int(props, "DbAllocatedStorage", 100)
     bucket_lifecycle_days = _int(props, "BucketLifecycleDays", 7)
     license_data = _str(props, "LicenseData")
-    dex_admin_email = _str(props, "DexAdminEmail")
-    dex_admin_password_hash = _str(props, "DexAdminPasswordHash")
-    oidc_superadmin_emails = _str(props, "OidcSuperadminEmails", "")
 
     bucket_name = _bucket_name(account_id, region)
     queue_arn = _queue_arn(account_id, region)
@@ -539,21 +644,25 @@ def run(props: dict, region: str | None = None) -> dict:
         value=_random_hex(32),
         description="Internal service keys (random 32-byte hex)",
     )
+    # admin-api consumes this via the ECS secrets `:key::` JSON pointer
+    # (services_control.py: ValueFrom=Sub("${AdminApiKeySecretArn}:key::")).
+    # Write a JSON object with a `key` field so the pointer resolves; a plain
+    # hex value would fail at task launch with "invalid character 'f' after
+    # top-level value" because ECS attempts JSON parsing for `:field::`.
     admin_key_secret_arn = ensure_secret_with_value(
         secretsmanager,
         name=SECRET_NAMES["admin_key"],
-        value=_random_hex(32),
-        description="First-boot admin API key (rotated by admin-api)",
+        value=json.dumps({"key": _random_hex(32)}),
+        description="First-boot admin API key (rotated by admin-api).",
     )
+    # Maestro app DB credential. The maestro container's db-init creates a
+    # postgres user named ``maestro`` with this password; mcp-gateway and the
+    # maestro container then connect with it via secret_arn:password::.
     maestro_db_secret_arn = ensure_secret_with_value(
         secretsmanager,
         name=SECRET_NAMES["maestro_db"],
-        value=json.dumps({
-            "dex_admin_email": dex_admin_email,
-            "dex_admin_password_hash": dex_admin_password_hash,
-            "oidc_superadmin_emails": oidc_superadmin_emails,
-        }),
-        description="Maestro/DEX OIDC config",
+        value=json.dumps({"username": "maestro", "password": _generate_password()}),
+        description="Maestro app DB credential (username/password JSON).",
     )
 
     # --------------------------------------------------------------------- SSM
@@ -600,9 +709,45 @@ def _random_hex(byte_length: int) -> str:
 # ---------------------------------------------------------------------------
 # Lambda entrypoint
 # ---------------------------------------------------------------------------
+# Safety margin (seconds) reserved between the SIGALRM and AWS Lambda's hard
+# kill so we have time to PUT the FAILED cfn-response.
+_DEADLINE_SAFETY_SECONDS = 20
+
+
+def _arm_deadline_alarm(event: dict, context: Any) -> None:
+    """Send a FAILED cfn-response shortly before AWS Lambda kills the worker.
+
+    Without this, a runtime kill produces no cfn-response and CFN polls for
+    ~1 hour before failing the customer's stack. SIGALRM is delivered on the
+    main thread; boto3 calls are interruptible by it.
+    """
+    if not event.get("ResponseURL"):
+        return
+    try:
+        remaining_ms = int(context.get_remaining_time_in_millis())
+    except (AttributeError, TypeError):
+        return
+    deadline_seconds = max(1, remaining_ms // 1000 - _DEADLINE_SAFETY_SECONDS)
+
+    def on_alarm(_signum, _frame):
+        try:
+            _send_cfn_response(
+                event, "FAILED", {},
+                reason="Lambda approaching timeout; re-invoke to continue. "
+                       "ensure_* helpers will skip steps already completed.",
+            )
+        finally:
+            sys.exit(1)
+
+    signal.signal(signal.SIGALRM, on_alarm)
+    signal.alarm(deadline_seconds)
+
+
 def handler(event: dict, context: Any) -> dict:
-    logger.info("event: %s", json.dumps({k: v for k, v in event.items() if k != "ResourceProperties"}))
+    logger.info("event: %s", json.dumps(_redact_event_for_log(event)))
     request_type = event.get("RequestType")
+
+    _arm_deadline_alarm(event, context)
 
     if request_type == "Delete":
         # Default no-op on Delete: data resources are intentionally retained.
@@ -610,12 +755,20 @@ def handler(event: dict, context: Any) -> dict:
         # default is a future config flag (DeletePolicy property).
         logger.info("Delete event: no-op (data resources retained by policy)")
         if event.get("ResponseURL"):
-            _send_cfn_response(event, "SUCCESS", {})
+            try:
+                _send_cfn_response(
+                    event, "SUCCESS", {},
+                    reason="Data resources retained by policy "
+                           "(RDS, S3 ingest bucket, SQS queue, secrets, SSM params).",
+                )
+            except Exception:
+                logger.exception("Delete cfn-response failed; AWS Lambda will retry")
+                raise
         return {"status": "noop-on-delete"}
 
     try:
         data = run(_props(event))
-    except Exception as exc:  # noqa: BLE001 -- we want to translate every failure to cfn-response
+    except Exception as exc:  # noqa: BLE001 -- we translate every failure to cfn-response
         logger.exception("data-setup failed")
         if event.get("ResponseURL"):
             _send_cfn_response(event, "FAILED", {}, reason=str(exc)[:1024])

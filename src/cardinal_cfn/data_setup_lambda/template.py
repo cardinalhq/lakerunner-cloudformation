@@ -88,23 +88,6 @@ def build_template() -> Template:
         Description="Cardinal lakerunner license JSON (raw).",
     ))
     t.add_parameter(Parameter(
-        "DexAdminEmail",
-        Type="String",
-        Description="DEX admin login email.",
-    ))
-    t.add_parameter(Parameter(
-        "DexAdminPasswordHash",
-        Type="String",
-        NoEcho=True,
-        Description="DEX admin bcrypt password hash.",
-    ))
-    t.add_parameter(Parameter(
-        "OidcSuperadminEmails",
-        Type="String",
-        Default="",
-        Description="Comma-separated maestro superadmin allowlist.",
-    ))
-    t.add_parameter(Parameter(
         "DbInstanceClass",
         Type="String",
         Default="db.t3.medium",
@@ -175,9 +158,6 @@ def build_template() -> Template:
         PrivateSubnets=Ref("PrivateSubnets"),
         DbSgId=Ref("DbSgId"),
         LicenseData=Ref("LicenseData"),
-        DexAdminEmail=Ref("DexAdminEmail"),
-        DexAdminPasswordHash=Ref("DexAdminPasswordHash"),
-        OidcSuperadminEmails=Ref("OidcSuperadminEmails"),
         DbInstanceClass=Ref("DbInstanceClass"),
         DbAllocatedStorage=Ref("DbAllocatedStorage"),
         BucketLifecycleDays=Ref("BucketLifecycleDays"),

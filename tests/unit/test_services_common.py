@@ -7,13 +7,11 @@ import pytest
 from cardinal_cfn.children import services_common
 
 
-def test_build_log_group_uses_install_id_in_name():
+def test_build_log_group_uses_cardinal_naming_contract():
     lg = services_common.build_log_group(service_key="query-api")
     rendered = json.loads(json.dumps(lg, default=lambda o: o.to_dict()))
     name = rendered["Properties"].get("LogGroupName")
-    assert name is not None
-    assert "InstallIdShort" in json.dumps(name)
-    assert "query-api" in json.dumps(name)
+    assert name == "/cardinal/query-api"
 
 
 def test_build_listener_rule_uses_registered_priority():

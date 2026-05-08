@@ -1,8 +1,8 @@
 """alb.yaml nested stack: ALB and HTTPS listeners (443 / 9443).
 
-Per the Phase 2 prereqs-split refactor, this stack no longer creates the ALB
-security group or the ALB-to-task ingress rule; the customer pre-creates the
-SGs and arranges the ingress separately (documented in required-roles.md).
+The ALB security group and the ALB-to-task ingress rules are customer-owned
+(see ``docs/operations/required-roles.md``); this stack consumes the SG ID
+and never creates or mutates security groups.
 """
 
 from troposphere import (
@@ -53,17 +53,6 @@ def build() -> Template:
             "AlbSgId",
             Type="AWS::EC2::SecurityGroup::Id",
             Description="ALB security group ID (customer-supplied).",
-        )
-    )
-    t.add_parameter(
-        Parameter(
-            "TaskSgId",
-            Type="AWS::EC2::SecurityGroup::Id",
-            Description=(
-                "ECS task security group ID (customer-supplied). The customer "
-                "is responsible for ensuring this SG permits ingress from "
-                "AlbSgId on the task ports."
-            ),
         )
     )
     t.add_parameter(

@@ -285,8 +285,6 @@ def build() -> Template:
     ]
 
     # ---------------------------------------------------------------------
-    # query-api
-    # ---------------------------------------------------------------------
     # query-worker (built first so query-api can reference its ECS Service
     # name in QUERY_WORKER_SERVICE_NAME for ECS-based worker discovery).
     # ---------------------------------------------------------------------
@@ -321,11 +319,10 @@ def build() -> Template:
 
     # query-api reaches query-worker on its task port over the shared task SG.
     # No SecurityGroupIngress resource is created here -- the customer-supplied
-    # TaskSgId already permits all task-to-task ingress (TCP 0-65535 from self),
-    # per docs/operations/required-roles.md. Adding an ingress rule here would
-    # require the deployer principal to hold ec2:AuthorizeSecurityGroupIngress
-    # on a customer-managed SG, which violates the Phase 2 boundary
-    # (the lakerunner stack does not create or mutate SGs).
+    # TaskSgId already permits task-to-task ingress (TCP 0-65535 from self),
+    # per docs/operations/required-roles.md. The lakerunner stack does not
+    # create or mutate SGs; mutating one would require the deployer principal
+    # to hold ec2:AuthorizeSecurityGroupIngress on a customer-managed SG.
 
     # ---------------------------------------------------------------------
     # query-api
@@ -347,7 +344,7 @@ def build() -> Template:
             health_check_path=api_health_path,
         )
     )
-    t.add_resource(
+    api_listener_rule = t.add_resource(
         services_common.build_listener_rule(
             service_key="query-api",
             target_group_ref=api_tg,
@@ -396,6 +393,7 @@ def build() -> Template:
             container_name="query-api",
             container_port=api_container_port,
             service_registry_ref=api_discovery,
+            listener_rule_refs=[api_listener_rule],
         )
     )
 

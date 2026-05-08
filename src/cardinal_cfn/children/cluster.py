@@ -1,8 +1,8 @@
 """cluster.yaml nested stack: ECS cluster + Cloud Map namespace + base log group.
 
-Per the Phase 2 prereqs-split refactor, this stack no longer creates the task
-security group or the execution role; the customer pre-creates both and passes
-their IDs/ARNs as parameters.
+The cluster is named ``cardinal`` (fixed) so the customer-supplied IAM cookbook
+can grant least-privilege ECS access via ``cluster/cardinal``. Task SG and
+execution role are customer-supplied; they are not created here.
 """
 
 from troposphere import (
@@ -34,24 +34,10 @@ def build() -> Template:
             Description="VPC ID (forwarded from root).",
         )
     )
-    t.add_parameter(
-        Parameter(
-            "ExecutionRoleArn",
-            Type="String",
-            Description="ECS task execution role ARN (customer-supplied).",
-        )
-    )
-    t.add_parameter(
-        Parameter(
-            "TaskSgId",
-            Type="AWS::EC2::SecurityGroup::Id",
-            Description="ECS task security group ID (customer-supplied).",
-        )
-    )
-
     cluster_res = t.add_resource(
         ECSCluster(
             "Cluster",
+            ClusterName="cardinal",
             ClusterSettings=[ClusterSetting(Name="containerInsights", Value="enabled")],
             Tags=cardinal_tags(component="compute", role="ecs-cluster"),
         )

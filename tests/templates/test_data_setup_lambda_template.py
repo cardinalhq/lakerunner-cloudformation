@@ -25,9 +25,6 @@ def test_required_parameters_declared(template_dict):
         "PrivateSubnets",
         "DbSgId",
         "LicenseData",
-        "DexAdminEmail",
-        "DexAdminPasswordHash",
-        "OidcSuperadminEmails",
         "DbInstanceClass",
         "DbAllocatedStorage",
         "BucketLifecycleDays",
@@ -38,8 +35,15 @@ def test_required_parameters_declared(template_dict):
 
 
 def test_secret_parameters_marked_no_echo(template_dict):
-    for secret_param in ("LicenseData", "DexAdminPasswordHash"):
-        assert template_dict["Parameters"][secret_param]["NoEcho"] is True
+    assert template_dict["Parameters"]["LicenseData"]["NoEcho"] is True
+
+
+def test_oidc_parameters_not_passed_through(template_dict):
+    """OIDC config is consumed by the lakerunner stack, not by data-setup."""
+    params = set(template_dict["Parameters"])
+    assert "DexAdminEmail" not in params
+    assert "DexAdminPasswordHash" not in params
+    assert "OidcSuperadminEmails" not in params
 
 
 def test_lambda_function_uses_customer_supplied_role(template_dict):

@@ -14,7 +14,7 @@ def template_dict():
 
 def test_required_parameters(template_dict):
     for n in ("InstallIdShort", "InstallIdLong", "VpcId",
-              "PrivateSubnetsCsv", "AlbSgId", "TaskSgId"):
+              "PrivateSubnetsCsv", "AlbSgId"):
         assert n in template_dict["Parameters"], f"missing parameter: {n}"
 
 

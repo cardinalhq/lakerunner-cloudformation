@@ -64,6 +64,7 @@ identity, but they are willing to grant a powerful role to a Lambda.
 
     The customer's IT creates these from a vendor-supplied policy
     cookbook (docs/operations/required-roles.md, generated from
+    required_roles_doc.py, which composes the policy fragments in
     iam_policies.py). They may collapse multiple ARNs onto a single
     powerful role; the templates do not care.
         |
@@ -203,9 +204,9 @@ writes against the values the lakerunner templates parameterize on.
 
 `docs/operations/required-roles.md` lists each customer-supplied role,
 its trust policy, and its required inline-policy contents. The doc is
-generated from `src/cardinal_cfn/iam_policies.py` (existing) by a
-build-time helper, so the doc and the customer-runtime requirement
-can never drift.
+generated from `src/cardinal_cfn/required_roles_doc.py`, which composes
+the policy fragments in `src/cardinal_cfn/iam_policies.py`, so the doc
+and the customer-runtime requirement can never drift.
 
 The cookbook covers:
 - TaskRole (ECS-tasks trust; S3 RW, SQS RW, SSM read on `/cardinal/*`,

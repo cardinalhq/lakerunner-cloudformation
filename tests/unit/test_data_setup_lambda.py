@@ -225,3 +225,190 @@ def test_wait_db_available_default_timeout_below_lambda_cap():
     default_timeout = sig.parameters["timeout_seconds"].default
     assert default_timeout <= 880, \
         f"wait_db_available timeout ({default_timeout}s) must leave room for cfn-response under the 900s Lambda cap"
+
+
+# ---------------------------------------------------------------------------
+# Sensitive-event redaction (direct-invoke path)
+# ---------------------------------------------------------------------------
+def test_redact_event_drops_resource_properties_and_sensitive_keys():
+    event = {
+        "RequestType": "Create",
+        "StackId": "arn:...",
+        "LicenseData": "REAL_LICENSE_VALUE",
+        "DexAdminPasswordHash": "$2a$10$secret",
+        "OidcSuperadminEmails": "a@b,c@d",
+        "ResourceProperties": {"some": "thing"},
+    }
+    redacted = h._redact_event_for_log(event)
+    assert "ResourceProperties" not in redacted
+    assert redacted["LicenseData"] == "<redacted>"
+    assert redacted["DexAdminPasswordHash"] == "<redacted>"
+    assert redacted["OidcSuperadminEmails"] == "<redacted>"
+    assert redacted["RequestType"] == "Create"
+
+
+# ---------------------------------------------------------------------------
+# CFN response transport
+# ---------------------------------------------------------------------------
+class _FakeHTTPSResponse:
+    def __init__(self, status, reason=""):
+        self.status = status
+        self.reason = reason
+
+    def read(self):
+        return b""
+
+
+class _FakeHTTPSConnection:
+    last = {}
+
+    def __init__(self, host, timeout=None):
+        _FakeHTTPSConnection.last = {"host": host, "timeout": timeout}
+        self._response = _FakeHTTPSResponse(200)
+        self._closed = False
+
+    def request(self, method, path, body, headers):
+        _FakeHTTPSConnection.last["method"] = method
+        _FakeHTTPSConnection.last["path"] = path
+        _FakeHTTPSConnection.last["body"] = body
+        _FakeHTTPSConnection.last["headers"] = headers
+
+    def getresponse(self):
+        return self._response
+
+    def close(self):
+        self._closed = True
+
+
+def test_send_cfn_response_no_op_without_response_url():
+    h._send_cfn_response({"StackId": "s", "RequestId": "r", "LogicalResourceId": "l"}, "SUCCESS", {})
+
+
+def test_send_cfn_response_puts_well_formed_body(monkeypatch):
+    monkeypatch.setattr(h.http.client, "HTTPSConnection", _FakeHTTPSConnection)
+    event = {
+        "ResponseURL": "https://example.invalid/path?x=1",
+        "StackId": "arn:s", "RequestId": "rid", "LogicalResourceId": "Custom",
+        "PhysicalResourceId": "cardinal-data-setup",
+    }
+    h._send_cfn_response(event, "SUCCESS", {"foo": "bar"})
+    sent = json.loads(_FakeHTTPSConnection.last["body"])
+    assert sent["Status"] == "SUCCESS"
+    assert sent["PhysicalResourceId"] == "cardinal-data-setup"
+    assert sent["Data"] == {"foo": "bar"}
+    assert _FakeHTTPSConnection.last["method"] == "PUT"
+    assert _FakeHTTPSConnection.last["path"] == "/path?x=1"
+
+
+def test_send_cfn_response_raises_on_non_2xx(monkeypatch):
+    """A non-2xx from the presigned URL means CFN didn't get our response.
+    Logging-and-continuing here would lead to a 1-hour stack hang; raise
+    instead so AWS Lambda's retry semantics get a shot."""
+    class _FailingConn(_FakeHTTPSConnection):
+        def __init__(self, host, timeout=None):
+            super().__init__(host, timeout)
+            self._response = _FakeHTTPSResponse(500, "Internal Server Error")
+
+    monkeypatch.setattr(h.http.client, "HTTPSConnection", _FailingConn)
+    event = {
+        "ResponseURL": "https://example.invalid/p",
+        "StackId": "s", "RequestId": "r", "LogicalResourceId": "l",
+    }
+    with pytest.raises(RuntimeError, match="cfn-response transport failed"):
+        h._send_cfn_response(event, "SUCCESS", {})
+
+
+# ---------------------------------------------------------------------------
+# S3 region branching
+# ---------------------------------------------------------------------------
+class _FakeS3Client:
+    def __init__(self, head_error=None):
+        self._head_error = head_error
+        self.create_calls = []
+        self.tag_calls = []
+
+    def head_bucket(self, Bucket):  # noqa: N803
+        if self._head_error is not None:
+            raise self._head_error
+
+    def create_bucket(self, **kwargs):
+        self.create_calls.append(kwargs)
+
+    def put_bucket_tagging(self, **kwargs):
+        self.tag_calls.append(kwargs)
+
+
+def _client_error(code, status):
+    return ClientError(
+        {"Error": {"Code": code, "Message": "x"}, "ResponseMetadata": {"HTTPStatusCode": status}},
+        "HeadBucket",
+    )
+
+
+def test_ensure_s3_bucket_us_east_1_omits_location_constraint():
+    s3 = _FakeS3Client(head_error=_client_error("404", 404))
+    h.ensure_s3_bucket(s3, bucket="cardinal-ingest-1-us-east-1", region="us-east-1")
+    assert len(s3.create_calls) == 1
+    assert "CreateBucketConfiguration" not in s3.create_calls[0]
+
+
+def test_ensure_s3_bucket_other_region_includes_location_constraint():
+    s3 = _FakeS3Client(head_error=_client_error("404", 404))
+    h.ensure_s3_bucket(s3, bucket="cardinal-ingest-1-us-east-2", region="us-east-2")
+    assert s3.create_calls[0]["CreateBucketConfiguration"] == {"LocationConstraint": "us-east-2"}
+
+
+def test_ensure_s3_bucket_403_raises_actionable_error():
+    s3 = _FakeS3Client(head_error=_client_error("Forbidden", 403))
+    with pytest.raises(RuntimeError, match="not accessible"):
+        h.ensure_s3_bucket(s3, bucket="x", region="us-east-2")
+
+
+def test_ensure_s3_bucket_301_raises_region_error():
+    s3 = _FakeS3Client(head_error=_client_error("PermanentRedirect", 301))
+    with pytest.raises(RuntimeError, match="different region"):
+        h.ensure_s3_bucket(s3, bucket="x", region="us-east-2")
+
+
+def test_ensure_s3_bucket_recovers_from_concurrent_create():
+    """Two Lambda invocations race past head_bucket → both call create_bucket;
+    the loser sees BucketAlreadyOwnedByYou. Recover instead of failing."""
+    raised = {}
+
+    class _RaceS3(_FakeS3Client):
+        def create_bucket(self, **kwargs):
+            if not raised:
+                raised["once"] = True
+                raise ClientError(
+                    {"Error": {"Code": "BucketAlreadyOwnedByYou", "Message": "you"}},
+                    "CreateBucket",
+                )
+            super().create_bucket(**kwargs)
+
+    s3 = _RaceS3(head_error=_client_error("404", 404))
+    h.ensure_s3_bucket(s3, bucket="x", region="us-east-2")  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# Naming contract: the values the Lambda writes must match the IAM cookbook.
+# ---------------------------------------------------------------------------
+def test_naming_contract_secrets_match_iam_cookbook_glob():
+    """The cookbook scopes secrets read to ``cardinal-*``; if any Lambda-written
+    secret name fell outside that prefix, the customer's TaskRole would be
+    IAM-denied at runtime."""
+    for name in h.SECRET_NAMES.values():
+        assert name.startswith("cardinal-"), f"secret {name!r} breaks the cardinal-* IAM glob"
+
+
+def test_naming_contract_ssm_params_match_iam_cookbook_glob():
+    """SSM params are scoped to ``/cardinal/*`` in the cookbook."""
+    for name in h.SSM_PARAM_NAMES.values():
+        assert name.startswith("/cardinal/"), f"SSM param {name!r} breaks the /cardinal/* IAM glob"
+
+
+def test_naming_contract_cluster_family_log_group_match_spec():
+    """The Lambda docstring is the human-readable contract; verify the spec
+    values appear so a refactor that drops or renames them raises here."""
+    src = h.__doc__ or ""
+    for required in ("cardinal-migrator", "cardinal-ingest", "/cardinal/<service>"):
+        assert required in src, f"naming contract missing {required!r} in handler docstring"

@@ -1,14 +1,9 @@
 """Pure-data IAM policy-document builders.
 
-Used by the shell-script generators (which inline the JSON into
-``aws iam put-role-policy --policy-document file://...`` calls) and
-by the CFN template generators (which embed the same dicts as
-``Policies=[Policy(PolicyDocument=...)]`` on consuming resources).
-
-Every builder returns a plain ``dict`` shaped as a valid AWS IAM
-policy document. Pass concrete account/region/ARN values; do not
-parameterize via Sub strings -- the shell-script generator can't
-emit Sub.
+Used by the CFN template generators and the customer-facing
+required-roles cookbook generator. Every builder returns a plain
+``dict`` shaped as a valid AWS IAM policy document. Pass concrete
+account/region/ARN values; do not parameterize via Sub strings.
 """
 
 from __future__ import annotations
@@ -125,6 +120,28 @@ def pass_role_policy_doc(*, role_arns: list[str]) -> dict:
         "Action": ["iam:PassRole"],
         "Resource": list(role_arns),
     })
+
+
+def acm_import_policy_doc(*, account_id: str, region: str) -> dict:
+    """Permissions for the cert Lambda to import a customer-supplied PEM
+    bundle into ACM and clean it up on stack delete."""
+    return _doc(
+        {
+            "Effect": "Allow",
+            "Action": [
+                "acm:ImportCertificate",
+                "acm:AddTagsToCertificate",
+                "acm:RemoveTagsFromCertificate",
+                "acm:DescribeCertificate",
+            ],
+            "Resource": "*",
+        },
+        {
+            "Effect": "Allow",
+            "Action": ["acm:DeleteCertificate"],
+            "Resource": [f"arn:aws:acm:{region}:{account_id}:certificate/*"],
+        },
+    )
 
 
 def ecs_run_task_policy_doc(*, cluster_arn: str, task_definition_family: str, account_id: str, region: str) -> dict:

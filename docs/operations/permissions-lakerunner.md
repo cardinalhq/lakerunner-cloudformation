@@ -2,13 +2,13 @@
 
 What the **running application** has access to.
 
-After the Phase 2 prereqs-split refactor, every IAM role and security
-group is **pre-created by the customer's IT** and supplied as a
-parameter ARN/ID. Cardinal's CloudFormation never creates IAM roles or
-security groups. The authoritative reference for what each
-customer-supplied role's trust + inline policy must contain is
+Every IAM role and security group is **pre-created by the customer's
+IT** and supplied as a parameter ARN/ID. Cardinal's CloudFormation never
+creates IAM roles or security groups. The authoritative reference for
+what each customer-supplied role's trust + inline policy must contain is
 `docs/operations/required-roles.md` (generated from
-`src/cardinal_cfn/iam_policies.py`).
+`src/cardinal_cfn/required_roles_doc.py`, which composes the policy
+fragments in `src/cardinal_cfn/iam_policies.py`).
 
 This doc is the "what does the running software actually do?" half of
 the permissions story. Install-time permissions for the operator role
@@ -26,7 +26,7 @@ deploying the templates live in `permissions-infrastructure.md`.
 
 | Role parameter | Trust | Why | Required permissions |
 |---|---|---|---|
-| `TaskRoleArn` | `ecs-tasks.amazonaws.com` | Used by every lakerunner ECS task (query / process / control / otel / maestro). The Phase 2 spec replaces the previous one-role-per-service split with a single shared role; customers who want finer separation can pass different ARNs for different services in a future refactor. | S3 RW on the ingest bucket, SQS RW on the ingest queue, SSM read on `/cardinal/*`, secrets read on `cardinal-*`, CW Logs writes to `/cardinal/*`, `ecs:DescribeServices` / `ecs:UpdateService` on the cluster, `ecs:DescribeTasks` / `ecs:ListTasks`, `bedrock:InvokeModel(WithResponseStream)` on `foundation-model/*`. |
+| `TaskRoleArn` | `ecs-tasks.amazonaws.com` | Used by every lakerunner ECS task (query / process / control / otel / maestro). One shared role across services; customers who want finer separation can pass different ARNs for different services in a future refactor. | S3 RW on the ingest bucket, SQS RW on the ingest queue, SSM read on `/cardinal/*`, secrets read on `cardinal-*`, CW Logs writes to `/cardinal/*`, `ecs:DescribeServices` / `ecs:UpdateService` on the cluster, `ecs:DescribeTasks` / `ecs:ListTasks`, `bedrock:InvokeModel(WithResponseStream)` on `foundation-model/*`. |
 
 ### Lambda roles (CloudFormation custom resources)
 
