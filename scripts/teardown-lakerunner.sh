@@ -7,13 +7,13 @@
 # Two install shapes:
 #
 # 1. Post-pivot installs (current).  The lakerunner stack owns no Retain or
-#    Snapshot resources -- the data layer (RDS, S3 ingest, secrets, SSM,
-#    SQS) lives outside both stacks, managed by the cardinal-data-setup
-#    Lambda.  delete-stack alone removes everything the stack owns; the
-#    post-delete cleanup helpers below no-op because the legacy nested
-#    stacks (StorageStack, DatabaseStack, ConfigStack) are absent.  Wiping
-#    the data layer is a separate operator-driven step -- see
-#    docs/operations/tearing-down.md.
+#    Snapshot resources -- the entire infra layer (RDS, S3 ingest, secrets,
+#    SSM, SQS, ECS cluster, Cloud Map namespace) lives outside the stack,
+#    provisioned by scripts/data-setup.sh.  delete-stack alone removes
+#    everything the stack owns; the post-delete cleanup helpers below
+#    no-op because the legacy nested stacks (StorageStack, DatabaseStack,
+#    ConfigStack, ClusterStack) are absent.  Wiping the infra layer is a
+#    separate operator-driven step -- see docs/operations/tearing-down.md.
 #
 # 2. Legacy installs (pre-pivot).  The lakerunner stack still embeds the
 #    data layer with Retain / Snapshot policies:

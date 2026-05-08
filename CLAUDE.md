@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository overview
 
-Generators (Python + troposphere) emit two customer-facing CloudFormation roots and twelve nested child templates. Design context lives in:
+Generators (Python + troposphere) emit one customer-facing CloudFormation root (the application stack) plus eight nested children, and an optional VPC root. All infra is provisioned by `scripts/data-setup.sh`, not by CloudFormation. Design context lives in:
 
 - `docs/superpowers/specs/2026-04-28-cardinal-cfn-refactor-design.md` — design spec (source of truth)
 - `docs/superpowers/plans/2026-04-28-cardinal-cfn-refactor.md` — phased implementation plan
@@ -16,24 +16,26 @@ When in doubt, the design spec wins.
 Two customer-facing CloudFormation root templates:
 
 - `cardinal-vpc.yaml` — optional VPC (skipped by customers using their own VPC)
-- `cardinal-lakerunner.yaml` — application root, composed of twelve nested children
+- `cardinal-lakerunner.yaml` — application root, composed of eight nested children
 
-The lakerunner root nests these children:
+Plus a single shell driver:
+
+- `scripts/data-setup.sh` — raw-AWS-CLI infra provisioner. Creates RDS, S3 ingest, SQS, the five `cardinal-*` Secrets Manager secrets, the two SSM parameters, the ECS cluster (`cardinal`), and the Cloud Map private DNS namespace (`cardinal.local`). Idempotent; emits a JSON document on stdout whose keys map 1:1 to the lakerunner stack's infra-setup parameters. The customer supplies all IAM roles and security groups out-of-band; they are inputs, not outputs, of the script.
+
+The lakerunner root nests these children — application-tier resources only:
 
 | # | Template | Owns |
 |---|---|---|
-| 1 | `cluster.yaml` | ECS cluster, base TaskSG, shared execution role, base log group |
-| 2 | `database.yaml` | RDS subnet group, DB instance, DB master secret |
-| 3 | `storage.yaml` | S3 ingest bucket + lifecycle, SQS queue + policy, S3 → SQS notifications |
-| 4 | `alb.yaml` | ALB, default 443 listener, ALB security group |
-| 5 | `config.yaml` | SSM params, license/admin/internal-keys secrets |
-| 6 | `cert.yaml` | Optional ACM cert importer (Lambda-backed custom resource) |
-| 7 | `migration.yaml` | One-shot DB migration custom resource |
-| 8 | `services-query.yaml` | query-api, query-worker |
-| 9 | `services-process.yaml` | process-{logs,metrics,traces}, pubsub-sqs |
-| 10 | `services-control.yaml` | sweeper, monitoring, admin-api, alert-evaluator |
-| 11 | `otel.yaml` | otel-collector |
-| 12 | `maestro.yaml` | Maestro + bundled DEX OIDC |
+| 1 | `alb.yaml` | ALB, default 443 listener (ALB SG is customer-supplied) |
+| 2 | `cert.yaml` | Optional ACM cert importer (Lambda-backed custom resource) |
+| 3 | `migration.yaml` | One-shot DB migration custom resource |
+| 4 | `services-query.yaml` | query-api, query-worker |
+| 5 | `services-process.yaml` | process-{logs,metrics,traces}, pubsub-sqs |
+| 6 | `services-control.yaml` | sweeper, monitoring, admin-api, alert-evaluator |
+| 7 | `otel.yaml` | otel-collector |
+| 8 | `maestro.yaml` | Maestro + bundled DEX OIDC |
+
+The lakerunner stack creates **no infra** of its own — no ECS cluster, no security groups, no IAM roles, no databases, no buckets, no queues, no secrets, no SSM parameters. Every such resource is created by `data-setup.sh` (or by the customer) and threaded into the stack as a parameter.
 
 Cross-stack wiring goes through the root via `Fn::GetAtt childStack.Outputs.X` → child parameter. Sibling children never reference each other directly.
 
@@ -53,6 +55,10 @@ src/
     children/                # one module per nested-stack child
     root.py                  # parent template generator
     cardinal_vpc.py          # standalone VPC generator
+scripts/
+  data-setup.sh              # infra provisioner (raw AWS CLI; idempotent)
+  deploy-lakerunner.sh       # CFN deploy driver
+  teardown-lakerunner.sh     # CFN teardown driver
 cardinal-defaults.yaml       # consolidated defaults (services, images, maestro, otel)
 tests/
   conftest.py                # adds src/ to sys.path; no pip install -e needed
@@ -70,9 +76,14 @@ generated-templates/
   cardinal-vpc.yaml
   cardinal-lakerunner.yaml             # the root
   cardinal-lakerunner/                 # the children, mirrors S3 prefix
-    cluster.yaml
-    database.yaml
-    ...
+    alb.yaml
+    cert.yaml
+    migration.yaml
+    services-query.yaml
+    services-process.yaml
+    services-control.yaml
+    otel.yaml
+    maestro.yaml
 ```
 
 ## Key design rules
@@ -84,9 +95,13 @@ generated-templates/
 - Explicit physical names *only* where externally referenced — SSM Parameter names (AWS-required), the S3 ingest bucket name (predictability), license/admin secrets (referenced from outside the stack).
 - Never name RDS, ECS clusters/services, listener rules, log groups, target groups — explicit names block in-place updates.
 
-### Multi-install isolation
+### Single-install assumption
 
-`InstallIdShort` (8 hex) and `InstallIdLong` (12 hex) are derived from the root stack's `AWS::StackId` and propagated as parameters to every nested child. **Children never compute these themselves** — `Ref(AWS::StackId)` in a child returns the child's id, not the root's.
+The infra script names the ECS cluster `cardinal` and the Cloud Map namespace `cardinal.local` — both fixed. This implies one Cardinal install per AWS account/region, which is the supported deployment model. Customers running multiple installs should use separate accounts (or separate regions).
+
+### Multi-install isolation (lakerunner-internal)
+
+Within a single account/region, `InstallIdShort` (8 hex) and `InstallIdLong` (12 hex) are derived from the root stack's `AWS::StackId` and propagated as parameters to every nested child. **Children never compute these themselves** — `Ref(AWS::StackId)` in a child returns the child's id, not the root's.
 
 ```
 UUID            = Fn::Select(2, Fn::Split("/", Ref(AWS::StackId)))
@@ -130,7 +145,7 @@ Lambda-backed, runs the lakerunner migrator as a one-shot ECS task. Behavior:
 
 ### Service tier rule (B → C safe)
 
-The three service tier stacks (`services-query`, `services-process`, `services-control`) own *only* per-service resources: ECS Service, TaskDefinition, TargetGroup, ListenerRule, per-service log group, per-service task role. Anything shared across services lives in `cluster`, `alb`, or `config`. This rule keeps the door open to a future per-service-stack split with minimal disruption.
+The three service tier stacks (`services-query`, `services-process`, `services-control`) own *only* per-service resources: ECS Service, TaskDefinition, TargetGroup, ListenerRule, per-service log group. Anything shared across services lives in `alb` or arrives as an infra-setup parameter (cluster, task SG, task/execution roles, secret ARNs, SSM param names). This rule keeps the door open to a future per-service-stack split with minimal disruption.
 
 ## Build and testing
 
@@ -156,7 +171,7 @@ python3 -m cardinal_cfn.cardinal_vpc       # emits VPC YAML
 
 All templates must pass cfn-lint with no errors. Warnings are tolerable when explainable; `.cfnlintrc` carries the project-wide ignores.
 
-## Publishing (Phase 8)
+## Publishing
 
 GitHub Actions on tag push (`v*`) builds, lints, tests, and publishes to a vendor-managed public S3 bucket (`cardinal-cfn`, provisioned in `terraform-deployments/aws/production/cloudformation-distribution.tf`). Customers paste the regional S3 URL into the CloudFormation console:
 
@@ -164,7 +179,7 @@ GitHub Actions on tag push (`v*`) builds, lints, tests, and publishes to a vendo
 https://cardinal-cfn.s3.<region>.amazonaws.com/lakerunner/<version>/cardinal-lakerunner.yaml
 ```
 
-Air-gapped customers override the `TemplateBaseUrl` parameter on the root stack to point at a customer-owned mirror.
+Air-gapped customers override the `TemplateBaseUrl` parameter on the root stack to point at a customer-owned mirror. The `data-setup.sh` script is run by the customer's operator out-of-band and does not need to be hosted; it is committed under `scripts/`.
 
 ## Security considerations
 

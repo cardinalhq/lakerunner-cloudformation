@@ -15,7 +15,6 @@ POLICIES: dict = {
     "license-secret":               ("Retain", "Retain"),
     "sqs-ingest-queue":             ("Delete", "Delete"),
     "alb":                          ("Delete", "Delete"),
-    "ecs-cluster":                  ("Delete", "Delete"),
     "log-group":                    ("Delete", "Delete"),
 }
 

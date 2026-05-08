@@ -22,7 +22,6 @@ def test_policies_table_covers_data_resources():
         "admin-api-key-secret",
         "sqs-ingest-queue",
         "alb",
-        "ecs-cluster",
         "log-group",
     }
     assert expected_kinds.issubset(POLICIES.keys())

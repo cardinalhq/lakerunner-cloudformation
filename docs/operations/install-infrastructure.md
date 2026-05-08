@@ -1,133 +1,72 @@
-# Install part 1: infrastructure (the data layer)
+# Install part 1: infrastructure
 
-This is the first of two install steps. It creates the resources
-Cardinal needs to hold customer data: an RDS Postgres instance, an S3
-ingest bucket, an SQS ingest queue, the Secrets Manager secrets that
-hold the license / admin / DB credentials, and two SSM parameters.
+This is the first of two install steps. It runs `scripts/data-setup.sh`,
+which provisions every resource the lakerunner application stack needs
+but does not manage itself: an RDS Postgres instance, an S3 ingest
+bucket, an SQS ingest queue, the Secrets Manager secrets that hold the
+license / admin / DB credentials, two SSM parameters, the ECS cluster,
+and the Cloud Map private DNS namespace.
 
-After this stack reaches `CREATE_COMPLETE`, the data layer exists
-**outside** any CloudFormation stack -- the data-setup Lambda created
-the resources directly. Continue with
-[`install-lakerunner.md`](install-lakerunner.md) to deploy the
-application.
+The script is the **only** supported infra path. There is no
+CloudFormation wrapper for this layer; the resources it creates live
+outside any stack and survive lakerunner-stack deletes. Continue with
+[`install-lakerunner.md`](install-lakerunner.md) once the script
+returns.
 
 ## Layer ownership at a glance
 
 | Layer | Owned by | Where it lives |
 |---|---|---|
-| IAM roles + security groups | Customer's IT (out of band) | Pre-created using the cookbook in [`required-roles.md`](required-roles.md). |
-| Data layer (RDS, S3, SQS, secrets, SSM) | `cardinal-data-setup` stack -> Lambda | Resources live outside CFN; only the Lambda is in the stack. **This document.** |
-| Application layer (ECS, ALB, services) | `cardinal-lakerunner` stack | Stateless. Owned end-to-end by CFN. **Next document.** |
+| IAM roles + security groups | Customer's IT (out of band) | Pre-created. See "IT prereqs" below. |
+| Infra layer (RDS, S3, SQS, secrets, SSM, ECS cluster, Cloud Map ns) | `scripts/data-setup.sh` (raw AWS CLI) | Resources live outside CFN. **This document.** |
+| Application layer (ALB, ECS services, migration, cert) | `cardinal-lakerunner` stack | Stateless. Owned end-to-end by CFN. **Next document.** |
 
 ## Step 0: IT prereqs (one-time, out of band)
 
 The customer's IT team must pre-create:
 
-- **Five IAM roles** -- `cardinal-task-role`, `cardinal-execution-role`,
-  `cardinal-migration-lambda-role`, `cardinal-data-setup-lambda-role`,
-  and (optional) `cardinal-cert-lambda-role`. Trust principals + inline
-  policies are documented in
-  [`required-roles.md`](required-roles.md), generated from
-  `src/cardinal_cfn/iam_policies.py` so they never drift from what the
-  templates expect.
-- **Three security groups** in the target VPC -- `TaskSgId`, `AlbSgId`,
-  `DbSgId`. Required ingress is in `required-roles.md` under
-  "Required security groups".
+- **IAM roles** -- one task role and one execution role for every ECS
+  task in the install (a single shared task role is supported, and
+  recommended), one Lambda execution role for the migration custom
+  resource, and -- only when using the PEM-import certificate path --
+  one Lambda execution role for the cert importer. Trust principals
+  are `ecs-tasks.amazonaws.com` for task roles and
+  `lambda.amazonaws.com` for Lambda roles.
+- **Two security groups** in the target VPC -- `TaskSgId` (applied to
+  every ECS task) and `AlbSgId` (applied to the shared ALB). Plus a
+  `DbSgId` referenced by the script when it creates RDS, with ingress
+  from `TaskSgId` on port 5432.
 
-Customers free to use a single shared role with the union of every
-inline policy; the role's trust must allow both
-`ecs-tasks.amazonaws.com` and `lambda.amazonaws.com`.
+The exact policies these roles need are documented under
+[`permissions-lakerunner.md`](permissions-lakerunner.md). The operator
+running `data-setup.sh` needs the broader policy described in
+[`permissions-infrastructure.md`](permissions-infrastructure.md).
 
-This step is identical for both stacks; do it once.
+## Step 1: collect the inputs
 
-## Step 1: collect the parameters
+`scripts/data-setup.sh` reads its configuration from environment
+variables. The required ones:
 
-The `cardinal-data-setup.yaml` template takes:
-
-| Parameter | Source | Notes |
-|---|---|---|
-| `DataSetupLambdaRoleArn` | IT (step 0) | Pre-created Lambda execution role. |
-| `VpcId` | Operator | Target VPC for the RDS subnet group. |
-| `PrivateSubnets` | Operator | `List<AWS::EC2::Subnet::Id>` (CSV when staged in JSON params). At least two subnets in distinct AZs. |
-| `DbSgId` | IT (step 0) | DB security group ID. |
-| `LicenseData` | Operator | Raw single-line `z64:...` license file content. NoEcho. |
-| `BucketLifecycleDays` | Optional | S3 ingest object expiry (default `7`). |
-| `DbInstanceClass` | Optional | RDS class (default `db.t3.medium`). |
-| `DbAllocatedStorage` | Optional | RDS GiB (default `100`). |
-| `LambdaCodeS3Url` | Optional | Full `s3://<bucket>/<prefix>/<version>/<file>.zip` URL of the data-setup Lambda zip. Must point at a bucket in the **same region** as this stack. Default targets us-east-1 (the publishing source of truth); override for any other region. See "Lambda code URL by region" below. |
-
-There are **no DEX or OIDC parameters** on this stack -- those flow
-only into the lakerunner stack.
-
-### Lambda code URL by region
-
-The data-setup Lambda's code zip must live in an S3 bucket in the
-same region as the Lambda function. The release workflow publishes
-to `cardinal-cfn-us-east-1` (the source of truth); S3 bucket
-replication populates `cardinal-cfn-us-east-2` as a regional mirror.
-
-| Region | `LambdaCodeS3Url` |
+| Env var | Notes |
 |---|---|
-| `us-east-1` | `s3://cardinal-cfn-us-east-1/lakerunner/<VERSION>/cardinal-data-setup-lambda.zip` (template default) |
-| `us-east-2` | `s3://cardinal-cfn-us-east-2/lakerunner/<VERSION>/cardinal-data-setup-lambda.zip` |
+| `REGION` | Target AWS region. |
+| `VPC_ID` | Target VPC. |
+| `PRIVATE_SUBNETS` | CSV of subnet IDs across at least two AZs. |
+| `DB_SG_ID` | Pre-created DB security group. |
+| `LICENSE_DATA_FILE` | Path to the cardinal license token (single line beginning with `z64:`). |
 
-Air-gapped mirrors must preserve the same key shape -- exactly three
-slash-separated segments after the bucket -- because the template
-parses `LambdaCodeS3Url` with a fixed-depth `Fn::Split`.
+Optional sizing knobs:
 
-## Step 2: published template URL
+| Env var | Default | Notes |
+|---|---|---|
+| `DB_INSTANCE_CLASS` | `db.t3.medium` | RDS instance class. |
+| `DB_ALLOCATED_STORAGE` | `100` | RDS GiB. |
+| `BUCKET_LIFECYCLE_DAYS` | `7` | Ingest object expiry. |
 
-Templates are published per release tag at:
+Caller identity must have the data-setup permissions in
+[`permissions-infrastructure.md`](permissions-infrastructure.md).
 
-```
-https://cardinal-cfn-us-east-1.s3.us-east-1.amazonaws.com/lakerunner/<VERSION>/<template>.yaml
-```
-
-Replace `<VERSION>` with the explicit release tag (e.g. `v0.0.41`).
-There is no `latest` tag -- every install is to a named version. The
-same `<VERSION>` is used for both stacks.
-
-## Step 3: deploy
-
-Stage parameters in a JSON file rather than inline so the multi-line
-license content is easy to handle:
-
-```sh
-LICENSE_DATA="$(cat ~/path/to/license.token)"   # the file beginning with "z64:"
-
-cat > /tmp/data-setup-params.json <<EOF
-[
-  {"ParameterKey": "DataSetupLambdaRoleArn", "ParameterValue": "arn:aws:iam::<ACCOUNT>:role/cardinal-data-setup-lambda-role"},
-  {"ParameterKey": "VpcId",                  "ParameterValue": "vpc-..."},
-  {"ParameterKey": "PrivateSubnets",         "ParameterValue": "subnet-aaaa,subnet-bbbb,subnet-cccc"},
-  {"ParameterKey": "DbSgId",                 "ParameterValue": "sg-..."},
-  {"ParameterKey": "LicenseData",            "ParameterValue": "${LICENSE_DATA}"},
-  {"ParameterKey": "LambdaCodeS3Url",        "ParameterValue": "s3://cardinal-cfn-<REGION>/lakerunner/<VERSION>/cardinal-data-setup-lambda.zip"}
-]
-EOF
-
-aws cloudformation create-stack \
-    --region <REGION> \
-    --stack-name cardinal-data-setup \
-    --template-url https://cardinal-cfn-us-east-1.s3.us-east-1.amazonaws.com/lakerunner/<VERSION>/cardinal-data-setup.yaml \
-    --parameters file:///tmp/data-setup-params.json
-
-aws cloudformation wait stack-create-complete \
-    --region <REGION> --stack-name cardinal-data-setup
-```
-
-The stack does not create IAM; no `CAPABILITY_*` flag is needed. Stack
-create completes when the Lambda finishes its first invocation (10-20
-minutes on a cold install -- RDS provisioning dominates).
-
-## Alternative: skip the Lambda, run the steps directly
-
-`scripts/data-setup.sh` is a POSIX-shell, AWS-CLI-only driver that is
-functionally equivalent to the data-setup Lambda. Use it when you want
-to drive the data layer from Jenkins (or any CI runner) without
-deploying the wrapper CFN stack at all. Parameters are at the top of
-the script as env-overridable variables; outputs land on stdout as a
-JSON document with the same 13 keys the data-setup stack emits.
+## Step 2: run the script
 
 ```sh
 REGION=us-east-2 \
@@ -135,73 +74,69 @@ VPC_ID=vpc-... \
 PRIVATE_SUBNETS=subnet-aaaa,subnet-bbbb \
 DB_SG_ID=sg-... \
 LICENSE_DATA_FILE=/path/to/license.token \
-    scripts/data-setup.sh > /tmp/data-setup-outputs.json
+    scripts/data-setup.sh > /tmp/infra-outputs.json
 ```
 
-The script is idempotent (each step does describe-then-act on the same
-deterministic resource names the Lambda uses) so re-running after a
-partial failure converges. The caller's identity needs the same
-permissions the data-setup Lambda's role has -- see
-[`required-roles.md`](required-roles.md), `cardinal-data-setup-lambda-role`.
+Cold runs take 10-20 minutes -- RDS provisioning dominates. The
+script is idempotent: each step does describe-then-act on the
+deterministic resource names below, so re-running after a partial
+failure converges.
 
-If you use this path, skip step 3 above. Continue to step 4.
+Resources created with fixed names:
 
-## Step 4: harvest outputs
+- ECS cluster: `cardinal`
+- Cloud Map namespace: `cardinal.local`
+- RDS instance: `cardinal-db`
+- SQS queue: `cardinal-ingest`
+- S3 bucket: `cardinal-ingest-<account>-<region>`
+- Secrets: `cardinal-db-master`, `cardinal-license`,
+  `cardinal-internal-keys`, `cardinal-admin-key`, `cardinal-maestro-db`
+- SSM params: `/cardinal/storage-profiles`, `/cardinal/api-keys`
 
-These outputs are 1:1 with the `cardinal-lakerunner` data-layer
-parameters; the next install step uses them as direct inputs.
+These fixed names imply one Cardinal install per AWS account/region.
 
-```sh
-aws cloudformation describe-stacks \
-    --region <REGION> --stack-name cardinal-data-setup \
-    --query 'Stacks[0].Outputs' --output json > /tmp/data-setup-outputs.json
-```
+## Step 3: harvest outputs
 
-Output keys (all identical to the corresponding `cardinal-lakerunner`
-parameter keys):
+The script prints a JSON document to stdout. Its keys map 1:1 to the
+`cardinal-lakerunner` stack's "Infra-setup outputs" parameter group:
 
 `DbEndpoint`, `DbPort`, `DbName`, `DbMasterSecretArn`,
 `MaestroDbSecretArn`, `IngestBucketName`, `IngestQueueUrl`,
 `IngestQueueArn`, `LicenseSecretArn`, `InternalKeysSecretArn`,
-`AdminKeySecretArn`, `StorageProfilesParamName`, `ApiKeysParamName`.
+`AdminKeySecretArn`, `StorageProfilesParamName`, `ApiKeysParamName`,
+`ClusterName`, `ClusterArn`, `ServiceNamespaceId`,
+`ServiceNamespaceName`.
+
+The next install step consumes these as direct inputs.
 
 **Next:** [`install-lakerunner.md`](install-lakerunner.md).
 
 ## Failure recovery
 
-The data-setup Lambda is idempotent: each `ensure_*` step does
-describe-then-act on a deterministic name, so re-invocation after a
-partial failure converges. The Lambda's execution role grants update +
-delete on every resource it manages, so the Lambda recovers from
-partial state on its own -- no IT break-glass involvement required.
+The script is idempotent: every `ensure_*` function does
+describe-then-act on a deterministic name, so re-invocation converges.
+The caller's identity should have create + update + delete on every
+resource the script manages so it can recover from partial state on
+its own -- no IT break-glass involvement required.
 
 Common failure modes:
 
-- **VPC / subnets do not exist or are in the wrong region.** Lambda
-  fails fast on `CreateDBSubnetGroup`. Fix the parameter, redeploy.
-- **`DbSgId` does not exist.** Same shape; Lambda fails fast on
-  `CreateDBInstance`.
-- **`LicenseData` is malformed.** The Lambda creates the secret with
-  the raw string; lakerunner services fail at runtime with a parse
-  error. Overwrite the secret with the correct content via
-  `aws secretsmanager put-secret-value` and restart the affected
-  services.
-
-If the data-setup stack ends up in `CREATE_FAILED` /
-`ROLLBACK_FAILED` and the Lambda's logs do not explain it, delete the
-failed stack and re-run from step 3. Lambda-managed resources live
-outside the stack and survive; the next run reconciles to the
-desired state.
+- **VPC / subnets do not exist or are in the wrong region.** Script
+  fails fast on `CreateDBSubnetGroup` or
+  `CreatePrivateDnsNamespace`. Fix the env var, re-run.
+- **`DB_SG_ID` does not exist.** Script fails fast on
+  `CreateDBInstance`. Fix and re-run.
+- **`LICENSE_DATA_FILE` is malformed.** The script creates the
+  secret with the raw content; lakerunner services fail at runtime
+  with a parse error. Overwrite the secret with the correct content
+  via `aws secretsmanager put-secret-value` and restart the affected
+  services. (Re-running the script will *not* overwrite an existing
+  secret.)
 
 ## Tearing down
 
-The data-setup Lambda is a no-op on `RequestType=Delete` by design.
-`aws cloudformation delete-stack cardinal-data-setup` removes only the
-Lambda function and the custom-resource record; **the data layer
-survives** (RDS, S3 bucket, secrets, SSM params, SQS queue all
-remain). This is intentional -- those resources hold customer data.
-
-To wipe the data layer for a real decommission, see the "Layer 2"
-procedure in [`tearing-down.md`](tearing-down.md). For a redeploy
-against the existing data, just delete the application stack and
-re-run [`install-lakerunner.md`](install-lakerunner.md).
+The script does not have a `delete` mode. Wiping the infra layer is a
+deliberate, operator-driven step covered in
+[`tearing-down.md`](tearing-down.md). For a redeploy against the
+existing infra, just delete the application stack and re-run
+[`install-lakerunner.md`](install-lakerunner.md).

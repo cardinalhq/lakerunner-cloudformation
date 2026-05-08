@@ -1,7 +1,23 @@
 # Cardinal CloudFormation Refactor — Design
 
 Date: 2026-04-28
-Status: Draft (pending review)
+Status: Superseded in part — see "2026-05-08 Pivot" below
+
+## 2026-05-08 Pivot — Infra-script-only
+
+Subsequent to the prereqs-split (which moved RDS/S3/SQS/secrets/SSM out of CloudFormation and into a Lambda), a further pivot **eliminates CloudFormation as an infra creator entirely**. The lakerunner stack now creates only application-tier resources; everything else (cluster included) is provisioned by a single shell script.
+
+What changed from the rest of this document:
+
+- `cardinal-data-setup.yaml` (the data-setup Lambda + its CFN wrapper) is **deleted**. `scripts/data-setup.sh` is the single supported infra path.
+- `cardinal-deployer-role.yaml` (the IAM cookbook root) is **deleted**. Customers create whatever IAM they need out-of-band; the deploy/teardown scripts accept an optional service-role ARN.
+- `cluster.yaml` (ECS cluster + Cloud Map namespace + base log group) is **deleted as a nested child**. The ECS cluster (fixed name `cardinal`) and Cloud Map private DNS namespace (fixed name `cardinal.local`) are now created by `data-setup.sh`. The base log group was unused and is gone entirely.
+- The lakerunner stack root takes four new String parameters from the script's JSON output: `ClusterName`, `ClusterArn`, `ServiceNamespaceId`, `ServiceNamespaceName`. The "Data-setup outputs" parameter group is renamed "Infra-setup outputs".
+- The lakerunner stack creates **no security groups and no IAM roles**. The customer (or their IT) supplies all of them as ARN/ID parameters: `TaskRoleArn`, `ExecutionRoleArn`, `MigrationLambdaRoleArn`, `CertLambdaRoleArn`, `TaskSgId`, `AlbSgId`. There is one shared task role across every ECS service; per-service task roles were collapsed to keep the parameter surface small.
+- Single-install assumption: cluster name `cardinal` and namespace name `cardinal.local` are fixed. One install per AWS account/region. Customers running multiple installs use separate accounts.
+- The lakerunner root therefore nests **eight** children, not twelve: `alb`, `cert`, `migration`, `services-query`, `services-process`, `services-control`, `otel`, `maestro`.
+
+The remainder of this document remains useful as historical context (naming conventions, install-id derivation, ALB / migration / service-tier rules, listener priorities, lifecycle policy table). Where it conflicts with the bullets above, the bullets win.
 
 ## Goal
 

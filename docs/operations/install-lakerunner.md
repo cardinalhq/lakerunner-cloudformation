@@ -1,13 +1,14 @@
 # Install part 2: lakerunner (the application)
 
-Second of two install steps. Creates the stateless application
-infrastructure: ECS cluster, ALB, twelve services + their target
-groups + listener rules, and the migration / cert-import custom
-resources.
+Second of two install steps. Creates the stateless application: ALB,
+twelve ECS services + their target groups + listener rules, and the
+migration / cert-import custom resources. The ECS cluster, Cloud Map
+namespace, IAM roles, and security groups are all consumed as
+parameters -- the lakerunner stack creates none of them.
 
 **Pre-req:** [`install-infrastructure.md`](install-infrastructure.md)
-must be at `CREATE_COMPLETE` and you must have
-`/tmp/data-setup-outputs.json` from its step 4.
+must have completed and you must have `/tmp/infra-outputs.json` from
+its step 3.
 
 ## Step 1: prep secondary inputs
 
@@ -43,27 +44,28 @@ Choose one of:
 ## Step 2: build the params file
 
 The lakerunner stack has many parameters. They split into three
-groups: data-setup outputs (group A), IT-supplied IAM/SG identifiers
+groups: infra-setup outputs (group A), IT-supplied IAM/SG identifiers
 (group B), and operator-supplied network + TLS + DEX values (group C).
 
-Use the helper below to build a single combined JSON file. The data-
-setup output keys are identical to the lakerunner parameter keys so
-group A is mechanical.
+Use the helper below to build a single combined JSON file. The
+infra-setup script's JSON output keys are identical to the lakerunner
+parameter keys so group A is mechanical.
 
 ```sh
 python3 - <<'PY' > /tmp/lakerunner-params.json
 import json, pathlib
-ds = {o["OutputKey"]: o["OutputValue"] for o in
-      json.loads(pathlib.Path("/tmp/data-setup-outputs.json").read_text())}
+infra = json.loads(pathlib.Path("/tmp/infra-outputs.json").read_text())
 
-# Group A: pass-through data-setup outputs (keys match 1:1).
-data_setup_keys = [
+# Group A: pass-through infra-setup outputs (keys match 1:1).
+infra_keys = [
     "DbEndpoint", "DbPort", "DbName", "DbMasterSecretArn",
     "MaestroDbSecretArn", "IngestBucketName", "IngestQueueUrl",
     "IngestQueueArn", "LicenseSecretArn", "InternalKeysSecretArn",
     "AdminKeySecretArn", "StorageProfilesParamName", "ApiKeysParamName",
+    "ClusterName", "ClusterArn",
+    "ServiceNamespaceId", "ServiceNamespaceName",
 ]
-params = [{"ParameterKey": k, "ParameterValue": ds[k]} for k in data_setup_keys]
+params = [{"ParameterKey": k, "ParameterValue": infra[k]} for k in infra_keys]
 
 # Group B (IT) + Group C (operator). Edit these for the install.
 account = "<ACCOUNT>"
@@ -92,8 +94,7 @@ If you are importing PEMs instead of using `CertificateArn`, replace
 the `CertificateArn` entry with `CertificateBody`,
 `CertificatePrivateKey`, and (optionally) `CertificateChain`, and add
 `CertLambdaRoleArn`. PEMs are passed as raw multi-line strings in the
-JSON params file, the same way `LicenseData` was in the infrastructure
-step.
+JSON params file.
 
 `TemplateBaseUrl` defaults to the `dev` channel; release installs must
 override it to the matching version directory (trailing slash
@@ -165,6 +166,6 @@ out of the rollback path. See [`deploying.md`](deploying.md).
 
 The lakerunner stack owns no `Retain` or `Snapshot` resources. A plain
 `aws cloudformation delete-stack cardinal-lakerunner` removes
-everything it created; the data layer (created by the data-setup
-Lambda) survives by design. See [`tearing-down.md`](tearing-down.md)
-for the full layered procedure.
+everything it created; the infra layer (created by `data-setup.sh`)
+survives by design. See [`tearing-down.md`](tearing-down.md) for the
+full layered procedure.

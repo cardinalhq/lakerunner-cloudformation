@@ -25,7 +25,7 @@ def test_required_parameters(td):
         "CertLambdaRoleArn",
         "TaskSgId",
         "AlbSgId",
-        # Data-setup outputs threaded in
+        # Infra-setup outputs threaded in
         "DbEndpoint",
         "DbPort",
         "DbName",
@@ -39,12 +39,16 @@ def test_required_parameters(td):
         "AdminKeySecretArn",
         "StorageProfilesParamName",
         "ApiKeysParamName",
+        "ClusterName",
+        "ClusterArn",
+        "ServiceNamespaceId",
+        "ServiceNamespaceName",
     ):
         assert n in td["Parameters"], f"missing parameter: {n}"
 
 
 def test_no_phase1_data_or_secret_input_parameters(td):
-    """Phase 2: license/api/storage payloads are owned by the data-setup Lambda."""
+    """license/api/storage payloads are owned by the infra-setup script."""
     for n in ("LicenseData", "ApiKeysOverride", "StorageProfilesOverride"):
         assert n not in td["Parameters"], f"unexpected legacy parameter: {n}"
 
@@ -77,7 +81,7 @@ def test_console_parameter_groups(td):
     assert labels == [
         "Networking",
         "IAM roles + security groups",
-        "Data-setup outputs",
+        "Infra-setup outputs",
         "Sizing",
         "Images",
         "Advanced",
@@ -85,16 +89,15 @@ def test_console_parameter_groups(td):
 
 
 def test_nested_stack_count(td):
-    """Phase 2 removes database/storage/config -> 9 nested children remain."""
+    """Infra-script pivot removes the cluster child -> 8 nested children remain."""
     nested = [r for r in td["Resources"].values() if r["Type"] == "AWS::CloudFormation::Stack"]
-    assert len(nested) == 9
+    assert len(nested) == 8
 
 
 def test_nested_stack_logical_ids(td):
     nested = {k for k, v in td["Resources"].items()
               if v["Type"] == "AWS::CloudFormation::Stack"}
     expected = {
-        "ClusterStack",
         "AlbStack",
         "CertStack",
         "MigrationStack",
@@ -108,10 +111,10 @@ def test_nested_stack_logical_ids(td):
 
 
 def test_no_legacy_data_stacks(td):
-    """The Phase 2 spec deletes the database/storage/config children."""
+    """The infra-script pivot deletes database/storage/config/cluster children."""
     nested = {k for k, v in td["Resources"].items()
               if v["Type"] == "AWS::CloudFormation::Stack"}
-    for legacy in ("DatabaseStack", "StorageStack", "ConfigStack"):
+    for legacy in ("DatabaseStack", "StorageStack", "ConfigStack", "ClusterStack"):
         assert legacy not in nested, f"legacy nested stack still present: {legacy}"
 
 

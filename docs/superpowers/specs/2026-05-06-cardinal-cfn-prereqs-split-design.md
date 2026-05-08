@@ -1,5 +1,14 @@
 # Cardinal CFN -- customer-supplied prereqs, data-setup Lambda, parameterized lakerunner
 
+> **2026-05-08 status: superseded.** The data-setup Lambda + its CFN wrapper
+> were retired in favor of a shell-only infra path (`scripts/data-setup.sh`).
+> The cluster nested-stack child was also retired; the script now creates
+> the ECS cluster and Cloud Map namespace directly. See the "2026-05-08
+> Pivot" section in `2026-04-28-cardinal-cfn-refactor-design.md` for the
+> current architecture. Everything below remains for historical context.
+
+
+
 Design spec for a customer environment where:
 
 - The customer's IT pre-creates **all** IAM roles and security groups
