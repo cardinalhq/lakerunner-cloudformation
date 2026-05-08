@@ -119,6 +119,32 @@ The stack does not create IAM; no `CAPABILITY_*` flag is needed. Stack
 create completes when the Lambda finishes its first invocation (10-20
 minutes on a cold install -- RDS provisioning dominates).
 
+## Alternative: skip the Lambda, run the steps directly
+
+`scripts/data-setup.sh` is a POSIX-shell, AWS-CLI-only driver that is
+functionally equivalent to the data-setup Lambda. Use it when you want
+to drive the data layer from Jenkins (or any CI runner) without
+deploying the wrapper CFN stack at all. Parameters are at the top of
+the script as env-overridable variables; outputs land on stdout as a
+JSON document with the same 13 keys the data-setup stack emits.
+
+```sh
+REGION=us-east-2 \
+VPC_ID=vpc-... \
+PRIVATE_SUBNETS=subnet-aaaa,subnet-bbbb \
+DB_SG_ID=sg-... \
+LICENSE_DATA_FILE=/path/to/license.token \
+    scripts/data-setup.sh > /tmp/data-setup-outputs.json
+```
+
+The script is idempotent (each step does describe-then-act on the same
+deterministic resource names the Lambda uses) so re-running after a
+partial failure converges. The caller's identity needs the same
+permissions the data-setup Lambda's role has -- see
+[`required-roles.md`](required-roles.md), `cardinal-data-setup-lambda-role`.
+
+If you use this path, skip step 3 above. Continue to step 4.
+
 ## Step 4: harvest outputs
 
 These outputs are 1:1 with the `cardinal-lakerunner` data-layer
