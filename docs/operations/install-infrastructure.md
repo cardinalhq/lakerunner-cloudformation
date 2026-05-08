@@ -1,15 +1,19 @@
 # Install part 1: infrastructure
 
 This is the first of two install steps. It runs `scripts/data-setup.sh`,
-which provisions every resource the lakerunner application stack needs
-but does not manage itself: an RDS Postgres instance, an S3 ingest
-bucket, an SQS ingest queue, the Secrets Manager secrets that hold the
-license / admin / DB credentials, two SSM parameters, the ECS cluster,
-and the Cloud Map private DNS namespace.
+which provisions the **data** resources the lakerunner application
+stack needs but does not manage itself: an RDS Postgres instance, an
+S3 ingest bucket, an SQS ingest queue, the Secrets Manager secrets
+that hold the license / admin / DB credentials, and two SSM parameters.
 
-The script is the **only** supported infra path. There is no
-CloudFormation wrapper for this layer; the resources it creates live
-outside any stack and survive lakerunner-stack deletes. Continue with
+The compute-plane resources (ECS cluster, Cloud Map private DNS
+namespace) are pre-created by the customer and passed into the script
+as env vars; the script does not create or validate them. Identifiers
+flow straight through to the script's JSON output.
+
+The script is the **only** supported data path. There is no
+CloudFormation wrapper; the resources it creates live outside any
+stack and survive lakerunner-stack deletes. Continue with
 [`install-lakerunner.md`](install-lakerunner.md) once the script
 returns.
 
@@ -18,7 +22,8 @@ returns.
 | Layer | Owned by | Where it lives |
 |---|---|---|
 | IAM roles + security groups | Customer's IT (out of band) | Pre-created. See "IT prereqs" below. |
-| Infra layer (RDS, S3, SQS, secrets, SSM, ECS cluster, Cloud Map ns) | `scripts/data-setup.sh` (raw AWS CLI) | Resources live outside CFN. **This document.** |
+| Compute plane (ECS cluster, Cloud Map namespace) | Customer's IT (out of band) | Pre-created; identifiers passed to the script as env vars. |
+| Data layer (RDS, S3, SQS, secrets, SSM) | `scripts/data-setup.sh` (raw AWS CLI) | Resources live outside CFN. **This document.** |
 | Application layer (ALB, ECS services, migration, cert) | `cardinal-lakerunner` stack | Stateless. Owned end-to-end by CFN. **Next document.** |
 
 ## Step 0: IT prereqs (one-time, out of band)
@@ -36,6 +41,11 @@ The customer's IT team must pre-create:
   every ECS task) and `AlbSgId` (applied to the shared ALB). Plus a
   `DbSgId` referenced by the script when it creates RDS, with ingress
   from `TaskSgId` on port 5432.
+- **An ECS cluster.** Any name is fine; capture the cluster name and
+  the cluster ARN.
+- **A Cloud Map private DNS namespace** in the target VPC. Used for
+  in-cluster service-to-service DNS (e.g. alert-evaluator ->
+  query-api). Capture the namespace ID and the namespace name.
 
 The exact policies these roles need are documented under
 [`permissions-lakerunner.md`](permissions-lakerunner.md). The operator
@@ -50,9 +60,12 @@ variables. The required ones:
 | Env var | Notes |
 |---|---|
 | `REGION` | Target AWS region. |
-| `VPC_ID` | Target VPC. |
 | `PRIVATE_SUBNETS` | CSV of subnet IDs across at least two AZs. |
 | `DB_SG_ID` | Pre-created DB security group. |
+| `CLUSTER_NAME` | Pre-created ECS cluster name. |
+| `CLUSTER_ARN` | Pre-created ECS cluster ARN. |
+| `SERVICE_NAMESPACE_ID` | Pre-created Cloud Map private DNS namespace ID. |
+| `SERVICE_NAMESPACE_NAME` | Pre-created Cloud Map namespace name (e.g. `cardinal.local`). |
 | `LICENSE_DATA` *or* `LICENSE_DATA_FILE` | Cardinal license token (single line beginning with `z64:`). Set `LICENSE_DATA` to the token itself, or `LICENSE_DATA_FILE` to a file containing it. `LICENSE_DATA` wins if both are set. |
 
 Optional sizing knobs:
@@ -70,9 +83,12 @@ Caller identity must have the data-setup permissions in
 
 ```sh
 REGION=us-east-2 \
-VPC_ID=vpc-... \
 PRIVATE_SUBNETS=subnet-aaaa,subnet-bbbb \
 DB_SG_ID=sg-... \
+CLUSTER_NAME=cardinal \
+CLUSTER_ARN=arn:aws:ecs:us-east-2:111111111111:cluster/cardinal \
+SERVICE_NAMESPACE_ID=ns-xxxxxxxxxxxxxxxx \
+SERVICE_NAMESPACE_NAME=cardinal.local \
 LICENSE_DATA="z64:..." \
     scripts/data-setup.sh > /tmp/infra-outputs.json
 ```
@@ -84,8 +100,6 @@ failure converges.
 
 Resources created with fixed names:
 
-- ECS cluster: `cardinal`
-- Cloud Map namespace: `cardinal.local`
 - RDS instance: `cardinal-db`
 - SQS queue: `cardinal-ingest`
 - S3 bucket: `cardinal-ingest-<account>-<region>`
@@ -121,11 +135,13 @@ its own -- no IT break-glass involvement required.
 
 Common failure modes:
 
-- **VPC / subnets do not exist or are in the wrong region.** Script
-  fails fast on `CreateDBSubnetGroup` or
-  `CreatePrivateDnsNamespace`. Fix the env var, re-run.
+- **Subnets do not exist or are in the wrong region.** Script fails
+  fast on `CreateDBSubnetGroup`. Fix the env var, re-run.
 - **`DB_SG_ID` does not exist.** Script fails fast on
   `CreateDBInstance`. Fix and re-run.
+- **`CLUSTER_*` / `SERVICE_NAMESPACE_*` typos.** The script does not
+  validate them; they get written into the JSON output and surface
+  later as a lakerunner stack failure. Double-check before running.
 - **`LICENSE_DATA_FILE` is malformed.** The script creates the
   secret with the raw content; lakerunner services fail at runtime
   with a parse error. Overwrite the secret with the correct content
