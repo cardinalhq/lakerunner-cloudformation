@@ -54,7 +54,7 @@ The `cardinal-data-setup.yaml` template takes:
 | `BucketLifecycleDays` | Optional | S3 ingest object expiry (default `7`). |
 | `DbInstanceClass` | Optional | RDS class (default `db.t3.medium`). |
 | `DbAllocatedStorage` | Optional | RDS GiB (default `100`). |
-| `LambdaCodeS3Url` | Optional | Full `s3://<bucket>/<prefix>/<version>/<file>.zip` URL of the data-setup Lambda zip. Must point at a bucket in the **same region** as this stack. Default targets us-east-2; override for any other region. See "Lambda code URL by region" below. |
+| `LambdaCodeS3Url` | Optional | Full `s3://<bucket>/<prefix>/<version>/<file>.zip` URL of the data-setup Lambda zip. Must point at a bucket in the **same region** as this stack. Default targets us-east-1 (the publishing source of truth); override for any other region. See "Lambda code URL by region" below. |
 
 There are **no DEX or OIDC parameters** on this stack -- those flow
 only into the lakerunner stack.
@@ -62,13 +62,14 @@ only into the lakerunner stack.
 ### Lambda code URL by region
 
 The data-setup Lambda's code zip must live in an S3 bucket in the
-same region as the Lambda function. The published artifact is
-mirrored to one regional bucket per supported region:
+same region as the Lambda function. The release workflow publishes
+to `cardinal-cfn-us-east-1` (the source of truth); S3 bucket
+replication populates `cardinal-cfn-us-east-2` as a regional mirror.
 
-| Region | Default `LambdaCodeS3Url` |
+| Region | `LambdaCodeS3Url` |
 |---|---|
-| `us-east-1` | `s3://cardinal-cfn-us-east-1/lakerunner/<VERSION>/cardinal-data-setup-lambda.zip` |
-| `us-east-2` | `s3://cardinal-cfn-us-east-2/lakerunner/<VERSION>/cardinal-data-setup-lambda.zip` (template default) |
+| `us-east-1` | `s3://cardinal-cfn-us-east-1/lakerunner/<VERSION>/cardinal-data-setup-lambda.zip` (template default) |
+| `us-east-2` | `s3://cardinal-cfn-us-east-2/lakerunner/<VERSION>/cardinal-data-setup-lambda.zip` |
 
 Air-gapped mirrors must preserve the same key shape -- exactly three
 slash-separated segments after the bucket -- because the template
@@ -79,7 +80,7 @@ parses `LambdaCodeS3Url` with a fixed-depth `Fn::Split`.
 Templates are published per release tag at:
 
 ```
-https://cardinal-cfn.s3.us-east-2.amazonaws.com/lakerunner/<VERSION>/<template>.yaml
+https://cardinal-cfn-us-east-1.s3.us-east-1.amazonaws.com/lakerunner/<VERSION>/<template>.yaml
 ```
 
 Replace `<VERSION>` with the explicit release tag (e.g. `v0.0.41`).
@@ -108,7 +109,7 @@ EOF
 aws cloudformation create-stack \
     --region <REGION> \
     --stack-name cardinal-data-setup \
-    --template-url https://cardinal-cfn.s3.us-east-2.amazonaws.com/lakerunner/<VERSION>/cardinal-data-setup.yaml \
+    --template-url https://cardinal-cfn-us-east-1.s3.us-east-1.amazonaws.com/lakerunner/<VERSION>/cardinal-data-setup.yaml \
     --parameters file:///tmp/data-setup-params.json
 
 aws cloudformation wait stack-create-complete \
@@ -118,6 +119,32 @@ aws cloudformation wait stack-create-complete \
 The stack does not create IAM; no `CAPABILITY_*` flag is needed. Stack
 create completes when the Lambda finishes its first invocation (10-20
 minutes on a cold install -- RDS provisioning dominates).
+
+## Alternative: skip the Lambda, run the steps directly
+
+`scripts/data-setup.sh` is a POSIX-shell, AWS-CLI-only driver that is
+functionally equivalent to the data-setup Lambda. Use it when you want
+to drive the data layer from Jenkins (or any CI runner) without
+deploying the wrapper CFN stack at all. Parameters are at the top of
+the script as env-overridable variables; outputs land on stdout as a
+JSON document with the same 13 keys the data-setup stack emits.
+
+```sh
+REGION=us-east-2 \
+VPC_ID=vpc-... \
+PRIVATE_SUBNETS=subnet-aaaa,subnet-bbbb \
+DB_SG_ID=sg-... \
+LICENSE_DATA_FILE=/path/to/license.token \
+    scripts/data-setup.sh > /tmp/data-setup-outputs.json
+```
+
+The script is idempotent (each step does describe-then-act on the same
+deterministic resource names the Lambda uses) so re-running after a
+partial failure converges. The caller's identity needs the same
+permissions the data-setup Lambda's role has -- see
+[`required-roles.md`](required-roles.md), `cardinal-data-setup-lambda-role`.
+
+If you use this path, skip step 3 above. Continue to step 4.
 
 ## Step 4: harvest outputs
 

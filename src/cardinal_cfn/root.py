@@ -30,8 +30,11 @@ from cardinal_cfn.defaults import load_defaults
 
 
 VERSION = os.environ.get("CARDINAL_VERSION", "dev")
-DEFAULT_BUCKET_REGION = os.environ.get("CARDINAL_BUCKET_REGION", "us-east-2")
-DEFAULT_BUCKET_NAME = os.environ.get("CARDINAL_BUCKET_NAME", "cardinal-cfn")
+# us-east-1 is the publishing source of truth; us-east-2 is populated via
+# S3 bucket replication. Override CARDINAL_BUCKET_NAME / CARDINAL_BUCKET_REGION
+# for air-gapped builds that target a customer-owned mirror.
+DEFAULT_BUCKET_REGION = os.environ.get("CARDINAL_BUCKET_REGION", "us-east-1")
+DEFAULT_BUCKET_NAME = os.environ.get("CARDINAL_BUCKET_NAME", "cardinal-cfn-us-east-1")
 DEFAULT_TEMPLATE_BASE_URL = (
     f"https://{DEFAULT_BUCKET_NAME}.s3.{DEFAULT_BUCKET_REGION}.amazonaws.com"
     f"/lakerunner/{VERSION}/cardinal-lakerunner/"
