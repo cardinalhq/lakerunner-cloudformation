@@ -1,10 +1,13 @@
 #!/bin/sh
 # Cardinal lakerunner infra-setup driver, in raw AWS CLI.
 #
-# Creates everything the lakerunner application stack needs but does not
-# manage itself: RDS, S3 ingest, SQS, the five `cardinal-*` Secrets Manager
-# secrets, the two SSM parameters, the ECS cluster, and the Cloud Map
-# private DNS namespace for in-cluster service-to-service routing.
+# Creates the data resources the lakerunner application stack needs
+# but does not manage itself: RDS, S3 ingest, SQS, the five `cardinal-*`
+# Secrets Manager secrets, and the two SSM parameters.
+#
+# Caller-supplied compute-plane identifiers (ECS cluster, Cloud Map
+# namespace) are accepted as env vars and passed through to the JSON
+# output unchanged -- the script does not create or validate them.
 #
 # Idempotent. Each step does describe-then-act on the deterministic
 # names below; re-running after a partial failure converges. The script
@@ -23,10 +26,22 @@ set -eu
 
 # Required.
 : "${REGION:=us-east-2}"
-: "${VPC_ID:=vpc-xxxxxxxx}"
 : "${PRIVATE_SUBNETS:=subnet-aaaaaaaa,subnet-bbbbbbbb}"   # CSV, >=2 subnets in distinct AZs
 : "${DB_SG_ID:=sg-xxxxxxxx}"                              # cardinal-db-sg
-: "${LICENSE_DATA_FILE:=}"                                # path to z64:... license token
+
+# Caller-supplied compute-plane identifiers (passed through to the JSON
+# output verbatim; not created or validated here).
+: "${CLUSTER_NAME:=}"
+: "${CLUSTER_ARN:=}"
+: "${SERVICE_NAMESPACE_ID:=}"
+: "${SERVICE_NAMESPACE_NAME:=}"
+
+# License token (z64:...). Provide exactly one of:
+#   LICENSE_DATA       -- the token itself (single-line string)
+#   LICENSE_DATA_FILE  -- path to a file whose contents are the token
+# LICENSE_DATA wins if both are set.
+: "${LICENSE_DATA:=}"
+: "${LICENSE_DATA_FILE:=}"
 
 # Optional sizing (defaults match the Lambda).
 : "${DB_INSTANCE_CLASS:=db.t3.medium}"
@@ -55,9 +70,6 @@ SECRET_MAESTRO_DB="cardinal-maestro-db"
 SSM_STORAGE_PROFILES="/cardinal/storage-profiles"
 SSM_API_KEYS="/cardinal/api-keys"
 
-ECS_CLUSTER_NAME="cardinal"
-NAMESPACE_NAME="cardinal.local"
-
 PROJECT="cardinal"
 APPLICATION="cardinal-lakerunner"
 MANAGED_BY="cardinal-data-setup-script"
@@ -73,8 +85,19 @@ for tool in aws jq openssl; do
     command -v "$tool" >/dev/null 2>&1 || fail "$tool is required on PATH"
 done
 
-[ -n "${LICENSE_DATA_FILE}" ] || fail "LICENSE_DATA_FILE must point at the cardinal license token (z64:...)"
-[ -r "${LICENSE_DATA_FILE}" ] || fail "license file not readable: ${LICENSE_DATA_FILE}"
+if [ -n "${LICENSE_DATA}" ]; then
+    license_data="${LICENSE_DATA}"
+elif [ -n "${LICENSE_DATA_FILE}" ]; then
+    [ -r "${LICENSE_DATA_FILE}" ] || fail "license file not readable: ${LICENSE_DATA_FILE}"
+    license_data=$(cat "${LICENSE_DATA_FILE}")
+else
+    fail "set LICENSE_DATA (the z64:... token) or LICENSE_DATA_FILE (path to a file containing it)"
+fi
+
+for var in CLUSTER_NAME CLUSTER_ARN SERVICE_NAMESPACE_ID SERVICE_NAMESPACE_NAME; do
+    eval "value=\${$var}"
+    [ -n "$value" ] || fail "$var must be set (caller pre-creates ECS cluster + Cloud Map namespace)"
+done
 
 aws_cli() { aws --region "$REGION" "$@"; }
 
@@ -121,12 +144,6 @@ tags_sqs_map() {
 tags_s3_envelope() {
     component="$1"
     jq -nc --argjson set "$(tags_json_array "$component")" '{TagSet:$set}'
-}
-
-# ECS APIs use lowercase {key, value} instead of the {Key, Value} shape used
-# by RDS / Secrets Manager / Cloud Map. Reshape the canonical array.
-tags_json_array_ecs() {
-    tags_json_array "$1" | jq -c 'map({key:.Key, value:.Value})'
 }
 
 # ============================================================================
@@ -362,78 +379,13 @@ ensure_ssm_parameter() {
 }
 
 # ============================================================================
-#  COMPUTE  --  ECS cluster + Cloud Map private DNS namespace
-#                Cluster name is fixed ("cardinal") so customer IAM can grant
-#                least-privilege access via cluster/cardinal. Namespace name
-#                is fixed ("cardinal.local") since the script has no install-id
-#                to embed; this matches the single-install-per-region model
-#                the cluster name already implies.
-# ============================================================================
-
-ensure_ecs_cluster() {
-    log "ensuring ECS cluster $ECS_CLUSTER_NAME"
-    arn=$(aws_cli ecs describe-clusters --clusters "$ECS_CLUSTER_NAME" \
-            --query 'clusters[?status==`ACTIVE`].clusterArn | [0]' \
-            --output text 2>/dev/null || true)
-    if [ -n "$arn" ] && [ "$arn" != "None" ]; then
-        printf '%s' "$arn"
-        return
-    fi
-    arn=$(aws_cli ecs create-cluster \
-        --cluster-name "$ECS_CLUSTER_NAME" \
-        --settings name=containerInsights,value=enabled \
-        --tags "$(tags_json_array_ecs ecs-cluster)" \
-        --query 'cluster.clusterArn' --output text)
-    printf '%s' "$arn"
-}
-
-ensure_service_namespace() {
-    log "ensuring Cloud Map namespace $NAMESPACE_NAME"
-    namespace_id=$(aws_cli servicediscovery list-namespaces \
-        --query "Namespaces[?Name=='$NAMESPACE_NAME' && Type=='DNS_PRIVATE'].Id | [0]" \
-        --output text 2>/dev/null || true)
-    if [ -n "$namespace_id" ] && [ "$namespace_id" != "None" ]; then
-        printf '%s' "$namespace_id"
-        return
-    fi
-    op=$(aws_cli servicediscovery create-private-dns-namespace \
-        --name "$NAMESPACE_NAME" \
-        --vpc "$VPC_ID" \
-        --description "Cardinal in-cluster service-to-service DNS." \
-        --query OperationId --output text)
-    log "waiting for namespace creation operation $op"
-    while :; do
-        status=$(aws_cli servicediscovery get-operation \
-            --operation-id "$op" --query 'Operation.Status' --output text)
-        case "$status" in
-            SUCCESS) break ;;
-            FAIL)
-                err=$(aws_cli servicediscovery get-operation \
-                        --operation-id "$op" \
-                        --query 'Operation.ErrorMessage' --output text)
-                fail "Cloud Map namespace creation failed: $err"
-                ;;
-            *) sleep 5 ;;
-        esac
-    done
-    namespace_id=$(aws_cli servicediscovery list-namespaces \
-        --query "Namespaces[?Name=='$NAMESPACE_NAME' && Type=='DNS_PRIVATE'].Id | [0]" \
-        --output text)
-    namespace_arn=$(aws_cli servicediscovery get-namespace \
-        --id "$namespace_id" --query 'Namespace.Arn' --output text)
-    aws_cli servicediscovery tag-resource \
-        --resource-arn "$namespace_arn" \
-        --tags "$(tags_json_array service-namespace)" >/dev/null
-    printf '%s' "$namespace_id"
-}
-
-# ============================================================================
-#  ORCHESTRATION  --  matches handler.py run() ordering
+#  ORCHESTRATION
 # ============================================================================
 
 main() {
     log "account=$ACCOUNT_ID region=$REGION"
-    log "vpc=$VPC_ID  subnets=$PRIVATE_SUBNETS  db-sg=$DB_SG_ID"
+    log "subnets=$PRIVATE_SUBNETS  db-sg=$DB_SG_ID"
+    log "cluster=$CLUSTER_NAME  namespace=$SERVICE_NAMESPACE_NAME"
 
     # ---- storage ----------------------------------------------------------
     queue_url=$(ensure_sqs_queue)
@@ -461,7 +413,7 @@ main() {
 
     # ---- secrets ----------------------------------------------------------
     license_arn=$(ensure_secret_with_value "$SECRET_LICENSE" \
-        "$(cat "$LICENSE_DATA_FILE")" \
+        "$license_data" \
         "Cardinal lakerunner license" \
         license)
     internal_keys_arn=$(ensure_secret_with_value "$SECRET_INTERNAL_KEYS" \
@@ -485,10 +437,6 @@ main() {
     ensure_ssm_parameter "$SSM_API_KEYS" "{}" \
         "Cardinal external API keys (operator-managed JSON)"
 
-    # ---- compute ----------------------------------------------------------
-    cluster_arn=$(ensure_ecs_cluster)
-    namespace_id=$(ensure_service_namespace)
-
     log "done; emitting outputs JSON to stdout"
 
     # ---- output -----------------------------------------------------------
@@ -508,10 +456,10 @@ main() {
         --arg AdminKeySecretArn "$admin_key_arn" \
         --arg StorageProfilesParamName "$SSM_STORAGE_PROFILES" \
         --arg ApiKeysParamName "$SSM_API_KEYS" \
-        --arg ClusterName "$ECS_CLUSTER_NAME" \
-        --arg ClusterArn "$cluster_arn" \
-        --arg ServiceNamespaceId "$namespace_id" \
-        --arg ServiceNamespaceName "$NAMESPACE_NAME" \
+        --arg ClusterName "$CLUSTER_NAME" \
+        --arg ClusterArn "$CLUSTER_ARN" \
+        --arg ServiceNamespaceId "$SERVICE_NAMESPACE_ID" \
+        --arg ServiceNamespaceName "$SERVICE_NAMESPACE_NAME" \
         '{
             DbEndpoint:$DbEndpoint, DbPort:$DbPort, DbName:$DbName,
             DbMasterSecretArn:$DbMasterSecretArn,

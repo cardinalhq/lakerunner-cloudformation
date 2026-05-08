@@ -69,16 +69,14 @@ for delete -- the lakerunner stack creates no IAM, so the
 rollback-permissions wedge that motivates a service role does not
 exist on the delete path.
 
-## Layer 2: wipe the infra layer
+## Layer 2: wipe the data layer
 
 `scripts/data-setup.sh` has no `delete` mode. To actually wipe the
-infra layer the operator must remove the resources directly. The set
+data layer the operator must remove the resources directly. The set
 is fixed and named deterministically:
 
 | Resource | Identifier |
 |---|---|
-| ECS cluster | `cardinal` |
-| Cloud Map namespace | `cardinal.local` |
 | RDS instance | `cardinal-db` |
 | S3 ingest bucket | `cardinal-ingest-<account>-<region>` |
 | Secret: db master | `cardinal-db-master-*` (Secrets Manager auto-suffixed) |
@@ -91,12 +89,17 @@ is fixed and named deterministically:
 | SQS queue | `cardinal-ingest` |
 | RDS subnet group | `cardinal-db-subnet-group` |
 
+The ECS cluster and the Cloud Map namespace are customer-owned and
+deliberately outside this list -- delete them only if you also want
+those gone, and only **after** the lakerunner stack is gone so the
+cluster is empty.
+
 The operator's identity must hold the matching `Delete*` actions for
 each resource type.
 
 Manual procedure (raw AWS CLI). Run the lakerunner stack delete
-**first** (Layer 1 above) so no ECS task is still using the cluster
-or its task SG when you tear the cluster down.
+**first** (Layer 1 above) so no ECS task is still using the data
+resources or task SG.
 
 ```sh
 REGION=<REGION>
@@ -149,17 +152,15 @@ aws ssm delete-parameters --region "$REGION" \
 queue_url=$(aws sqs get-queue-url --region "$REGION" \
     --queue-name cardinal-ingest --query QueueUrl --output text)
 aws sqs delete-queue --region "$REGION" --queue-url "$queue_url"
+```
 
-# 6. ECS cluster. Must be empty -- run the lakerunner stack delete first.
-aws ecs delete-cluster --region "$REGION" --cluster cardinal
+The ECS cluster and the Cloud Map namespace are customer-owned, so
+removing them is an IT-side step (whatever IaC / console flow created
+them in the first place). If you do need the raw CLI calls:
 
-# 7. Cloud Map private DNS namespace.
-ns_id=$(aws servicediscovery list-namespaces --region "$REGION" \
-    --query "Namespaces[?Name=='cardinal.local' && Type=='DNS_PRIVATE'].Id | [0]" \
-    --output text)
-op=$(aws servicediscovery delete-namespace --region "$REGION" \
-    --id "$ns_id" --query OperationId --output text)
-# delete-namespace is async; poll if you need confirmation
+```sh
+aws ecs delete-cluster --region "$REGION" --cluster <cluster-name>
+aws servicediscovery delete-namespace --region "$REGION" --id <ns-id>
 ```
 
 ## What about the prereqs?

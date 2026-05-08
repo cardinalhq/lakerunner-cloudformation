@@ -20,7 +20,7 @@ Two customer-facing CloudFormation root templates:
 
 Plus a single shell driver:
 
-- `scripts/data-setup.sh` — raw-AWS-CLI infra provisioner. Creates RDS, S3 ingest, SQS, the five `cardinal-*` Secrets Manager secrets, the two SSM parameters, the ECS cluster (`cardinal`), and the Cloud Map private DNS namespace (`cardinal.local`). Idempotent; emits a JSON document on stdout whose keys map 1:1 to the lakerunner stack's infra-setup parameters. The customer supplies all IAM roles and security groups out-of-band; they are inputs, not outputs, of the script.
+- `scripts/data-setup.sh` — raw-AWS-CLI data provisioner. Creates RDS, S3 ingest, SQS, the five `cardinal-*` Secrets Manager secrets, and the two SSM parameters. Idempotent; emits a JSON document on stdout whose keys map 1:1 to the lakerunner stack's infra-setup parameters. The customer supplies all IAM roles, security groups, the ECS cluster, and the Cloud Map private DNS namespace out-of-band; they are inputs to the script, which forwards their identifiers into the JSON output.
 
 The lakerunner root nests these children — application-tier resources only:
 
@@ -97,7 +97,7 @@ generated-templates/
 
 ### Single-install assumption
 
-The infra script names the ECS cluster `cardinal` and the Cloud Map namespace `cardinal.local` — both fixed. This implies one Cardinal install per AWS account/region, which is the supported deployment model. Customers running multiple installs should use separate accounts (or separate regions).
+The fixed `cardinal-*` resource names the script creates (RDS instance, S3 bucket, SQS queue, secrets, SSM params) imply one Cardinal install per AWS account/region. The ECS cluster + Cloud Map namespace names are customer-chosen but should be picked with the same constraint in mind. Customers running multiple installs should use separate accounts (or separate regions).
 
 ### Multi-install isolation (lakerunner-internal)
 
