@@ -4,10 +4,13 @@ The root is a thin orchestrator. It declares the customer-facing parameter
 surface and stands up the nested children with TemplateURL pointing at the
 vendor S3 bucket.
 
-The data-bearing resources (RDS, S3 ingest bucket, SQS, secrets, SSM
-parameters) are created out-of-band by the cardinal-data-setup Lambda; their
+All infra (RDS, S3 ingest, SQS, secrets, SSM parameters, ECS cluster, Cloud
+Map namespace) is created out-of-band by ``scripts/data-setup.sh``; its
 identifiers arrive as parameters. All IAM roles and security groups are
-pre-created by the customer's IT and passed in as ARN/ID parameters.
+pre-created by the customer's IT and passed in as ARN/ID parameters. The
+lakerunner stack itself only owns ECS task-tier resources, the ALB and its
+listener rules, and the migration / cert custom resources -- the application,
+nothing else.
 """
 
 import os
@@ -153,36 +156,45 @@ _ROLE_SG_PARAMS = [
 
 
 # ---------------------------------------------------------------------------
-# Data-setup Lambda output parameters: identifiers for the data resources
-# the Lambda already created. Names match the Lambda's response keys 1:1.
-# Sensitive values (license/admin/internal-keys) come in as Secret ARNs --
-# the underlying secret values stay in Secrets Manager and are never seen
-# by CloudFormation.
+# Infra-setup output parameters: identifiers for the resources the
+# scripts/data-setup.sh driver already created. Names match the script's
+# JSON output keys 1:1. Sensitive values (license/admin/internal-keys) come
+# in as Secret ARNs -- the underlying secret values stay in Secrets Manager
+# and are never seen by CloudFormation.
 # ---------------------------------------------------------------------------
-_DATA_SETUP_PARAMS = [
-    ("DbEndpoint", "String", None, "RDS endpoint hostname (data-setup output)."),
+_INFRA_SETUP_PARAMS = [
+    ("DbEndpoint", "String", None, "RDS endpoint hostname (infra-setup output)."),
     ("DbPort", "String", "5432", "RDS port."),
     ("DbName", "String", "lakerunner", "Lakerunner database name."),
     ("DbMasterSecretArn", "String", None,
-     "ARN of the master DB credentials secret (data-setup output)."),
+     "ARN of the master DB credentials secret (infra-setup output)."),
     ("MaestroDbSecretArn", "String", None,
-     "ARN of the maestro application DB password secret (data-setup output)."),
+     "ARN of the maestro application DB password secret (infra-setup output)."),
     ("IngestBucketName", "String", None,
-     "Name of the S3 ingest bucket (data-setup output)."),
+     "Name of the S3 ingest bucket (infra-setup output)."),
     ("IngestQueueUrl", "String", None,
-     "URL of the SQS ingest queue (data-setup output)."),
+     "URL of the SQS ingest queue (infra-setup output)."),
     ("IngestQueueArn", "String", None,
-     "ARN of the SQS ingest queue (data-setup output)."),
+     "ARN of the SQS ingest queue (infra-setup output)."),
     ("LicenseSecretArn", "String", None,
-     "ARN of the cardinal-license secret (data-setup output)."),
+     "ARN of the cardinal-license secret (infra-setup output)."),
     ("InternalKeysSecretArn", "String", None,
-     "ARN of the cardinal-internal-keys secret (data-setup output)."),
+     "ARN of the cardinal-internal-keys secret (infra-setup output)."),
     ("AdminKeySecretArn", "String", None,
-     "ARN of the cardinal-admin-key secret (data-setup output)."),
+     "ARN of the cardinal-admin-key secret (infra-setup output)."),
     ("StorageProfilesParamName", "String", None,
-     "Name of the SSM parameter holding storage_profiles YAML (data-setup output)."),
+     "Name of the SSM parameter holding storage_profiles YAML (infra-setup output)."),
     ("ApiKeysParamName", "String", None,
-     "Name of the SSM parameter holding api_keys YAML (data-setup output)."),
+     "Name of the SSM parameter holding api_keys YAML (infra-setup output)."),
+    ("ClusterName", "String", None,
+     "Name of the ECS cluster (infra-setup output)."),
+    ("ClusterArn", "String", None,
+     "ARN of the ECS cluster (infra-setup output)."),
+    ("ServiceNamespaceId", "String", None,
+     "Cloud Map private DNS namespace ID for in-cluster service discovery "
+     "(infra-setup output)."),
+    ("ServiceNamespaceName", "String", None,
+     "Cloud Map private DNS namespace name (infra-setup output)."),
 ]
 
 
@@ -230,9 +242,9 @@ def build() -> Template:
     _add_string_params(t, _ROLE_SG_PARAMS)
 
     # ---------------------------------------------------------------------
-    # Data-setup outputs threaded in as parameters
+    # Infra-setup outputs threaded in as parameters
     # ---------------------------------------------------------------------
-    _add_string_params(t, _DATA_SETUP_PARAMS)
+    _add_string_params(t, _INFRA_SETUP_PARAMS)
 
     # ---------------------------------------------------------------------
     # Sensitive / advanced parameters
@@ -347,8 +359,8 @@ def build() -> Template:
                             "CertificateChain"]},
             {"label": "IAM roles + security groups",
              "parameters": [name for name, *_ in _ROLE_SG_PARAMS]},
-            {"label": "Data-setup outputs",
-             "parameters": [name for name, *_ in _DATA_SETUP_PARAMS]},
+            {"label": "Infra-setup outputs",
+             "parameters": [name for name, *_ in _INFRA_SETUP_PARAMS]},
             {"label": "Sizing", "parameters": sizing_param_names},
             {"label": "Images", "parameters": image_param_names},
             {"label": "Advanced",
@@ -368,12 +380,6 @@ def build() -> Template:
     # ---------------------------------------------------------------------
     # Nested children
     # ---------------------------------------------------------------------
-    cluster_stack = _add_child(t, "ClusterStack", "cluster.yaml", {
-        "InstallIdShort": install_short,
-        "InstallIdLong": install_long,
-        "VpcId": Ref("VpcId"),
-    })
-
     cert_stack = _add_child(t, "CertStack", "cert.yaml", {
         "InstallIdShort": install_short,
         "InstallIdLong": install_long,
@@ -396,8 +402,8 @@ def build() -> Template:
     migration_stack = _add_child(t, "MigrationStack", "migration.yaml", {
         "InstallIdShort": install_short,
         "InstallIdLong": install_long,
-        "ClusterArn": GetAtt(cluster_stack, "Outputs.ClusterArn"),
-        "ClusterName": GetAtt(cluster_stack, "Outputs.ClusterName"),
+        "ClusterArn": Ref("ClusterArn"),
+        "ClusterName": Ref("ClusterName"),
         "TaskSecurityGroupId": Ref("TaskSgId"),
         "ExecutionRoleArn": Ref("ExecutionRoleArn"),
         "TaskRoleArn": Ref("TaskRoleArn"),
@@ -409,7 +415,7 @@ def build() -> Template:
         "DbSecretArn": Ref("DbMasterSecretArn"),
         "LakerunnerImage": lakerunner_image,
         "DbInitImage": Ref("DbInitImage"),
-    }, depends_on=["ClusterStack"])
+    })
 
     migration_complete = GetAtt(migration_stack, "Outputs.MigrationCustomResourceRef")
 
@@ -419,7 +425,7 @@ def build() -> Template:
         return {
             "InstallIdShort": install_short,
             "InstallIdLong": install_long,
-            "ClusterArn": GetAtt(cluster_stack, "Outputs.ClusterArn"),
+            "ClusterArn": Ref("ClusterArn"),
             "TaskSecurityGroupId": Ref("TaskSgId"),
             "ExecutionRoleArn": Ref("ExecutionRoleArn"),
             "TaskRoleArn": Ref("TaskRoleArn"),
@@ -442,8 +448,8 @@ def build() -> Template:
     services_query_params.update({
         "HttpsListenerArn": GetAtt(alb_stack, "Outputs.HttpsListenerArn"),
         "VpcId": Ref("VpcId"),
-        "ClusterName": GetAtt(cluster_stack, "Outputs.ClusterName"),
-        "ServiceNamespaceId": GetAtt(cluster_stack, "Outputs.ServiceNamespaceId"),
+        "ClusterName": Ref("ClusterName"),
+        "ServiceNamespaceId": Ref("ServiceNamespaceId"),
         "QueryApiReplicas": Ref("QueryApiReplicas"),
         "QueryApiCpu": Ref("QueryApiCpu"),
         "QueryApiMemory": Ref("QueryApiMemory"),
@@ -474,8 +480,8 @@ def build() -> Template:
         "AdminHttpsListenerArn": GetAtt(alb_stack, "Outputs.AdminHttpsListenerArn"),
         "AdminApiKeySecretArn": Ref("AdminKeySecretArn"),
         "VpcId": Ref("VpcId"),
-        "ServiceNamespaceName": GetAtt(cluster_stack, "Outputs.ServiceNamespaceName"),
-        "ClusterName": GetAtt(cluster_stack, "Outputs.ClusterName"),
+        "ServiceNamespaceName": Ref("ServiceNamespaceName"),
+        "ClusterName": Ref("ClusterName"),
         "ProcessLogsServiceName":
             GetAtt(services_process_stack, "Outputs.ProcessLogsServiceName"),
         "ProcessMetricsServiceName":
@@ -493,7 +499,7 @@ def build() -> Template:
     _add_child(t, "OtelStack", "otel.yaml", {
         "InstallIdShort": install_short,
         "InstallIdLong": install_long,
-        "ClusterArn": GetAtt(cluster_stack, "Outputs.ClusterArn"),
+        "ClusterArn": Ref("ClusterArn"),
         "TaskSecurityGroupId": Ref("TaskSgId"),
         "ExecutionRoleArn": Ref("ExecutionRoleArn"),
         "TaskRoleArn": Ref("TaskRoleArn"),
@@ -517,7 +523,7 @@ def build() -> Template:
     maestro_stack = _add_child(t, "MaestroStack", "maestro.yaml", {
         "InstallIdShort": install_short,
         "InstallIdLong": install_long,
-        "ClusterArn": GetAtt(cluster_stack, "Outputs.ClusterArn"),
+        "ClusterArn": Ref("ClusterArn"),
         "TaskSecurityGroupId": Ref("TaskSgId"),
         "ExecutionRoleArn": Ref("ExecutionRoleArn"),
         "TaskRoleArn": Ref("TaskRoleArn"),

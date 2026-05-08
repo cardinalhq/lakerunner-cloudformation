@@ -1,30 +1,31 @@
 # Tearing down a Cardinal lakerunner install
 
-After the install pivot in #83, "tearing down" splits cleanly into two
+After the infra-script pivot, "tearing down" splits cleanly into two
 independent layers, each with very different reversibility:
 
 1. **Application layer** -- the `cardinal-lakerunner` stack. Stateless.
    `aws cloudformation delete-stack` removes everything it owns; nothing
    is retained.
-2. **Data layer** -- the resources the `cardinal-data-setup` Lambda
-   created (RDS, S3 ingest bucket, Secrets Manager secrets, SSM
-   parameters, SQS queue). These live **outside** any CloudFormation
-   stack and survive deletion of either stack. Wiping them is a
-   destructive, customer-data-bearing operation that the operator must
-   trigger explicitly.
+2. **Infra layer** -- the resources `scripts/data-setup.sh` created
+   (RDS, S3 ingest bucket, Secrets Manager secrets, SSM parameters,
+   SQS queue, ECS cluster, Cloud Map namespace). These live
+   **outside** any CloudFormation stack and survive deletion of the
+   lakerunner stack. Wiping them is a destructive, customer-data-bearing
+   operation that the operator must trigger explicitly.
 
 Read both sections before deciding what to delete. A stack delete-then-
-redeploy on the same install ID will pick the existing data layer back
-up; a true decommission requires step 2.
+redeploy will pick the existing infra layer back up; a true
+decommission requires step 2.
 
 ## Layer 1: delete the lakerunner application stack
 
 `cardinal-lakerunner` owns no `Retain` or `Snapshot` resources. The
-template creates only stateless application infrastructure: ECS
-cluster, services, task definitions, ALB, listeners, target groups,
-listener rules, custom-resource Lambdas (cert-import + migration), and
-CloudWatch log groups. All have `DeletionPolicy: Delete` (or no policy,
-which AWS treats as `Delete`).
+template creates only stateless application resources: ECS services,
+task definitions, ALB, listeners, target groups, listener rules,
+custom-resource Lambdas (cert-import + migration), and CloudWatch log
+groups. All have `DeletionPolicy: Delete` (or no policy, which AWS
+treats as `Delete`). The ECS cluster itself is **not** in the stack
+and is not affected by `delete-stack`.
 
 ```sh
 aws cloudformation delete-stack \
@@ -59,31 +60,25 @@ Notable side effects:
   pristine account.
 
 Stack delete is sufficient if you intend to redeploy the application
-layer against the same data. The next install with the same data-setup
-stack picks up the same RDS / bucket / secrets, so a fresh
-lakerunner stack reaches a working state without any data migration.
+layer against the same infra. The next install picks up the same RDS /
+bucket / secrets / cluster, so a fresh lakerunner stack reaches a
+working state without any data migration.
 
-The `cardinal-deployer-role` (if you used `--role-arn` for the deploy)
-is not strictly required for delete -- the lakerunner stack creates no
-IAM after the prereqs split, so the rollback-permissions wedge that
-motivated the deployer role does not exist on the delete path.
+A CloudFormation service role passed via `--role-arn` is not required
+for delete -- the lakerunner stack creates no IAM, so the
+rollback-permissions wedge that motivates a service role does not
+exist on the delete path.
 
-## Layer 2: wipe the data layer
+## Layer 2: wipe the infra layer
 
-The data-setup Lambda **does not delete data on stack delete**. By
-design, `aws cloudformation delete-stack cardinal-data-setup` removes
-only the Lambda function and the custom-resource record; the RDS
-instance, the S3 ingest bucket, the Secrets Manager secrets, the SSM
-parameters, and the SQS queue all survive. The Lambda's IAM role does
-not currently grant the matching `Delete*` actions, so even calling the
-Lambda with `RequestType: Delete` is a no-op.
-
-To actually wipe the data layer the operator (or break-glass IT
-identity) must remove the resources directly. The set is fixed and
-named deterministically:
+`scripts/data-setup.sh` has no `delete` mode. To actually wipe the
+infra layer the operator must remove the resources directly. The set
+is fixed and named deterministically:
 
 | Resource | Identifier |
 |---|---|
+| ECS cluster | `cardinal` |
+| Cloud Map namespace | `cardinal.local` |
 | RDS instance | `cardinal-db` |
 | S3 ingest bucket | `cardinal-ingest-<account>-<region>` |
 | Secret: db master | `cardinal-db-master-*` (Secrets Manager auto-suffixed) |
@@ -97,21 +92,21 @@ named deterministically:
 | RDS subnet group | `cardinal-db-subnet-group` |
 
 The operator's identity must hold the matching `Delete*` actions for
-each resource type; the data-setup-Lambda role does not because the
-Lambda is intentionally restricted to create + update.
+each resource type.
 
-Manual procedure (raw AWS CLI):
+Manual procedure (raw AWS CLI). Run the lakerunner stack delete
+**first** (Layer 1 above) so no ECS task is still using the cluster
+or its task SG when you tear the cluster down.
 
 ```sh
 REGION=<REGION>
 ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
 BUCKET="cardinal-ingest-${ACCOUNT}-${REGION}"
 
-# 1. RDS instance. The data-setup Lambda creates the DB with
-#    DeletionProtection=True, so disable that first. SkipFinalSnapshot
-#    means no final snapshot is taken; drop it to keep one. Wait for
-#    delete to complete -- a DBSubnetGroup cannot be deleted while any
-#    instance still uses it.
+# 1. RDS instance. The script creates the DB with DeletionProtection=True,
+#    so disable that first. SkipFinalSnapshot means no final snapshot is
+#    taken; drop it to keep one. Wait for delete to complete -- a
+#    DBSubnetGroup cannot be deleted while any instance still uses it.
 aws rds modify-db-instance \
     --region "$REGION" \
     --db-instance-identifier cardinal-db \
@@ -128,8 +123,8 @@ aws rds wait db-instance-deleted \
 aws rds delete-db-subnet-group \
     --region "$REGION" --db-subnet-group-name cardinal-db-subnet-group
 
-# 2. S3 ingest bucket. The data-setup Lambda does not enable versioning,
-#    so the simple recursive remove is sufficient.
+# 2. S3 ingest bucket. The script does not enable versioning, so the
+#    simple recursive remove is sufficient.
 aws s3 rm "s3://$BUCKET" --recursive --region "$REGION"
 aws s3api delete-bucket --bucket "$BUCKET" --region "$REGION"
 
@@ -154,29 +149,34 @@ aws ssm delete-parameters --region "$REGION" \
 queue_url=$(aws sqs get-queue-url --region "$REGION" \
     --queue-name cardinal-ingest --query QueueUrl --output text)
 aws sqs delete-queue --region "$REGION" --queue-url "$queue_url"
-```
 
-The `cardinal-data-setup` stack itself can be deleted at any point
-above (the resources its Lambda manages live outside the stack). The
-stack delete is a fast no-op on the data layer.
+# 6. ECS cluster. Must be empty -- run the lakerunner stack delete first.
+aws ecs delete-cluster --region "$REGION" --cluster cardinal
+
+# 7. Cloud Map private DNS namespace.
+ns_id=$(aws servicediscovery list-namespaces --region "$REGION" \
+    --query "Namespaces[?Name=='cardinal.local' && Type=='DNS_PRIVATE'].Id | [0]" \
+    --output text)
+op=$(aws servicediscovery delete-namespace --region "$REGION" \
+    --id "$ns_id" --query OperationId --output text)
+# delete-namespace is async; poll if you need confirmation
+```
 
 ## What about the prereqs?
 
-The IT-side IAM roles (`cardinal-task-role`, `cardinal-execution-role`,
-`cardinal-migration-lambda-role`, `cardinal-data-setup-lambda-role`,
-`cardinal-cert-lambda-role`) and the three security groups
-(`cardinal-task-sg`, `cardinal-alb-sg`, `cardinal-db-sg`) are
-deliberately owned outside both stacks -- the customer's IT team
-created them once. Removing them is an IT-side operation that should
-match how IT created them (Terraform, manual IAM, or whatever tool
-they use); Cardinal's tearing-down flow does not touch them.
+The IT-side IAM roles (one task role, one execution role, one migration
+Lambda role, optionally one cert Lambda role) and the security groups
+(`TaskSgId`, `AlbSgId`, `DbSgId`) are deliberately owned outside both
+stacks -- the customer's IT team created them once. Removing them is an
+IT-side operation that should match how IT created them (Terraform,
+manual IAM, or whatever tool they use); Cardinal's tearing-down flow
+does not touch them.
 
 If you also want them gone:
 
 ```sh
 for role in cardinal-task-role cardinal-execution-role \
             cardinal-migration-lambda-role \
-            cardinal-data-setup-lambda-role \
             cardinal-cert-lambda-role; do
     aws iam delete-role-policy --role-name "$role" --policy-name cardinal-inline 2>/dev/null || true
     aws iam list-attached-role-policies --role-name "$role" \
