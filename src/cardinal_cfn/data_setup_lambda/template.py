@@ -31,9 +31,12 @@ import os
 
 from troposphere import (
     GetAtt,
+    Join,
     Output,
     Parameter,
     Ref,
+    Select,
+    Split,
     Tags,
     Template,
 )
@@ -42,8 +45,10 @@ from troposphere.awslambda import Code, Function
 
 
 VERSION = os.environ.get("CARDINAL_VERSION", "dev")
-DEFAULT_BUCKET = os.environ.get("CARDINAL_BUCKET_NAME", "cardinal-cfn")
-DEFAULT_LAMBDA_KEY = f"lakerunner/{VERSION}/cardinal-data-setup-lambda.zip"
+DEFAULT_BUCKET = os.environ.get("CARDINAL_BUCKET_NAME", "cardinal-cfn-us-east-2")
+DEFAULT_LAMBDA_URL = (
+    f"s3://{DEFAULT_BUCKET}/lakerunner/{VERSION}/cardinal-data-setup-lambda.zip"
+)
 
 
 def build_template() -> Template:
@@ -108,16 +113,21 @@ def build_template() -> Template:
         Description="S3 ingest bucket object expiration in days.",
     ))
     t.add_parameter(Parameter(
-        "LambdaCodeS3Bucket",
+        "LambdaCodeS3Url",
         Type="String",
-        Default=DEFAULT_BUCKET,
-        Description="S3 bucket containing the Lambda zip.",
-    ))
-    t.add_parameter(Parameter(
-        "LambdaCodeS3Key",
-        Type="String",
-        Default=DEFAULT_LAMBDA_KEY,
-        Description="S3 key of the Lambda zip within the bucket.",
+        Default=DEFAULT_LAMBDA_URL,
+        AllowedPattern=r"^s3://[^/]+/[^/]+/[^/]+/[^/]+\.zip$",
+        ConstraintDescription=(
+            "LambdaCodeS3Url must be an s3://<bucket>/<prefix>/<version>/<file>.zip URL "
+            "(exactly three slash-separated path segments). The bucket must be in the same "
+            "region as this stack."
+        ),
+        Description=(
+            "Full s3:// URL of the data-setup Lambda zip. The bucket must be in the same "
+            "region as this stack. Default targets the published bucket in us-east-2; "
+            "override for other regions or air-gapped mirrors. Example: "
+            "s3://cardinal-cfn-us-east-1/lakerunner/v0.0.42/cardinal-data-setup-lambda.zip."
+        ),
     ))
 
     # ---- Lambda function ---------------------------------------------------
@@ -133,9 +143,16 @@ def build_template() -> Template:
         # skip already-completed steps.
         Timeout=900,
         MemorySize=512,
+        # Parse LambdaCodeS3Url (s3://bucket/prefix/version/file.zip) into the
+        # S3Bucket + S3Key pair the Lambda CFN resource requires. AllowedPattern
+        # on the parameter enforces the three-segment shape this parsing assumes.
         Code=Code(
-            S3Bucket=Ref("LambdaCodeS3Bucket"),
-            S3Key=Ref("LambdaCodeS3Key"),
+            S3Bucket=Select(2, Split("/", Ref("LambdaCodeS3Url"))),
+            S3Key=Join("/", [
+                Select(3, Split("/", Ref("LambdaCodeS3Url"))),
+                Select(4, Split("/", Ref("LambdaCodeS3Url"))),
+                Select(5, Split("/", Ref("LambdaCodeS3Url"))),
+            ]),
         ),
         Description="Cardinal lakerunner data-setup: idempotent ensure_* over RDS, S3, SQS, Secrets, SSM.",
         Tags=Tags(

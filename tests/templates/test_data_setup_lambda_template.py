@@ -28,10 +28,17 @@ def test_required_parameters_declared(template_dict):
         "DbInstanceClass",
         "DbAllocatedStorage",
         "BucketLifecycleDays",
-        "LambdaCodeS3Bucket",
-        "LambdaCodeS3Key",
+        "LambdaCodeS3Url",
     }
     assert required <= set(template_dict["Parameters"])
+
+
+def test_split_lambda_code_params_are_gone(template_dict):
+    """The previous LambdaCodeS3Bucket / LambdaCodeS3Key pair was replaced
+    by a single full-URL parameter; make sure nothing reintroduces them."""
+    params = set(template_dict["Parameters"])
+    assert "LambdaCodeS3Bucket" not in params
+    assert "LambdaCodeS3Key" not in params
 
 
 def test_secret_parameters_marked_no_echo(template_dict):
@@ -83,8 +90,29 @@ def test_naming_contract_lambda_function_name_is_stable(template_dict):
     assert fn["FunctionName"] == "cardinal-data-setup"
 
 
-def test_default_lambda_code_path_uses_published_bucket(template_dict):
-    bucket_default = template_dict["Parameters"]["LambdaCodeS3Bucket"]["Default"]
-    key_default = template_dict["Parameters"]["LambdaCodeS3Key"]["Default"]
-    assert bucket_default == "cardinal-cfn"
-    assert key_default.startswith("lakerunner/") and key_default.endswith("/cardinal-data-setup-lambda.zip")
+def test_default_lambda_code_url_targets_published_bucket(template_dict):
+    """Default LambdaCodeS3Url points at the published regional bucket; pattern
+    must match the AllowedPattern regex so the default is always self-validating."""
+    import re
+
+    p = template_dict["Parameters"]["LambdaCodeS3Url"]
+    assert re.match(p["AllowedPattern"], p["Default"]), p["Default"]
+    assert p["Default"].startswith("s3://cardinal-cfn")
+    assert p["Default"].endswith("/cardinal-data-setup-lambda.zip")
+    # Three slash-separated key segments (prefix/version/file).
+    key = p["Default"].split("/", 3)[3]
+    assert key.count("/") == 2
+
+
+def test_lambda_code_property_parses_url_into_bucket_and_key(template_dict):
+    """The Code.S3Bucket / Code.S3Key pair is derived from LambdaCodeS3Url
+    via Fn::Split + Fn::Select + Fn::Join. Element indices encode the
+    three-segment key shape that AllowedPattern enforces."""
+    code = template_dict["Resources"]["DataSetupFunction"]["Properties"]["Code"]
+    expected_split = {"Fn::Split": ["/", {"Ref": "LambdaCodeS3Url"}]}
+    assert code["S3Bucket"] == {"Fn::Select": [2, expected_split]}
+    assert code["S3Key"] == {"Fn::Join": ["/", [
+        {"Fn::Select": [3, expected_split]},
+        {"Fn::Select": [4, expected_split]},
+        {"Fn::Select": [5, expected_split]},
+    ]]}
