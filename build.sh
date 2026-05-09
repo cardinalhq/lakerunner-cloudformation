@@ -21,6 +21,9 @@ export PYTHONPATH="$(pwd)/src${PYTHONPATH:+:$PYTHONPATH}"
 echo "Generating cardinal-vpc.yaml..."
 python3 -m cardinal_cfn.cardinal_vpc > generated-templates/cardinal-vpc.yaml
 
+echo "Generating cardinal-infrastructure.yaml..."
+python3 -m cardinal_cfn.cardinal_infrastructure > generated-templates/cardinal-infrastructure.yaml
+
 # ---------------------------------------------------------------------------
 # Lakerunner stack (root + 8 nested children). Children take role ARNs,
 # security-group IDs, and infra identifiers (cluster, RDS, S3, SQS, secrets,
@@ -39,6 +42,7 @@ done
 echo
 echo "Linting CFN templates..."
 cfn-lint generated-templates/cardinal-vpc.yaml \
+         generated-templates/cardinal-infrastructure.yaml \
          generated-templates/cardinal-lakerunner.yaml \
          generated-templates/cardinal-lakerunner/*.yaml || \
   echo "cfn-lint completed with warnings"
