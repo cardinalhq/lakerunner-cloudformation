@@ -9,3 +9,8 @@ ignore_checks:
   - W3005  # nested-stack DependsOn intentionally repeats the dependency
            # already implied by GetAtt(MigrationStack.Outputs.*) — keeping
            # both forms makes the ordering explicit at the root level
+  - E3005  # cardinal-infrastructure: IngestBucket DependsOn the conditional
+           # IngestQueuePolicy. In fresh-create mode the policy exists and
+           # the dependency prevents an S3-validates-by-posting race; in
+           # ImportMode=Yes neither resource is created, so DependsOn is a
+           # no-op per CFN docs.

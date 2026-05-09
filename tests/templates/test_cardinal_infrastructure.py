@@ -324,3 +324,64 @@ def test_outputs_match_script_contract(td):
 def test_outputs_have_no_export(td):
     for name, out in td["Outputs"].items():
         assert "Export" not in out, f"output {name} should not have an Export"
+
+
+# ---------------------------------------------------------------------------
+# Optional name parameters (used at import time)
+# ---------------------------------------------------------------------------
+
+
+_IMPORT_NAME_PARAMS = (
+    "DBInstanceIdentifier",
+    "DBSubnetGroupName",
+    "IngestQueueName",
+    "DBMasterSecretName",
+    "InternalKeysSecretName",
+    "MaestroDBSecretName",
+)
+
+
+def test_import_name_parameters_exist_with_blank_defaults(td):
+    for n in _IMPORT_NAME_PARAMS:
+        assert n in td["Parameters"], f"missing import-name parameter: {n}"
+        assert td["Parameters"][n]["Default"] == "", (
+            f"{n} default must be blank so fresh installs auto-name"
+        )
+
+
+_AUTO_NAME_CONDITIONS = {
+    "AutoNameDBInstance",
+    "AutoNameDBSubnetGroup",
+    "AutoNameIngestQueue",
+    "AutoNameDBMasterSecret",
+    "AutoNameInternalKeysSecret",
+    "AutoNameMaestroDBSecret",
+}
+
+
+def test_auto_name_conditions_present(td):
+    assert _AUTO_NAME_CONDITIONS <= set(td["Conditions"].keys())
+
+
+def _name_property(td, logical_id, prop):
+    return td["Resources"][logical_id]["Properties"][prop]
+
+
+def test_auto_name_use_site_pattern(td):
+    """Each import-eligible resource uses Fn::If(AutoNameX, NoValue, Ref(X))."""
+    cases = [
+        ("DBInstance", "DBInstanceIdentifier", "AutoNameDBInstance"),
+        ("DBSubnetGroup", "DBSubnetGroupName", "AutoNameDBSubnetGroup"),
+        ("IngestQueue", "QueueName", "AutoNameIngestQueue"),
+        ("DBMasterSecret", "Name", "AutoNameDBMasterSecret"),
+        ("InternalKeysSecret", "Name", "AutoNameInternalKeysSecret"),
+        ("MaestroDBSecret", "Name", "AutoNameMaestroDBSecret"),
+    ]
+    for logical_id, prop, condition in cases:
+        value = _name_property(td, logical_id, prop)
+        if_branches = value["Fn::If"]
+        assert if_branches[0] == condition
+        assert if_branches[1] == {"Ref": "AWS::NoValue"}
+        # third branch is Ref to the corresponding parameter
+        ref_param = if_branches[2]["Ref"]
+        assert ref_param in _IMPORT_NAME_PARAMS, ref_param
