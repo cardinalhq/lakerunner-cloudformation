@@ -227,11 +227,39 @@ def test_ingest_queue_policy_allows_s3_with_source_conditions(td):
     assert "aws:SourceArn" in stmt["Condition"]["ArnLike"]
 
 
-def test_ingest_bucket_depends_on_queue_policy(td):
-    """Without DependsOn, S3 create can race the queue-policy create and fail
-    bucket-notification validation."""
+def test_ingest_bucket_orders_after_queue_policy(td):
+    """S3 validates the SQS notification destination when the bucket's
+    notification config is applied, so the bucket must be created after
+    IngestQueuePolicy. A plain DependsOn would dangle when ImportMode=Yes
+    excludes the policy, so the ordering rides in an otherwise-unused Fn::Sub
+    variable that resolves to AWS::NoValue in import mode."""
     bucket = _by_logical_id(td, "IngestBucket")
-    assert bucket["DependsOn"] == "IngestQueuePolicy"
+    assert "DependsOn" not in bucket
+    queue_val = bucket["Properties"]["NotificationConfiguration"][
+        "QueueConfigurations"
+    ][0]["Queue"]
+    sub_vars = queue_val["Fn::Sub"][1]
+    assert sub_vars["QueueArn"] == {"Fn::GetAtt": ["IngestQueue", "Arn"]}
+    dep = sub_vars["PolicyDependency"]["Fn::If"]
+    assert dep[0] == "CreateCfnOnlyResources"
+    assert dep[1] == {"Ref": "IngestQueuePolicy"}
+    assert dep[2] == {"Ref": "AWS::NoValue"}
+
+
+def test_no_dependson_references_a_conditional_resource(td):
+    """A DependsOn pointing at a Condition-gated resource dangles whenever that
+    condition is false (notably ImportMode=Yes), which fails change-set
+    creation with 'Unresolved resource dependencies'."""
+    conditional_ids = {
+        lid for lid, res in td["Resources"].items() if "Condition" in res
+    }
+    for lid, res in td["Resources"].items():
+        dep = res.get("DependsOn")
+        if dep is None:
+            continue
+        deps = dep if isinstance(dep, list) else [dep]
+        bad = conditional_ids.intersection(deps)
+        assert not bad, f"{lid} DependsOn condition-gated resource(s): {sorted(bad)}"
 
 
 def test_ingest_bucket_lifecycle_uses_parameter(td):
@@ -248,7 +276,9 @@ def test_ingest_bucket_notification_targets_queue(td):
     ]
     queue_cfg = notif["QueueConfigurations"][0]
     assert queue_cfg["Event"] == "s3:ObjectCreated:*"
-    assert queue_cfg["Queue"] == {"Fn::GetAtt": ["IngestQueue", "Arn"]}
+    sub = queue_cfg["Queue"]["Fn::Sub"]
+    assert sub[0] == "${QueueArn}"
+    assert sub[1]["QueueArn"] == {"Fn::GetAtt": ["IngestQueue", "Arn"]}
 
 
 def test_ingest_bucket_name_uses_default_or_override(td):

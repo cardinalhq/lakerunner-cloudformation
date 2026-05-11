@@ -524,12 +524,29 @@ def build() -> Template:
                     QueueConfigurations=[
                         QueueConfigurations(
                             Event="s3:ObjectCreated:*",
-                            Queue=GetAtt(ingest_queue, "Arn"),
+                            # The queue ARN, wrapped in Fn::Sub only to carry an
+                            # ordering dependency on IngestQueuePolicy: S3
+                            # validates the SQS destination when the notification
+                            # config is applied and fails if the queue policy is
+                            # not yet in place. A plain ``DependsOn`` would dangle
+                            # whenever ImportMode=Yes excludes IngestQueuePolicy
+                            # (CFN rejects DependsOn on a condition-false
+                            # resource), so the dependency rides in the otherwise
+                            # unused ``PolicyDependency`` variable, which resolves
+                            # to AWS::NoValue in import mode.
+                            Queue=Sub(
+                                "${QueueArn}",
+                                QueueArn=GetAtt(ingest_queue, "Arn"),
+                                PolicyDependency=If(
+                                    "CreateCfnOnlyResources",
+                                    Ref(ingest_queue_policy),
+                                    Ref(AWS_NO_VALUE),
+                                ),
+                            ),
                         )
                     ]
                 ),
                 Tags=_tags(component="ingest-bucket"),
-                DependsOn=ingest_queue_policy.title,
             )
         )
     )
