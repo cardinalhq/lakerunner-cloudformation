@@ -13,3 +13,6 @@ __pycache__/
 
 # Generated CloudFormation templates
 generated-templates/
+
+# Local scratch / not-for-commit scripts
+do-not-commit.sh
