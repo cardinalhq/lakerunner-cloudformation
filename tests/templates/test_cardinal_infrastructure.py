@@ -231,19 +231,21 @@ def test_ingest_bucket_orders_after_queue_policy(td):
     """S3 validates the SQS notification destination when the bucket's
     notification config is applied, so the bucket must be created after
     IngestQueuePolicy. A plain DependsOn would dangle when ImportMode=Yes
-    excludes the policy, so the ordering rides in an otherwise-unused Fn::Sub
-    variable that resolves to AWS::NoValue in import mode."""
+    excludes the policy, so on the create path the ordering rides in an
+    otherwise-unused Fn::Sub variable referencing the policy; in import mode the
+    value is just the bare queue ARN (Fn::Sub context values must be strings, so
+    Fn::If -> AWS::NoValue cannot be smuggled into the Sub itself)."""
     bucket = _by_logical_id(td, "IngestBucket")
     assert "DependsOn" not in bucket
     queue_val = bucket["Properties"]["NotificationConfiguration"][
         "QueueConfigurations"
     ][0]["Queue"]
-    sub_vars = queue_val["Fn::Sub"][1]
+    branches = queue_val["Fn::If"]
+    assert branches[0] == "CreateCfnOnlyResources"
+    sub_vars = branches[1]["Fn::Sub"][1]
     assert sub_vars["QueueArn"] == {"Fn::GetAtt": ["IngestQueue", "Arn"]}
-    dep = sub_vars["PolicyDependency"]["Fn::If"]
-    assert dep[0] == "CreateCfnOnlyResources"
-    assert dep[1] == {"Ref": "IngestQueuePolicy"}
-    assert dep[2] == {"Ref": "AWS::NoValue"}
+    assert sub_vars["PolicyDependency"] == {"Ref": "IngestQueuePolicy"}
+    assert branches[2] == {"Fn::GetAtt": ["IngestQueue", "Arn"]}
 
 
 def test_no_dependson_references_a_conditional_resource(td):
@@ -262,6 +264,39 @@ def test_no_dependson_references_a_conditional_resource(td):
         assert not bad, f"{lid} DependsOn condition-gated resource(s): {sorted(bad)}"
 
 
+def _walk(node):
+    """Yield ``node`` and every dict/list nested inside it."""
+    yield node
+    if isinstance(node, dict):
+        for v in node.values():
+            yield from _walk(v)
+    elif isinstance(node, list):
+        for v in node:
+            yield from _walk(v)
+
+
+_NO_VALUE = {"Ref": "AWS::NoValue"}
+
+
+def test_no_fn_sub_context_resolves_to_no_value(td):
+    """CreateChangeSet rejects an Fn::Sub whose context object holds anything
+    that is not a string (or a string-returning function) -- AWS::NoValue, even
+    behind an Fn::If, fails template parsing."""
+    for node in _walk(td):
+        if not isinstance(node, dict) or "Fn::Sub" not in node:
+            continue
+        body = node["Fn::Sub"]
+        if not isinstance(body, list) or len(body) < 2:
+            continue
+        for name, value in body[1].items():
+            assert value != _NO_VALUE, f"Fn::Sub var {name!r} is AWS::NoValue"
+            if isinstance(value, dict) and "Fn::If" in value:
+                _, t_branch, f_branch = value["Fn::If"]
+                assert _NO_VALUE not in (t_branch, f_branch), (
+                    f"Fn::Sub var {name!r} has an Fn::If branch of AWS::NoValue"
+                )
+
+
 def test_ingest_bucket_lifecycle_uses_parameter(td):
     rules = _by_logical_id(td, "IngestBucket")["Properties"]["LifecycleConfiguration"]["Rules"]
     rule = rules[0]
@@ -276,9 +311,14 @@ def test_ingest_bucket_notification_targets_queue(td):
     ]
     queue_cfg = notif["QueueConfigurations"][0]
     assert queue_cfg["Event"] == "s3:ObjectCreated:*"
-    sub = queue_cfg["Queue"]["Fn::Sub"]
+    branches = queue_cfg["Queue"]["Fn::If"]
+    assert branches[0] == "CreateCfnOnlyResources"
+    # create path: Fn::Sub renders to the queue ARN, carrying the policy dep
+    sub = branches[1]["Fn::Sub"]
     assert sub[0] == "${QueueArn}"
     assert sub[1]["QueueArn"] == {"Fn::GetAtt": ["IngestQueue", "Arn"]}
+    # import path: bare ARN, no dependency on the (absent) queue policy
+    assert branches[2] == {"Fn::GetAtt": ["IngestQueue", "Arn"]}
 
 
 def test_ingest_bucket_name_uses_default_or_override(td):
