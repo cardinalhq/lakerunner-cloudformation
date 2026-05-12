@@ -157,9 +157,11 @@ def build() -> Template:
     # process-* services. ClusterName is the ECS cluster name (not ARN) — both
     # the autoscaler's ECS_CLUSTER env var and the IAM resource ARNs need the
     # name form. The three service-name inputs come from services-process stack
-    # outputs; the three replica inputs are the same Refs that gate the
-    # process-* DesiredCount in services-process, so the autoscaler's max
-    # tracks whatever the customer set at deploy time.
+    # outputs; the three replica inputs are the per-service max replicas (the
+    # Process*Replicas parameters, also exposed on services-process). The
+    # process-* services are created at one replica there; the autoscaler then
+    # scales them up to this max, so it tracks whatever the customer set at
+    # deploy time.
     t.add_parameter(
         Parameter(
             "ClusterName",

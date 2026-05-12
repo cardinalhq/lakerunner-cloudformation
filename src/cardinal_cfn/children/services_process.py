@@ -7,9 +7,11 @@ Owns four ECS Fargate services that ingest from SQS and write to S3:
 - process-metrics (signal_type: metrics, replicas + memory tunable)
 - process-traces (signal_type: traces, replicas + memory tunable)
 
-None of these services attach to the ALB. Replicas parameters set the maximum
-desired count; the external monitoring service manages actual scaling. CPU
-values come from cardinal-defaults.yaml directly.
+None of these services attach to the ALB. The process-* services are created
+at one replica (min_replicas); the monitoring service in services-control
+scales them up to the Process*Replicas cap via ecs:UpdateService -- launching
+at the max would triple the steady-state Fargate footprint on every deploy.
+CPU values come from cardinal-defaults.yaml directly.
 """
 
 from troposphere import (
@@ -147,6 +149,12 @@ def build() -> Template:
     # Per the project CLAUDE.md table: process-* services expose Replicas and
     # Memory as parameters; CPU stays in YAML. pubsub-sqs exposes Replicas
     # only; CPU and Memory both stay in YAML.
+    #
+    # For process-*, "Replicas" is the autoscaler's *max* cap, not the initial
+    # desired count -- the services are created at min_replicas (see the
+    # per-service blocks below) and the monitoring service scales up to this
+    # value. The same Refs are forwarded to services-control as the
+    # autoscaler's per-service max.
     # ---------------------------------------------------------------------
     t.add_parameter(
         Parameter(
@@ -154,8 +162,10 @@ def build() -> Template:
             Type="Number",
             Default=str(_max_replicas(logs_cfg)),
             Description=(
-                "Maximum desired replicas for lakerunner-process-logs. The "
-                "monitoring service manages actual replica count up to this max."
+                "Maximum replicas the monitoring autoscaler may scale "
+                "lakerunner-process-logs to. The service is created at "
+                "min_replicas and the autoscaler scales it up to this cap "
+                "under load."
             ),
         )
     )
@@ -173,8 +183,10 @@ def build() -> Template:
             Type="Number",
             Default=str(_max_replicas(metrics_cfg)),
             Description=(
-                "Maximum desired replicas for lakerunner-process-metrics. The "
-                "monitoring service manages actual replica count up to this max."
+                "Maximum replicas the monitoring autoscaler may scale "
+                "lakerunner-process-metrics to. The service is created at "
+                "min_replicas and the autoscaler scales it up to this cap "
+                "under load."
             ),
         )
     )
@@ -192,8 +204,10 @@ def build() -> Template:
             Type="Number",
             Default=str(_max_replicas(traces_cfg)),
             Description=(
-                "Maximum desired replicas for lakerunner-process-traces. The "
-                "monitoring service manages actual replica count up to this max."
+                "Maximum replicas the monitoring autoscaler may scale "
+                "lakerunner-process-traces to. The service is created at "
+                "min_replicas and the autoscaler scales it up to this cap "
+                "under load."
             ),
         )
     )
@@ -296,7 +310,14 @@ def build() -> Template:
     ]
 
     # ---------------------------------------------------------------------
-    # Per-service blocks (log group, task role, task def, ECS service)
+    # Per-service blocks (log group, task def, ECS service).
+    #
+    # process-* services are created at their min replica count; the monitoring
+    # service (services-control) then scales them up to Process*Replicas via
+    # ecs:UpdateService. Starting at the max would launch ~3x the steady-state
+    # task count on every deploy (and can blow the account's Fargate vCPU
+    # quota). pubsub-sqs has no autoscaler, so its DesiredCount is the
+    # PubsubSqsReplicas parameter directly.
     # ---------------------------------------------------------------------
     services = [
         {
@@ -304,7 +325,7 @@ def build() -> Template:
             "config": logs_cfg,
             "cpu": logs_cfg["cpu"],
             "memory_mib": Ref("ProcessLogsMemory"),
-            "desired_count": Ref("ProcessLogsReplicas"),
+            "desired_count": _min_replicas(logs_cfg),
             "output_name": "ProcessLogsServiceName",
         },
         {
@@ -312,7 +333,7 @@ def build() -> Template:
             "config": metrics_cfg,
             "cpu": metrics_cfg["cpu"],
             "memory_mib": Ref("ProcessMetricsMemory"),
-            "desired_count": Ref("ProcessMetricsReplicas"),
+            "desired_count": _min_replicas(metrics_cfg),
             "output_name": "ProcessMetricsServiceName",
         },
         {
@@ -320,7 +341,7 @@ def build() -> Template:
             "config": traces_cfg,
             "cpu": traces_cfg["cpu"],
             "memory_mib": Ref("ProcessTracesMemory"),
-            "desired_count": Ref("ProcessTracesReplicas"),
+            "desired_count": _min_replicas(traces_cfg),
             "output_name": "ProcessTracesServiceName",
         },
         {
@@ -393,14 +414,28 @@ def _build_service_block(
 
 
 def _max_replicas(service_cfg: dict) -> int:
-    """Default replicas for an autoscaling-eligible service.
+    """Autoscaler max-replica cap for an autoscaling-eligible service.
 
-    process-* configs encode min/max under autoscaling; the parameter default
-    uses max_replicas. Falls back to `replicas` if autoscaling is absent.
+    process-* configs encode min/max under autoscaling; the Process*Replicas
+    parameter default uses max_replicas. Falls back to `replicas` if
+    autoscaling is absent.
     """
     autoscaling = service_cfg.get("autoscaling")
     if autoscaling and "max_replicas" in autoscaling:
         return int(autoscaling["max_replicas"])
+    return int(service_cfg["replicas"])
+
+
+def _min_replicas(service_cfg: dict) -> int:
+    """Initial ECS DesiredCount for an autoscaling-eligible service.
+
+    The service is created at this count; the monitoring service (in
+    services-control) scales it up to the Process*Replicas cap under load.
+    Falls back to `replicas` if autoscaling is absent.
+    """
+    autoscaling = service_cfg.get("autoscaling")
+    if autoscaling and "min_replicas" in autoscaling:
+        return int(autoscaling["min_replicas"])
     return int(service_cfg["replicas"])
 
 

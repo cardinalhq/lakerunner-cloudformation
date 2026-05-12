@@ -149,6 +149,10 @@ Pre-allocated, registered in `src/cardinal_cfn/listener_priorities.py`. Each ser
 
 The three service tier stacks (`services-query`, `services-process`, `services-control`) own *only* per-service resources: ECS Service, TaskDefinition, TargetGroup, ListenerRule, per-service log group. Anything shared across services lives in `alb` or arrives as an infra-setup parameter (cluster, task SG, task/execution roles, secret ARNs, SSM param names). This rule keeps the door open to a future per-service-stack split with minimal disruption.
 
+### Process-tier autoscaling
+
+`services-process` creates `process-{logs,metrics,traces}` at one replica (`min_replicas` from `cardinal-defaults.yaml`). The `monitoring` service in `services-control` scales them up to the `ProcessLogsReplicas` / `ProcessMetricsReplicas` / `ProcessTracesReplicas` cap (default 10 each) via `ecs:UpdateService`. Those parameters are the autoscaler *ceiling*, not the initial `DesiredCount` — creating the services at the ceiling would launch ~3x the steady-state task count on every deploy and can exhaust the account's Fargate vCPU quota. `pubsub-sqs` is not autoscaled; `PubsubSqsReplicas` (default 1) is its literal `DesiredCount`. The root forwards the same `Process*Replicas` Refs to both `services-process` (where they are now unused — kept symmetric with the customer-facing surface) and `services-control` (the autoscaler max).
+
 ## Build and testing
 
 Canonical workflow uses the Makefile:
