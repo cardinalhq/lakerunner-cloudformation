@@ -188,23 +188,39 @@ def test_pubsub_sqs_task_definition_uses_yaml_defaults(td):
     assert not isinstance(mem, dict), f"PubsubSqs Memory unexpectedly templated: {mem!r}"
 
 
-def test_desired_count_uses_replicas_param(td):
+def test_process_services_start_at_one_replica(td):
+    """process-* are created at min_replicas (1); the monitoring autoscaler in
+    services-control scales them up to the Process*Replicas cap. Launching at
+    the max would triple the steady-state Fargate footprint on every deploy."""
     services = {
         logical_id: r
         for logical_id, r in td["Resources"].items()
         if r["Type"] == "AWS::ECS::Service"
     }
-    expected_refs = {
-        "ProcessLogsService": "ProcessLogsReplicas",
-        "ProcessMetricsService": "ProcessMetricsReplicas",
-        "ProcessTracesService": "ProcessTracesReplicas",
-        "PubsubSqsService": "PubsubSqsReplicas",
+    for logical_id in ("ProcessLogsService", "ProcessMetricsService", "ProcessTracesService"):
+        dc = services[logical_id]["Properties"]["DesiredCount"]
+        assert dc == 1, f"{logical_id} should be created at 1 replica; got {dc!r}"
+
+
+def test_pubsub_sqs_desired_count_uses_replicas_param(td):
+    """pubsub-sqs has no autoscaler, so its DesiredCount is the parameter."""
+    services = {
+        logical_id: r
+        for logical_id, r in td["Resources"].items()
+        if r["Type"] == "AWS::ECS::Service"
     }
-    for logical_id, expected_ref in expected_refs.items():
-        svc = services[logical_id]
-        dc = svc["Properties"]["DesiredCount"]
-        assert isinstance(dc, dict) and dc.get("Ref") == expected_ref, (
-            f"{logical_id} DesiredCount should be Ref({expected_ref}); got {dc!r}"
+    dc = services["PubsubSqsService"]["Properties"]["DesiredCount"]
+    assert isinstance(dc, dict) and dc.get("Ref") == "PubsubSqsReplicas", (
+        f"PubsubSqsService DesiredCount should be Ref(PubsubSqsReplicas); got {dc!r}"
+    )
+
+
+def test_process_replicas_params_default_to_autoscaler_max(td):
+    """Process*Replicas defaults are the autoscaler ceiling (max_replicas from
+    cardinal-defaults.yaml), not the initial desired count."""
+    for n in ("ProcessLogsReplicas", "ProcessMetricsReplicas", "ProcessTracesReplicas"):
+        assert td["Parameters"][n]["Default"] == "10", (
+            f"{n} default should be the autoscaling max; got {td['Parameters'][n]['Default']!r}"
         )
 
 
