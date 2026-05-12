@@ -21,7 +21,6 @@ def test_required_parameters(td):
         # IAM + SG parameters now customer-supplied
         "TaskRoleArn",
         "ExecutionRoleArn",
-        "CertLambdaRoleArn",
         "TaskSgId",
         "AlbSgId",
         # Infra-setup outputs threaded in

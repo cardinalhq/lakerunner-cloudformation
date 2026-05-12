@@ -36,13 +36,16 @@ The migrator is **not** Lambda-backed -- it runs as an ECS service
 task role and `ExecutionRoleArn` for image pull / secret resolution -- no
 dedicated role. So no `MigrationLambdaRoleArn` parameter exists.
 
-### Cert-import Lambda role (optional, PEM path only)
+### TLS certificate
 
-Trusts `lambda.amazonaws.com`. Created only when `CertificateArn` is empty.
-
-| Role parameter | Why | Required permissions |
-|---|---|---|
-| `CertLambdaRoleArn` (optional) | Imports a customer-supplied PEM into ACM when `CertificateArn` is empty. | `logs:*` on `*`, `acm:ImportCertificate` on `*` (no ARN exists at create time), `acm:DeleteCertificate` / `AddTagsToCertificate` / `RemoveTagsFromCertificate` scoped to `arn:aws:acm:${Region}:${AccountId}:certificate/*`. Environments that cannot run Lambda must supply an ACM `CertificateArn` instead. |
+No Lambda. If you pass an existing `CertificateArn` (ACM or IAM server cert),
+`cert.yaml` just forwards it. If `CertificateArn` is empty and you pass the cert
+material as PEM parameters (`CertificateBody` / `CertificatePrivateKey` /
+`CertificateChain`), `cert.yaml` creates an `AWS::IAM::ServerCertificate` from
+them and the ALB HTTPS listener uses its ARN. There is no `CertLambdaRoleArn`
+parameter. The deployer needs `iam:UploadServerCertificate` /
+`iam:DeleteServerCertificate` (etc.) for the PEM path -- see the infrastructure
+permissions doc.
 
 ## Resource policies
 
