@@ -143,8 +143,6 @@ _ROLE_SG_PARAMS = [
     ("ExecutionRoleArn", "String", None,
      "ARN of the ECS task execution role (used at task launch to pull "
      "images and resolve secrets)."),
-    ("MigrationLambdaRoleArn", "String", None,
-     "ARN of the IAM role the migration Lambda assumes."),
     ("CertLambdaRoleArn", "String", "",
      "ARN of the IAM role the cert-import Lambda assumes. Required only "
      "when CertificateArn is empty (PEM-import path)."),
@@ -407,7 +405,6 @@ def build() -> Template:
         "TaskSecurityGroupId": Ref("TaskSgId"),
         "ExecutionRoleArn": Ref("ExecutionRoleArn"),
         "TaskRoleArn": Ref("TaskRoleArn"),
-        "MigrationLambdaRoleArn": Ref("MigrationLambdaRoleArn"),
         "PrivateSubnetsCsv": private_subnets_csv,
         "DbEndpoint": Ref("DbEndpoint"),
         "DbPort": Ref("DbPort"),
@@ -417,7 +414,7 @@ def build() -> Template:
         "DbInitImage": Ref("DbInitImage"),
     })
 
-    migration_complete = GetAtt(migration_stack, "Outputs.MigrationCustomResourceRef")
+    migration_complete = GetAtt(migration_stack, "Outputs.MigrationServiceArn")
 
     # Common cross-stack parameter dict shared by query / process / control.
     # Each tier extends with its own sizing parameters as needed.

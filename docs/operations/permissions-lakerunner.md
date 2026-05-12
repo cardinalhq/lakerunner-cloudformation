@@ -28,14 +28,21 @@ deploying the templates live in `permissions-infrastructure.md`.
 |---|---|---|---|
 | `TaskRoleArn` | `ecs-tasks.amazonaws.com` | Used by every lakerunner ECS task (query / process / control / otel / maestro). One shared role across services; customers who want finer separation can pass different ARNs for different services in a future refactor. | S3 RW on the ingest bucket, SQS RW on the ingest queue, SSM read on `/cardinal/*`, secrets read on `cardinal-*`, CW Logs writes to `/cardinal/*`, `ecs:DescribeServices` / `ecs:UpdateService` on the cluster, `ecs:DescribeTasks` / `ecs:ListTasks`, `bedrock:InvokeModel(WithResponseStream)` on `foundation-model/*`. |
 
-### Lambda roles (CloudFormation custom resources)
+### DB migrator
 
-Both trust `lambda.amazonaws.com`.
+The migrator is **not** Lambda-backed -- it runs as an ECS service
+(`migration.yaml`: a Fargate task that runs `lakerunner migrate`, then a
+`keepalive` container that idles). It uses `TaskRoleArn` for the migrator's
+task role and `ExecutionRoleArn` for image pull / secret resolution -- no
+dedicated role. So no `MigrationLambdaRoleArn` parameter exists.
+
+### Cert-import Lambda role (optional, PEM path only)
+
+Trusts `lambda.amazonaws.com`. Created only when `CertificateArn` is empty.
 
 | Role parameter | Why | Required permissions |
 |---|---|---|
-| `MigrationLambdaRoleArn` | Drives one-shot `ecs:RunTask` of the migrator on stack create/update. | `logs:*` on `*`, `ecs:RunTask` on the migrator task definition (cond. `ecs:cluster = ${ClusterArn}`), `ecs:DescribeTasks` (same cond.), `iam:PassRole` on `ExecutionRoleArn` and `TaskRoleArn`. |
-| `CertLambdaRoleArn` (optional) | Imports a customer-supplied PEM into ACM when `CertificateArn` is empty. | `logs:*` on `*`, `acm:ImportCertificate` on `*` (no ARN exists at create time), `acm:DeleteCertificate` / `AddTagsToCertificate` / `RemoveTagsFromCertificate` scoped to `arn:aws:acm:${Region}:${AccountId}:certificate/*`. |
+| `CertLambdaRoleArn` (optional) | Imports a customer-supplied PEM into ACM when `CertificateArn` is empty. | `logs:*` on `*`, `acm:ImportCertificate` on `*` (no ARN exists at create time), `acm:DeleteCertificate` / `AddTagsToCertificate` / `RemoveTagsFromCertificate` scoped to `arn:aws:acm:${Region}:${AccountId}:certificate/*`. Environments that cannot run Lambda must supply an ACM `CertificateArn` instead. |
 
 ## Resource policies
 
@@ -71,8 +78,10 @@ All three live in the customer's VPC. Tasks run in private subnets with
 
 - No role grants `s3:*` or `sqs:*` on resources outside the install
   (Cardinal's policy templates use `cardinal-*` ARN scopes).
-- No role grants `iam:*` except `iam:PassRole` on `MigrationLambdaRoleArn`,
-  scoped to `TaskRoleArn` and `ExecutionRoleArn`.
+- No running service grants `iam:*`. (The deployer needs `iam:PassRole` on
+  `TaskRoleArn` / `ExecutionRoleArn` to register ECS task definitions, and on
+  `CertLambdaRoleArn` if the PEM cert path is used -- see the infrastructure
+  permissions doc.)
 - No role grants `ec2:*`, `rds:*`, or `kms:*` to the running services.
 - No security group exposes anything to the public internet -- the ALB
   is internal-scheme, so its `0.0.0.0/0` rules are VPC-local.

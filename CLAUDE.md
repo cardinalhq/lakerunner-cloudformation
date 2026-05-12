@@ -28,7 +28,7 @@ The lakerunner root nests these children — application-tier resources only:
 |---|---|---|
 | 1 | `alb.yaml` | ALB, default 443 listener (ALB SG is customer-supplied) |
 | 2 | `cert.yaml` | Optional ACM cert importer (Lambda-backed custom resource) |
-| 3 | `migration.yaml` | One-shot DB migration custom resource |
+| 3 | `migration.yaml` | DB migration ECS service (runs migrator once, then idles) |
 | 4 | `services-query.yaml` | query-api, query-worker |
 | 5 | `services-process.yaml` | process-{logs,metrics,traces}, pubsub-sqs |
 | 6 | `services-control.yaml` | sweeper, monitoring, admin-api, alert-evaluator |
@@ -135,13 +135,15 @@ Pre-allocated, registered in `src/cardinal_cfn/listener_priorities.py`. Each ser
 | otel-grpc | 300 |
 | (reserved) | 400-999 |
 
-### Migration custom resource
+### Migration (no Lambda)
 
-Lambda-backed, runs the lakerunner migrator as a one-shot ECS task. Behavior:
+`migration.yaml` runs the lakerunner DB migrator as an **ECS service**, not a Lambda-backed custom resource (some target environments cannot run Lambda). Design: `docs/superpowers/specs/2026-05-12-no-lambda-migration-design.md`.
 
-- Stable `PhysicalResourceId`: `cardinal-migration-<InstallIdLong>`.
-- Trigger: `MigrationVersion` property = `LakerunnerImage` value. The migrator runs from the same image as the lakerunner service tasks (single `LakerunnerImage` parameter), so any image change reruns migrations and the two cannot drift. Customers who want digest pinning use `image@sha256:...` as the `LakerunnerImage` value. Mutable tags like `:latest` are not supported.
-- Create runs the migrator. Update reruns only if `MigrationVersion` changed. Delete is a no-op.
+- The migrator task definition has three containers: `configdb-init` (non-essential; `psql CREATE DATABASE configdb` if absent) → `migrator` (non-essential; `lakerunner migrate --databases=lrdb,configdb`; `dependsOn configdb-init=COMPLETE`) → `keepalive` (essential; sleeps; `dependsOn migrator=SUCCESS`).
+- Because `keepalive` is the only essential container and ECS won't start it until `migrator` exits 0, the task — and therefore the `MigratorService`, and therefore the `MigrationStack` nested stack — only reaches a stable state after migrations succeed. The service-tier stacks `DependsOn MigrationStack`, so they only deploy after migrations run. A failed migration → `keepalive` never starts → the ECS deployment circuit breaker fails the service → `MigrationStack` fails → the parent stack rolls back.
+- The migrator runs from the same image as the lakerunner service tasks (single `LakerunnerImage` parameter), so the two cannot drift; an image change redeploys `MigratorService` (rerunning the migrator) before the service-tier stacks update. Customers who want digest pinning use `image@sha256:...`; mutable tags like `:latest` are not supported.
+- `DesiredCount` is hardcoded to `1` (~$3/month Fargate). An operator may `aws ecs update-service --desired-count 0` to reclaim the slot — harmless CFN drift, re-applied on the next `LakerunnerImage` bump. The migrator must stay idempotent (a stray task recycle reruns it as a no-op).
+- The only remaining Lambda in the product is `cert.yaml`'s optional PEM-import custom resource, skipped when an ACM `CertificateArn` is supplied; no-Lambda environments must supply one.
 
 ### Service tier rule (B → C safe)
 

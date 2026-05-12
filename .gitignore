@@ -15,4 +15,4 @@ __pycache__/
 generated-templates/
 
 # Local scratch / not-for-commit scripts
-do-not-commit.sh
+do-not-commit*.sh
