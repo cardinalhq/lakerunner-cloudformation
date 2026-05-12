@@ -35,11 +35,10 @@ Choose one of:
   production. See [`certificates.md`](certificates.md) for issuance
   guidance.
 - **`CertificateBody` + `CertificatePrivateKey`** (+ optional
-  `CertificateChain`) -- ship raw PEMs and let the cert-import Lambda
-  push them into ACM. Required for air-gapped customers; useful for
-  testing with self-signed certs. Requires the `CertLambdaRoleArn`
-  parameter (the IT-side role from
-  [`required-roles.md`](required-roles.md)).
+  `CertificateChain`) -- ship raw PEMs; `cert.yaml` creates an
+  `AWS::IAM::ServerCertificate` from them and the ALB listener uses its
+  ARN. No Lambda, no out-of-band step. Useful for air-gapped customers
+  and self-signed test certs. (No `CertLambdaRoleArn` parameter.)
 
 ## Step 2: build the params file
 
@@ -89,11 +88,11 @@ print(json.dumps(params, indent=2))
 PY
 ```
 
-If you are importing PEMs instead of using `CertificateArn`, replace
-the `CertificateArn` entry with `CertificateBody`,
-`CertificatePrivateKey`, and (optionally) `CertificateChain`, and add
-`CertLambdaRoleArn`. PEMs are passed as raw multi-line strings in the
-JSON params file.
+If you are supplying PEMs instead of an `CertificateArn`, replace the
+`CertificateArn` entry with `CertificateBody`, `CertificatePrivateKey`,
+and (optionally) `CertificateChain` -- passed as raw multi-line strings
+in the JSON params file. The stack builds an `AWS::IAM::ServerCertificate`
+from them; nothing else is needed.
 
 `TemplateBaseUrl` defaults to the `dev` channel; release installs must
 override it to the matching version directory (trailing slash
@@ -115,8 +114,10 @@ aws cloudformation wait stack-create-complete \
     --region <REGION> --stack-name cardinal-lakerunner
 ```
 
-The stack creates no IAM, so no `CAPABILITY_*` flag is needed. Total
-install time is typically 10-15 minutes. The `migration` nested stack
+No `CAPABILITY_*` flag is needed. (The stack creates no IAM roles or
+policies; the PEM cert path creates an `AWS::IAM::ServerCertificate`,
+which is not a capability-gated resource type.) Total install time is
+typically 10-15 minutes. The `migration` nested stack
 comes up first -- it runs the migrator as an ECS task against the
 existing RDS and only reports complete once that task succeeds -- and
 the service-tier stacks (which `DependsOn` it) come up after.

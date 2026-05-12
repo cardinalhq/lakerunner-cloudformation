@@ -143,9 +143,6 @@ _ROLE_SG_PARAMS = [
     ("ExecutionRoleArn", "String", None,
      "ARN of the ECS task execution role (used at task launch to pull "
      "images and resolve secrets)."),
-    ("CertLambdaRoleArn", "String", "",
-     "ARN of the IAM role the cert-import Lambda assumes. Required only "
-     "when CertificateArn is empty (PEM-import path)."),
     ("TaskSgId", "AWS::EC2::SecurityGroup::Id", None,
      "Security group ID applied to every ECS task in the install."),
     ("AlbSgId", "AWS::EC2::SecurityGroup::Id", None,
@@ -385,7 +382,6 @@ def build() -> Template:
         "CertificateBody": Ref("CertificateBody"),
         "CertificatePrivateKey": Ref("CertificatePrivateKey"),
         "CertificateChain": Ref("CertificateChain"),
-        "CertLambdaRoleArn": Ref("CertLambdaRoleArn"),
     })
 
     alb_stack = _add_child(t, "AlbStack", "alb.yaml", {

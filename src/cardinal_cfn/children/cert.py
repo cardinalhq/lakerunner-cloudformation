@@ -1,10 +1,11 @@
-"""cert.yaml nested stack: optional ACM cert importer custom resource.
+"""cert.yaml nested stack: optional TLS certificate for the ALB HTTPS listener.
 
-Lets the customer pass cert/private-key/chain PEMs directly into the stack
-parameters. A Lambda-backed custom resource imports them into ACM and the
-output ``EffectiveCertificateArn`` is wired into the ALB child. If the
-customer instead supplies an existing ``CertificateArn`` the Lambda is not
-deployed and the existing ARN is forwarded as-is.
+No Lambda. If the customer supplies an existing ``CertificateArn`` it is
+forwarded as-is. Otherwise the customer passes the certificate / private key
+(and optional chain) as PEM strings and the stack creates an
+``AWS::IAM::ServerCertificate`` from them -- an ALB HTTPS listener accepts an
+IAM server certificate ARN exactly like an ACM one. Either way the output
+``EffectiveCertificateArn`` is wired into the ALB child.
 """
 
 from troposphere import (
@@ -16,23 +17,21 @@ from troposphere import (
     Output,
     Parameter,
     Ref,
-    Sub,
     Template,
 )
-from troposphere.awslambda import Code, Function
-from troposphere.cloudformation import CustomResource
-from troposphere.logs import LogGroup
+from troposphere.iam import ServerCertificate
 
-from cardinal_cfn.children import cert_lambda
 from cardinal_cfn.naming import cardinal_tags
 from cardinal_cfn.parameters import add_install_id_parameters
-from cardinal_cfn.policies import apply_policy
+
+AWS_NO_VALUE = "AWS::NoValue"
 
 
 def build() -> Template:
     t = Template()
     t.set_description(
-        "Cardinal cert: optional ACM certificate import (custom-resource Lambda)."
+        "Cardinal cert: optional TLS certificate for the ALB HTTPS listener "
+        "(an existing ACM/IAM cert ARN, or an IAM server certificate built from PEMs)."
     )
 
     add_install_id_parameters(t)
@@ -42,8 +41,8 @@ def build() -> Template:
         Type="String",
         Default="",
         Description=(
-            "Existing ACM certificate ARN. If empty, the cert is imported "
-            "from CertificateBody + CertificatePrivateKey."
+            "Existing ACM (or IAM server) certificate ARN. If empty, a "
+            "certificate is built from CertificateBody + CertificatePrivateKey."
         ),
     ))
     t.add_parameter(Parameter(
@@ -67,58 +66,30 @@ def build() -> Template:
         NoEcho=True,
         Description="Optional PEM-encoded chain of intermediate certificates.",
     ))
-    t.add_parameter(Parameter(
-        "CertLambdaRoleArn",
-        Type="String",
-        Default="",
-        Description=(
-            "IAM role ARN the cert-import Lambda assumes. Required when the "
-            "PEM-import path is in use (CertificateArn empty)."
-        ),
-    ))
 
+    # CertificateArn empty + a PEM body provided -> build an IAM server cert.
     t.add_condition(
-        "ImportCert",
+        "CreateServerCert",
         And(Equals(Ref("CertificateArn"), ""),
             Not(Equals(Ref("CertificateBody"), ""))),
     )
+    t.add_condition("HasCertChain", Not(Equals(Ref("CertificateChain"), "")))
 
-    log_group = t.add_resource(LogGroup(
-        "CertLambdaLogGroup",
-        Condition="ImportCert",
-        LogGroupName=Sub("/aws/lambda/cardinal-cert-${InstallIdLong}"),
-        RetentionInDays=14,
-    ))
-    apply_policy(log_group, "log-group")
-
-    cert_fn = t.add_resource(Function(
-        "CertLambda",
-        Condition="ImportCert",
-        FunctionName=Sub("cardinal-cert-${InstallIdLong}"),
-        Code=Code(ZipFile=cert_lambda.SOURCE),
-        Runtime="python3.11",
-        Handler="index.lambda_handler",
-        Role=Ref("CertLambdaRoleArn"),
-        Timeout=900,
-        Tags=cardinal_tags(component="cert", role="lambda"),
-    ))
-
-    custom = t.add_resource(CustomResource(
-        "ImportedCertificate",
-        Condition="ImportCert",
-        ServiceToken=GetAtt(cert_fn, "Arn"),
-        InstallIdLong=Ref("InstallIdLong"),
+    server_cert = t.add_resource(ServerCertificate(
+        "ServerCertificate",
+        Condition="CreateServerCert",
         CertificateBody=Ref("CertificateBody"),
-        CertificatePrivateKey=Ref("CertificatePrivateKey"),
-        CertificateChain=Ref("CertificateChain"),
+        PrivateKey=Ref("CertificatePrivateKey"),
+        CertificateChain=If("HasCertChain", Ref("CertificateChain"), Ref(AWS_NO_VALUE)),
+        Tags=cardinal_tags(component="cert", role="server-cert"),
     ))
 
     t.add_output(Output(
         "EffectiveCertificateArn",
-        Description="ACM certificate ARN to use on the ALB HTTPS listener.",
+        Description="Certificate ARN to use on the ALB HTTPS listener.",
         Value=If(
-            "ImportCert",
-            GetAtt(custom, "CertificateArn"),
+            "CreateServerCert",
+            GetAtt(server_cert, "Arn"),
             Ref("CertificateArn"),
         ),
     ))

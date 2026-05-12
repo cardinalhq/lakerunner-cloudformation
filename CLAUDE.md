@@ -27,7 +27,7 @@ The lakerunner root nests these children — application-tier resources only:
 | # | Template | Owns |
 |---|---|---|
 | 1 | `alb.yaml` | ALB, default 443 listener (ALB SG is customer-supplied) |
-| 2 | `cert.yaml` | Optional ACM cert importer (Lambda-backed custom resource) |
+| 2 | `cert.yaml` | Optional cert installer (pass-through ACM/IAM ARN, or `AWS::IAM::ServerCertificate` from PEMs) |
 | 3 | `migration.yaml` | DB migration ECS service (runs migrator once, then idles) |
 | 4 | `services-query.yaml` | query-api, query-worker |
 | 5 | `services-process.yaml` | process-{logs,metrics,traces}, pubsub-sqs |
@@ -143,7 +143,7 @@ Pre-allocated, registered in `src/cardinal_cfn/listener_priorities.py`. Each ser
 - Because `keepalive` is the only essential container and ECS won't start it until `migrator` exits 0, the task — and therefore the `MigratorService`, and therefore the `MigrationStack` nested stack — only reaches a stable state after migrations succeed. The service-tier stacks `DependsOn MigrationStack`, so they only deploy after migrations run. A failed migration → `keepalive` never starts → the ECS deployment circuit breaker fails the service → `MigrationStack` fails → the parent stack rolls back.
 - The migrator runs from the same image as the lakerunner service tasks (single `LakerunnerImage` parameter), so the two cannot drift; an image change redeploys `MigratorService` (rerunning the migrator) before the service-tier stacks update. Customers who want digest pinning use `image@sha256:...`; mutable tags like `:latest` are not supported.
 - `DesiredCount` is hardcoded to `1` (~$3/month Fargate). An operator may `aws ecs update-service --desired-count 0` to reclaim the slot — harmless CFN drift, re-applied on the next `LakerunnerImage` bump. The migrator must stay idempotent (a stray task recycle reruns it as a no-op).
-- The only remaining Lambda in the product is `cert.yaml`'s optional PEM-import custom resource, skipped when an ACM `CertificateArn` is supplied; no-Lambda environments must supply one.
+- There are no Lambdas anywhere in the product. `cert.yaml` either forwards a supplied ACM/IAM certificate ARN, or — when `CertificateArn` is empty and PEM material is supplied — creates an `AWS::IAM::ServerCertificate` (an ALB HTTPS listener accepts an IAM server-cert ARN like an ACM one).
 
 ### Service tier rule (B → C safe)
 
