@@ -396,6 +396,16 @@ def test_outputs_have_no_export(td):
         assert "Export" not in out, f"output {name} should not have an Export"
 
 
+def test_outputs_gated_so_import_change_set_adds_none(td):
+    """An IMPORT change set rejects adding/modifying Outputs, so every output is
+    conditioned on CreateCfnOnlyResources -- false when ImportMode=Yes, so the
+    import template has no Outputs section at all."""
+    for name, out in td["Outputs"].items():
+        assert out.get("Condition") == "CreateCfnOnlyResources", (
+            f"output {name} must be gated on CreateCfnOnlyResources"
+        )
+
+
 # ---------------------------------------------------------------------------
 # Optional name parameters (used at import time)
 # ---------------------------------------------------------------------------

@@ -772,100 +772,50 @@ def build() -> Template:
     )
 
     # -----------------------------------------------------------------------
-    # Outputs (1:1 with the JSON keys that scripts/data-setup.sh emits)
+    # Outputs (1:1 with the JSON keys that scripts/data-setup.sh emits).
+    #
+    # Every output is gated on CreateCfnOnlyResources: an IMPORT change set may
+    # only add the resources being imported -- adding or modifying Outputs is
+    # rejected ("you cannot modify or add [Outputs]"). With ImportMode=Yes the
+    # condition is false for all of them, so the import template carries no
+    # Outputs section; they appear on the follow-up ImportMode=No update.
     # -----------------------------------------------------------------------
 
-    t.add_output(
-        Output(
-            "DbEndpoint",
-            Description="RDS endpoint hostname.",
-            Value=GetAtt(db_instance, "Endpoint.Address"),
+    def _emit_output(name: str, description: str, value) -> None:
+        t.add_output(
+            Output(
+                name,
+                Description=description,
+                Value=value,
+                Condition="CreateCfnOnlyResources",
+            )
         )
-    )
-    t.add_output(
-        Output(
-            "DbPort",
-            Description="RDS endpoint port.",
-            Value=GetAtt(db_instance, "Endpoint.Port"),
-        )
-    )
-    t.add_output(
-        Output(
-            "DbName",
-            Description="RDS database name.",
-            Value="lakerunner",
-        )
-    )
-    t.add_output(
-        Output(
-            "DbMasterSecretArn",
-            Description="ARN of the RDS master-credentials secret.",
-            Value=Ref(db_master_secret),
-        )
-    )
-    t.add_output(
-        Output(
-            "MaestroDbSecretArn",
-            Description="ARN of the Maestro app DB credentials secret.",
-            Value=Ref(maestro_db_secret),
-        )
-    )
-    t.add_output(
-        Output(
-            "IngestBucketName",
-            Description="Name of the S3 ingest bucket.",
-            Value=Ref(ingest_bucket),
-        )
-    )
-    t.add_output(
-        Output(
-            "IngestQueueUrl",
-            Description="URL of the SQS ingest queue.",
-            Value=Ref(ingest_queue),
-        )
-    )
-    t.add_output(
-        Output(
-            "IngestQueueArn",
-            Description="ARN of the SQS ingest queue.",
-            Value=GetAtt(ingest_queue, "Arn"),
-        )
-    )
-    t.add_output(
-        Output(
-            "LicenseSecretArn",
-            Description="ARN of the license secret.",
-            Value=Ref(license_secret),
-        )
-    )
-    t.add_output(
-        Output(
-            "InternalKeysSecretArn",
-            Description="ARN of the internal service keys secret.",
-            Value=Ref(internal_keys_secret),
-        )
-    )
-    t.add_output(
-        Output(
-            "AdminKeySecretArn",
-            Description="ARN of the first-boot admin key secret.",
-            Value=Ref(admin_key_secret),
-        )
-    )
-    t.add_output(
-        Output(
-            "StorageProfilesParamName",
-            Description="Name of the storage-profiles SSM parameter.",
-            Value=Ref(storage_profiles_param),
-        )
-    )
-    t.add_output(
-        Output(
-            "ApiKeysParamName",
-            Description="Name of the external API-keys SSM parameter.",
-            Value=Ref(api_keys_param),
-        )
-    )
+
+    _emit_output("DbEndpoint", "RDS endpoint hostname.",
+                 GetAtt(db_instance, "Endpoint.Address"))
+    _emit_output("DbPort", "RDS endpoint port.",
+                 GetAtt(db_instance, "Endpoint.Port"))
+    _emit_output("DbName", "RDS database name.", "lakerunner")
+    _emit_output("DbMasterSecretArn", "ARN of the RDS master-credentials secret.",
+                 Ref(db_master_secret))
+    _emit_output("MaestroDbSecretArn", "ARN of the Maestro app DB credentials secret.",
+                 Ref(maestro_db_secret))
+    _emit_output("IngestBucketName", "Name of the S3 ingest bucket.",
+                 Ref(ingest_bucket))
+    _emit_output("IngestQueueUrl", "URL of the SQS ingest queue.",
+                 Ref(ingest_queue))
+    _emit_output("IngestQueueArn", "ARN of the SQS ingest queue.",
+                 GetAtt(ingest_queue, "Arn"))
+    _emit_output("LicenseSecretArn", "ARN of the license secret.",
+                 Ref(license_secret))
+    _emit_output("InternalKeysSecretArn", "ARN of the internal service keys secret.",
+                 Ref(internal_keys_secret))
+    _emit_output("AdminKeySecretArn", "ARN of the first-boot admin key secret.",
+                 Ref(admin_key_secret))
+    _emit_output("StorageProfilesParamName", "Name of the storage-profiles SSM parameter.",
+                 Ref(storage_profiles_param))
+    _emit_output("ApiKeysParamName", "Name of the external API-keys SSM parameter.",
+                 Ref(api_keys_param))
 
     return t
 
