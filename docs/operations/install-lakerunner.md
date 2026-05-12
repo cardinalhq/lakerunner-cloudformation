@@ -74,7 +74,6 @@ params += [
     # B: IT roles + SGs
     {"ParameterKey": "TaskRoleArn",            "ParameterValue": f"arn:aws:iam::{account}:role/cardinal-task-role"},
     {"ParameterKey": "ExecutionRoleArn",       "ParameterValue": f"arn:aws:iam::{account}:role/cardinal-execution-role"},
-    {"ParameterKey": "MigrationLambdaRoleArn", "ParameterValue": f"arn:aws:iam::{account}:role/cardinal-migration-lambda-role"},
     {"ParameterKey": "TaskSgId",               "ParameterValue": "sg-..."},
     {"ParameterKey": "AlbSgId",                "ParameterValue": "sg-..."},
     # C: network + TLS + DEX
@@ -117,9 +116,10 @@ aws cloudformation wait stack-create-complete \
 ```
 
 The stack creates no IAM, so no `CAPABILITY_*` flag is needed. Total
-install time is typically 10-15 minutes (12 ECS services come up in
-parallel; the migration custom resource runs against the existing
-RDS).
+install time is typically 10-15 minutes. The `migration` nested stack
+comes up first -- it runs the migrator as an ECS task against the
+existing RDS and only reports complete once that task succeeds -- and
+the service-tier stacks (which `DependsOn` it) come up after.
 
 ## Step 4: post-install discovery
 

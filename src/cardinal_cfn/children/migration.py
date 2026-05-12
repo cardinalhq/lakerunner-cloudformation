@@ -1,16 +1,29 @@
-"""migration.yaml nested stack: DB migration ECS task + custom-resource Lambda."""
+"""migration.yaml nested stack: DB migrator task definition + a long-running
+ECS service that runs the migrator once and then sleeps.
+
+No Lambda. The migrator task definition has three containers:
+
+  1. configdb-init (non-essential): psql CREATE DATABASE configdb if absent.
+  2. migrator (non-essential): `lakerunner migrate --databases=lrdb,configdb`,
+     dependsOn configdb-init=COMPLETE.
+  3. keepalive (essential): sleeps forever, dependsOn migrator=SUCCESS.
+
+Because keepalive is the only essential container and ECS will not start it
+until migrator exits 0, the task is not RUNNING -- and therefore the ECS
+service is not at steady state, and therefore the MigrationStack nested stack
+is not CREATE_COMPLETE -- until migrations succeed. The service-tier stacks
+already DependsOn MigrationStack, so they only deploy after migrations run. An
+image change redeploys the service (new migrator run) before those stacks
+update, exactly as the old custom-resource trigger did.
+"""
 
 from troposphere import (
     Template,
     Parameter,
     Ref,
-    GetAtt,
     Output,
-    Split,
     Sub,
 )
-from troposphere.awslambda import Code, Function
-from troposphere.cloudformation import CustomResource
 from troposphere.ecs import (
     ContainerDefinition,
     ContainerDependency,
@@ -21,7 +34,7 @@ from troposphere.ecs import (
 )
 from troposphere.logs import LogGroup
 
-from cardinal_cfn.children import migration_lambda
+from cardinal_cfn.children.services_common import build_ecs_service
 from cardinal_cfn.defaults import load_defaults
 from cardinal_cfn.naming import cardinal_tags
 from cardinal_cfn.parameters import add_install_id_parameters
@@ -30,7 +43,10 @@ from cardinal_cfn.policies import apply_policy
 
 def build() -> Template:
     t = Template()
-    t.set_description("Cardinal migration: DB migrator ECS task and custom-resource Lambda.")
+    t.set_description(
+        "Cardinal migration: DB migrator task definition and the ECS service "
+        "that runs it once and then idles."
+    )
 
     defaults = load_defaults()
 
@@ -42,7 +58,6 @@ def build() -> Template:
     t.add_parameter(Parameter("TaskSecurityGroupId", Type="String", Description="ECS task security group ID."))
     t.add_parameter(Parameter("ExecutionRoleArn", Type="String", Description="ECS task execution role ARN."))
     t.add_parameter(Parameter("TaskRoleArn", Type="String", Description="ECS task role ARN (used by the migrator container)."))
-    t.add_parameter(Parameter("MigrationLambdaRoleArn", Type="String", Description="IAM role ARN the migration Lambda assumes."))
     t.add_parameter(Parameter("PrivateSubnetsCsv", Type="String", Description="Comma-separated private subnet IDs."))
 
     # Database parameters
@@ -51,10 +66,10 @@ def build() -> Template:
     t.add_parameter(Parameter("DbName", Type="String", Default="lakerunner", Description="Database name."))
     t.add_parameter(Parameter("DbSecretArn", Type="String", Description="ARN of the DB master secret."))
 
-    # Image parameters.  The migrator uses the same image as the lakerunner
-    # service tasks (LakerunnerImage) so the two cannot drift.  The custom
-    # resource keys its trigger off this same value, so any change to
-    # LakerunnerImage reruns migrations.
+    # Image parameters. The migrator runs from the same image as the lakerunner
+    # service tasks (LakerunnerImage), so the two cannot drift; an image change
+    # redeploys the migration service (rerunning the migrator) before the
+    # service-tier stacks update.
     t.add_parameter(
         Parameter(
             "LakerunnerImage",
@@ -68,46 +83,29 @@ def build() -> Template:
             "DbInitImage",
             Type="String",
             Default=defaults["images"]["db_init"],
-            Description="Image used by the configdb-init container (must include psql).",
+            Description="Image for the configdb-init and keepalive containers (must include psql and a shell).",
         )
     )
 
     # ---------------------------------------------------------------------------
-    # Log groups
+    # Log group (shared by all three containers)
     # ---------------------------------------------------------------------------
-    migrator_lg = t.add_resource(
-        LogGroup(
-            "MigratorLogGroup",
-            RetentionInDays=14,
-        )
-    )
+    migrator_lg = t.add_resource(LogGroup("MigratorLogGroup", RetentionInDays=14))
     apply_policy(migrator_lg, "log-group")
 
-    lambda_lg = t.add_resource(
-        LogGroup(
-            "LambdaLogGroup",
-            LogGroupName=Sub("/aws/lambda/cardinal-migration-${InstallIdLong}"),
-            RetentionInDays=14,
+    def _logs(stream_prefix: str) -> LogConfiguration:
+        return LogConfiguration(
+            LogDriver="awslogs",
+            Options={
+                "awslogs-group": Ref(migrator_lg),
+                "awslogs-region": Ref("AWS::Region"),
+                "awslogs-stream-prefix": stream_prefix,
+            },
         )
-    )
-    apply_policy(lambda_lg, "log-group")
 
     # ---------------------------------------------------------------------------
-    # Migrator ECS task definition.
-    #
-    # Two containers:
-    #   1. configdb-init (non-essential): runs psql to CREATE DATABASE configdb
-    #      if it doesn't already exist. lakerunner migrate connects to existing
-    #      DBs only and never issues CREATE DATABASE itself.
-    #   2. migrator (essential): runs `lakerunner migrate --databases=lrdb,configdb`
-    #      against both DBs. Uses dependsOn=COMPLETE so it waits for the init
-    #      container to finish first.
+    # Migrator ECS task definition (configdb-init -> migrator -> keepalive)
     # ---------------------------------------------------------------------------
-    db_init_secrets = [
-        Secret(Name="LRDB_USER", ValueFrom=Sub("${DbSecretArn}:username::")),
-        Secret(Name="LRDB_PASSWORD", ValueFrom=Sub("${DbSecretArn}:password::")),
-    ]
-
     configdb_init_container = ContainerDefinition(
         Name="configdb-init",
         Image=Ref("DbInitImage"),
@@ -128,22 +126,20 @@ def build() -> Template:
             Environment(Name="LRDB_HOST", Value=Ref("DbEndpoint")),
             Environment(Name="LRDB_PORT", Value=Ref("DbPort")),
         ],
-        Secrets=db_init_secrets,
-        LogConfiguration=LogConfiguration(
-            LogDriver="awslogs",
-            Options={
-                "awslogs-group": Ref(migrator_lg),
-                "awslogs-region": Ref("AWS::Region"),
-                "awslogs-stream-prefix": "configdb-init",
-            },
-        ),
+        Secrets=[
+            Secret(Name="LRDB_USER", ValueFrom=Sub("${DbSecretArn}:username::")),
+            Secret(Name="LRDB_PASSWORD", ValueFrom=Sub("${DbSecretArn}:password::")),
+        ],
+        LogConfiguration=_logs("configdb-init"),
     )
 
     migrator_container = ContainerDefinition(
         Name="migrator",
         Image=Ref("LakerunnerImage"),
         Command=["/app/bin/lakerunner", "migrate", "--databases=lrdb,configdb"],
-        Essential=True,
+        # Non-essential: it runs to completion and exits. The task keeps running
+        # via the keepalive container, which only starts once migrator exits 0.
+        Essential=False,
         DependsOn=[ContainerDependency(ContainerName="configdb-init", Condition="COMPLETE")],
         Environment=[
             Environment(Name="LRDB_HOST", Value=Ref("DbEndpoint")),
@@ -161,14 +157,20 @@ def build() -> Template:
             Secret(Name="CONFIGDB_USER", ValueFrom=Sub("${DbSecretArn}:username::")),
             Secret(Name="CONFIGDB_PASSWORD", ValueFrom=Sub("${DbSecretArn}:password::")),
         ],
-        LogConfiguration=LogConfiguration(
-            LogDriver="awslogs",
-            Options={
-                "awslogs-group": Ref(migrator_lg),
-                "awslogs-region": Ref("AWS::Region"),
-                "awslogs-stream-prefix": "migrator",
-            },
-        ),
+        LogConfiguration=_logs("migrator"),
+    )
+
+    keepalive_container = ContainerDefinition(
+        Name="keepalive",
+        Image=Ref("DbInitImage"),
+        # The single essential container. ECS will not start it until migrator
+        # exits 0, so the task -- and thus the service, and thus this nested
+        # stack -- only reaches a stable RUNNING state after migrations succeed.
+        Essential=True,
+        DependsOn=[ContainerDependency(ContainerName="migrator", Condition="SUCCESS")],
+        EntryPoint=["sh", "-c"],
+        Command=["echo 'migrations complete; idling'; exec sleep 2147483647"],
+        LogConfiguration=_logs("keepalive"),
     )
 
     task_def = t.add_resource(
@@ -181,51 +183,42 @@ def build() -> Template:
             Memory="512",
             ExecutionRoleArn=Ref("ExecutionRoleArn"),
             TaskRoleArn=Ref("TaskRoleArn"),
-            ContainerDefinitions=[configdb_init_container, migrator_container],
+            ContainerDefinitions=[configdb_init_container, migrator_container, keepalive_container],
             Tags=cardinal_tags(component="migration", role="migrator-task"),
         )
     )
 
     # ---------------------------------------------------------------------------
-    # Migration Lambda
+    # Migration service: desired count 1, runs the migrator task and idles.
+    # DesiredCount is intentionally hardcoded (not a parameter): an operator may
+    # `aws ecs update-service --desired-count 0` to reclaim the slot -- that is
+    # harmless CFN drift, and the next LakerunnerImage bump re-applies 1 and
+    # reruns migrations. A parameter at 0 would instead suppress migrations on
+    # the next image bump.
     # ---------------------------------------------------------------------------
-    migration_fn = t.add_resource(
-        Function(
-            "MigrationLambda",
-            FunctionName=Sub("cardinal-migration-${InstallIdLong}"),
-            Code=Code(ZipFile=migration_lambda.SOURCE),
-            Runtime="python3.11",
-            Handler="index.lambda_handler",
-            Role=Ref("MigrationLambdaRoleArn"),
-            Timeout=900,
-            Tags=cardinal_tags(component="migration", role="lambda"),
-        )
+    migrator_service = build_ecs_service(
+        service_key="migrator",
+        cluster_arn_param="ClusterArn",
+        task_definition_ref=task_def,
+        desired_count=1,
+        subnets_csv_param="PrivateSubnetsCsv",
+        security_group_id_param="TaskSecurityGroupId",
+        container_name="keepalive",
     )
-
-    # ---------------------------------------------------------------------------
-    # Custom resource — triggers the migrator on create/update
-    # ---------------------------------------------------------------------------
-    custom_resource = t.add_resource(
-        CustomResource(
-            "MigrationRunner",
-            ServiceToken=GetAtt(migration_fn, "Arn"),
-            MigrationVersion=Ref("LakerunnerImage"),
-            InstallIdLong=Ref("InstallIdLong"),
-            ClusterArn=Ref("ClusterArn"),
-            TaskDefinitionArn=Ref(task_def),
-            PrivateSubnetIds=Split(",", Ref("PrivateSubnetsCsv")),
-            TaskSecurityGroupId=Ref("TaskSecurityGroupId"),
-        )
-    )
+    t.add_resource(migrator_service)
 
     # ---------------------------------------------------------------------------
     # Outputs
     # ---------------------------------------------------------------------------
     t.add_output(
         Output(
-            "MigrationCustomResourceRef",
-            Value=Ref(custom_resource),
-            Description="Custom resource ref — downstream stacks depend on this.",
+            "MigrationServiceArn",
+            Value=Ref(migrator_service),
+            Description=(
+                "ARN of the migration ECS service. Downstream stacks depend on "
+                "MigrationStack, which is only complete once this service is "
+                "stable -- i.e. once migrations have run."
+            ),
         )
     )
 
@@ -233,5 +226,4 @@ def build() -> Template:
 
 
 if __name__ == "__main__":
-    import sys
     print(build().to_yaml(), end="")

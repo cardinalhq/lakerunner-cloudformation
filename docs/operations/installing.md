@@ -7,8 +7,8 @@ Install is one shell-script run followed by one CloudFormation stack:
    SSM, the ECS cluster, and the Cloud Map namespace via raw AWS CLI.
    Idempotent. Emits a JSON document that names every resource.
 2. [`install-lakerunner.md`](install-lakerunner.md) --
-   `cardinal-lakerunner` CloudFormation stack. Creates the ALB, ECS
-   services, and migration custom resource. Consumes the script's
+   `cardinal-lakerunner` CloudFormation stack. Creates the ALB, the ECS
+   services, and the DB-migration ECS service. Consumes the script's
    JSON output as input parameters along with the customer-supplied
    IAM role ARNs and security group IDs.
 

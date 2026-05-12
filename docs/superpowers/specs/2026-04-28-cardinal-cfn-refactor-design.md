@@ -206,6 +206,8 @@ Each priority is hard-coded into the per-service ListenerRule in its current tie
 
 ### Migration custom resource semantics
 
+> **Superseded** by `docs/superpowers/specs/2026-05-12-no-lambda-migration-design.md`: the migrator now runs as a long-running ECS service (no Lambda, no custom resource). The behavior below describes the original Lambda-backed design and is kept for historical context.
+
 `migration.yaml` runs the lakerunner DB migrator as a one-shot ECS task triggered by a Lambda-backed custom resource. Behavior contract:
 
 - **PhysicalResourceId** is stable: `cardinal-migration-<InstallIdLong>`. CFN must never observe an ID change between Create and Update calls — that would force a delete-and-recreate cycle.
