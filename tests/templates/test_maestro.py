@@ -245,6 +245,21 @@ def test_maestro_container_password_secret_present(td):
     assert "MAESTRO_DB_PASSWORD" in secret_names
 
 
+def test_mcp_gateway_container_has_license_data(td):
+    """mcp-gateway's license-go loader honors LICENSE_DATA env var;
+    without it the container falls through to /app/license/license.json
+    and the task fails at startup."""
+    mcp = _container(td, "mcp-gateway")
+    secret_names = {s["Name"] for s in mcp.get("Secrets", [])}
+    assert "LICENSE_DATA" in secret_names
+
+
+def test_maestro_container_has_license_data(td):
+    maestro_c = _container(td, "maestro")
+    secret_names = {s["Name"] for s in maestro_c.get("Secrets", [])}
+    assert "LICENSE_DATA" in secret_names
+
+
 def test_dex_init_container_env_has_issuer_url(td):
     dex_init_c = _container(td, "dex-init")
     env_names = {e["Name"] for e in dex_init_c.get("Environment", [])}
