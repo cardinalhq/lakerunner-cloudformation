@@ -153,9 +153,9 @@ _ROLE_SG_PARAMS = [
 # ---------------------------------------------------------------------------
 # Infra-setup output parameters: identifiers for the resources the
 # scripts/data-setup.sh driver already created. Names match the script's
-# JSON output keys 1:1. Sensitive values (license/admin/internal-keys) come
-# in as Secret ARNs -- the underlying secret values stay in Secrets Manager
-# and are never seen by CloudFormation.
+# JSON output keys 1:1. Sensitive values (license/admin) come in as Secret
+# ARNs -- the underlying secret values stay in Secrets Manager and are
+# never seen by CloudFormation.
 # ---------------------------------------------------------------------------
 _INFRA_SETUP_PARAMS = [
     ("DbEndpoint", "String", None, "RDS endpoint hostname (infra-setup output)."),
@@ -173,8 +173,6 @@ _INFRA_SETUP_PARAMS = [
      "ARN of the SQS ingest queue (infra-setup output)."),
     ("LicenseSecretArn", "String", None,
      "ARN of the cardinal-license secret (infra-setup output)."),
-    ("InternalKeysSecretArn", "String", None,
-     "ARN of the cardinal-internal-keys secret (infra-setup output)."),
     ("AdminKeySecretArn", "String", None,
      "ARN of the cardinal-admin-key secret (infra-setup output)."),
     ("StorageProfilesParamName", "String", None,
@@ -430,7 +428,6 @@ def build() -> Template:
             "QueueUrl": Ref("IngestQueueUrl"),
             "QueueArn": Ref("IngestQueueArn"),
             "LicenseSecretArn": Ref("LicenseSecretArn"),
-            "InternalServiceKeysSecretArn": Ref("InternalKeysSecretArn"),
             "ApiKeysParamName": Ref("ApiKeysParamName"),
             "StorageProfilesParamName": Ref("StorageProfilesParamName"),
             "MigrationComplete": migration_complete,
@@ -500,7 +497,6 @@ def build() -> Template:
         "BucketName": Ref("IngestBucketName"),
         "QueueArn": Ref("IngestQueueArn"),
         "LicenseSecretArn": Ref("LicenseSecretArn"),
-        "InternalServiceKeysSecretArn": Ref("InternalKeysSecretArn"),
         "ApiKeysParamName": Ref("ApiKeysParamName"),
         "StorageProfilesParamName": Ref("StorageProfilesParamName"),
         "HttpsListenerArn": GetAtt(alb_stack, "Outputs.HttpsListenerArn"),
@@ -529,7 +525,6 @@ def build() -> Template:
         "DbSecretArn": Ref("DbMasterSecretArn"),
         "MaestroDbSecretArn": Ref("MaestroDbSecretArn"),
         "LicenseSecretArn": Ref("LicenseSecretArn"),
-        "InternalServiceKeysSecretArn": Ref("InternalKeysSecretArn"),
         "ApiKeysParamName": Ref("ApiKeysParamName"),
         "StorageProfilesParamName": Ref("StorageProfilesParamName"),
         "MigrationComplete": migration_complete,

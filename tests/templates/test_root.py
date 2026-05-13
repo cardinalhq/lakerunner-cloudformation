@@ -33,7 +33,6 @@ def test_required_parameters(td):
         "IngestQueueUrl",
         "IngestQueueArn",
         "LicenseSecretArn",
-        "InternalKeysSecretArn",
         "AdminKeySecretArn",
         "StorageProfilesParamName",
         "ApiKeysParamName",

@@ -34,7 +34,6 @@ def test_required_cross_stack_parameters(td):
         "DbSecretArn",
         "MaestroDbSecretArn",
         "LicenseSecretArn",
-        "InternalServiceKeysSecretArn",
         "ApiKeysParamName",
         "StorageProfilesParamName",
         "MigrationComplete",

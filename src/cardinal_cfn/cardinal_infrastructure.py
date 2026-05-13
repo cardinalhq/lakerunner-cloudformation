@@ -6,7 +6,7 @@ Customer-deployable peer to ``cardinal-vpc``. Creates the resources that
 - RDS PostgreSQL instance + DB subnet group + master secret
 - S3 ingest bucket + lifecycle policy + S3 -> SQS notification
 - SQS ingest queue + queue policy
-- License / internal-keys / admin-key / maestro-db secrets
+- License / admin-key / maestro-db secrets
 - /cardinal/storage-profiles and /cardinal/api-keys SSM parameters
 
 Conceptually a CloudFormation port of ``scripts/data-setup.sh``; the
@@ -53,8 +53,8 @@ collide on retry. To recover:
    ``delete-secret --force-delete-without-recovery``), then redeploy.
 
 Resources without explicit names (RDS, SQS, DB subnet group, the
-db-master / internal-keys / maestro-db secrets) are CFN-named and
-collide-free on retry.
+db-master / maestro-db secrets) are CFN-named and collide-free on
+retry.
 """
 
 from troposphere import (
@@ -311,18 +311,6 @@ def build() -> Template:
             ),
         )
     )
-    internal_keys_secret_name = t.add_parameter(
-        Parameter(
-            "InternalKeysSecretName",
-            Type="String",
-            Default="",
-            Description=(
-                "Optional explicit name for the internal-keys secret. "
-                "Set to the existing name (e.g. 'cardinal-internal-keys') "
-                "when importing; blank otherwise."
-            ),
-        )
-    )
     maestro_db_secret_name = t.add_parameter(
         Parameter(
             "MaestroDBSecretName",
@@ -394,7 +382,6 @@ def build() -> Template:
                     "DBSubnetGroupName",
                     "IngestQueueName",
                     "DBMasterSecretName",
-                    "InternalKeysSecretName",
                     "MaestroDBSecretName",
                 ],
             },
@@ -432,10 +419,6 @@ def build() -> Template:
     t.add_condition("AutoNameIngestQueue", Equals(Ref(ingest_queue_name), ""))
     t.add_condition(
         "AutoNameDBMasterSecret", Equals(Ref(db_master_secret_name), "")
-    )
-    t.add_condition(
-        "AutoNameInternalKeysSecret",
-        Equals(Ref(internal_keys_secret_name), ""),
     )
     t.add_condition(
         "AutoNameMaestroDBSecret", Equals(Ref(maestro_db_secret_name), "")
@@ -647,7 +630,7 @@ def build() -> Template:
     )
 
     # -----------------------------------------------------------------------
-    # Application secrets (license, internal-keys, admin-key, maestro-db)
+    # Application secrets (license, admin-key, maestro-db)
     # -----------------------------------------------------------------------
 
     license_secret = t.add_resource(
@@ -658,28 +641,6 @@ def build() -> Template:
                 Description="Cardinal lakerunner license token (z64:...).",
                 SecretString=Ref(license_data),
                 Tags=_tags(component="license"),
-            )
-        )
-    )
-
-    internal_keys_secret = t.add_resource(
-        _retain(
-            Secret(
-                "InternalKeysSecret",
-                Name=If(
-                    "AutoNameInternalKeysSecret",
-                    Ref(AWS_NO_VALUE),
-                    Ref(internal_keys_secret_name),
-                ),
-                Description=(
-                    "Internal service keys: opaque high-entropy string "
-                    "shared between lakerunner services."
-                ),
-                GenerateSecretString=GenerateSecretString(
-                    PasswordLength=64,
-                    ExcludePunctuation=True,
-                ),
-                Tags=_tags(component="internal-keys"),
             )
         )
     )
@@ -808,8 +769,6 @@ def build() -> Template:
                  GetAtt(ingest_queue, "Arn"))
     _emit_output("LicenseSecretArn", "ARN of the license secret.",
                  Ref(license_secret))
-    _emit_output("InternalKeysSecretArn", "ARN of the internal service keys secret.",
-                 Ref(internal_keys_secret))
     _emit_output("AdminKeySecretArn", "ARN of the first-boot admin key secret.",
                  Ref(admin_key_secret))
     _emit_output("StorageProfilesParamName", "Name of the storage-profiles SSM parameter.",

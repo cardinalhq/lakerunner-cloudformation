@@ -29,7 +29,6 @@ def test_required_cross_stack_parameters(td):
         "BucketName",
         "QueueArn",
         "LicenseSecretArn",
-        "InternalServiceKeysSecretArn",
         "ApiKeysParamName",
         "StorageProfilesParamName",
         "HttpsListenerArn",

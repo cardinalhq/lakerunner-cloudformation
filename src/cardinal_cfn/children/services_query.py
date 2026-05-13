@@ -109,13 +109,6 @@ def build() -> Template:
     )
     t.add_parameter(
         Parameter(
-            "InternalServiceKeysSecretArn",
-            Type="String",
-            Description="ARN of the internal service keys (HMAC) Secrets Manager secret.",
-        )
-    )
-    t.add_parameter(
-        Parameter(
             "ApiKeysParamName",
             Type="String",
             Description="Name of the SSM parameter holding the api_keys YAML.",
@@ -232,7 +225,6 @@ def build() -> Template:
                     "QueueUrl",
                     "QueueArn",
                     "LicenseSecretArn",
-                    "InternalServiceKeysSecretArn",
                     "ApiKeysParamName",
                     "StorageProfilesParamName",
                     "MigrationComplete",
@@ -280,7 +272,6 @@ def build() -> Template:
         Secret(Name="LRDB_PASSWORD", ValueFrom=Sub("${DbSecretArn}:password::")),
         Secret(Name="CONFIGDB_USER", ValueFrom=Sub("${DbSecretArn}:username::")),
         Secret(Name="CONFIGDB_PASSWORD", ValueFrom=Sub("${DbSecretArn}:password::")),
-        Secret(Name="LRDB_INTERNAL_KEYS", ValueFrom=Ref("InternalServiceKeysSecretArn")),
         Secret(Name="LICENSE_DATA", ValueFrom=Ref("LicenseSecretArn")),
     ]
 

@@ -63,7 +63,6 @@ SQS_QUEUE_NAME="cardinal-ingest"
 
 SECRET_DB_MASTER="cardinal-db-master"
 SECRET_LICENSE="cardinal-license"
-SECRET_INTERNAL_KEYS="cardinal-internal-keys"
 SECRET_ADMIN_KEY="cardinal-admin-key"
 SECRET_MAESTRO_DB="cardinal-maestro-db"
 
@@ -332,7 +331,7 @@ update_db_master_secret() {
 }
 
 # ============================================================================
-#  SECRETS  --  license, internal-keys, admin-key, maestro-db
+#  SECRETS  --  license, admin-key, maestro-db
 #                Each is create-only: never overwrite on re-run.
 # ============================================================================
 
@@ -407,10 +406,6 @@ main() {
         "$license_data" \
         "Cardinal lakerunner license" \
         license)
-    internal_keys_arn=$(ensure_secret_with_value "$SECRET_INTERNAL_KEYS" \
-        "$(gen_hex32)" \
-        "Internal service keys (random 32-byte hex)" \
-        internal-keys)
     # admin-key is JSON {"key": "..."} so the ECS secret pointer ":key::"
     # resolves at task launch.
     admin_key_arn=$(ensure_secret_with_value "$SECRET_ADMIN_KEY" \
@@ -443,7 +438,6 @@ main() {
         --arg IngestQueueUrl "$queue_url" \
         --arg IngestQueueArn "$QUEUE_ARN" \
         --arg LicenseSecretArn "$license_arn" \
-        --arg InternalKeysSecretArn "$internal_keys_arn" \
         --arg AdminKeySecretArn "$admin_key_arn" \
         --arg StorageProfilesParamName "$SSM_STORAGE_PROFILES" \
         --arg ApiKeysParamName "$SSM_API_KEYS" \
@@ -458,7 +452,6 @@ main() {
             IngestBucketName:$IngestBucketName,
             IngestQueueUrl:$IngestQueueUrl, IngestQueueArn:$IngestQueueArn,
             LicenseSecretArn:$LicenseSecretArn,
-            InternalKeysSecretArn:$InternalKeysSecretArn,
             AdminKeySecretArn:$AdminKeySecretArn,
             StorageProfilesParamName:$StorageProfilesParamName,
             ApiKeysParamName:$ApiKeysParamName,

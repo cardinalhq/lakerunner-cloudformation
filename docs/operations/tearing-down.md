@@ -82,8 +82,8 @@ is fixed and named deterministically:
 | Secret: db master | `cardinal-db-master-*` (Secrets Manager auto-suffixed) |
 | Secret: maestro db | `cardinal-maestro-db-*` |
 | Secret: license | `cardinal-license-*` |
-| Secret: internal keys | `cardinal-internal-keys-*` |
 | Secret: admin key | `cardinal-admin-key-*` |
+| Secret: internal keys (legacy installs only) | `cardinal-internal-keys-*` |
 | SSM parameter | `/cardinal/storage-profiles` |
 | SSM parameter | `/cardinal/api-keys` |
 | SQS queue | `cardinal-ingest` |

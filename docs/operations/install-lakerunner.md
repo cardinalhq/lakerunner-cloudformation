@@ -59,8 +59,8 @@ infra = json.loads(pathlib.Path("/tmp/infra-outputs.json").read_text())
 infra_keys = [
     "DbEndpoint", "DbPort", "DbName", "DbMasterSecretArn",
     "MaestroDbSecretArn", "IngestBucketName", "IngestQueueUrl",
-    "IngestQueueArn", "LicenseSecretArn", "InternalKeysSecretArn",
-    "AdminKeySecretArn", "StorageProfilesParamName", "ApiKeysParamName",
+    "IngestQueueArn", "LicenseSecretArn", "AdminKeySecretArn",
+    "StorageProfilesParamName", "ApiKeysParamName",
     "ClusterName", "ClusterArn",
     "ServiceNamespaceId", "ServiceNamespaceName",
 ]
