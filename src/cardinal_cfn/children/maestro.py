@@ -411,7 +411,11 @@ def build() -> Template:
         Environment=db_env + [
             Environment(Name="MCP_PORT", Value=str(mcp_gateway_port)),
         ],
-        Secrets=list(db_secrets),
+        # mcp-gateway loads its license via license-go; LICENSE_DATA env var
+        # is honored (priority > LICENSE_FILE > /app/license/license.json).
+        Secrets=list(db_secrets) + [
+            Secret(Name="LICENSE_DATA", ValueFrom=Ref("LicenseSecretArn")),
+        ],
         DependsOn=[{"ContainerName": "db-init", "Condition": "SUCCESS"}],
         LogConfiguration=LogConfiguration(
             LogDriver="awslogs",
