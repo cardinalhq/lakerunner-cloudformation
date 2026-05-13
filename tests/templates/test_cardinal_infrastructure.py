@@ -97,13 +97,13 @@ def test_creates_secret_target_attachment(td):
     assert types.count("AWS::SecretsManager::SecretTargetAttachment") == 1
 
 
-def test_creates_four_managed_secrets_plus_master(td):
-    """db-master + license + internal-keys + admin-key + maestro-db = 5."""
+def test_creates_three_managed_secrets_plus_master(td):
+    """db-master + license + admin-key + maestro-db = 4."""
     secrets = [
         r for r in td["Resources"].values()
         if r["Type"] == "AWS::SecretsManager::Secret"
     ]
-    assert len(secrets) == 5
+    assert len(secrets) == 4
 
 
 def test_creates_two_ssm_parameters(td):
@@ -189,14 +189,6 @@ def test_admin_key_secret_generates_keyed_json(td):
     assert gen["PasswordLength"] == 64
     assert gen["SecretStringTemplate"] == "{}"
     assert sec["Name"] == {"Ref": "AdminKeySecretName"}
-
-
-def test_internal_keys_secret_is_plain_string(td):
-    sec = _by_logical_id(td, "InternalKeysSecret")["Properties"]
-    gen = sec["GenerateSecretString"]
-    assert "SecretStringTemplate" not in gen
-    assert "GenerateStringKey" not in gen
-    assert gen["PasswordLength"] == 64
 
 
 def test_maestro_db_secret_generates_password_with_username(td):
@@ -380,7 +372,6 @@ _EXPECTED_OUTPUT_KEYS = {
     "IngestQueueUrl",
     "IngestQueueArn",
     "LicenseSecretArn",
-    "InternalKeysSecretArn",
     "AdminKeySecretArn",
     "StorageProfilesParamName",
     "ApiKeysParamName",
@@ -416,7 +407,6 @@ _IMPORT_NAME_PARAMS = (
     "DBSubnetGroupName",
     "IngestQueueName",
     "DBMasterSecretName",
-    "InternalKeysSecretName",
     "MaestroDBSecretName",
 )
 
@@ -434,7 +424,6 @@ _AUTO_NAME_CONDITIONS = {
     "AutoNameDBSubnetGroup",
     "AutoNameIngestQueue",
     "AutoNameDBMasterSecret",
-    "AutoNameInternalKeysSecret",
     "AutoNameMaestroDBSecret",
 }
 
@@ -454,7 +443,6 @@ def test_auto_name_use_site_pattern(td):
         ("DBSubnetGroup", "DBSubnetGroupName", "AutoNameDBSubnetGroup"),
         ("IngestQueue", "QueueName", "AutoNameIngestQueue"),
         ("DBMasterSecret", "Name", "AutoNameDBMasterSecret"),
-        ("InternalKeysSecret", "Name", "AutoNameInternalKeysSecret"),
         ("MaestroDBSecret", "Name", "AutoNameMaestroDBSecret"),
     ]
     for logical_id, prop, condition in cases:

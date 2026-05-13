@@ -20,7 +20,7 @@ Two customer-facing CloudFormation root templates:
 
 Plus a single shell driver:
 
-- `scripts/data-setup.sh` — raw-AWS-CLI data provisioner. Creates RDS, S3 ingest, SQS, the five `cardinal-*` Secrets Manager secrets, and the two SSM parameters. Idempotent; emits a JSON document on stdout whose keys map 1:1 to the lakerunner stack's infra-setup parameters. The customer supplies all IAM roles, security groups, the ECS cluster, and the Cloud Map private DNS namespace out-of-band; they are inputs to the script, which forwards their identifiers into the JSON output.
+- `scripts/data-setup.sh` — raw-AWS-CLI data provisioner. Creates RDS, S3 ingest, SQS, the four `cardinal-*` Secrets Manager secrets (`-db-master`, `-license`, `-admin-key`, `-maestro-db`), and the two SSM parameters. Idempotent; emits a JSON document on stdout whose keys map 1:1 to the lakerunner stack's infra-setup parameters. The customer supplies all IAM roles, security groups, the ECS cluster, and the Cloud Map private DNS namespace out-of-band; they are inputs to the script, which forwards their identifiers into the JSON output.
 
 The lakerunner root nests these children — application-tier resources only:
 

@@ -121,13 +121,6 @@ def build() -> Template:
     )
     t.add_parameter(
         Parameter(
-            "InternalServiceKeysSecretArn",
-            Type="String",
-            Description="ARN of the internal service keys (HMAC) Secrets Manager secret.",
-        )
-    )
-    t.add_parameter(
-        Parameter(
             "ApiKeysParamName",
             Type="String",
             Description="Name of the SSM parameter holding the api_keys YAML.",
@@ -241,7 +234,6 @@ def build() -> Template:
                     "BucketName",
                     "QueueArn",
                     "LicenseSecretArn",
-                    "InternalServiceKeysSecretArn",
                     "ApiKeysParamName",
                     "StorageProfilesParamName",
                     "HttpsListenerArn",
@@ -302,7 +294,6 @@ def build() -> Template:
     ] + _service_specific_env(otel_cfg)
 
     secrets = [
-        Secret(Name="LRDB_INTERNAL_KEYS", ValueFrom=Ref("InternalServiceKeysSecretArn")),
         Secret(Name="LICENSE_DATA", ValueFrom=Ref("LicenseSecretArn")),
     ]
 

@@ -18,7 +18,6 @@ def test_policies_table_covers_data_resources():
         "rds-instance",
         "s3-ingest-bucket",
         "db-master-secret",
-        "internal-service-keys-secret",
         "admin-api-key-secret",
         "sqs-ingest-queue",
         "alb",
@@ -39,13 +38,6 @@ def test_apply_policy_for_ingest_bucket_retains():
     apply_policy(r, "s3-ingest-bucket")
     assert r.DeletionPolicy == "Retain"
     assert r.UpdateReplacePolicy == "Retain"
-
-
-def test_apply_policy_for_internal_keys_deletes():
-    r = FakeResource()
-    apply_policy(r, "internal-service-keys-secret")
-    assert r.DeletionPolicy == "Delete"
-    assert r.UpdateReplacePolicy == "Delete"
 
 
 def test_apply_policy_unknown_kind_raises():

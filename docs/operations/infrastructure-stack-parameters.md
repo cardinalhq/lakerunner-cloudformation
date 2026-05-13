@@ -9,7 +9,7 @@ https://cardinal-cfn.s3.<region>.amazonaws.com/lakerunner/<version>/cardinal-inf
 
 The stack creates the data-plane resources consumed by the
 `cardinal-lakerunner` application stack: RDS, S3 ingest bucket, SQS ingest
-queue, the five `cardinal-*` secrets, and the two `/cardinal/*` SSM
+queue, the four `cardinal-*` secrets, and the two `/cardinal/*` SSM
 parameters.
 
 There are only two supported scenarios:
@@ -74,7 +74,6 @@ DBInstanceIdentifier
 DBSubnetGroupName
 IngestQueueName
 DBMasterSecretName
-InternalKeysSecretName
 MaestroDBSecretName
 ```
 
@@ -165,10 +164,6 @@ Create this file as `infrastructure-import-parameters.json`:
     "ParameterValue": "cardinal-db-master"
   },
   {
-    "ParameterKey": "InternalKeysSecretName",
-    "ParameterValue": "cardinal-internal-keys"
-  },
-  {
     "ParameterKey": "MaestroDBSecretName",
     "ParameterValue": "cardinal-maestro-db"
   },
@@ -250,13 +245,6 @@ Create this file as `infrastructure-resources-to-import.json`:
   },
   {
     "ResourceType": "AWS::SecretsManager::Secret",
-    "LogicalResourceId": "InternalKeysSecret",
-    "ResourceIdentifier": {
-      "Id": "arn:aws:secretsmanager:<region>:<account-id>:secret:cardinal-internal-keys-<suffix>"
-    }
-  },
-  {
-    "ResourceType": "AWS::SecretsManager::Secret",
     "LogicalResourceId": "AdminKeySecret",
     "ResourceIdentifier": {
       "Id": "arn:aws:secretsmanager:<region>:<account-id>:secret:cardinal-admin-key-<suffix>"
@@ -314,7 +302,6 @@ Repeat that command for:
 
 ```text
 cardinal-license
-cardinal-internal-keys
 cardinal-admin-key
 cardinal-maestro-db
 ```
@@ -407,10 +394,6 @@ as `infrastructure-import-parameters.json`, except `ImportMode` is `No`:
   {
     "ParameterKey": "DBMasterSecretName",
     "ParameterValue": "cardinal-db-master"
-  },
-  {
-    "ParameterKey": "InternalKeysSecretName",
-    "ParameterValue": "cardinal-internal-keys"
   },
   {
     "ParameterKey": "MaestroDBSecretName",

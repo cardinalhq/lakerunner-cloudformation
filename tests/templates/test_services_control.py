@@ -35,7 +35,6 @@ def test_required_cross_stack_parameters(td):
         "QueueUrl",
         "QueueArn",
         "LicenseSecretArn",
-        "InternalServiceKeysSecretArn",
         "ApiKeysParamName",
         "StorageProfilesParamName",
         "MigrationComplete",

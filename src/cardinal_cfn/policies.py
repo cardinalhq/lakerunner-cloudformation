@@ -10,7 +10,6 @@ POLICIES: dict = {
     "rds-instance":                 ("Snapshot", "Snapshot"),
     "s3-ingest-bucket":             ("Retain", "Retain"),
     "db-master-secret":             ("Retain", "Retain"),
-    "internal-service-keys-secret": ("Delete", "Delete"),
     "admin-api-key-secret":         ("Retain", "Retain"),
     "license-secret":               ("Retain", "Retain"),
     "sqs-ingest-queue":             ("Delete", "Delete"),
