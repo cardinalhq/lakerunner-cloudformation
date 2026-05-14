@@ -105,6 +105,10 @@ def _sizing_param_specs(defaults: dict) -> list[dict]:
         {"name": "DexClientId", "type": "String",
          "default": str(maestro_cfg["dex"]["client_id"]),
          "description": "OIDC client ID the maestro UI uses against DEX."},
+        {"name": "McpMigrateRecoverFromDirty", "type": "String",
+         "default": "false", "allowed_values": ["true", "false"],
+         "description": "When true, mcp-gateway tries to recover from a "
+                        "previously failed (dirty) maestro DB migration on startup."},
         # OTEL
         {"name": "OtelReplicas", "type": "Number", "default": int(otel_cfg["replicas"]),
          "min": 1, "description": "Desired replicas for the otel-gateway service."},
@@ -534,6 +538,7 @@ def build() -> Template:
         "DexInitImage": dex_init_image,
         "MaestroTaskCpu": Ref("MaestroTaskCpu"),
         "MaestroTaskMemory": Ref("MaestroTaskMemory"),
+        "McpMigrateRecoverFromDirty": Ref("McpMigrateRecoverFromDirty"),
         "DexClientId": Ref("DexClientId"),
         "DexAdminEmail": Ref("DexAdminEmail"),
         "DexAdminPasswordHash": Ref("DexAdminPasswordHash"),

@@ -253,6 +253,19 @@ def build() -> Template:
             ),
         )
     )
+    t.add_parameter(
+        Parameter(
+            "McpMigrateRecoverFromDirty",
+            Type="String",
+            Default="false",
+            AllowedValues=["true", "false"],
+            Description=(
+                "When true, sets MCP_MIGRATE_RECOVER_FROM_DIRTY=true on the "
+                "mcp-gateway container, allowing it to recover from a "
+                "previously failed (dirty) maestro DB migration on startup."
+            ),
+        )
+    )
     add_no_echo_parameter(
         t,
         "DexAdminPasswordHash",
@@ -294,7 +307,11 @@ def build() -> Template:
             },
             {
                 "label": "Maestro tunables",
-                "parameters": ["MaestroTaskCpu", "MaestroTaskMemory"],
+                "parameters": [
+                    "MaestroTaskCpu",
+                    "MaestroTaskMemory",
+                    "McpMigrateRecoverFromDirty",
+                ],
             },
             {
                 "label": "Image overrides",
@@ -410,6 +427,10 @@ def build() -> Template:
         PortMappings=[PortMapping(ContainerPort=mcp_gateway_port, Protocol="tcp")],
         Environment=db_env + [
             Environment(Name="MCP_PORT", Value=str(mcp_gateway_port)),
+            Environment(
+                Name="MCP_MIGRATE_RECOVER_FROM_DIRTY",
+                Value=Ref("McpMigrateRecoverFromDirty"),
+            ),
         ],
         # mcp-gateway loads its license via license-go; LICENSE_DATA env var
         # is honored (priority > LICENSE_FILE > /app/license/license.json).
