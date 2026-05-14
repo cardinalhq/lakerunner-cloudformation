@@ -23,6 +23,7 @@ from troposphere import (
     Join,
     Output,
     Sub,
+    Equals,
 )
 from troposphere.cloudformation import Stack
 
@@ -309,6 +310,21 @@ def build() -> Template:
     sizing_param_names = [s["name"] for s in sizing_specs]
 
     # ---------------------------------------------------------------------
+    # Feature toggles
+    # ---------------------------------------------------------------------
+    t.add_parameter(Parameter(
+        "DeployMaestro",
+        Type="String",
+        Default="Yes",
+        AllowedValues=["Yes", "No"],
+        Description=(
+            "When No, the MaestroStack nested stack is skipped entirely. "
+            "Flip to No to recover the overall stack if maestro fails to "
+            "create or update."
+        ),
+    ))
+
+    # ---------------------------------------------------------------------
     # Image overrides
     # ---------------------------------------------------------------------
     lakerunner_image = add_image_override(
@@ -361,11 +377,17 @@ def build() -> Template:
             {"label": "Sizing", "parameters": sizing_param_names},
             {"label": "Images", "parameters": image_param_names},
             {"label": "Advanced",
-             "parameters": ["DexAdminEmail", "DexAdminPasswordHash",
+             "parameters": ["DeployMaestro",
+                            "DexAdminEmail", "DexAdminPasswordHash",
                             "OidcSuperadminEmails",
                             "TemplateBaseUrl"]},
         ],
     )
+
+    # ---------------------------------------------------------------------
+    # Conditions
+    # ---------------------------------------------------------------------
+    t.add_condition("DeployMaestroEnabled", Equals(Ref("DeployMaestro"), "Yes"))
 
     # ---------------------------------------------------------------------
     # Install-id derivation (computed inline; not a parameter on root)
@@ -543,7 +565,7 @@ def build() -> Template:
         "DexAdminEmail": Ref("DexAdminEmail"),
         "DexAdminPasswordHash": Ref("DexAdminPasswordHash"),
         "OidcSuperadminEmails": Ref("OidcSuperadminEmails"),
-    }, depends_on=["MigrationStack"])
+    }, depends_on=["MigrationStack"], condition="DeployMaestroEnabled")
 
     # ---------------------------------------------------------------------
     # Top-level outputs
@@ -565,13 +587,15 @@ def build() -> Template:
     ))
     t.add_output(Output("MaestroUrl",
                         Value=GetAtt(maestro_stack, "Outputs.MaestroUrl"),
-                        Description="Base URL for the maestro UI."))
+                        Description="Base URL for the maestro UI.",
+                        Condition="DeployMaestroEnabled"))
 
     return t
 
 
 def _add_child(t: Template, logical_id: str, child_filename: str,
-               parameters: dict, depends_on: list[str] | None = None):
+               parameters: dict, depends_on: list[str] | None = None,
+               condition: str | None = None):
     """Add an AWS::CloudFormation::Stack resource with a Sub-rendered TemplateURL."""
     kwargs: dict = dict(
         TemplateURL=Sub("${TemplateBaseUrl}" + child_filename),
@@ -579,6 +603,8 @@ def _add_child(t: Template, logical_id: str, child_filename: str,
     )
     if depends_on:
         kwargs["DependsOn"] = depends_on
+    if condition:
+        kwargs["Condition"] = condition
     return t.add_resource(Stack(logical_id, **kwargs))
 
 
