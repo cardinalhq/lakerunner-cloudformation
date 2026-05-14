@@ -40,6 +40,12 @@ from troposphere.ecs import (
     NetworkConfiguration,
     Secret,
     Service,
+    ServiceRegistry,
+)
+from troposphere.servicediscovery import (
+    DnsConfig,
+    DnsRecord,
+    Service as DiscoveryService,
 )
 
 from cardinal_cfn.children import services_common
@@ -141,6 +147,17 @@ def build() -> Template:
     t.add_parameter(
         Parameter("VpcId", Type="AWS::EC2::VPC::Id", Description="VPC ID (forwarded from root).")
     )
+    t.add_parameter(
+        Parameter(
+            "ServiceNamespaceId",
+            Type="String",
+            Description=(
+                "Cloud Map private DNS namespace ID. Used to register the "
+                "collector at cardinal-otel.<namespace> for task-to-task "
+                "discovery by lakerunner self-telemetry."
+            ),
+        )
+    )
 
     # ---------------------------------------------------------------------
     # Image override
@@ -238,6 +255,7 @@ def build() -> Template:
                     "StorageProfilesParamName",
                     "HttpsListenerArn",
                     "VpcId",
+                    "ServiceNamespaceId",
                 ],
             },
             {
@@ -336,6 +354,23 @@ def build() -> Template:
     t.add_resource(listener_rule)
 
     # ---------------------------------------------------------------------
+    # Cloud Map registration so other tasks can reach the collector at
+    # cardinal-otel.<namespace>:4317 without going through the ALB. Used by
+    # lakerunner self-telemetry.
+    # ---------------------------------------------------------------------
+    otel_discovery = t.add_resource(
+        DiscoveryService(
+            "OtelDiscoveryService",
+            Name="cardinal-otel",
+            NamespaceId=Ref("ServiceNamespaceId"),
+            DnsConfig=DnsConfig(
+                DnsRecords=[DnsRecord(Type="A", TTL="10")],
+                RoutingPolicy="MULTIVALUE",
+            ),
+        )
+    )
+
+    # ---------------------------------------------------------------------
     # ECS Service (inlined, not via build_ecs_service helper, because the
     # LoadBalancers block must be conditionally populated via Fn::If).
     # ---------------------------------------------------------------------
@@ -372,6 +407,9 @@ def build() -> Template:
                 ],
                 Ref("AWS::NoValue"),
             ),
+            ServiceRegistries=[
+                ServiceRegistry(RegistryArn=GetAtt(otel_discovery, "Arn")),
+            ],
             Tags=cardinal_tags(component="compute", role=_SERVICE_KEY),
         )
     )

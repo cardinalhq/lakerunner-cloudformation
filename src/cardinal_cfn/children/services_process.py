@@ -59,6 +59,7 @@ def build() -> Template:
     # Cross-stack inputs (forwarded from root)
     # ---------------------------------------------------------------------
     t.add_parameter(Parameter("ClusterArn", Type="String", Description="ECS cluster ARN."))
+    t.add_parameter(Parameter("ClusterName", Type="String", Description="ECS cluster name."))
     t.add_parameter(
         Parameter(
             "TaskSecurityGroupId",
@@ -108,6 +109,23 @@ def build() -> Template:
             "StorageProfilesParamName",
             Type="String",
             Description="Name of the SSM parameter holding the storage_profiles YAML.",
+        )
+    )
+    t.add_parameter(
+        Parameter(
+            "SelfTelemetryEndpoint",
+            Type="String",
+            Default="",
+            Description="OTLP gRPC URL for the in-cluster otel-collector. Empty when SelfTelemetry is disabled.",
+        )
+    )
+    t.add_parameter(
+        Parameter(
+            "SelfTelemetryEnabled",
+            Type="String",
+            Default="false",
+            AllowedValues=["true", "false"],
+            Description="ENABLE_OTLP_TELEMETRY flag for lakerunner containers in this tier.",
         )
     )
 
@@ -376,7 +394,11 @@ def _build_service_block(
 ):
     """Wire up the three resources (log group, task def, service) for one service."""
     log_group = t.add_resource(services_common.build_log_group(service_key=service_key))
-    env = list(base_env) + _service_specific_env(config)
+    env = (
+        list(base_env)
+        + services_common.lakerunner_otel_env(service_key=service_key)
+        + _service_specific_env(config)
+    )
     task_def = t.add_resource(
         services_common.build_task_definition(
             service_key=service_key,
