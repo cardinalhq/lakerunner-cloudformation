@@ -24,6 +24,7 @@ from troposphere import (
     Output,
     Sub,
     Equals,
+    If,
 )
 from troposphere.cloudformation import Stack
 
@@ -323,6 +324,16 @@ def build() -> Template:
             "create or update."
         ),
     ))
+    t.add_parameter(Parameter(
+        "SelfTelemetry",
+        Type="String",
+        Default="Yes",
+        AllowedValues=["Yes", "No"],
+        Description=(
+            "When Yes, lakerunner tasks emit OTLP telemetry to the in-cluster "
+            "otel-collector at cardinal-otel.<namespace>:4317."
+        ),
+    ))
 
     # ---------------------------------------------------------------------
     # Image overrides
@@ -377,7 +388,7 @@ def build() -> Template:
             {"label": "Sizing", "parameters": sizing_param_names},
             {"label": "Images", "parameters": image_param_names},
             {"label": "Advanced",
-             "parameters": ["DeployMaestro",
+             "parameters": ["DeployMaestro", "SelfTelemetry",
                             "DexAdminEmail", "DexAdminPasswordHash",
                             "OidcSuperadminEmails",
                             "TemplateBaseUrl"]},
@@ -388,6 +399,17 @@ def build() -> Template:
     # Conditions
     # ---------------------------------------------------------------------
     t.add_condition("DeployMaestroEnabled", Equals(Ref("DeployMaestro"), "Yes"))
+    t.add_condition("SelfTelemetryEnabled", Equals(Ref("SelfTelemetry"), "Yes"))
+
+    # Endpoint resolves at deploy time. When disabled the URL is blanked so
+    # the OTel SDK has nothing to dial -- ENABLE_OTLP_TELEMETRY=false is the
+    # actual gate, the empty URL is belt + suspenders.
+    self_telemetry_endpoint = If(
+        "SelfTelemetryEnabled",
+        Sub("http://cardinal-otel.${ServiceNamespaceName}:4317"),
+        "",
+    )
+    self_telemetry_enabled = If("SelfTelemetryEnabled", "true", "false")
 
     # ---------------------------------------------------------------------
     # Install-id derivation (computed inline; not a parameter on root)
@@ -443,6 +465,7 @@ def build() -> Template:
             "InstallIdShort": install_short,
             "InstallIdLong": install_long,
             "ClusterArn": Ref("ClusterArn"),
+            "ClusterName": Ref("ClusterName"),
             "TaskSecurityGroupId": Ref("TaskSgId"),
             "ExecutionRoleArn": Ref("ExecutionRoleArn"),
             "TaskRoleArn": Ref("TaskRoleArn"),
@@ -458,6 +481,8 @@ def build() -> Template:
             "StorageProfilesParamName": Ref("StorageProfilesParamName"),
             "MigrationComplete": migration_complete,
             "LakerunnerImage": lakerunner_image,
+            "SelfTelemetryEndpoint": self_telemetry_endpoint,
+            "SelfTelemetryEnabled": self_telemetry_enabled,
         }
 
     services_query_params = _service_tier_common()
@@ -527,6 +552,7 @@ def build() -> Template:
         "StorageProfilesParamName": Ref("StorageProfilesParamName"),
         "HttpsListenerArn": GetAtt(alb_stack, "Outputs.HttpsListenerArn"),
         "VpcId": Ref("VpcId"),
+        "ServiceNamespaceId": Ref("ServiceNamespaceId"),
         "OtelImage": otel_image,
         "OtelReplicas": Ref("OtelReplicas"),
         "OtelCpu": Ref("OtelCpu"),

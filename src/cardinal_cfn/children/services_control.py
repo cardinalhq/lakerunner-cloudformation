@@ -145,6 +145,23 @@ def build() -> Template:
             Description="Name of the SSM parameter holding the storage_profiles YAML.",
         )
     )
+    t.add_parameter(
+        Parameter(
+            "SelfTelemetryEndpoint",
+            Type="String",
+            Default="",
+            Description="OTLP gRPC URL for the in-cluster otel-collector. Empty when SelfTelemetry is disabled.",
+        )
+    )
+    t.add_parameter(
+        Parameter(
+            "SelfTelemetryEnabled",
+            Type="String",
+            Default="false",
+            AllowedValues=["true", "false"],
+            Description="ENABLE_OTLP_TELEMETRY flag for lakerunner containers in this tier.",
+        )
+    )
 
     # Inputs the monitoring service uses to drive ECS-based autoscaling of the
     # process-* services. ClusterName is the ECS cluster name (not ARN) — both
@@ -324,7 +341,11 @@ def build() -> Template:
             path_patterns=["/*"],
         )
     )
-    admin_env = list(base_env) + _service_specific_env(admin_cfg)
+    admin_env = (
+        list(base_env)
+        + services_common.lakerunner_otel_env(service_key="admin-api")
+        + _service_specific_env(admin_cfg)
+    )
     # Seed the lakerunner admin-api binary's first valid admin key. Without
     # this, every Authorization: Bearer <key> request fails validation
     # because the configdb has no admin keys and the binary won't accept
@@ -467,7 +488,12 @@ def _build_internal_service_block(
 ):
     """Wire up log group, task def, and ECS service for one internal service."""
     log_group = t.add_resource(services_common.build_log_group(service_key=service_key))
-    env = list(base_env) + _service_specific_env(config) + list(extra_env or [])
+    env = (
+        list(base_env)
+        + services_common.lakerunner_otel_env(service_key=service_key)
+        + _service_specific_env(config)
+        + list(extra_env or [])
+    )
     task_def = t.add_resource(
         services_common.build_task_definition(
             service_key=service_key,

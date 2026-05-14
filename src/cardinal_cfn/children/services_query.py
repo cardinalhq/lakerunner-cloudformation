@@ -121,6 +121,23 @@ def build() -> Template:
             Description="Name of the SSM parameter holding the storage_profiles YAML.",
         )
     )
+    t.add_parameter(
+        Parameter(
+            "SelfTelemetryEndpoint",
+            Type="String",
+            Default="",
+            Description="OTLP gRPC URL for the in-cluster otel-collector. Empty when SelfTelemetry is disabled.",
+        )
+    )
+    t.add_parameter(
+        Parameter(
+            "SelfTelemetryEnabled",
+            Type="String",
+            Default="false",
+            AllowedValues=["true", "false"],
+            Description="ENABLE_OTLP_TELEMETRY flag for lakerunner containers in this tier.",
+        )
+    )
 
     # MigrationComplete is unused inside this stack on purpose. The root passes
     # the migration-stack output through this parameter; CloudFormation cannot
@@ -281,7 +298,11 @@ def build() -> Template:
     # ---------------------------------------------------------------------
     worker_lg = t.add_resource(services_common.build_log_group(service_key="query-worker"))
 
-    worker_env = list(base_env) + _service_specific_env(worker_cfg)
+    worker_env = (
+        list(base_env)
+        + services_common.lakerunner_otel_env(service_key="query-worker")
+        + _service_specific_env(worker_cfg)
+    )
     worker_task = t.add_resource(
         services_common.build_task_definition(
             service_key="query-worker",
@@ -321,7 +342,11 @@ def build() -> Template:
     api_lg = t.add_resource(services_common.build_log_group(service_key="query-api"))
 
     # query-api uses ECS API to discover live query-worker tasks.
-    api_env = list(base_env) + _service_specific_env(api_cfg) + [
+    api_env = (
+        list(base_env)
+        + services_common.lakerunner_otel_env(service_key="query-api")
+        + _service_specific_env(api_cfg)
+    ) + [
         Environment(Name="EXECUTION_ENVIRONMENT", Value="ecs"),
         Environment(Name="QUERY_WORKER_CLUSTER_NAME", Value=Ref("ClusterName")),
         Environment(Name="QUERY_WORKER_SERVICE_NAME", Value=GetAtt(worker_service, "Name")),

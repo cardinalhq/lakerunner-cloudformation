@@ -4,12 +4,13 @@ Each helper constructs and returns a single troposphere object.
 The caller is responsible for adding it to a template.
 """
 
-from troposphere import GetAtt, Ref, Split
+from troposphere import GetAtt, Ref, Split, Sub
 from troposphere.ecs import (
     AwsvpcConfiguration,
     ContainerDefinition,
     DeploymentCircuitBreaker,
     DeploymentConfiguration,
+    Environment,
     LoadBalancer as EcsLoadBalancer,
     LogConfiguration,
     NetworkConfiguration,
@@ -31,6 +32,31 @@ from troposphere.logs import LogGroup
 from cardinal_cfn.listener_priorities import priority_for
 from cardinal_cfn.naming import cardinal_tags
 from cardinal_cfn.policies import apply_policy
+
+
+def lakerunner_otel_env(*, service_key: str) -> list:
+    """OTel env vars wired to the in-cluster otel-collector.
+
+    Mirrors the helm chart pattern: OTEL_SERVICE_NAME=lakerunner-<component>,
+    ENABLE_OTLP_TELEMETRY toggles the actual exporter, OTEL_EXPORTER_OTLP_ENDPOINT
+    points at the collector's Cloud Map DNS name, and OTEL_RESOURCE_ATTRIBUTES
+    carries ecs.cluster.name. All four env vars are unconditionally set; the
+    ENABLE_OTLP_TELEMETRY flag is what actually starts/stops exporting.
+
+    Expects the calling stack to declare these parameters:
+      - SelfTelemetryEndpoint (String): the OTLP gRPC URL, or "" when disabled.
+      - SelfTelemetryEnabled  (String): "true" or "false".
+      - ClusterName           (String): forwarded from the root.
+    """
+    return [
+        Environment(Name="OTEL_SERVICE_NAME", Value=f"lakerunner-{service_key}"),
+        Environment(Name="OTEL_EXPORTER_OTLP_ENDPOINT", Value=Ref("SelfTelemetryEndpoint")),
+        Environment(Name="ENABLE_OTLP_TELEMETRY", Value=Ref("SelfTelemetryEnabled")),
+        Environment(
+            Name="OTEL_RESOURCE_ATTRIBUTES",
+            Value=Sub("ecs.cluster.name=${ClusterName}"),
+        ),
+    ]
 
 
 def build_log_group(*, service_key: str, retention_days: int = 14) -> LogGroup:
