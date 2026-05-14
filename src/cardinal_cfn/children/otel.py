@@ -355,7 +355,8 @@ def build() -> Template:
 
     # ---------------------------------------------------------------------
     # Cloud Map registration so other tasks can reach the collector at
-    # cardinal-otel.<namespace>:4317 without going through the ALB. Used by
+    # cardinal-otel.<namespace>:4318 (OTLP/HTTP) without going through the
+    # ALB. Used by
     # lakerunner self-telemetry.
     # ---------------------------------------------------------------------
     otel_discovery = t.add_resource(
