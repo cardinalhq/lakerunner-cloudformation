@@ -331,7 +331,7 @@ def build() -> Template:
         AllowedValues=["Yes", "No"],
         Description=(
             "When Yes, lakerunner tasks emit OTLP telemetry to the in-cluster "
-            "otel-collector at cardinal-otel.<namespace>:4317."
+            "otel-collector at cardinal-otel.<namespace>:4318 (OTLP/HTTP)."
         ),
     ))
 
@@ -403,10 +403,12 @@ def build() -> Template:
 
     # Endpoint resolves at deploy time. When disabled the URL is blanked so
     # the OTel SDK has nothing to dial -- ENABLE_OTLP_TELEMETRY=false is the
-    # actual gate, the empty URL is belt + suspenders.
+    # actual gate, the empty URL is belt + suspenders. Port 4318 is OTLP/HTTP;
+    # lakerunner's OTel SDK uses the HTTP exporter, so 4317 (gRPC) returns
+    # HTTP/2 SETTINGS frames the SDK can't parse.
     self_telemetry_endpoint = If(
         "SelfTelemetryEnabled",
-        Sub("http://cardinal-otel.${ServiceNamespaceName}:4317"),
+        Sub("http://cardinal-otel.${ServiceNamespaceName}:4318"),
         "",
     )
     self_telemetry_enabled = If("SelfTelemetryEnabled", "true", "false")
