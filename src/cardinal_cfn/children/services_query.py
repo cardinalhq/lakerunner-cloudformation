@@ -29,13 +29,6 @@ from cardinal_cfn.parameters import (
 )
 
 
-# Parameter name for the env var the binary uses to find the API-keys SSM
-# parameter and the storage-profiles SSM parameter. The binary resolves the
-# parameter values at startup via SSM GetParameter; we only thread the names.
-_API_KEYS_ENV = "LRDB_API_KEYS_SSM_PARAM"
-_STORAGE_PROFILES_ENV = "LRDB_STORAGE_PROFILES_SSM_PARAM"
-
-
 def build() -> Template:
     t = Template()
     t.set_description(
@@ -105,20 +98,6 @@ def build() -> Template:
             "LicenseSecretArn",
             Type="String",
             Description="ARN of the license Secrets Manager secret.",
-        )
-    )
-    t.add_parameter(
-        Parameter(
-            "ApiKeysParamName",
-            Type="String",
-            Description="Name of the SSM parameter holding the api_keys YAML.",
-        )
-    )
-    t.add_parameter(
-        Parameter(
-            "StorageProfilesParamName",
-            Type="String",
-            Description="Name of the SSM parameter holding the storage_profiles YAML.",
         )
     )
     t.add_parameter(
@@ -242,8 +221,6 @@ def build() -> Template:
                     "QueueUrl",
                     "QueueArn",
                     "LicenseSecretArn",
-                    "ApiKeysParamName",
-                    "StorageProfilesParamName",
                     "MigrationComplete",
                 ],
             },
@@ -280,8 +257,6 @@ def build() -> Template:
         Environment(Name="CONFIGDB_PORT", Value=Ref("DbPort")),
         Environment(Name="CONFIGDB_DBNAME", Value="configdb"),
         Environment(Name="CONFIGDB_SSLMODE", Value="require"),
-        Environment(Name=_API_KEYS_ENV, Value=Ref("ApiKeysParamName")),
-        Environment(Name=_STORAGE_PROFILES_ENV, Value=Ref("StorageProfilesParamName")),
     ]
 
     base_secrets = [

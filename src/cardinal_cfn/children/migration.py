@@ -66,6 +66,29 @@ def build() -> Template:
     t.add_parameter(Parameter("DbName", Type="String", Default="lakerunner", Description="Database name."))
     t.add_parameter(Parameter("DbSecretArn", Type="String", Description="ARN of the DB master secret."))
 
+    # SSM-backed seeds for configdb (storage profiles, API keys). The migrator
+    # reads these via STORAGE_PROFILE_FILE/API_KEYS_FILE = env:VAR indirection
+    # (see lakerunner cmd/initialize/loader.go). They are injected as env vars
+    # by ECS Secrets resolution against the SSM parameter ARN -- which is why
+    # the execution role needs ssm:GetParameter* on /cardinal/* (already
+    # documented in docs/operations/permissions-lakerunner.md). The migrator's
+    # initializeIfNeededFunc seeds configdb only when the tables are empty, so
+    # operator edits via the maestro UI are not clobbered on image bumps.
+    t.add_parameter(
+        Parameter(
+            "StorageProfilesParamName",
+            Type="String",
+            Description="Name of the SSM parameter holding the storage_profiles YAML.",
+        )
+    )
+    t.add_parameter(
+        Parameter(
+            "ApiKeysParamName",
+            Type="String",
+            Description="Name of the SSM parameter holding the api_keys YAML.",
+        )
+    )
+
     # Image parameters. The migrator runs from the same image as the lakerunner
     # service tasks (LakerunnerImage), so the two cannot drift; an image change
     # redeploys the migration service (rerunning the migrator) before the
@@ -150,12 +173,31 @@ def build() -> Template:
             Environment(Name="CONFIGDB_PORT", Value=Ref("DbPort")),
             Environment(Name="CONFIGDB_DBNAME", Value="configdb"),
             Environment(Name="CONFIGDB_SSLMODE", Value="require"),
+            # The env: prefix tells the binary's initializeIfNeededFunc to
+            # read the YAML body from the named env var, which ECS Secrets
+            # populates from SSM below.
+            Environment(Name="STORAGE_PROFILE_FILE", Value="env:STORAGE_PROFILES_YAML"),
+            Environment(Name="API_KEYS_FILE", Value="env:API_KEYS_YAML"),
         ],
         Secrets=[
             Secret(Name="LRDB_USER", ValueFrom=Sub("${DbSecretArn}:username::")),
             Secret(Name="LRDB_PASSWORD", ValueFrom=Sub("${DbSecretArn}:password::")),
             Secret(Name="CONFIGDB_USER", ValueFrom=Sub("${DbSecretArn}:username::")),
             Secret(Name="CONFIGDB_PASSWORD", ValueFrom=Sub("${DbSecretArn}:password::")),
+            # ECS resolves these at task launch by calling SSM with the
+            # execution role and injects the parameter value as the env var.
+            Secret(
+                Name="STORAGE_PROFILES_YAML",
+                ValueFrom=Sub(
+                    "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${StorageProfilesParamName}"
+                ),
+            ),
+            Secret(
+                Name="API_KEYS_YAML",
+                ValueFrom=Sub(
+                    "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ApiKeysParamName}"
+                ),
+            ),
         ],
         LogConfiguration=_logs("migrator"),
     )

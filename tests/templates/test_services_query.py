@@ -36,11 +36,16 @@ def test_required_cross_stack_parameters(td):
         "QueueUrl",
         "QueueArn",
         "LicenseSecretArn",
-        "ApiKeysParamName",
-        "StorageProfilesParamName",
         "MigrationComplete",
     ):
         assert n in td["Parameters"], f"missing parameter: {n}"
+
+
+def test_no_storage_profile_or_api_keys_params(td):
+    """The migrator seeds configdb from these SSM parameters; service tasks
+    read profiles from configdb at runtime, so these are not threaded here."""
+    for n in ("ApiKeysParamName", "StorageProfilesParamName"):
+        assert n not in td["Parameters"], f"unexpected parameter: {n}"
 
 
 def test_per_service_tunable_parameters(td):
