@@ -99,26 +99,60 @@ def test_query_worker_does_not_attach_to_alb(td):
                 )
 
 
-def test_only_one_listener_rule_and_one_target_group(td):
+def test_one_target_group_and_two_listener_rules(td):
+    """query-api: single target group fanned in by two listener rules; the
+    ALB caps path-pattern values at 5 per condition and the binary serves
+    routes that don't all fit in one rule."""
     tgs = [r for r in td["Resources"].values()
            if r["Type"] == "AWS::ElasticLoadBalancingV2::TargetGroup"]
     rules = [r for r in td["Resources"].values()
              if r["Type"] == "AWS::ElasticLoadBalancingV2::ListenerRule"]
     assert len(tgs) == 1
-    assert len(rules) == 1
+    assert len(rules) == 2
+    # Both rules forward to the same target group.
+    tg_logical = [k for k, r in td["Resources"].items()
+                  if r["Type"] == "AWS::ElasticLoadBalancingV2::TargetGroup"][0]
+    for rule in rules:
+        action = rule["Properties"]["Actions"][0]
+        assert action["TargetGroupArn"] == {"Ref": tg_logical}, action
 
 
-def test_listener_rule_uses_query_api_path_pattern(td):
-    rule = next(r for r in td["Resources"].values()
-                if r["Type"] == "AWS::ElasticLoadBalancingV2::ListenerRule")
-    conditions = rule["Properties"]["Conditions"]
-    found = False
-    for cond in conditions:
-        if cond.get("Field") == "path-pattern":
-            values = cond["PathPatternConfig"]["Values"]
-            assert values == ["/api/v1/query/*"]
-            found = True
-    assert found, "expected a path-pattern condition"
+def test_listener_rules_cover_binary_routes(td):
+    """The path patterns must match the binary's actual routes (queryapi/
+    querier.go:965-984): /api/v1/{logs,metrics,spans,promql,logql}/...
+    plus /api/v1/{ping,services,features}. The legacy /api/v1/query/*
+    pattern (binary never served it) must not reappear."""
+    rules = [r for r in td["Resources"].values()
+             if r["Type"] == "AWS::ElasticLoadBalancingV2::ListenerRule"]
+    all_patterns = set()
+    for rule in rules:
+        for cond in rule["Properties"]["Conditions"]:
+            if cond.get("Field") == "path-pattern":
+                all_patterns.update(cond["PathPatternConfig"]["Values"])
+    expected = {
+        "/api/v1/logs/*", "/api/v1/metrics/*", "/api/v1/spans/*",
+        "/api/v1/promql/*", "/api/v1/logql/*",
+        "/api/v1/ping", "/api/v1/services", "/api/v1/features",
+    }
+    assert expected.issubset(all_patterns), (
+        f"missing patterns: {expected - all_patterns}"
+    )
+    assert "/api/v1/query/*" not in all_patterns, (
+        "the legacy /api/v1/query/* pattern matches no binary route"
+    )
+
+
+def test_no_listener_rule_exceeds_alb_path_pattern_cap(td):
+    """AWS ELB allows at most 5 path-pattern values per condition."""
+    rules = [r for r in td["Resources"].values()
+             if r["Type"] == "AWS::ElasticLoadBalancingV2::ListenerRule"]
+    for rule in rules:
+        for cond in rule["Properties"]["Conditions"]:
+            if cond.get("Field") == "path-pattern":
+                values = cond["PathPatternConfig"]["Values"]
+                assert len(values) <= 5, (
+                    f"rule with > 5 path-pattern values: {values}"
+                )
 
 
 # ---------------------------------------------------------------------------

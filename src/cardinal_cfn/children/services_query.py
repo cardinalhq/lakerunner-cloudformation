@@ -335,12 +335,34 @@ def build() -> Template:
             health_check_path=api_health_path,
         )
     )
+    # The binary serves /api/v1/{logs,metrics,spans,promql,logql}/... plus
+    # /api/v1/{ping,services,features}. An ALB listener-rule condition caps
+    # path-pattern values at 5, so route them through two rules sharing the
+    # query-api target group.
     api_listener_rule = t.add_resource(
         services_common.build_listener_rule(
             service_key="query-api",
             target_group_ref=api_tg,
             listener_arn_param="HttpsListenerArn",
-            path_patterns=["/api/v1/query/*"],
+            path_patterns=[
+                "/api/v1/logs/*",
+                "/api/v1/metrics/*",
+                "/api/v1/spans/*",
+                "/api/v1/promql/*",
+                "/api/v1/logql/*",
+            ],
+        )
+    )
+    api_listener_rule_extra = t.add_resource(
+        services_common.build_listener_rule(
+            service_key="query-api-extra",
+            target_group_ref=api_tg,
+            listener_arn_param="HttpsListenerArn",
+            path_patterns=[
+                "/api/v1/ping",
+                "/api/v1/services",
+                "/api/v1/features",
+            ],
         )
     )
     api_task = t.add_resource(
