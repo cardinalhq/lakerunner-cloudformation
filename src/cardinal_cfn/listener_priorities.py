@@ -9,9 +9,13 @@ future per-service stack splits collision-free.
 
 
 LISTENER_PRIORITIES: dict = {
-    "query-api":     100,
-    "maestro-dex":   210,
-    "otel-grpc":     300,
+    "query-api":       100,
+    # query-api's listener rule needs a second slot because the binary's
+    # routes span more than the 5 path-pattern values an ALB listener
+    # rule allows in a single condition.
+    "query-api-extra": 105,
+    "maestro-dex":     210,
+    "otel-grpc":       300,
     # Maestro is the default app: a true catch-all "/*" rule. It MUST be
     # numerically the highest (lowest priority) so all other rules win.
     "maestro-https": 49999,
