@@ -149,20 +149,6 @@ def build() -> Template:
             Description="ARN of the license Secrets Manager secret.",
         )
     )
-    t.add_parameter(
-        Parameter(
-            "ApiKeysParamName",
-            Type="String",
-            Description="Name of the SSM parameter holding the api_keys YAML.",
-        )
-    )
-    t.add_parameter(
-        Parameter(
-            "StorageProfilesParamName",
-            Type="String",
-            Description="Name of the SSM parameter holding the storage_profiles YAML.",
-        )
-    )
 
     # MigrationComplete is unused on purpose (same convention as services-*).
     # The root passes the migration-stack output through this parameter so
@@ -299,8 +285,6 @@ def build() -> Template:
                     "DbPort",
                     "DbSecretArn",
                     "LicenseSecretArn",
-                    "ApiKeysParamName",
-                    "StorageProfilesParamName",
                     "MaestroDbSecretArn",
                     "MigrationComplete",
                 ],

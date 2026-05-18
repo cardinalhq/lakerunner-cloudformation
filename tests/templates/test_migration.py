@@ -39,8 +39,29 @@ def test_required_parameters(template_dict):
     for n in ("InstallIdShort", "InstallIdLong", "ClusterArn", "ClusterName",
               "TaskSecurityGroupId", "ExecutionRoleArn", "TaskRoleArn",
               "PrivateSubnetsCsv", "DbEndpoint", "DbSecretArn",
-              "LakerunnerImage", "DbInitImage"):
+              "LakerunnerImage", "DbInitImage",
+              "StorageProfilesParamName", "ApiKeysParamName"):
         assert n in template_dict["Parameters"], f"missing parameter: {n}"
+
+
+def test_migrator_seeds_configdb_from_ssm(template_dict):
+    """The migrator must read storage-profiles + api-keys YAML from the
+    SSM parameters so initializeIfNeededFunc seeds configdb on first install
+    (issue #109). YAML is injected as env vars via ECS Secrets resolution
+    against the SSM parameter ARN; STORAGE_PROFILE_FILE / API_KEYS_FILE use
+    the binary's `env:VAR` indirection."""
+    migrator = _containers(template_dict)["migrator"]
+    env = {e["Name"]: e["Value"] for e in migrator["Environment"]}
+    assert env.get("STORAGE_PROFILE_FILE") == "env:STORAGE_PROFILES_YAML"
+    assert env.get("API_KEYS_FILE") == "env:API_KEYS_YAML"
+
+    secrets = {s["Name"]: s["ValueFrom"] for s in migrator["Secrets"]}
+    sp_arn = secrets.get("STORAGE_PROFILES_YAML")
+    ak_arn = secrets.get("API_KEYS_YAML")
+    assert sp_arn is not None and "StorageProfilesParamName" in str(sp_arn), \
+        f"STORAGE_PROFILES_YAML secret must reference StorageProfilesParamName: {sp_arn}"
+    assert ak_arn is not None and "ApiKeysParamName" in str(ak_arn), \
+        f"API_KEYS_YAML secret must reference ApiKeysParamName: {ak_arn}"
 
 
 def test_migration_image_params_are_unified(template_dict):

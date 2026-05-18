@@ -29,8 +29,6 @@ def test_required_cross_stack_parameters(td):
         "BucketName",
         "QueueArn",
         "LicenseSecretArn",
-        "ApiKeysParamName",
-        "StorageProfilesParamName",
         "HttpsListenerArn",
         "VpcId",
     ):
@@ -41,6 +39,14 @@ def test_no_db_parameters(td):
     """OTEL collector writes to S3, not the database."""
     for n in ("DbEndpoint", "DbPort", "DbSecretArn"):
         assert n not in td["Parameters"], f"unexpected DB parameter: {n}"
+
+
+def test_no_storage_profile_or_api_keys_params(td):
+    """The migrator seeds configdb from these SSM parameters; the OTEL
+    collector reads profiles from configdb at runtime, so these are not
+    threaded here."""
+    for n in ("ApiKeysParamName", "StorageProfilesParamName"):
+        assert n not in td["Parameters"], f"unexpected parameter: {n}"
 
 
 def test_no_migration_complete_parameter(td):

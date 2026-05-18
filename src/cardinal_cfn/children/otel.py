@@ -72,11 +72,6 @@ _SERVICE_KEY = "otel-grpc"
 # canonical path prefix.
 _OTLP_GRPC_PORT = 4317
 
-# Env-var names the binary uses to find the SSM-parameter names for api_keys
-# and storage_profiles. Same convention as the lakerunner services.
-_API_KEYS_ENV = "LRDB_API_KEYS_SSM_PARAM"
-_STORAGE_PROFILES_ENV = "LRDB_STORAGE_PROFILES_SSM_PARAM"
-
 
 def build() -> Template:
     t = Template()
@@ -123,20 +118,6 @@ def build() -> Template:
             "LicenseSecretArn",
             Type="String",
             Description="ARN of the license Secrets Manager secret.",
-        )
-    )
-    t.add_parameter(
-        Parameter(
-            "ApiKeysParamName",
-            Type="String",
-            Description="Name of the SSM parameter holding the api_keys YAML.",
-        )
-    )
-    t.add_parameter(
-        Parameter(
-            "StorageProfilesParamName",
-            Type="String",
-            Description="Name of the SSM parameter holding the storage_profiles YAML.",
         )
     )
     # Always declared so the root can pass them unconditionally; only
@@ -251,8 +232,6 @@ def build() -> Template:
                     "BucketName",
                     "QueueArn",
                     "LicenseSecretArn",
-                    "ApiKeysParamName",
-                    "StorageProfilesParamName",
                     "HttpsListenerArn",
                     "VpcId",
                     "ServiceNamespaceId",
@@ -307,8 +286,6 @@ def build() -> Template:
         Environment(Name="LRDB_S3_REGION", Value=Ref("AWS::Region")),
         Environment(Name="ORG", Value=default_org),
         Environment(Name="COLLECTOR", Value=default_collector),
-        Environment(Name=_API_KEYS_ENV, Value=Ref("ApiKeysParamName")),
-        Environment(Name=_STORAGE_PROFILES_ENV, Value=Ref("StorageProfilesParamName")),
     ] + _service_specific_env(otel_cfg)
 
     secrets = [

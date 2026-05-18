@@ -418,10 +418,22 @@ main() {
         maestro-db)
 
     # ---- SSM --------------------------------------------------------------
-    ensure_ssm_parameter "$SSM_STORAGE_PROFILES" "{}" \
-        "Cardinal storage profiles (operator-managed JSON)"
-    ensure_ssm_parameter "$SSM_API_KEYS" "{}" \
-        "Cardinal external API keys (operator-managed JSON)"
+    # storage-profiles: seed an install-specific profile (bucket + region
+    # substituted) on first create. Idempotent: never overwritten on re-run,
+    # so operator edits (via maestro UI -> SSM, or `aws ssm put-parameter
+    # --overwrite`) survive. The lakerunner migrator container consumes this
+    # parameter at first install to seed configdb's bucket_configurations and
+    # organization_buckets tables; subsequent runs are no-ops because
+    # initializeIfNeededFunc skips when configdb already has profiles.
+    storage_profiles_yaml=$(printf -- '- bucket: %s\n  cloud_provider: aws\n  collector_name: lakerunner\n  insecure_tls: false\n  instance_num: 1\n  organization_id: 12340000-0000-4000-8000-000000000000\n  region: %s\n  use_path_style: true\n' \
+        "$BUCKET" "$REGION")
+    ensure_ssm_parameter "$SSM_STORAGE_PROFILES" "$storage_profiles_yaml" \
+        "Cardinal storage profiles (YAML; operator-managed)"
+    # api-keys: seed an empty list so the migrator can read the parameter
+    # without parse errors. Operators populate via maestro UI or
+    # `aws ssm put-parameter --overwrite` post-install.
+    ensure_ssm_parameter "$SSM_API_KEYS" "[]" \
+        "Cardinal external API keys (YAML; operator-managed)"
 
     log "done; emitting outputs JSON to stdout"
 
