@@ -222,28 +222,21 @@ def test_ingest_queue_policy_allows_s3_with_source_conditions(td):
 def test_ingest_bucket_orders_after_queue_policy(td):
     """S3 validates the SQS notification destination when the bucket's
     notification config is applied, so the bucket must be created after
-    IngestQueuePolicy. A plain DependsOn would dangle when ImportMode=Yes
-    excludes the policy, so on the create path the ordering rides in an
-    otherwise-unused Fn::Sub variable referencing the policy; in import mode the
-    value is just the bare queue ARN (Fn::Sub context values must be strings, so
-    Fn::If -> AWS::NoValue cannot be smuggled into the Sub itself)."""
+    IngestQueuePolicy -- expressed as a plain DependsOn."""
     bucket = _by_logical_id(td, "IngestBucket")
-    assert "DependsOn" not in bucket
+    dep = bucket["DependsOn"]
+    deps = dep if isinstance(dep, list) else [dep]
+    assert "IngestQueuePolicy" in deps
     queue_val = bucket["Properties"]["NotificationConfiguration"][
         "QueueConfigurations"
     ][0]["Queue"]
-    branches = queue_val["Fn::If"]
-    assert branches[0] == "CreateCfnOnlyResources"
-    sub_vars = branches[1]["Fn::Sub"][1]
-    assert sub_vars["QueueArn"] == {"Fn::GetAtt": ["IngestQueue", "Arn"]}
-    assert sub_vars["PolicyDependency"] == {"Ref": "IngestQueuePolicy"}
-    assert branches[2] == {"Fn::GetAtt": ["IngestQueue", "Arn"]}
+    assert queue_val == {"Fn::GetAtt": ["IngestQueue", "Arn"]}
 
 
 def test_no_dependson_references_a_conditional_resource(td):
     """A DependsOn pointing at a Condition-gated resource dangles whenever that
-    condition is false (notably ImportMode=Yes), which fails change-set
-    creation with 'Unresolved resource dependencies'."""
+    condition is false, which fails change-set creation with 'Unresolved
+    resource dependencies'."""
     conditional_ids = {
         lid for lid, res in td["Resources"].items() if "Condition" in res
     }
@@ -303,14 +296,7 @@ def test_ingest_bucket_notification_targets_queue(td):
     ]
     queue_cfg = notif["QueueConfigurations"][0]
     assert queue_cfg["Event"] == "s3:ObjectCreated:*"
-    branches = queue_cfg["Queue"]["Fn::If"]
-    assert branches[0] == "CreateCfnOnlyResources"
-    # create path: Fn::Sub renders to the queue ARN, carrying the policy dep
-    sub = branches[1]["Fn::Sub"]
-    assert sub[0] == "${QueueArn}"
-    assert sub[1]["QueueArn"] == {"Fn::GetAtt": ["IngestQueue", "Arn"]}
-    # import path: bare ARN, no dependency on the (absent) queue policy
-    assert branches[2] == {"Fn::GetAtt": ["IngestQueue", "Arn"]}
+    assert queue_cfg["Queue"] == {"Fn::GetAtt": ["IngestQueue", "Arn"]}
 
 
 def test_ingest_bucket_name_uses_default_or_override(td):
@@ -387,69 +373,54 @@ def test_outputs_have_no_export(td):
         assert "Export" not in out, f"output {name} should not have an Export"
 
 
-def test_outputs_gated_so_import_change_set_adds_none(td):
-    """An IMPORT change set rejects adding/modifying Outputs, so every output is
-    conditioned on CreateCfnOnlyResources -- false when ImportMode=Yes, so the
-    import template has no Outputs section at all."""
+def test_outputs_are_unconditional(td):
+    """The stack always creates its resources, so outputs carry no Condition."""
     for name, out in td["Outputs"].items():
-        assert out.get("Condition") == "CreateCfnOnlyResources", (
-            f"output {name} must be gated on CreateCfnOnlyResources"
-        )
+        assert "Condition" not in out, f"output {name} should be unconditional"
 
 
 # ---------------------------------------------------------------------------
-# Optional name parameters (used at import time)
+# Import mode removed: no ImportMode parameter, no auto-name conditions, and
+# the import-only explicit-name parameters are gone. RDS, the subnet group,
+# the SQS queue, and the db-master / maestro-db secrets are CFN-auto-named.
 # ---------------------------------------------------------------------------
 
 
-_IMPORT_NAME_PARAMS = (
-    "DBInstanceIdentifier",
-    "DBSubnetGroupName",
-    "IngestQueueName",
-    "DBMasterSecretName",
-    "MaestroDBSecretName",
-)
+def test_no_import_mode_parameter(td):
+    for n in (
+        "ImportMode",
+        "DBInstanceIdentifier",
+        "DBSubnetGroupName",
+        "IngestQueueName",
+        "DBMasterSecretName",
+        "MaestroDBSecretName",
+    ):
+        assert n not in td["Parameters"], f"{n} should be removed with import mode"
 
 
-def test_import_name_parameters_exist_with_blank_defaults(td):
-    for n in _IMPORT_NAME_PARAMS:
-        assert n in td["Parameters"], f"missing import-name parameter: {n}"
-        assert td["Parameters"][n]["Default"] == "", (
-            f"{n} default must be blank so fresh installs auto-name"
-        )
+def test_no_import_mode_conditions(td):
+    conditions = set(td.get("Conditions", {}).keys())
+    for c in (
+        "CreateCfnOnlyResources",
+        "AutoNameDBInstance",
+        "AutoNameDBSubnetGroup",
+        "AutoNameIngestQueue",
+        "AutoNameDBMasterSecret",
+        "AutoNameMaestroDBSecret",
+    ):
+        assert c not in conditions, f"{c} should be removed with import mode"
 
 
-_AUTO_NAME_CONDITIONS = {
-    "AutoNameDBInstance",
-    "AutoNameDBSubnetGroup",
-    "AutoNameIngestQueue",
-    "AutoNameDBMasterSecret",
-    "AutoNameMaestroDBSecret",
-}
+def test_auto_named_resources_omit_explicit_names(td):
+    """Resources that were import-overridable are now plain CFN-auto-named."""
+    assert "DBInstanceIdentifier" not in _by_logical_id(td, "DBInstance")["Properties"]
+    assert "DBSubnetGroupName" not in _by_logical_id(td, "DBSubnetGroup")["Properties"]
+    assert "QueueName" not in _by_logical_id(td, "IngestQueue")["Properties"]
+    assert "Name" not in _by_logical_id(td, "DBMasterSecret")["Properties"]
+    assert "Name" not in _by_logical_id(td, "MaestroDBSecret")["Properties"]
 
 
-def test_auto_name_conditions_present(td):
-    assert _AUTO_NAME_CONDITIONS <= set(td["Conditions"].keys())
-
-
-def _name_property(td, logical_id, prop):
-    return td["Resources"][logical_id]["Properties"][prop]
-
-
-def test_auto_name_use_site_pattern(td):
-    """Each import-eligible resource uses Fn::If(AutoNameX, NoValue, Ref(X))."""
-    cases = [
-        ("DBInstance", "DBInstanceIdentifier", "AutoNameDBInstance"),
-        ("DBSubnetGroup", "DBSubnetGroupName", "AutoNameDBSubnetGroup"),
-        ("IngestQueue", "QueueName", "AutoNameIngestQueue"),
-        ("DBMasterSecret", "Name", "AutoNameDBMasterSecret"),
-        ("MaestroDBSecret", "Name", "AutoNameMaestroDBSecret"),
-    ]
-    for logical_id, prop, condition in cases:
-        value = _name_property(td, logical_id, prop)
-        if_branches = value["Fn::If"]
-        assert if_branches[0] == condition
-        assert if_branches[1] == {"Ref": "AWS::NoValue"}
-        # third branch is Ref to the corresponding parameter
-        ref_param = if_branches[2]["Ref"]
-        assert ref_param in _IMPORT_NAME_PARAMS, ref_param
+def test_no_resource_is_conditional(td):
+    """Import mode was the only source of resource-level conditions."""
+    for lid, res in td["Resources"].items():
+        assert "Condition" not in res, f"{lid} should not be conditional"

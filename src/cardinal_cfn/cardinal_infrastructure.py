@@ -16,25 +16,6 @@ shape, secret JSON layout) mirrors the script 1:1.
 Outputs match the keys the script emits, so the lakerunner stack can
 consume either path identically.
 
-Importing existing resources
-----------------------------
-
-To bring an existing data-setup.sh-created install under stack
-management:
-
-1. Run a ``create-change-set --change-set-type IMPORT`` with
-   ``ImportMode=Yes`` and the matching ``*Name`` overrides set to the
-   live physical names. The CFN-only resources (``IngestQueuePolicy``
-   and ``DBMasterSecretAttachment``) are skipped in this mode -- CFN
-   import does not support resources that lack a real AWS-side
-   physical ID.
-2. After import succeeds, run a normal stack update with
-   ``ImportMode=No``. CFN creates the two skipped resources via their
-   underlying API calls (``set-queue-attributes`` and
-   ``put-secret-value``). Both are no-ops when the live config already
-   matches the template, which it will for any install bootstrapped
-   by ``scripts/data-setup.sh``.
-
 Recovery from a failed first create
 -----------------------------------
 
@@ -58,7 +39,6 @@ retry.
 """
 
 from troposphere import (
-    AWS_NO_VALUE,
     Equals,
     GetAtt,
     If,
@@ -259,87 +239,6 @@ def build() -> Template:
         ),
     )
 
-    # -----------------------------------------------------------------------
-    # Optional explicit-name parameters (used when importing an existing
-    # data-setup.sh-created install into the stack). Blank => CFN-auto-named.
-    # -----------------------------------------------------------------------
-
-    db_instance_identifier = t.add_parameter(
-        Parameter(
-            "DBInstanceIdentifier",
-            Type="String",
-            Default="",
-            Description=(
-                "Optional explicit DB instance identifier. Set to the "
-                "existing identifier (e.g. 'cardinal-db') when importing; "
-                "leave blank for fresh installs."
-            ),
-        )
-    )
-    db_subnet_group_name = t.add_parameter(
-        Parameter(
-            "DBSubnetGroupName",
-            Type="String",
-            Default="",
-            Description=(
-                "Optional explicit DB subnet group name. Set when "
-                "importing an existing subnet group; blank otherwise."
-            ),
-        )
-    )
-    ingest_queue_name = t.add_parameter(
-        Parameter(
-            "IngestQueueName",
-            Type="String",
-            Default="",
-            Description=(
-                "Optional explicit SQS queue name. Set when importing "
-                "an existing queue (e.g. 'cardinal-ingest'); blank "
-                "otherwise."
-            ),
-        )
-    )
-    db_master_secret_name = t.add_parameter(
-        Parameter(
-            "DBMasterSecretName",
-            Type="String",
-            Default="",
-            Description=(
-                "Optional explicit name for the DB master secret. Set "
-                "to the existing name (e.g. 'cardinal-db-master') when "
-                "importing; blank otherwise."
-            ),
-        )
-    )
-    maestro_db_secret_name = t.add_parameter(
-        Parameter(
-            "MaestroDBSecretName",
-            Type="String",
-            Default="",
-            Description=(
-                "Optional explicit name for the maestro-db secret. Set "
-                "to the existing name (e.g. 'cardinal-maestro-db') when "
-                "importing; blank otherwise."
-            ),
-        )
-    )
-    import_mode = t.add_parameter(
-        Parameter(
-            "ImportMode",
-            Type="String",
-            Default="No",
-            AllowedValues=["Yes", "No"],
-            Description=(
-                "Set to 'Yes' when running this template as a "
-                "create-change-set --change-set-type IMPORT. The "
-                "CFN-only resources (DBMasterSecretAttachment and the "
-                "IngestQueuePolicy) are skipped in this mode and must "
-                "be added by a follow-up stack update with "
-                "ImportMode=No."
-            ),
-        )
-    )
-
     add_parameter_group_metadata(
         t,
         groups=[
@@ -375,16 +274,6 @@ def build() -> Template:
                     "ApiKeysParamName",
                 ],
             },
-            {
-                "label": "Import overrides (set only when importing existing resources)",
-                "parameters": [
-                    "DBInstanceIdentifier",
-                    "DBSubnetGroupName",
-                    "IngestQueueName",
-                    "DBMasterSecretName",
-                    "MaestroDBSecretName",
-                ],
-            },
         ],
         labels={
             "PrivateSubnets": "Private subnets (2+ in distinct AZs)",
@@ -407,24 +296,6 @@ def build() -> Template:
         Equals(Ref(ingest_bucket_name), ""),
     )
 
-    # CFN has no "not-equals". Each ``AutoNameX`` is True iff the
-    # corresponding override parameter is blank. Use site idiom:
-    # ``If("AutoNameX", AWS_NO_VALUE, Ref(X))``.
-    t.add_condition(
-        "AutoNameDBInstance", Equals(Ref(db_instance_identifier), "")
-    )
-    t.add_condition(
-        "AutoNameDBSubnetGroup", Equals(Ref(db_subnet_group_name), "")
-    )
-    t.add_condition("AutoNameIngestQueue", Equals(Ref(ingest_queue_name), ""))
-    t.add_condition(
-        "AutoNameDBMasterSecret", Equals(Ref(db_master_secret_name), "")
-    )
-    t.add_condition(
-        "AutoNameMaestroDBSecret", Equals(Ref(maestro_db_secret_name), "")
-    )
-    t.add_condition("CreateCfnOnlyResources", Equals(Ref(import_mode), "No"))
-
     bucket_name_value = If(
         "UseDefaultBucketName",
         Sub("cardinal-ingest-${AWS::AccountId}-${AWS::Region}"),
@@ -439,18 +310,14 @@ def build() -> Template:
         _retain(
             Queue(
                 "IngestQueue",
-                QueueName=If(
-                    "AutoNameIngestQueue", Ref(AWS_NO_VALUE), Ref(ingest_queue_name)
-                ),
                 Tags=_tags(component="ingest-queue"),
             )
         )
     )
 
-    ingest_queue_policy = t.add_resource(
+    t.add_resource(
         QueuePolicy(
             "IngestQueuePolicy",
-            Condition="CreateCfnOnlyResources",
             Queues=[Ref(ingest_queue)],
             PolicyDocument={
                 "Version": "2012-10-17",
@@ -489,6 +356,11 @@ def build() -> Template:
         _retain(
             Bucket(
                 "IngestBucket",
+                # S3 validates the SQS notification destination when the
+                # bucket's notification config is applied and fails if the
+                # queue policy is not yet in place, so the bucket must be
+                # created after IngestQueuePolicy.
+                DependsOn="IngestQueuePolicy",
                 BucketName=bucket_name_value,
                 LifecycleConfiguration=LifecycleConfiguration(
                     Rules=[
@@ -507,29 +379,7 @@ def build() -> Template:
                     QueueConfigurations=[
                         QueueConfigurations(
                             Event="s3:ObjectCreated:*",
-                            # S3 validates the SQS notification destination when
-                            # the bucket's notification config is applied and
-                            # fails if the queue policy is not yet in place, so
-                            # the bucket must be created after IngestQueuePolicy.
-                            # A plain ``DependsOn`` would dangle whenever
-                            # ImportMode=Yes drops IngestQueuePolicy (CFN rejects
-                            # DependsOn on a condition-false resource), so on the
-                            # create path the ordering rides in an otherwise
-                            # unused ``Fn::Sub`` variable that references the
-                            # policy. In import mode there is no policy to depend
-                            # on, so the value is just the bare queue ARN.
-                            # (``Fn::Sub`` context values must be strings, so an
-                            # ``Fn::If`` -> AWS::NoValue smuggled into the Sub
-                            # itself is rejected by CreateChangeSet.)
-                            Queue=If(
-                                "CreateCfnOnlyResources",
-                                Sub(
-                                    "${QueueArn}",
-                                    QueueArn=GetAtt(ingest_queue, "Arn"),
-                                    PolicyDependency=Ref(ingest_queue_policy),
-                                ),
-                                GetAtt(ingest_queue, "Arn"),
-                            ),
+                            Queue=GetAtt(ingest_queue, "Arn"),
                         )
                     ]
                 ),
@@ -546,11 +396,6 @@ def build() -> Template:
         _retain(
             DBSubnetGroup(
                 "DBSubnetGroup",
-                DBSubnetGroupName=If(
-                    "AutoNameDBSubnetGroup",
-                    Ref(AWS_NO_VALUE),
-                    Ref(db_subnet_group_name),
-                ),
                 DBSubnetGroupDescription="Cardinal lakerunner DB subnet group",
                 SubnetIds=Ref(private_subnets),
                 Tags=_tags(component="db-subnet-group"),
@@ -562,11 +407,6 @@ def build() -> Template:
         _retain(
             Secret(
                 "DBMasterSecret",
-                Name=If(
-                    "AutoNameDBMasterSecret",
-                    Ref(AWS_NO_VALUE),
-                    Ref(db_master_secret_name),
-                ),
                 Description=(
                     "Cardinal RDS master credentials. Connection JSON "
                     "(host/port/engine/dbname) is filled in by the "
@@ -587,11 +427,6 @@ def build() -> Template:
         _snapshot(
             DBInstance(
                 "DBInstance",
-                DBInstanceIdentifier=If(
-                    "AutoNameDBInstance",
-                    Ref(AWS_NO_VALUE),
-                    Ref(db_instance_identifier),
-                ),
                 Engine="postgres",
                 EngineVersion=Ref(db_engine_version),
                 DBInstanceClass=Ref(db_instance_class),
@@ -622,7 +457,6 @@ def build() -> Template:
     t.add_resource(
         SecretTargetAttachment(
             "DBMasterSecretAttachment",
-            Condition="CreateCfnOnlyResources",
             SecretId=Ref(db_master_secret),
             TargetId=Ref(db_instance),
             TargetType="AWS::RDS::DBInstance",
@@ -670,11 +504,6 @@ def build() -> Template:
         _retain(
             Secret(
                 "MaestroDBSecret",
-                Name=If(
-                    "AutoNameMaestroDBSecret",
-                    Ref(AWS_NO_VALUE),
-                    Ref(maestro_db_secret_name),
-                ),
                 Description=(
                     'Maestro app DB credential. JSON shape '
                     '{"username":"maestro","password":"<random>"}.'
@@ -734,12 +563,6 @@ def build() -> Template:
 
     # -----------------------------------------------------------------------
     # Outputs (1:1 with the JSON keys that scripts/data-setup.sh emits).
-    #
-    # Every output is gated on CreateCfnOnlyResources: an IMPORT change set may
-    # only add the resources being imported -- adding or modifying Outputs is
-    # rejected ("you cannot modify or add [Outputs]"). With ImportMode=Yes the
-    # condition is false for all of them, so the import template carries no
-    # Outputs section; they appear on the follow-up ImportMode=No update.
     # -----------------------------------------------------------------------
 
     def _emit_output(name: str, description: str, value) -> None:
@@ -748,7 +571,6 @@ def build() -> Template:
                 name,
                 Description=description,
                 Value=value,
-                Condition="CreateCfnOnlyResources",
             )
         )
 
