@@ -64,7 +64,6 @@ SQS_QUEUE_NAME="cardinal-ingest"
 SECRET_DB_MASTER="cardinal-db-master"
 SECRET_LICENSE="cardinal-license"
 SECRET_ADMIN_KEY="cardinal-admin-key"
-SECRET_MAESTRO_DB="cardinal-maestro-db"
 
 SSM_STORAGE_PROFILES="/cardinal/storage-profiles"
 SSM_API_KEYS="/cardinal/api-keys"
@@ -331,7 +330,7 @@ update_db_master_secret() {
 }
 
 # ============================================================================
-#  SECRETS  --  license, admin-key, maestro-db
+#  SECRETS  --  license, admin-key
 #                Each is create-only: never overwrite on re-run.
 # ============================================================================
 
@@ -412,10 +411,6 @@ main() {
         "$(jq -nc --arg k "$(gen_hex32)" '{key:$k}')" \
         "First-boot admin API key (rotated by admin-api)." \
         admin-key)
-    maestro_db_arn=$(ensure_secret_with_value "$SECRET_MAESTRO_DB" \
-        "$(jq -nc --arg p "$(gen_password)" '{username:"maestro", password:$p}')" \
-        "Maestro app DB credential (username/password JSON)." \
-        maestro-db)
 
     # ---- SSM --------------------------------------------------------------
     # storage-profiles: seed an install-specific profile (bucket + region
@@ -445,7 +440,6 @@ main() {
         --arg DbPort "$db_port" \
         --arg DbName "$DB_NAME" \
         --arg DbMasterSecretArn "$db_master_secret_arn" \
-        --arg MaestroDbSecretArn "$maestro_db_arn" \
         --arg IngestBucketName "$BUCKET" \
         --arg IngestQueueUrl "$queue_url" \
         --arg IngestQueueArn "$QUEUE_ARN" \
@@ -460,7 +454,6 @@ main() {
         '{
             DbEndpoint:$DbEndpoint, DbPort:$DbPort, DbName:$DbName,
             DbMasterSecretArn:$DbMasterSecretArn,
-            MaestroDbSecretArn:$MaestroDbSecretArn,
             IngestBucketName:$IngestBucketName,
             IngestQueueUrl:$IngestQueueUrl, IngestQueueArn:$IngestQueueArn,
             LicenseSecretArn:$LicenseSecretArn,

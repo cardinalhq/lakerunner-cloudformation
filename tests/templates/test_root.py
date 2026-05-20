@@ -28,7 +28,6 @@ def test_required_parameters(td):
         "DbPort",
         "DbName",
         "DbMasterSecretArn",
-        "MaestroDbSecretArn",
         "IngestBucketName",
         "IngestQueueUrl",
         "IngestQueueArn",

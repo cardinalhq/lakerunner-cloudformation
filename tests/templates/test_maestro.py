@@ -32,7 +32,6 @@ def test_required_cross_stack_parameters(td):
         "DbEndpoint",
         "DbPort",
         "DbSecretArn",
-        "MaestroDbSecretArn",
         "LicenseSecretArn",
         "MigrationComplete",
     ):
@@ -201,7 +200,8 @@ def test_ecs_service_has_two_load_balancers(td):
 
 
 def test_no_internally_managed_maestro_db_secret(td):
-    """Phase 2: the maestro DB secret is created by the data-setup Lambda."""
+    """maestro connects with the master DB secret (infra-setup output); the
+    stack manages no secret of its own."""
     secrets = [
         r for r in td["Resources"].values()
         if r["Type"] == "AWS::SecretsManager::Secret"
@@ -223,10 +223,12 @@ def _container(td, name):
     )
 
 
-def test_db_init_secrets_include_master_db_user_password_and_maestro_password(td):
+def test_db_init_secrets_use_master_db_credentials(td):
+    """db-init only creates the database, so it needs just the master creds."""
     db_init = _container(td, "db-init")
     secret_names = {s["Name"] for s in db_init.get("Secrets", [])}
-    assert {"LRDB_USER", "LRDB_PASSWORD", "MAESTRO_DB_PASSWORD"} <= secret_names
+    assert {"LRDB_USER", "LRDB_PASSWORD"} <= secret_names
+    assert "MAESTRO_DB_PASSWORD" not in secret_names
 
 
 def test_maestro_container_env_has_db_settings(td):
@@ -236,7 +238,6 @@ def test_maestro_container_env_has_db_settings(td):
         "MAESTRO_DB_HOST",
         "MAESTRO_DB_PORT",
         "MAESTRO_DB_NAME",
-        "MAESTRO_DB_USER",
         "MAESTRO_DB_SSLMODE",
         "DEX_ISSUER_URL",
         "DEX_CLIENT_ID",
@@ -244,10 +245,14 @@ def test_maestro_container_env_has_db_settings(td):
         assert n in env_names, f"maestro env missing {n}"
 
 
-def test_maestro_container_password_secret_present(td):
+def test_maestro_container_db_user_and_password_from_master_secret(td):
+    """User and password both come from the master DB secret (no maestro role)."""
     maestro_c = _container(td, "maestro")
-    secret_names = {s["Name"] for s in maestro_c.get("Secrets", [])}
-    assert "MAESTRO_DB_PASSWORD" in secret_names
+    secrets = {s["Name"]: s["ValueFrom"] for s in maestro_c.get("Secrets", [])}
+    assert "MAESTRO_DB_USER" in secrets
+    assert "MAESTRO_DB_PASSWORD" in secrets
+    for name in ("MAESTRO_DB_USER", "MAESTRO_DB_PASSWORD"):
+        assert secrets[name]["Fn::Sub"].startswith("${DbSecretArn}")
 
 
 def test_mcp_gateway_container_has_license_data(td):
@@ -292,10 +297,6 @@ def test_outputs_dex_url(td):
 
 def test_outputs_service_name(td):
     assert "MaestroServiceName" in td["Outputs"]
-
-
-def test_outputs_db_secret_arn(td):
-    assert "MaestroDbSecretArn" in td["Outputs"]
 
 
 # ---------------------------------------------------------------------------

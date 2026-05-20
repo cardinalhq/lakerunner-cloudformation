@@ -97,13 +97,13 @@ def test_creates_secret_target_attachment(td):
     assert types.count("AWS::SecretsManager::SecretTargetAttachment") == 1
 
 
-def test_creates_three_managed_secrets_plus_master(td):
-    """db-master + license + admin-key + maestro-db = 4."""
+def test_creates_managed_secrets(td):
+    """db-master + license + admin-key = 3 (maestro reuses the master)."""
     secrets = [
         r for r in td["Resources"].values()
         if r["Type"] == "AWS::SecretsManager::Secret"
     ]
-    assert len(secrets) == 4
+    assert len(secrets) == 3
 
 
 def test_creates_two_ssm_parameters(td):
@@ -191,11 +191,9 @@ def test_admin_key_secret_generates_keyed_json(td):
     assert sec["Name"] == {"Ref": "AdminKeySecretName"}
 
 
-def test_maestro_db_secret_generates_password_with_username(td):
-    sec = _by_logical_id(td, "MaestroDBSecret")["Properties"]
-    gen = sec["GenerateSecretString"]
-    assert gen["GenerateStringKey"] == "password"
-    assert "maestro" in gen["SecretStringTemplate"]
+def test_no_maestro_db_secret(td):
+    """maestro connects with the master DB secret, so no separate secret."""
+    assert "MaestroDBSecret" not in td["Resources"]
 
 
 def test_ssm_parameters_use_overridable_names(td):
@@ -353,7 +351,6 @@ _EXPECTED_OUTPUT_KEYS = {
     "DbPort",
     "DbName",
     "DbMasterSecretArn",
-    "MaestroDbSecretArn",
     "IngestBucketName",
     "IngestQueueUrl",
     "IngestQueueArn",
@@ -382,7 +379,7 @@ def test_outputs_are_unconditional(td):
 # ---------------------------------------------------------------------------
 # Import mode removed: no ImportMode parameter, no auto-name conditions, and
 # the import-only explicit-name parameters are gone. RDS, the subnet group,
-# the SQS queue, and the db-master / maestro-db secrets are CFN-auto-named.
+# the SQS queue, and the db-master secret are CFN-auto-named.
 # ---------------------------------------------------------------------------
 
 
@@ -417,7 +414,6 @@ def test_auto_named_resources_omit_explicit_names(td):
     assert "DBSubnetGroupName" not in _by_logical_id(td, "DBSubnetGroup")["Properties"]
     assert "QueueName" not in _by_logical_id(td, "IngestQueue")["Properties"]
     assert "Name" not in _by_logical_id(td, "DBMasterSecret")["Properties"]
-    assert "Name" not in _by_logical_id(td, "MaestroDBSecret")["Properties"]
 
 
 def test_no_resource_is_conditional(td):

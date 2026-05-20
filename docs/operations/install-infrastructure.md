@@ -104,7 +104,7 @@ Resources created with fixed names:
 - SQS queue: `cardinal-ingest`
 - S3 bucket: `cardinal-ingest-<account>-<region>`
 - Secrets: `cardinal-db-master`, `cardinal-license`,
-  `cardinal-admin-key`, `cardinal-maestro-db`
+  `cardinal-admin-key`
 - SSM params: `/cardinal/storage-profiles`, `/cardinal/api-keys`
 
 These fixed names imply one Cardinal install per AWS account/region.
@@ -115,7 +115,7 @@ The script prints a JSON document to stdout. Its keys map 1:1 to the
 `cardinal-lakerunner` stack's "Infra-setup outputs" parameter group:
 
 `DbEndpoint`, `DbPort`, `DbName`, `DbMasterSecretArn`,
-`MaestroDbSecretArn`, `IngestBucketName`, `IngestQueueUrl`,
+`IngestBucketName`, `IngestQueueUrl`,
 `IngestQueueArn`, `LicenseSecretArn`, `AdminKeySecretArn`,
 `StorageProfilesParamName`, `ApiKeysParamName`, `ClusterName`,
 `ClusterArn`, `ServiceNamespaceId`, `ServiceNamespaceName`.
