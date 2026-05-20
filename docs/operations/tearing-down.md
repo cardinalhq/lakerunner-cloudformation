@@ -80,7 +80,6 @@ is fixed and named deterministically:
 | RDS instance | `cardinal-db` |
 | S3 ingest bucket | `cardinal-ingest-<account>-<region>` |
 | Secret: db master | `cardinal-db-master-*` (Secrets Manager auto-suffixed) |
-| Secret: maestro db (legacy installs only) | `cardinal-maestro-db-*` |
 | Secret: license | `cardinal-license-*` |
 | Secret: admin key | `cardinal-admin-key-*` |
 | Secret: internal keys (legacy installs only) | `cardinal-internal-keys-*` |
@@ -134,7 +133,7 @@ aws s3api delete-bucket --bucket "$BUCKET" --region "$REGION"
 # 3. Secrets. Use --force-delete-without-recovery to skip the 7-30 day
 #    recovery window; drop that flag (and add --recovery-window-in-days)
 #    if you want it.
-for prefix in cardinal-db-master cardinal-maestro-db cardinal-license \
+for prefix in cardinal-db-master cardinal-license \
               cardinal-internal-keys cardinal-admin-key; do
     arn=$(aws secretsmanager list-secrets --region "$REGION" \
         --filters Key=name,Values="$prefix" \
