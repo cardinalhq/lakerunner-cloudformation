@@ -111,6 +111,22 @@ def test_creates_two_ssm_parameters(td):
     assert types.count("AWS::SSM::Parameter") == 2
 
 
+def test_ssm_seeds_render_nonempty_yaml_lists(td):
+    # Regression: the migrator imports these into configdb and needs YAML
+    # *lists*. A top-level map ("{}") fails to unmarshal into
+    # []initialize.StorageProfile and aborts the migration -- the bug that hit
+    # CFN-infra installs because #110 fixed only data-setup.sh, not this path.
+    sp = td["Resources"]["StorageProfilesParam"]["Properties"]["Value"]
+    body = sp["Fn::Sub"][0] if isinstance(sp, dict) else sp
+    assert body.lstrip().startswith("- "), f"storage profiles must be a YAML list: {body!r}"
+    assert "{}" not in body
+    for field in ("organization_id", "collector_name", "cloud_provider", "region", "bucket"):
+        assert field in body, f"storage profile missing {field}"
+
+    ak = td["Resources"]["ApiKeysParam"]["Properties"]["Value"]
+    assert ak == "[]", f"api keys must seed an empty list, got: {ak!r}"
+
+
 def test_creates_ingest_bucket_and_queue(td):
     types = _types(td)
     assert types.count("AWS::S3::Bucket") == 1
@@ -203,8 +219,7 @@ def test_ssm_parameters_use_overridable_names(td):
     assert ak["Name"] == {"Ref": "ApiKeysParamName"}
     assert sp["Type"] == "String"
     assert ak["Type"] == "String"
-    assert sp["Value"] == "{}"
-    assert ak["Value"] == "{}"
+    # Seed values are asserted in test_ssm_seeds_render_nonempty_yaml_lists.
 
 
 def test_ingest_queue_policy_allows_s3_with_source_conditions(td):
