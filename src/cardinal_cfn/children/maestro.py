@@ -2,9 +2,10 @@
 
 Owns a SINGLE ECS Fargate service running a six-container task definition:
 
-  1. db-init       (Essential=False, runs psql to bootstrap maestro DB+user)
+  1. db-init       (Essential=False, runs psql to create the maestro database)
   2. mcp-gateway   (Essential=True, runs maestro DB schema migrations on
-                    startup, then serves the MCP gateway port)
+                    startup as the DB superuser -- so CREATE EXTENSION in the
+                    migrations succeeds -- then serves the MCP gateway port)
   3. wait-for-mcp  (Essential=False, blocks until mcp-gateway has finished
                     its on-startup migrations so maestro doesn't race them)
   4. maestro      (Essential=True, listens on the maestro HTTPS port)
@@ -132,14 +133,11 @@ def build() -> Template:
         Parameter(
             "DbSecretArn",
             Type="String",
-            Description="ARN of the master DB secret (used by db-init to provision maestro DB+user).",
-        )
-    )
-    t.add_parameter(
-        Parameter(
-            "MaestroDbSecretArn",
-            Type="String",
-            Description="ARN of the maestro application DB secret (created by data-setup Lambda).",
+            Description=(
+                "ARN of the master DB secret. db-init uses it to create the "
+                "maestro database, and mcp-gateway + maestro connect with it "
+                "(the migrations run CREATE EXTENSION, which needs superuser)."
+            ),
         )
     )
     t.add_parameter(
@@ -285,7 +283,6 @@ def build() -> Template:
                     "DbPort",
                     "DbSecretArn",
                     "LicenseSecretArn",
-                    "MaestroDbSecretArn",
                     "MigrationComplete",
                 ],
             },
@@ -330,37 +327,15 @@ def build() -> Template:
         Image=db_init_image_ref,
         Essential=False,
         EntryPoint=["sh", "-c"],
-        # Idempotent provisioning of the maestro DB / role / extensions.
-        # The "|| true" fallbacks tolerate "already exists" on re-runs.
-        # PG 15+ revokes CREATE on the public schema from PUBLIC, so we
-        # transfer ownership of the database and schema to the maestro
-        # role. The pgvector / pgcrypto / citext extensions must be created
-        # by an rds_superuser (the lakerunner master) — mcp-gateway's
-        # migrations run as the maestro role and use IF NOT EXISTS so
-        # they no-op once these are in place.
+        # Create the maestro database; mcp-gateway can't create the database it
+        # connects to. Everything else (schema, ownership, the pgvector /
+        # pgcrypto / citext extensions) is handled by mcp-gateway's migrations,
+        # which run as the DB superuser. The "|| true" tolerates re-runs.
         Command=[
             (
                 "PGPASSWORD=$LRDB_PASSWORD psql -h $LRDB_HOST -p $LRDB_PORT "
                 "-U $LRDB_USER -d postgres -v ON_ERROR_STOP=1 "
-                "-c \"CREATE DATABASE maestro\" || true; "
-                "PGPASSWORD=$LRDB_PASSWORD psql -h $LRDB_HOST -p $LRDB_PORT "
-                "-U $LRDB_USER -d postgres -v ON_ERROR_STOP=1 "
-                "-c \"CREATE USER maestro WITH PASSWORD '$MAESTRO_DB_PASSWORD'\" "
-                "|| true; "
-                "PGPASSWORD=$LRDB_PASSWORD psql -h $LRDB_HOST -p $LRDB_PORT "
-                "-U $LRDB_USER -d postgres -v ON_ERROR_STOP=1 "
-                "-c \"GRANT ALL ON DATABASE maestro TO maestro\"; "
-                "PGPASSWORD=$LRDB_PASSWORD psql -h $LRDB_HOST -p $LRDB_PORT "
-                "-U $LRDB_USER -d postgres -v ON_ERROR_STOP=1 "
-                "-c \"ALTER DATABASE maestro OWNER TO maestro\"; "
-                "PGPASSWORD=$LRDB_PASSWORD psql -h $LRDB_HOST -p $LRDB_PORT "
-                "-U $LRDB_USER -d maestro -v ON_ERROR_STOP=1 "
-                "-c \"ALTER SCHEMA public OWNER TO maestro\"; "
-                "for ext in vector pgcrypto citext; do "
-                "PGPASSWORD=$LRDB_PASSWORD psql -h $LRDB_HOST -p $LRDB_PORT "
-                "-U $LRDB_USER -d maestro -v ON_ERROR_STOP=1 "
-                "-c \"CREATE EXTENSION IF NOT EXISTS $ext\"; "
-                "done"
+                "-c \"CREATE DATABASE maestro\" || true"
             )
         ],
         Environment=[
@@ -370,10 +345,6 @@ def build() -> Template:
         Secrets=[
             Secret(Name="LRDB_USER", ValueFrom=Sub("${DbSecretArn}:username::")),
             Secret(Name="LRDB_PASSWORD", ValueFrom=Sub("${DbSecretArn}:password::")),
-            Secret(
-                Name="MAESTRO_DB_PASSWORD",
-                ValueFrom=Sub("${MaestroDbSecretArn}:password::"),
-            ),
         ],
         LogConfiguration=LogConfiguration(
             LogDriver="awslogs",
@@ -388,17 +359,21 @@ def build() -> Template:
     # mcp-gateway runs the maestro DB schema migrations on startup, then
     # serves MCP. Maestro shares this DB and breaks if migrations haven't
     # run yet (relation "maestro_*" does not exist).
+    # mcp-gateway (migrations + MCP server) and maestro connect as the DB
+    # master/superuser. The migrations issue CREATE EXTENSION (pgvector et al.),
+    # which RDS only allows for rds_superuser, so there is no separate, lesser
+    # maestro role -- the instance is single-tenant to this install.
     db_env = [
         Environment(Name="MAESTRO_DB_HOST", Value=Ref("DbEndpoint")),
         Environment(Name="MAESTRO_DB_PORT", Value=Ref("DbPort")),
         Environment(Name="MAESTRO_DB_NAME", Value="maestro"),
-        Environment(Name="MAESTRO_DB_USER", Value="maestro"),
         Environment(Name="MAESTRO_DB_SSLMODE", Value="require"),
     ]
     db_secrets = [
+        Secret(Name="MAESTRO_DB_USER", ValueFrom=Sub("${DbSecretArn}:username::")),
         Secret(
             Name="MAESTRO_DB_PASSWORD",
-            ValueFrom=Sub("${MaestroDbSecretArn}:password::"),
+            ValueFrom=Sub("${DbSecretArn}:password::"),
         ),
     ]
 
@@ -713,7 +688,6 @@ def build() -> Template:
     t.add_output(Output("MaestroUrl", Value=Sub("https://${AlbDnsName}/")))
     t.add_output(Output("DexUrl", Value=Sub("https://${AlbDnsName}/dex/")))
     t.add_output(Output("MaestroServiceName", Value=GetAtt(service, "Name")))
-    t.add_output(Output("MaestroDbSecretArn", Value=Ref("MaestroDbSecretArn")))
 
     return t
 

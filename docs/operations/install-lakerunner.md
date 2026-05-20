@@ -58,7 +58,7 @@ infra = json.loads(pathlib.Path("/tmp/infra-outputs.json").read_text())
 # Group A: pass-through infra-setup outputs (keys match 1:1).
 infra_keys = [
     "DbEndpoint", "DbPort", "DbName", "DbMasterSecretArn",
-    "MaestroDbSecretArn", "IngestBucketName", "IngestQueueUrl",
+    "IngestBucketName", "IngestQueueUrl",
     "IngestQueueArn", "LicenseSecretArn", "AdminKeySecretArn",
     "StorageProfilesParamName", "ApiKeysParamName",
     "ClusterName", "ClusterArn",

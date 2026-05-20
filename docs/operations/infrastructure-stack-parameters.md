@@ -65,8 +65,8 @@ aws cloudformation wait stack-create-complete \
   --stack-name cardinal-infrastructure
 ```
 
-RDS, the DB subnet group, the SQS queue, and the `cardinal-db-master` /
-`cardinal-maestro-db` secrets are CloudFormation-generated names. The ingest
+RDS, the DB subnet group, the SQS queue, and the `cardinal-db-master`
+secret are CloudFormation-generated names. The ingest
 bucket is the one named resource that is predictable: leaving `IngestBucketName`
 out makes the template create `cardinal-ingest-<account-id>-<region>`.
 

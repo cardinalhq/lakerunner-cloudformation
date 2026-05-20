@@ -80,7 +80,7 @@ is fixed and named deterministically:
 | RDS instance | `cardinal-db` |
 | S3 ingest bucket | `cardinal-ingest-<account>-<region>` |
 | Secret: db master | `cardinal-db-master-*` (Secrets Manager auto-suffixed) |
-| Secret: maestro db | `cardinal-maestro-db-*` |
+| Secret: maestro db (legacy installs only) | `cardinal-maestro-db-*` |
 | Secret: license | `cardinal-license-*` |
 | Secret: admin key | `cardinal-admin-key-*` |
 | Secret: internal keys (legacy installs only) | `cardinal-internal-keys-*` |

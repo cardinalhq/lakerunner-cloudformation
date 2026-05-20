@@ -6,7 +6,7 @@ Customer-deployable peer to ``cardinal-vpc``. Creates the resources that
 - RDS PostgreSQL instance + DB subnet group + master secret
 - S3 ingest bucket + lifecycle policy + S3 -> SQS notification
 - SQS ingest queue + queue policy
-- License / admin-key / maestro-db secrets
+- License / admin-key secrets
 - /cardinal/storage-profiles and /cardinal/api-keys SSM parameters
 
 Conceptually a CloudFormation port of ``scripts/data-setup.sh``; the
@@ -34,7 +34,7 @@ collide on retry. To recover:
    ``delete-secret --force-delete-without-recovery``), then redeploy.
 
 Resources without explicit names (RDS, SQS, DB subnet group, the
-db-master / maestro-db secrets) are CFN-named and collide-free on
+db-master secret) are CFN-named and collide-free on
 retry.
 """
 
@@ -464,7 +464,7 @@ def build() -> Template:
     )
 
     # -----------------------------------------------------------------------
-    # Application secrets (license, admin-key, maestro-db)
+    # Application secrets (license, admin-key)
     # -----------------------------------------------------------------------
 
     license_secret = t.add_resource(
@@ -496,25 +496,6 @@ def build() -> Template:
                     ExcludePunctuation=True,
                 ),
                 Tags=_tags(component="admin-key"),
-            )
-        )
-    )
-
-    maestro_db_secret = t.add_resource(
-        _retain(
-            Secret(
-                "MaestroDBSecret",
-                Description=(
-                    'Maestro app DB credential. JSON shape '
-                    '{"username":"maestro","password":"<random>"}.'
-                ),
-                GenerateSecretString=GenerateSecretString(
-                    SecretStringTemplate='{"username":"maestro"}',
-                    GenerateStringKey="password",
-                    PasswordLength=40,
-                    ExcludePunctuation=True,
-                ),
-                Tags=_tags(component="maestro-db"),
             )
         )
     )
@@ -581,8 +562,6 @@ def build() -> Template:
     _emit_output("DbName", "RDS database name.", "lakerunner")
     _emit_output("DbMasterSecretArn", "ARN of the RDS master-credentials secret.",
                  Ref(db_master_secret))
-    _emit_output("MaestroDbSecretArn", "ARN of the Maestro app DB credentials secret.",
-                 Ref(maestro_db_secret))
     _emit_output("IngestBucketName", "Name of the S3 ingest bucket.",
                  Ref(ingest_bucket))
     _emit_output("IngestQueueUrl", "URL of the SQS ingest queue.",
