@@ -501,7 +501,12 @@ def build() -> Template:
     )
 
     # -----------------------------------------------------------------------
-    # SSM parameters (operator-managed JSON, default {})
+    # SSM parameters (operator-managed YAML). The migrator's initializer
+    # (lakerunner migrate, since #109/#110) imports these into configdb and
+    # expects YAML *lists* -- a top-level map (e.g. "{}") fails to unmarshal
+    # into []initialize.StorageProfile and aborts the migration. Mirror
+    # data-setup.sh: seed storage-profiles with an install-specific profile
+    # (bucket + region substituted) and api-keys with an empty list.
     # -----------------------------------------------------------------------
 
     storage_profiles_param = t.add_resource(
@@ -510,8 +515,18 @@ def build() -> Template:
                 "StorageProfilesParam",
                 Name=Ref(storage_profiles_param_name),
                 Type="String",
-                Value="{}",
-                Description="Cardinal storage profiles (operator-managed JSON).",
+                Value=Sub(
+                    "- organization_id: 12340000-0000-4000-8000-000000000000\n"
+                    "  instance_num: 1\n"
+                    "  collector_name: lakerunner\n"
+                    "  cloud_provider: aws\n"
+                    "  region: ${AWS::Region}\n"
+                    "  bucket: ${BucketName}\n"
+                    "  insecure_tls: false\n"
+                    "  use_path_style: true\n",
+                    BucketName=bucket_name_value,
+                ),
+                Description="Cardinal storage profiles (YAML; operator-managed).",
                 Tags={
                     "Application": APPLICATION,
                     "Project": PROJECT,
@@ -529,8 +544,8 @@ def build() -> Template:
                 "ApiKeysParam",
                 Name=Ref(api_keys_param_name),
                 Type="String",
-                Value="{}",
-                Description="Cardinal external API keys (operator-managed JSON).",
+                Value="[]",
+                Description="Cardinal external API keys (YAML; operator-managed).",
                 Tags={
                     "Application": APPLICATION,
                     "Project": PROJECT,
