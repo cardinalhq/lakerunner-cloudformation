@@ -5,11 +5,14 @@ image. The collector listens on the canonical OTLP ports (gRPC 4317 and
 HTTP 4318) and writes telemetry directly to the ingest S3 bucket; it has
 no database dependency and does not consume from the ingest SQS queue.
 
-The collector is always attached to the shared ALB: this stack creates a
-TargetGroup + ListenerRule (priority 300) on the HTTPS listener and wires
-the ECS Service's LoadBalancers block to it. The ALB security group is
-customer-supplied and may differ from the task security group; the
-customer owns the ALB-to-task ingress rule on the OTLP gRPC port.
+The collector is always attached to the shared ALB, exposing OTLP/HTTP
+(4318): this stack creates a TargetGroup + ListenerRule (priority 300,
+"/v1/*") on the HTTPS listener and wires the ECS Service's LoadBalancers
+block to it. Health checks hit the collector's health_check extension on
+13133. The gRPC receiver (4317) is not ALB-exposed but stays reachable
+task-to-task via Cloud Map. The ALB security group is customer-supplied
+and may differ from the task security group; the customer owns the
+ALB-to-task ingress rule on the OTLP HTTP port.
 
 Config injection is intentionally minimal: the image ships with a baked-in
 config (`/etc/otel/config.yaml`, referenced by the default command) and
@@ -65,12 +68,15 @@ from cardinal_cfn.parameters import (
 # entry must reference.
 _SERVICE_KEY = "otel-grpc"
 
-# OTLP ports. The ALB target points at the gRPC port; HTTP receivers run on
-# 4318 and remain reachable task-to-task. Path patterns on the listener rule
-# are largely irrelevant when targeting a gRPC service, but ListenerRule
-# requires at least one condition — "/v1/*" matches the OTLP HTTP receivers'
-# canonical path prefix.
-_OTLP_GRPC_PORT = 4317
+# OTLP ports. The ALB exposes OTLP/HTTP (4318): it's plain HTTP, so a standard
+# HTTP target group + the "/v1/*" listener rule (OTLP HTTP's canonical path
+# prefix: /v1/traces|metrics|logs) work without gRPC/HTTP-2 complications. The
+# gRPC receiver (4317) stays reachable task-to-task via Cloud Map but is not
+# ALB-exposed. The collector's health_check extension serves HTTP 200 at "/"
+# on 13133, so the target group health-checks that port (not the OTLP port,
+# which has no plain-HTTP health path).
+_OTLP_HTTP_PORT = 4318
+_HEALTH_PORT = 13133
 
 
 def build() -> Template:
@@ -285,19 +291,22 @@ def build() -> Template:
             environment=env,
             secrets=secrets,
             log_group_ref=log_group,
-            container_port=_OTLP_GRPC_PORT,
+            container_port=_OTLP_HTTP_PORT,
         )
     )
 
     # ---------------------------------------------------------------------
-    # ALB attachment (TargetGroup + ListenerRule). The TargetGroup targets
-    # the gRPC port; path patterns are nominal because gRPC traffic uses
-    # HTTP/2 to a fixed path.
+    # ALB attachment (TargetGroup + ListenerRule). Traffic targets OTLP/HTTP
+    # (4318) and the "/v1/*" rule matches /v1/traces|metrics|logs. Health
+    # checks hit the collector's health_check extension on 13133 (HTTP 200 at
+    # "/"); the OTLP port has no plain-HTTP health path.
     # ---------------------------------------------------------------------
     target_group = services_common.build_target_group(
         service_key=_SERVICE_KEY,
         vpc_id_param="VpcId",
-        port=_OTLP_GRPC_PORT,
+        port=_OTLP_HTTP_PORT,
+        health_check_path="/",
+        health_check_port=_HEALTH_PORT,
     )
     t.add_resource(target_group)
 
@@ -356,7 +365,7 @@ def build() -> Template:
             LoadBalancers=[
                 EcsLoadBalancer(
                     ContainerName=_SERVICE_KEY,
-                    ContainerPort=_OTLP_GRPC_PORT,
+                    ContainerPort=_OTLP_HTTP_PORT,
                     TargetGroupArn=Ref(target_group),
                 )
             ],
@@ -375,7 +384,7 @@ def build() -> Template:
     t.add_output(
         Output(
             "OtelEndpoint",
-            Value=Sub(f"alb:${{HttpsListenerArn}}:{_OTLP_GRPC_PORT}"),
+            Value=Sub(f"alb:${{HttpsListenerArn}}:{_OTLP_HTTP_PORT}"),
         )
     )
     t.add_output(Output("OtelServiceName", Value=GetAtt(service, "Name")))

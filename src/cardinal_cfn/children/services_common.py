@@ -81,8 +81,18 @@ def build_target_group(
     vpc_id_param: str,
     port: int,
     health_check_path: str = "/healthz",
+    health_check_port: int | None = None,
 ) -> TargetGroup:
-    """ALB target group for a service that attaches to the ALB."""
+    """ALB target group for a service that attaches to the ALB.
+
+    ``health_check_port`` overrides the port the ALB probes when the health
+    endpoint lives on a different port than the traffic port (e.g. the otel
+    collector serves OTLP on 4318 but its health_check extension on 13133).
+    Defaults to the traffic port.
+    """
+    kwargs = {}
+    if health_check_port is not None:
+        kwargs["HealthCheckPort"] = str(health_check_port)
     return TargetGroup(
         _resource_title(service_key, "TargetGroup"),
         Port=port,
@@ -93,6 +103,7 @@ def build_target_group(
         HealthCheckProtocol="HTTP",
         Matcher=Matcher(HttpCode="200"),
         Tags=cardinal_tags(component="networking", role=f"{service_key}-tg"),
+        **kwargs,
     )
 
 
