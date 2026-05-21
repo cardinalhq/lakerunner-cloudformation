@@ -118,9 +118,6 @@ def _sizing_param_specs(defaults: dict) -> list[dict]:
          "description": "Fargate CPU units for the otel-gateway service."},
         {"name": "OtelMemory", "type": "String", "default": str(otel_cfg["memory_mib"]),
          "description": "Fargate memory (MiB) for the otel-gateway service."},
-        {"name": "OtelExposeOnAlb", "type": "String", "default": "No",
-         "allowed_values": ["Yes", "No"],
-         "description": "When Yes, attach the otel-gateway to the shared ALB."},
         {"name": "OtelConfigYaml", "type": "String", "default": "",
          "description": "Optional inline OTEL collector config YAML override."},
     ]
@@ -555,7 +552,6 @@ def build() -> Template:
         "OtelReplicas": Ref("OtelReplicas"),
         "OtelCpu": Ref("OtelCpu"),
         "OtelMemory": Ref("OtelMemory"),
-        "OtelExposeOnAlb": Ref("OtelExposeOnAlb"),
         "OtelConfigYaml": Ref("OtelConfigYaml"),
     })
 

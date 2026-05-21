@@ -5,11 +5,11 @@ image. The collector listens on the canonical OTLP ports (gRPC 4317 and
 HTTP 4318) and writes telemetry directly to the ingest S3 bucket; it has
 no database dependency and does not consume from the ingest SQS queue.
 
-ALB attachment is OPTIONAL. When OtelExposeOnAlb=Yes, this stack also
-creates a TargetGroup + ListenerRule (priority 300) on the shared HTTPS
-listener. The ECS Service's LoadBalancers block is gated by the same
-condition so a single template covers both the internal-only and ALB-
-exposed deployments.
+The collector is always attached to the shared ALB: this stack creates a
+TargetGroup + ListenerRule (priority 300) on the HTTPS listener and wires
+the ECS Service's LoadBalancers block to it. The ALB security group is
+customer-supplied and may differ from the task security group; the
+customer owns the ALB-to-task ingress rule on the OTLP gRPC port.
 
 Config injection is intentionally minimal: the image ships with a baked-in
 config (`/etc/otel/config.yaml`, referenced by the default command) and
@@ -76,8 +76,8 @@ _OTLP_GRPC_PORT = 4317
 def build() -> Template:
     t = Template()
     t.set_description(
-        "Cardinal otel: cardinalhq-otel-collector ECS Fargate service. ALB "
-        "attachment is optional and gated on OtelExposeOnAlb."
+        "Cardinal otel: cardinalhq-otel-collector ECS Fargate service, always "
+        "attached to the shared ALB HTTPS listener."
     )
 
     defaults = load_defaults()
@@ -120,8 +120,6 @@ def build() -> Template:
             Description="ARN of the license Secrets Manager secret.",
         )
     )
-    # Always declared so the root can pass them unconditionally; only
-    # consumed when OtelExposeOnAlb=Yes via the gated ALB resources.
     t.add_parameter(
         Parameter("HttpsListenerArn", Type="String", Description="ARN of the ALB HTTPS listener.")
     )
@@ -177,18 +175,6 @@ def build() -> Template:
             Description="Fargate memory (MiB) for the otel-gateway service.",
         )
     )
-    t.add_parameter(
-        Parameter(
-            "OtelExposeOnAlb",
-            Type="String",
-            AllowedValues=["Yes", "No"],
-            Default="No",
-            Description=(
-                "When Yes, attach the otel-gateway service to the shared ALB "
-                "via a TargetGroup + ListenerRule on the HTTPS listener."
-            ),
-        )
-    )
     # The cardinalhq-otel-collector image's run-with-env-config wrapper reads
     # the collector YAML from CHQ_COLLECTOR_CONFIG_YAML at task start. We
     # ship a sensible default (cardinal-otel-config.yaml) and pass it via
@@ -208,7 +194,6 @@ def build() -> Template:
     # ---------------------------------------------------------------------
     # Conditions
     # ---------------------------------------------------------------------
-    t.add_condition("ExposeOtelOnAlb", Equals(Ref("OtelExposeOnAlb"), "Yes"))
     t.add_condition(
         "HasOtelConfigOverride", Not(Equals(Ref("OtelConfigYaml"), ""))
     )
@@ -249,10 +234,6 @@ def build() -> Template:
             {
                 "label": "Image overrides",
                 "parameters": ["OtelImage"],
-            },
-            {
-                "label": "ALB attachment",
-                "parameters": ["OtelExposeOnAlb"],
             },
         ],
     )
@@ -309,16 +290,15 @@ def build() -> Template:
     )
 
     # ---------------------------------------------------------------------
-    # Optional ALB attachment (TargetGroup + ListenerRule, gated by condition).
-    # The TargetGroup targets the gRPC port; path patterns are nominal because
-    # gRPC traffic uses HTTP/2 to a fixed path.
+    # ALB attachment (TargetGroup + ListenerRule). The TargetGroup targets
+    # the gRPC port; path patterns are nominal because gRPC traffic uses
+    # HTTP/2 to a fixed path.
     # ---------------------------------------------------------------------
     target_group = services_common.build_target_group(
         service_key=_SERVICE_KEY,
         vpc_id_param="VpcId",
         port=_OTLP_GRPC_PORT,
     )
-    target_group.Condition = "ExposeOtelOnAlb"
     t.add_resource(target_group)
 
     listener_rule = services_common.build_listener_rule(
@@ -327,7 +307,6 @@ def build() -> Template:
         listener_arn_param="HttpsListenerArn",
         path_patterns=["/v1/*"],
     )
-    listener_rule.Condition = "ExposeOtelOnAlb"
     t.add_resource(listener_rule)
 
     # ---------------------------------------------------------------------
@@ -349,8 +328,8 @@ def build() -> Template:
     )
 
     # ---------------------------------------------------------------------
-    # ECS Service (inlined, not via build_ecs_service helper, because the
-    # LoadBalancers block must be conditionally populated via Fn::If).
+    # ECS Service (inlined, not via build_ecs_service helper, so the
+    # LoadBalancers block can reference the always-present TargetGroup).
     # ---------------------------------------------------------------------
     service = t.add_resource(
         Service(
@@ -374,17 +353,13 @@ def build() -> Template:
                     Rollback=True,
                 ),
             ),
-            LoadBalancers=If(
-                "ExposeOtelOnAlb",
-                [
-                    EcsLoadBalancer(
-                        ContainerName=_SERVICE_KEY,
-                        ContainerPort=_OTLP_GRPC_PORT,
-                        TargetGroupArn=Ref(target_group),
-                    )
-                ],
-                Ref("AWS::NoValue"),
-            ),
+            LoadBalancers=[
+                EcsLoadBalancer(
+                    ContainerName=_SERVICE_KEY,
+                    ContainerPort=_OTLP_GRPC_PORT,
+                    TargetGroupArn=Ref(target_group),
+                )
+            ],
             ServiceRegistries=[
                 ServiceRegistry(RegistryArn=GetAtt(otel_discovery, "Arn")),
             ],
@@ -400,11 +375,7 @@ def build() -> Template:
     t.add_output(
         Output(
             "OtelEndpoint",
-            Value=If(
-                "ExposeOtelOnAlb",
-                Sub(f"alb:${{HttpsListenerArn}}:{_OTLP_GRPC_PORT}"),
-                Sub(f"internal:${{AWS::StackName}}:{_OTLP_GRPC_PORT}"),
-            ),
+            Value=Sub(f"alb:${{HttpsListenerArn}}:{_OTLP_GRPC_PORT}"),
         )
     )
     t.add_output(Output("OtelServiceName", Value=GetAtt(service, "Name")))
