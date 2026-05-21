@@ -115,6 +115,21 @@ def test_target_group_and_listener_rule_unconditional(td):
     assert "Condition" not in rules[0]
 
 
+def test_target_group_serves_otlp_http_health_checks_13133(td):
+    """Traffic on OTLP/HTTP 4318; health check on the health_check extension
+    (13133), since 4317 is gRPC and 4318 has no plain-HTTP health path."""
+    tg = next(
+        r for r in td["Resources"].values()
+        if r["Type"] == "AWS::ElasticLoadBalancingV2::TargetGroup"
+    )
+    props = tg["Properties"]
+    assert props["Port"] == 4318
+    assert props["Protocol"] == "HTTP"
+    assert props["HealthCheckPort"] == "13133"
+    assert props["HealthCheckPath"] == "/"
+    assert props["HealthCheckProtocol"] == "HTTP"
+
+
 def test_listener_rule_priority_is_300(td):
     rule = next(
         r for r in td["Resources"].values()
@@ -128,7 +143,7 @@ def test_ecs_service_load_balancers_unconditional(td):
     lbs = svc["Properties"].get("LoadBalancers")
     assert isinstance(lbs, list), f"expected a plain list for LoadBalancers, got {lbs!r}"
     assert len(lbs) == 1
-    assert lbs[0]["ContainerPort"] == 4317
+    assert lbs[0]["ContainerPort"] == 4318
 
 
 # ---------------------------------------------------------------------------
