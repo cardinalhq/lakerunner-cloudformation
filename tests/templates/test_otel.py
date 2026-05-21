@@ -59,11 +59,9 @@ def test_tunable_parameters_present(td):
         assert n in td["Parameters"], f"missing parameter: {n}"
 
 
-def test_expose_on_alb_parameter(td):
-    p = td["Parameters"]["OtelExposeOnAlb"]
-    assert p["Type"] == "String"
-    assert p["AllowedValues"] == ["Yes", "No"]
-    assert p["Default"] == "No"
+def test_no_expose_on_alb_parameter(td):
+    """ALB attachment is unconditional; the toggle no longer exists."""
+    assert "OtelExposeOnAlb" not in td["Parameters"]
 
 
 # ---------------------------------------------------------------------------
@@ -71,10 +69,8 @@ def test_expose_on_alb_parameter(td):
 # ---------------------------------------------------------------------------
 
 
-def test_expose_on_alb_condition_defined(td):
-    conds = td.get("Conditions", {})
-    assert "ExposeOtelOnAlb" in conds
-    assert conds["ExposeOtelOnAlb"] == {"Fn::Equals": [{"Ref": "OtelExposeOnAlb"}, "Yes"]}
+def test_no_expose_on_alb_condition(td):
+    assert "ExposeOtelOnAlb" not in td.get("Conditions", {})
 
 
 # ---------------------------------------------------------------------------
@@ -104,7 +100,7 @@ def test_creates_one_task_definition(td):
     assert len(task_defs) == 1
 
 
-def test_target_group_and_listener_rule_have_condition(td):
+def test_target_group_and_listener_rule_unconditional(td):
     tgs = [
         r for r in td["Resources"].values()
         if r["Type"] == "AWS::ElasticLoadBalancingV2::TargetGroup"
@@ -115,8 +111,8 @@ def test_target_group_and_listener_rule_have_condition(td):
     ]
     assert len(tgs) == 1
     assert len(rules) == 1
-    assert tgs[0].get("Condition") == "ExposeOtelOnAlb"
-    assert rules[0].get("Condition") == "ExposeOtelOnAlb"
+    assert "Condition" not in tgs[0]
+    assert "Condition" not in rules[0]
 
 
 def test_listener_rule_priority_is_300(td):
@@ -127,15 +123,12 @@ def test_listener_rule_priority_is_300(td):
     assert rule["Properties"]["Priority"] == 300
 
 
-def test_ecs_service_load_balancers_is_conditional(td):
+def test_ecs_service_load_balancers_unconditional(td):
     svc = next(r for r in td["Resources"].values() if r["Type"] == "AWS::ECS::Service")
     lbs = svc["Properties"].get("LoadBalancers")
-    assert isinstance(lbs, dict), f"expected an Fn::If for LoadBalancers, got {lbs!r}"
-    assert "Fn::If" in lbs
-    branches = lbs["Fn::If"]
-    assert branches[0] == "ExposeOtelOnAlb"
-    # Non-attached branch must be AWS::NoValue.
-    assert branches[2] == {"Ref": "AWS::NoValue"}
+    assert isinstance(lbs, list), f"expected a plain list for LoadBalancers, got {lbs!r}"
+    assert len(lbs) == 1
+    assert lbs[0]["ContainerPort"] == 4317
 
 
 # ---------------------------------------------------------------------------
