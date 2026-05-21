@@ -21,6 +21,9 @@ export PYTHONPATH="$(pwd)/src${PYTHONPATH:+:$PYTHONPATH}"
 echo "Generating cardinal-vpc.yaml..."
 python3 -m cardinal_cfn.cardinal_vpc > generated-templates/cardinal-vpc.yaml
 
+echo "Generating cardinal-alb-sg.yaml..."
+python3 -m cardinal_cfn.cardinal_alb_sg > generated-templates/cardinal-alb-sg.yaml
+
 echo "Generating cardinal-infrastructure.yaml..."
 python3 -m cardinal_cfn.cardinal_infrastructure > generated-templates/cardinal-infrastructure.yaml
 
@@ -42,6 +45,7 @@ done
 echo
 echo "Linting CFN templates..."
 cfn-lint generated-templates/cardinal-vpc.yaml \
+         generated-templates/cardinal-alb-sg.yaml \
          generated-templates/cardinal-infrastructure.yaml \
          generated-templates/cardinal-lakerunner.yaml \
          generated-templates/cardinal-lakerunner/*.yaml || \
