@@ -123,8 +123,17 @@ def test_ssm_seeds_render_nonempty_yaml_lists(td):
     for field in ("organization_id", "collector_name", "cloud_provider", "region", "bucket"):
         assert field in body, f"storage profile missing {field}"
 
+    # api-keys is conditional: a one-entry YAML list when InitialIngestApiKey is
+    # set, otherwise "[]". Both branches must be YAML lists (never a "{}" map).
     ak = td["Resources"]["ApiKeysParam"]["Properties"]["Value"]
-    assert ak == "[]", f"api keys must seed an empty list, got: {ak!r}"
+    seeded, empty = ak["Fn::If"][1], ak["Fn::If"][2]
+    assert ak["Fn::If"][0] == "HasInitialIngestApiKey"
+    assert empty == "[]"
+    seeded_body = seeded["Fn::Sub"][0]
+    assert seeded_body.lstrip().startswith("- "), seeded_body
+    assert "{}" not in seeded_body
+    for field in ("organization_id", "keys"):
+        assert field in seeded_body, f"api-keys seed missing {field}"
 
 
 def test_creates_ingest_bucket_and_queue(td):
