@@ -42,6 +42,7 @@ from troposphere import (
     Equals,
     GetAtt,
     If,
+    Not,
     Output,
     Parameter,
     Ref,
@@ -230,12 +231,40 @@ def build() -> Template:
             AllowedPattern=r"^/[A-Za-z0-9._/-]{1,1011}$",
         )
     )
+    organization_id = t.add_parameter(
+        Parameter(
+            "OrganizationId",
+            Type="String",
+            Default="12340000-0000-4000-8000-000000000000",
+            Description=(
+                "Canonical single-install organization UUID. Used in both the "
+                "storage-profiles and api-keys SSM seeds; thread the same value "
+                "into the lakerunner stack's OrganizationId parameter."
+            ),
+            AllowedPattern=(
+                r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+                r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            ),
+        )
+    )
     license_data = add_no_echo_parameter(
         t,
         "LicenseData",
         description=(
             "Cardinal license token (z64:...). Stored verbatim as the "
             "string body of the license secret."
+        ),
+    )
+    # api-keys is plaintext YAML by design (an SSM parameter cannot be a
+    # SecureString in CloudFormation), so this key lands in plaintext SSM
+    # regardless; NoEcho only keeps it out of the console echo.
+    initial_ingest_api_key = add_no_echo_parameter(
+        t,
+        "InitialIngestApiKey",
+        default="",
+        description=(
+            "Ingest API key seeded into the api-keys SSM parameter for "
+            "OrganizationId. Leave blank to seed an empty list (no key)."
         ),
     )
 
@@ -266,6 +295,10 @@ def build() -> Template:
                 "parameters": ["LicenseData"],
             },
             {
+                "label": "Organization",
+                "parameters": ["OrganizationId", "InitialIngestApiKey"],
+            },
+            {
                 "label": "Recovery overrides (advanced)",
                 "parameters": [
                     "LicenseSecretName",
@@ -284,6 +317,8 @@ def build() -> Template:
             "IngestBucketName": "Ingest bucket name (blank = default)",
             "IngestBucketLifecycleDays": "Ingest object retention (days)",
             "LicenseData": "License token (z64:...)",
+            "OrganizationId": "Organization UUID",
+            "InitialIngestApiKey": "Initial ingest API key (blank = none)",
         },
     )
 
@@ -294,6 +329,11 @@ def build() -> Template:
     t.add_condition(
         "UseDefaultBucketName",
         Equals(Ref(ingest_bucket_name), ""),
+    )
+
+    t.add_condition(
+        "HasInitialIngestApiKey",
+        Not(Equals(Ref(initial_ingest_api_key), "")),
     )
 
     bucket_name_value = If(
@@ -516,7 +556,7 @@ def build() -> Template:
                 Name=Ref(storage_profiles_param_name),
                 Type="String",
                 Value=Sub(
-                    "- organization_id: 12340000-0000-4000-8000-000000000000\n"
+                    "- organization_id: ${OrgId}\n"
                     "  instance_num: 1\n"
                     "  collector_name: lakerunner\n"
                     "  cloud_provider: aws\n"
@@ -524,6 +564,7 @@ def build() -> Template:
                     "  bucket: ${BucketName}\n"
                     "  insecure_tls: false\n"
                     "  use_path_style: true\n",
+                    OrgId=Ref(organization_id),
                     BucketName=bucket_name_value,
                 ),
                 Description="Cardinal storage profiles (YAML; operator-managed).",
@@ -544,7 +585,17 @@ def build() -> Template:
                 "ApiKeysParam",
                 Name=Ref(api_keys_param_name),
                 Type="String",
-                Value="[]",
+                Value=If(
+                    "HasInitialIngestApiKey",
+                    Sub(
+                        "- organization_id: ${OrgId}\n"
+                        "  keys:\n"
+                        "    - ${Key}\n",
+                        OrgId=Ref(organization_id),
+                        Key=Ref(initial_ingest_api_key),
+                    ),
+                    "[]",
+                ),
                 Description="Cardinal external API keys (YAML; operator-managed).",
                 Tags={
                     "Application": APPLICATION,

@@ -147,6 +147,17 @@ def build() -> Template:
             Description="ARN of the license Secrets Manager secret.",
         )
     )
+    t.add_parameter(
+        Parameter(
+            "AdminApiKeySecretArn",
+            Type="String",
+            Description=(
+                "ARN of the cardinal-admin-key secret. Mounted into the maestro "
+                "container as MAESTRO_BOOTSTRAP_LAKERUNNER_ADMIN_API_KEY so the "
+                "seeded lakerunner datasource holds the same key admin-api validates."
+            ),
+        )
+    )
 
     # MigrationComplete is unused on purpose (same convention as services-*).
     # The root passes the migration-stack output through this parameter so
@@ -239,6 +250,26 @@ def build() -> Template:
     )
     t.add_parameter(
         Parameter(
+            "OrganizationId",
+            Type="String",
+            Default="12340000-0000-4000-8000-000000000000",
+            Description=(
+                "Canonical single-install organization UUID. Seeded as the org "
+                "Maestro pre-populates; matches the lakerunner storage-profiles / "
+                "api-keys org so both sides own the same data feed."
+            ),
+        )
+    )
+    t.add_parameter(
+        Parameter(
+            "OrgName",
+            Type="String",
+            Default="My Organization",
+            Description="Display name for the pre-populated organization.",
+        )
+    )
+    t.add_parameter(
+        Parameter(
             "McpMigrateRecoverFromDirty",
             Type="String",
             Default="false",
@@ -283,8 +314,13 @@ def build() -> Template:
                     "DbPort",
                     "DbSecretArn",
                     "LicenseSecretArn",
+                    "AdminApiKeySecretArn",
                     "MigrationComplete",
                 ],
+            },
+            {
+                "label": "Organization bootstrap",
+                "parameters": ["OrganizationId", "OrgName"],
             },
             {
                 "label": "Maestro tunables",
@@ -465,9 +501,29 @@ def build() -> Template:
             # token has groups=[], so without this the DEX admin lands on
             # /onboard with no way to bootstrap an org.
             Environment(Name="OIDC_SUPERADMIN_EMAILS", Value=Ref("OidcSuperadminEmails")),
+            # Idempotent seed-if-missing bootstrap: org + owner + a
+            # shared_cardinal lakerunner datasource (auto_add_to_all_orgs).
+            # The query endpoint is the main 443 listener; the admin endpoint
+            # is admin-api's dedicated 9443 listener. NODE_TLS_REJECT_UNAUTHORIZED=0
+            # (set above) lets the bootstrap reach them over the self-signed cert.
+            Environment(Name="MAESTRO_BOOTSTRAP_ORG_ID", Value=Ref("OrganizationId")),
+            Environment(Name="MAESTRO_BOOTSTRAP_ORG_NAME", Value=Ref("OrgName")),
+            Environment(Name="MAESTRO_BOOTSTRAP_OWNER_EMAIL", Value=Ref("DexAdminEmail")),
+            Environment(
+                Name="MAESTRO_BOOTSTRAP_LAKERUNNER_QUERY_API_URL",
+                Value=Sub("https://${AlbDnsName}"),
+            ),
+            Environment(
+                Name="MAESTRO_BOOTSTRAP_LAKERUNNER_ADMIN_API_URL",
+                Value=Sub("https://${AlbDnsName}:9443"),
+            ),
         ],
         Secrets=list(db_secrets) + [
             Secret(Name="LICENSE_DATA", ValueFrom=Ref("LicenseSecretArn")),
+            Secret(
+                Name="MAESTRO_BOOTSTRAP_LAKERUNNER_ADMIN_API_KEY",
+                ValueFrom=Sub("${AdminApiKeySecretArn}:key::"),
+            ),
         ],
         DependsOn=[
             {"ContainerName": "db-init", "Condition": "SUCCESS"},

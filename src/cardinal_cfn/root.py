@@ -286,6 +286,22 @@ def build() -> Template:
         ),
     ))
     t.add_parameter(Parameter(
+        "OrganizationId",
+        Type="String",
+        Default="12340000-0000-4000-8000-000000000000",
+        Description=(
+            "Canonical single-install organization UUID. Must match the value "
+            "the infrastructure stack seeded into storage-profiles / api-keys; "
+            "Maestro pre-populates this org and wires it to the local lakerunner."
+        ),
+    ))
+    t.add_parameter(Parameter(
+        "OrgName",
+        Type="String",
+        Default="My Organization",
+        Description="Display name for the org Maestro pre-populates.",
+    ))
+    t.add_parameter(Parameter(
         "TemplateBaseUrl",
         Type="String",
         Default=DEFAULT_TEMPLATE_BASE_URL,
@@ -386,6 +402,7 @@ def build() -> Template:
              "parameters": ["DeployMaestro", "SelfTelemetry",
                             "DexAdminEmail", "DexAdminPasswordHash",
                             "OidcSuperadminEmails",
+                            "OrganizationId", "OrgName",
                             "TemplateBaseUrl"]},
         ],
     )
@@ -582,6 +599,9 @@ def build() -> Template:
         "DexAdminEmail": Ref("DexAdminEmail"),
         "DexAdminPasswordHash": Ref("DexAdminPasswordHash"),
         "OidcSuperadminEmails": Ref("OidcSuperadminEmails"),
+        "AdminApiKeySecretArn": Ref("AdminKeySecretArn"),
+        "OrganizationId": Ref("OrganizationId"),
+        "OrgName": Ref("OrgName"),
     }, depends_on=["MigrationStack"], condition="DeployMaestroEnabled")
 
     # ---------------------------------------------------------------------

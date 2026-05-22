@@ -245,6 +245,32 @@ def test_maestro_container_env_has_db_settings(td):
         assert n in env_names, f"maestro env missing {n}"
 
 
+def test_maestro_container_has_bootstrap_env(td):
+    """Org/owner/datasource seed contract consumed by the conductor feature."""
+    maestro_c = _container(td, "maestro")
+    env = {e["Name"]: e["Value"] for e in maestro_c.get("Environment", [])}
+    assert env["MAESTRO_BOOTSTRAP_ORG_ID"] == {"Ref": "OrganizationId"}
+    assert env["MAESTRO_BOOTSTRAP_ORG_NAME"] == {"Ref": "OrgName"}
+    assert env["MAESTRO_BOOTSTRAP_OWNER_EMAIL"] == {"Ref": "DexAdminEmail"}
+    assert env["MAESTRO_BOOTSTRAP_LAKERUNNER_QUERY_API_URL"]["Fn::Sub"] == "https://${AlbDnsName}"
+    assert (
+        env["MAESTRO_BOOTSTRAP_LAKERUNNER_ADMIN_API_URL"]["Fn::Sub"]
+        == "https://${AlbDnsName}:9443"
+    )
+
+
+def test_maestro_container_admin_api_key_from_secret(td):
+    """The seeded datasource's admin key is the same cardinal-admin-key secret
+    that admin-api validates via ADMIN_INITIAL_API_KEY."""
+    maestro_c = _container(td, "maestro")
+    secrets = {s["Name"]: s["ValueFrom"] for s in maestro_c.get("Secrets", [])}
+    assert "AdminApiKeySecretArn" in td["Parameters"]
+    assert (
+        secrets["MAESTRO_BOOTSTRAP_LAKERUNNER_ADMIN_API_KEY"]["Fn::Sub"]
+        == "${AdminApiKeySecretArn}:key::"
+    )
+
+
 def test_maestro_container_db_user_and_password_from_master_secret(td):
     """User and password both come from the master DB secret (no maestro role)."""
     maestro_c = _container(td, "maestro")
