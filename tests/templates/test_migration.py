@@ -40,7 +40,8 @@ def test_required_parameters(template_dict):
               "TaskSecurityGroupId", "ExecutionRoleArn", "TaskRoleArn",
               "PrivateSubnetsCsv", "DbEndpoint", "DbSecretArn",
               "LakerunnerImage", "DbInitImage",
-              "StorageProfilesParamName", "ApiKeysParamName"):
+              "StorageProfilesParamName", "ApiKeysParamName",
+              "OrgId", "IngestBucketName"):
         assert n in template_dict["Parameters"], f"missing parameter: {n}"
 
 
@@ -98,8 +99,10 @@ def test_creates_task_definition(template_dict):
     assert "AWS::ECS::TaskDefinition" in _types(template_dict)
 
 
-def test_three_containers_present(template_dict):
-    assert set(_containers(template_dict)) == {"configdb-init", "migrator", "keepalive"}
+def test_four_containers_present(template_dict):
+    assert set(_containers(template_dict)) == {
+        "configdb-init", "migrator", "ensure-storage-profile", "keepalive",
+    }
 
 
 def test_exactly_one_essential_container(template_dict):
@@ -109,14 +112,54 @@ def test_exactly_one_essential_container(template_dict):
 
 
 def test_container_ordering_chain(template_dict):
+    """configdb-init -> migrator -> ensure-storage-profile -> keepalive. The
+    canonical-profile upsert sits on the keepalive critical path so any
+    failure surfaces as a stack rollback, not silent log noise."""
     cs = _containers(template_dict)
     assert "DependsOn" not in cs["configdb-init"]
     assert cs["migrator"]["DependsOn"] == [
         {"ContainerName": "configdb-init", "Condition": "COMPLETE"}
     ]
-    assert cs["keepalive"]["DependsOn"] == [
+    assert cs["ensure-storage-profile"]["DependsOn"] == [
         {"ContainerName": "migrator", "Condition": "SUCCESS"}
     ]
+    assert cs["keepalive"]["DependsOn"] == [
+        {"ContainerName": "ensure-storage-profile", "Condition": "SUCCESS"}
+    ]
+
+
+def test_ensure_storage_profile_is_non_essential(template_dict):
+    """It runs the upsert once and exits; keepalive's DependsOn=SUCCESS is
+    what gates task stability on a clean exit."""
+    assert _containers(template_dict)["ensure-storage-profile"].get("Essential") is False
+
+
+def test_ensure_storage_profile_upsert_is_idempotent(template_dict):
+    """SQL must use ON CONFLICT DO NOTHING on both inserts so re-runs after
+    operator edits never clobber existing rows."""
+    cmd = " ".join(_containers(template_dict)["ensure-storage-profile"]["Command"])
+    cmd_oneline = " ".join(cmd.split())  # collapse all whitespace
+    assert "ON CONFLICT (bucket_name) DO NOTHING" in cmd_oneline
+    assert (
+        "ON CONFLICT (organization_id, bucket_id, instance_num, collector_name) DO NOTHING"
+        in cmd_oneline
+    )
+    # collector_name must match the SSM-driven seed in cardinal_infrastructure
+    assert "'lakerunner'" in cmd_oneline
+
+
+def test_ensure_storage_profile_uses_configdb_credentials(template_dict):
+    """Sidecar reads CONFIGDB_* env + secrets and connects with sslmode=require."""
+    c = _containers(template_dict)["ensure-storage-profile"]
+    env = {e["Name"]: e["Value"] for e in c["Environment"]}
+    assert env["CONFIGDB_DBNAME"] == "configdb"
+    assert {"Ref": "DbEndpoint"} == env["CONFIGDB_HOST"]
+    assert {"Ref": "IngestBucketName"} == env["BUCKET_NAME"]
+    assert {"Ref": "OrgId"} == env["ORG_ID"]
+    secrets = {s["Name"] for s in c["Secrets"]}
+    assert {"CONFIGDB_USER", "CONFIGDB_PASSWORD"} <= secrets
+    cmd = " ".join(c["Command"])
+    assert "PGSSLMODE=require" in cmd
 
 
 def test_migrator_container_uses_lakerunner_image(template_dict):

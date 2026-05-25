@@ -468,6 +468,8 @@ def build() -> Template:
         "DbSecretArn": Ref("DbMasterSecretArn"),
         "StorageProfilesParamName": Ref("StorageProfilesParamName"),
         "ApiKeysParamName": Ref("ApiKeysParamName"),
+        "OrgId": Ref("OrganizationId"),
+        "IngestBucketName": Ref("IngestBucketName"),
         "LakerunnerImage": lakerunner_image,
         "DbInitImage": Ref("DbInitImage"),
     })

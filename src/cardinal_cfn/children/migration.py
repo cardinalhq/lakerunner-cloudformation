@@ -1,20 +1,33 @@
 """migration.yaml nested stack: DB migrator task definition + a long-running
 ECS service that runs the migrator once and then sleeps.
 
-No Lambda. The migrator task definition has three containers:
+No Lambda. The migrator task definition has four containers:
 
   1. configdb-init (non-essential): psql CREATE DATABASE configdb if absent.
   2. migrator (non-essential): `lakerunner migrate --databases=lrdb,configdb`,
      dependsOn configdb-init=COMPLETE.
-  3. keepalive (essential): sleeps forever, dependsOn migrator=SUCCESS.
+  3. ensure-storage-profile (non-essential): idempotent psql upsert that
+     guarantees the canonical single-install storage_profile row exists in
+     configdb.bucket_configurations + configdb.organization_buckets. The
+     lakerunner image's initializeIfNeededFunc only seeds configdb when those
+     tables are empty, so installs whose first migration landed before
+     #117 (the storage-profiles {} bug) or which got partially seeded under
+     a different org/collector never get the canonical row -- ingest still
+     works via the otel-collector path, but maestro UI queries (post-#121)
+     run as the canonical 12340000 org and fail with "storage profile not
+     found." This sidecar self-heals that on every image bump.
+  4. keepalive (essential): sleeps forever, dependsOn ensure-storage-profile=
+     SUCCESS. A failed upsert blocks keepalive -> the ECS deployment circuit
+     breaker fails the service -> the root stack rolls back. Loud, not silent.
 
 Because keepalive is the only essential container and ECS will not start it
-until migrator exits 0, the task is not RUNNING -- and therefore the ECS
-service is not at steady state, and therefore the MigrationStack nested stack
-is not CREATE_COMPLETE -- until migrations succeed. The service-tier stacks
-already DependsOn MigrationStack, so they only deploy after migrations run. An
-image change redeploys the service (new migrator run) before those stacks
-update, exactly as the old custom-resource trigger did.
+until its dependencies exit 0, the task is not RUNNING -- and therefore the
+ECS service is not at steady state, and therefore the MigrationStack nested
+stack is not CREATE_COMPLETE -- until migrations and the canonical-profile
+upsert both succeed. The service-tier stacks already DependsOn MigrationStack,
+so they only deploy after that gate clears. An image change redeploys the
+service (new migrator run + new upsert) before those stacks update, exactly
+as the old custom-resource trigger did.
 """
 
 from troposphere import (
@@ -86,6 +99,29 @@ def build() -> Template:
             "ApiKeysParamName",
             Type="String",
             Description="Name of the SSM parameter holding the api_keys YAML.",
+        )
+    )
+
+    # Inputs for the ensure-storage-profile sidecar. The canonical
+    # single-install org id and the ingest bucket name are exactly the values
+    # the SSM-driven seed would have written, so the sidecar's row is
+    # indistinguishable from a clean first-install seed.
+    t.add_parameter(
+        Parameter(
+            "OrgId",
+            Type="String",
+            Default="12340000-0000-4000-8000-000000000000",
+            Description=(
+                "Canonical single-install organization UUID. Must match the "
+                "infrastructure stack's storage-profiles/api-keys seed."
+            ),
+        )
+    )
+    t.add_parameter(
+        Parameter(
+            "IngestBucketName",
+            Type="String",
+            Description="Name of the S3 ingest bucket (infra-setup output).",
         )
     )
 
@@ -202,14 +238,75 @@ def build() -> Template:
         LogConfiguration=_logs("migrator"),
     )
 
+    # ensure-storage-profile: idempotent upsert that guarantees the canonical
+    # org's storage_profile row exists in configdb. Schema verified against
+    # the live lakerunner repo migrations (1755582182, 1755706737, 1755713265,
+    # 1755727712, 1755747368, 1755747422, 1755753938, 1779112554). ON CONFLICT
+    # uses bucket_configurations.bucket_name UNIQUE and the
+    # organization_buckets (organization_id, bucket_id, instance_num,
+    # collector_name) UNIQUE constraint -- both present on every live install.
+    # The legacy organization_id UNIQUE on organization_buckets was dropped in
+    # 1755727712 (allow_multiple_buckets_per_org), so this never collides with
+    # operator-added second buckets for the same org. DO NOTHING preserves
+    # operator edits made via the maestro UI.
+    #
+    # SQL goes in via stdin (not -c) so psql performs \set + :'var' client-side
+    # quoting -- psql's -c mode does not interpret :'var', and shell-substituting
+    # values into the SQL string would lean on parameter pattern hygiene the
+    # migration child does not own. The heredoc is UNQUOTED so $VARS expand via
+    # the shell before psql sees them; \set then re-quotes them properly for
+    # SQL via :'name' substitution inside the INSERT statements.
+    ensure_sp_container = ContainerDefinition(
+        Name="ensure-storage-profile",
+        Image=Ref("DbInitImage"),
+        Essential=False,
+        DependsOn=[ContainerDependency(ContainerName="migrator", Condition="SUCCESS")],
+        EntryPoint=["sh", "-c"],
+        Command=[
+            "set -e\n"
+            "export PGSSLMODE=require PGPASSWORD=\"$CONFIGDB_PASSWORD\"\n"
+            "psql -v ON_ERROR_STOP=1 \\\n"
+            "  -h \"$CONFIGDB_HOST\" -p \"$CONFIGDB_PORT\" \\\n"
+            "  -U \"$CONFIGDB_USER\" -d \"$CONFIGDB_DBNAME\" <<SQL\n"
+            "\\set bucket '$BUCKET_NAME'\n"
+            "\\set region '$AWS_REGION_NAME'\n"
+            "\\set org    '$ORG_ID'\n"
+            "INSERT INTO bucket_configurations\n"
+            "  (bucket_name, cloud_provider, region, use_path_style)\n"
+            "VALUES (:'bucket', 'aws', :'region', TRUE)\n"
+            "ON CONFLICT (bucket_name) DO NOTHING;\n"
+            "INSERT INTO organization_buckets\n"
+            "  (organization_id, bucket_id, instance_num, collector_name)\n"
+            "SELECT (:'org')::uuid, id, 1, 'lakerunner'\n"
+            "FROM bucket_configurations WHERE bucket_name = :'bucket'\n"
+            "ON CONFLICT (organization_id, bucket_id, instance_num, collector_name)\n"
+            "DO NOTHING;\n"
+            "SQL\n"
+        ],
+        Environment=[
+            Environment(Name="CONFIGDB_HOST", Value=Ref("DbEndpoint")),
+            Environment(Name="CONFIGDB_PORT", Value=Ref("DbPort")),
+            Environment(Name="CONFIGDB_DBNAME", Value="configdb"),
+            Environment(Name="BUCKET_NAME", Value=Ref("IngestBucketName")),
+            Environment(Name="AWS_REGION_NAME", Value=Ref("AWS::Region")),
+            Environment(Name="ORG_ID", Value=Ref("OrgId")),
+        ],
+        Secrets=[
+            Secret(Name="CONFIGDB_USER", ValueFrom=Sub("${DbSecretArn}:username::")),
+            Secret(Name="CONFIGDB_PASSWORD", ValueFrom=Sub("${DbSecretArn}:password::")),
+        ],
+        LogConfiguration=_logs("ensure-storage-profile"),
+    )
+
     keepalive_container = ContainerDefinition(
         Name="keepalive",
         Image=Ref("DbInitImage"),
-        # The single essential container. ECS will not start it until migrator
-        # exits 0, so the task -- and thus the service, and thus this nested
-        # stack -- only reaches a stable RUNNING state after migrations succeed.
+        # The single essential container. ECS will not start it until the
+        # canonical-profile upsert has exited 0, so the task -- and thus the
+        # service, and thus this nested stack -- only reaches a stable RUNNING
+        # state after both the migrator and the upsert succeed.
         Essential=True,
-        DependsOn=[ContainerDependency(ContainerName="migrator", Condition="SUCCESS")],
+        DependsOn=[ContainerDependency(ContainerName="ensure-storage-profile", Condition="SUCCESS")],
         EntryPoint=["sh", "-c"],
         Command=["echo 'migrations complete; idling'; exec sleep 2147483647"],
         LogConfiguration=_logs("keepalive"),
@@ -225,7 +322,12 @@ def build() -> Template:
             Memory="512",
             ExecutionRoleArn=Ref("ExecutionRoleArn"),
             TaskRoleArn=Ref("TaskRoleArn"),
-            ContainerDefinitions=[configdb_init_container, migrator_container, keepalive_container],
+            ContainerDefinitions=[
+                configdb_init_container,
+                migrator_container,
+                ensure_sp_container,
+                keepalive_container,
+            ],
             Tags=cardinal_tags(component="migration", role="migrator-task"),
         )
     )
