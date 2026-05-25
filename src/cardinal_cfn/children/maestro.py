@@ -127,6 +127,17 @@ def build() -> Template:
             Description="DNS name of the shared ALB (used to derive issuer URLs).",
         )
     )
+    t.add_parameter(
+        Parameter(
+            "ServiceNamespaceName",
+            Type="String",
+            Description=(
+                "Cloud Map private DNS namespace name (e.g. cardinal-<id>.local). "
+                "Used to reach lakerunner query-api and admin-api directly from "
+                "maestro without hairpinning through the ALB."
+            ),
+        )
+    )
     t.add_parameter(Parameter("DbEndpoint", Type="String", Description="RDS endpoint hostname."))
     t.add_parameter(Parameter("DbPort", Type="String", Default="5432", Description="RDS port."))
     t.add_parameter(
@@ -503,19 +514,24 @@ def build() -> Template:
             Environment(Name="OIDC_SUPERADMIN_EMAILS", Value=Ref("OidcSuperadminEmails")),
             # Idempotent seed-if-missing bootstrap: org + owner + a
             # shared_cardinal lakerunner datasource (auto_add_to_all_orgs).
-            # The query endpoint is the main 443 listener; the admin endpoint
-            # is admin-api's dedicated 9443 listener. NODE_TLS_REJECT_UNAUTHORIZED=0
-            # (set above) lets the bootstrap reach them over the self-signed cert.
+            # Both URLs point at the in-cluster Cloud Map names (query-api
+            # and admin-api both register a ServiceDiscovery::Service in
+            # ServicesQueryStack / ServicesControlStack), so maestro reaches
+            # lakerunner over plain HTTP on the task port and does NOT
+            # depend on the bundled self-signed ALB cert. The ALB
+            # attachments stay in place for any external/admin-UI callers.
+            # NODE_TLS_REJECT_UNAUTHORIZED=0 above is still needed for the
+            # DEX issuer / JWKS fetch, which continues to go via the ALB.
             Environment(Name="MAESTRO_BOOTSTRAP_ORG_ID", Value=Ref("OrganizationId")),
             Environment(Name="MAESTRO_BOOTSTRAP_ORG_NAME", Value=Ref("OrgName")),
             Environment(Name="MAESTRO_BOOTSTRAP_OWNER_EMAIL", Value=Ref("DexAdminEmail")),
             Environment(
                 Name="MAESTRO_BOOTSTRAP_LAKERUNNER_QUERY_API_URL",
-                Value=Sub("https://${AlbDnsName}"),
+                Value=Sub("http://query-api.${ServiceNamespaceName}:8080"),
             ),
             Environment(
                 Name="MAESTRO_BOOTSTRAP_LAKERUNNER_ADMIN_API_URL",
-                Value=Sub("https://${AlbDnsName}:9443"),
+                Value=Sub("http://admin-api.${ServiceNamespaceName}:9091"),
             ),
         ],
         Secrets=list(db_secrets) + [

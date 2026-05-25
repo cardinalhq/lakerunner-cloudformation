@@ -536,6 +536,7 @@ def build() -> Template:
         "AdminApiKeySecretArn": Ref("AdminKeySecretArn"),
         "VpcId": Ref("VpcId"),
         "ServiceNamespaceName": Ref("ServiceNamespaceName"),
+        "ServiceNamespaceId": Ref("ServiceNamespaceId"),
         "ClusterName": Ref("ClusterName"),
         "ProcessLogsServiceName":
             GetAtt(services_process_stack, "Outputs.ProcessLogsServiceName"),
@@ -583,6 +584,7 @@ def build() -> Template:
         "VpcId": Ref("VpcId"),
         "HttpsListenerArn": GetAtt(alb_stack, "Outputs.HttpsListenerArn"),
         "AlbDnsName": GetAtt(alb_stack, "Outputs.AlbDnsName"),
+        "ServiceNamespaceName": Ref("ServiceNamespaceName"),
         "DbEndpoint": Ref("DbEndpoint"),
         "DbPort": Ref("DbPort"),
         "DbSecretArn": Ref("DbMasterSecretArn"),
