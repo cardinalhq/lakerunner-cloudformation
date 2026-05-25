@@ -29,6 +29,7 @@ def test_required_cross_stack_parameters(td):
         "VpcId",
         "HttpsListenerArn",
         "AlbDnsName",
+        "ServiceNamespaceName",
         "DbEndpoint",
         "DbPort",
         "DbSecretArn",
@@ -252,10 +253,13 @@ def test_maestro_container_has_bootstrap_env(td):
     assert env["MAESTRO_BOOTSTRAP_ORG_ID"] == {"Ref": "OrganizationId"}
     assert env["MAESTRO_BOOTSTRAP_ORG_NAME"] == {"Ref": "OrgName"}
     assert env["MAESTRO_BOOTSTRAP_OWNER_EMAIL"] == {"Ref": "DexAdminEmail"}
-    assert env["MAESTRO_BOOTSTRAP_LAKERUNNER_QUERY_API_URL"]["Fn::Sub"] == "https://${AlbDnsName}"
+    assert (
+        env["MAESTRO_BOOTSTRAP_LAKERUNNER_QUERY_API_URL"]["Fn::Sub"]
+        == "http://query-api.${ServiceNamespaceName}:8080"
+    )
     assert (
         env["MAESTRO_BOOTSTRAP_LAKERUNNER_ADMIN_API_URL"]["Fn::Sub"]
-        == "https://${AlbDnsName}:9443"
+        == "http://admin-api.${ServiceNamespaceName}:9091"
     )
 
 

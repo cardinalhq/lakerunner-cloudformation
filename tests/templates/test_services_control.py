@@ -133,6 +133,46 @@ def test_admin_https_listener_arn_parameter(td):
 
 
 # ---------------------------------------------------------------------------
+# Cloud Map registration for admin-api
+# ---------------------------------------------------------------------------
+
+
+def test_service_namespace_id_parameter_present(td):
+    """ServiceNamespaceId is forwarded from root so admin-api can register
+    a Cloud Map A record at admin-api.<namespace>:9091."""
+    assert "ServiceNamespaceId" in td["Parameters"]
+
+
+def test_admin_api_discovery_service_registered(td):
+    """admin-api gets a ServiceDiscovery::Service so peers in the cluster
+    (maestro) can reach it without going through the ALB."""
+    discoveries = {
+        logical_id: res
+        for logical_id, res in td["Resources"].items()
+        if res["Type"] == "AWS::ServiceDiscovery::Service"
+    }
+    assert "AdminApiDiscoveryService" in discoveries
+    props = discoveries["AdminApiDiscoveryService"]["Properties"]
+    assert props["Name"] == "admin-api"
+    assert props["NamespaceId"] == {"Ref": "ServiceNamespaceId"}
+    records = props["DnsConfig"]["DnsRecords"]
+    assert any(r["Type"] == "A" for r in records)
+
+
+def test_admin_api_service_has_service_registries(td):
+    """The admin-api ECS service must reference the discovery service so
+    its task IPs land in DNS."""
+    svc = next(
+        res
+        for logical_id, res in td["Resources"].items()
+        if res["Type"] == "AWS::ECS::Service" and logical_id.endswith("AdminApiService")
+    )
+    assert "ServiceRegistries" in svc["Properties"]
+    arn = svc["Properties"]["ServiceRegistries"][0]["RegistryArn"]
+    assert arn == {"Fn::GetAtt": ["AdminApiDiscoveryService", "Arn"]}
+
+
+# ---------------------------------------------------------------------------
 # ALB attachment differentiation
 # ---------------------------------------------------------------------------
 

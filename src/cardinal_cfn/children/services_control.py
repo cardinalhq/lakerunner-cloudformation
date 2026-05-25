@@ -2,7 +2,10 @@
 
 Owns four ECS Fargate services:
 
-- admin-api (ALB-attached on dedicated 9443 listener; path catch-all `/*`)
+- admin-api (ALB-attached on dedicated 9443 listener; path catch-all `/*`,
+  also registered in Cloud Map as `admin-api.<namespace>:9091` so peers
+  inside the cluster — currently just maestro — can reach it without
+  hairpinning through the ALB and tripping the self-signed cert path)
 - sweeper (internal)
 - monitoring (internal; gRPC port not exposed on the ALB)
 - alert-evaluator (internal)
@@ -20,6 +23,11 @@ from troposphere import (
     Template,
 )
 from troposphere.ecs import Environment, Secret
+from troposphere.servicediscovery import (
+    DnsConfig,
+    DnsRecord,
+    Service as DiscoveryService,
+)
 
 from cardinal_cfn.children import services_common
 from cardinal_cfn.defaults import load_defaults
@@ -105,6 +113,17 @@ def build() -> Template:
             "ServiceNamespaceName",
             Type="String",
             Description="Cloud Map private DNS namespace name (e.g. cardinal-<id>.local).",
+        )
+    )
+    t.add_parameter(
+        Parameter(
+            "ServiceNamespaceId",
+            Type="String",
+            Description=(
+                "Cloud Map private DNS namespace ID. Used to register "
+                "admin-api so in-cluster peers (maestro) can reach it at "
+                "admin-api.<namespace>:9091 without going through the ALB."
+            ),
         )
     )
     t.add_parameter(Parameter("DbEndpoint", Type="String", Description="RDS endpoint hostname."))
@@ -346,6 +365,22 @@ def build() -> Template:
             container_port=admin_container_port,
         )
     )
+    # Register admin-api in Cloud Map so peers in the cluster (maestro) can
+    # reach it at http://admin-api.<namespace>:9091 without hairpinning out
+    # to the ALB's 9443 HTTPS listener. The ALB attachment stays for the
+    # external/admin-UI path; only the in-cluster maestro -> admin-api hop
+    # switches to the direct name (see children/maestro.py).
+    admin_discovery = t.add_resource(
+        DiscoveryService(
+            "AdminApiDiscoveryService",
+            Name="admin-api",
+            NamespaceId=Ref("ServiceNamespaceId"),
+            DnsConfig=DnsConfig(
+                DnsRecords=[DnsRecord(Type="A", TTL="10")],
+                RoutingPolicy="MULTIVALUE",
+            ),
+        )
+    )
     admin_service = t.add_resource(
         services_common.build_ecs_service(
             service_key="admin-api",
@@ -357,6 +392,7 @@ def build() -> Template:
             target_group_ref=admin_tg,
             container_name="admin-api",
             container_port=admin_container_port,
+            service_registry_ref=admin_discovery,
             listener_rule_refs=[admin_listener_rule],
         )
     )
