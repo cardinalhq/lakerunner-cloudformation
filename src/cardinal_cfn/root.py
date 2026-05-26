@@ -565,7 +565,7 @@ def build() -> Template:
         "BucketName": Ref("IngestBucketName"),
         "QueueArn": Ref("IngestQueueArn"),
         "LicenseSecretArn": Ref("LicenseSecretArn"),
-        "HttpsListenerArn": GetAtt(alb_stack, "Outputs.HttpsListenerArn"),
+        "OtelHttpListenerArn": GetAtt(alb_stack, "Outputs.OtelHttpListenerArn"),
         "AlbDnsName": GetAtt(alb_stack, "Outputs.AlbDnsName"),
         "VpcId": Ref("VpcId"),
         "ServiceNamespaceId": Ref("ServiceNamespaceId"),

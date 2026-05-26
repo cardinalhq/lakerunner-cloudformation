@@ -6,13 +6,17 @@ HTTP 4318) and writes telemetry directly to the ingest S3 bucket; it has
 no database dependency and does not consume from the ingest SQS queue.
 
 The collector is always attached to the shared ALB, exposing OTLP/HTTP
-(4318): this stack creates a TargetGroup + ListenerRule (priority 300,
-"/v1/*") on the HTTPS listener and wires the ECS Service's LoadBalancers
-block to it. Health checks hit the collector's health_check extension on
-13133. The gRPC receiver (4317) is not ALB-exposed but stays reachable
-task-to-task via Cloud Map. The ALB security group is customer-supplied
-and may differ from the task security group; the customer owns the
-ALB-to-task ingress rule on the OTLP HTTP port.
+on its own dedicated plain-HTTP listener at port 4318: this stack creates
+a TargetGroup + ListenerRule (priority 300, "/v1/*") on the OTel listener
+and wires the ECS Service's LoadBalancers block to it. The listener is
+HTTP (not HTTPS) because the ALB is internal-scheme and external senders
+arrive over VPC peering / TGW / VPN -- TLS at the ALB would only force
+those senders to install the ALB cert. Health checks hit the collector's
+health_check extension on 13133. The gRPC receiver (4317) is not
+ALB-exposed but stays reachable task-to-task via Cloud Map. The ALB
+security group is customer-supplied and may differ from the task security
+group; the customer owns the ALB-to-task ingress rule on 4318 and any
+peer-source ingress rule on the ALB itself.
 
 Config injection is intentionally minimal: the image ships with a baked-in
 config (`/etc/otel/config.yaml`, referenced by the default command) and
@@ -127,7 +131,11 @@ def build() -> Template:
         )
     )
     t.add_parameter(
-        Parameter("HttpsListenerArn", Type="String", Description="ARN of the ALB HTTPS listener.")
+        Parameter(
+            "OtelHttpListenerArn",
+            Type="String",
+            Description="ARN of the ALB OTel listener (plain HTTP on port 4318).",
+        )
     )
     t.add_parameter(
         Parameter(
@@ -244,7 +252,7 @@ def build() -> Template:
                     "BucketName",
                     "QueueArn",
                     "LicenseSecretArn",
-                    "HttpsListenerArn",
+                    "OtelHttpListenerArn",
                     "AlbDnsName",
                     "VpcId",
                     "ServiceNamespaceId",
@@ -336,7 +344,7 @@ def build() -> Template:
     listener_rule = services_common.build_listener_rule(
         service_key=_SERVICE_KEY,
         target_group_ref=target_group,
-        listener_arn_param="HttpsListenerArn",
+        listener_arn_param="OtelHttpListenerArn",
         path_patterns=["/v1/*"],
     )
     t.add_resource(listener_rule)
@@ -402,17 +410,8 @@ def build() -> Template:
     # ---------------------------------------------------------------------
     # Outputs
     # ---------------------------------------------------------------------
-    # Endpoint is a coarse summary string; consumers typically discover the
-    # service via ECS service-name + service-discovery, not this output.
-    t.add_output(
-        Output(
-            "OtelEndpoint",
-            Value=Sub(f"alb:${{HttpsListenerArn}}:{_OTLP_HTTP_PORT}"),
-        )
-    )
-    # In-cluster OTLP/HTTP URL via Cloud Map service discovery. Consumers that
-    # want a directly-dialable endpoint (instead of building one themselves
-    # from the service name and namespace) read this output.
+    # In-cluster OTLP/HTTP URL via Cloud Map service discovery. Reaches the
+    # task ENI directly, bypassing the ALB.
     t.add_output(
         Output(
             "OtelInternalUrl",
@@ -423,12 +422,12 @@ def build() -> Template:
     )
     # AWS-assigned ALB DNS name -- publicly resolvable but resolves to private
     # IPs (the ALB is internal-scheme). Useful for callers with VPC reachability
-    # that prefer the ALB path (HTTPS, /v1/* listener rule) over Cloud Map.
+    # (peering / TGW / VPN) that arrive via the ALB plain-HTTP OTel listener.
     t.add_output(Output("OtelAlbDnsName", Value=Ref("AlbDnsName")))
     t.add_output(
         Output(
             "OtelExternalUrl",
-            Value=Sub("https://${AlbDnsName}"),
+            Value=Sub(f"http://${{AlbDnsName}}:{_OTLP_HTTP_PORT}"),
         )
     )
     t.add_output(Output("OtelServiceName", Value=GetAtt(service, "Name")))

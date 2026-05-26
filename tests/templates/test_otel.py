@@ -29,7 +29,8 @@ def test_required_cross_stack_parameters(td):
         "BucketName",
         "QueueArn",
         "LicenseSecretArn",
-        "HttpsListenerArn",
+        "OtelHttpListenerArn",
+        "AlbDnsName",
         "VpcId",
     ):
         assert n in td["Parameters"], f"missing parameter: {n}"
@@ -168,8 +169,16 @@ def test_container_has_collector_config_env(td):
 # ---------------------------------------------------------------------------
 
 
-def test_outputs_endpoint(td):
-    assert "OtelEndpoint" in td["Outputs"]
+def test_outputs_endpoints(td):
+    for n in ("OtelInternalUrl", "OtelExternalUrl", "OtelAlbDnsName"):
+        assert n in td["Outputs"], f"missing output: {n}"
+
+
+def test_external_url_is_plain_http_on_4318(td):
+    """The OTel ALB listener is HTTP (not HTTPS); the URL must match."""
+    assert td["Outputs"]["OtelExternalUrl"]["Value"] == {
+        "Fn::Sub": "http://${AlbDnsName}:4318"
+    }
 
 
 def test_outputs_service_name(td):

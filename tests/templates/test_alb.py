@@ -48,12 +48,12 @@ def test_creates_load_balancer(template_dict):
     assert len(lbs) == 1
 
 
-def test_creates_https_listeners_on_443_and_9443(template_dict):
+def test_creates_listeners_on_443_9443_and_4318(template_dict):
     listeners = [r for r in template_dict["Resources"].values()
                  if r["Type"] == "AWS::ElasticLoadBalancingV2::Listener"]
-    assert len(listeners) == 2
-    ports = sorted(l["Properties"]["Port"] for l in listeners)
-    assert ports == [443, 9443]
+    assert len(listeners) == 3
+    by_port = {l["Properties"]["Port"]: l["Properties"]["Protocol"] for l in listeners}
+    assert by_port == {443: "HTTPS", 9443: "HTTPS", 4318: "HTTP"}
 
 
 def test_no_ingress_resources_internally_managed(template_dict):
@@ -77,6 +77,7 @@ def test_outputs_required(template_dict):
         "AlbDnsName",
         "HttpsListenerArn",
         "AdminHttpsListenerArn",
+        "OtelHttpListenerArn",
     ):
         assert n in template_dict["Outputs"]
 
