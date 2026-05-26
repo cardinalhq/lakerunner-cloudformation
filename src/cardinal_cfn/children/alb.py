@@ -1,8 +1,13 @@
-"""alb.yaml nested stack: ALB and HTTPS listeners (443 / 9443).
+"""alb.yaml nested stack: ALB and listeners (HTTPS 443 / 9443, HTTP 4318).
 
 The ALB security group and the ALB-to-task ingress rules are customer-owned
 (see ``docs/operations/required-roles.md``); this stack consumes the SG ID
 and never creates or mutates security groups.
+
+The OTel listener is HTTP (not HTTPS): the ALB is internal-scheme and the
+deployment model assumes the caller has VPC-layer reachability (peering /
+TGW / VPN). Plain OTLP/HTTP on 4318 matches the target group's protocol
+and removes the need to install the ALB cert on external senders.
 """
 
 from troposphere import (
@@ -122,10 +127,37 @@ def build() -> Template:
         )
     )
 
+    # Dedicated plain-HTTP listener for the OTel collector on the canonical
+    # OTLP/HTTP port (4318). Internal-scheme ALB + caller-owned VPC
+    # reachability means TLS termination at the ALB adds no value over the
+    # underlying peering encryption; serving plain HTTP keeps SDK clients on
+    # http://<alb>:4318 without needing the ALB cert in their trust store.
+    # The collector rule (registered from otel.py) owns this listener; the
+    # default 404 only fires for non-OTLP paths.
+    otel_listener = t.add_resource(
+        Listener(
+            "OtelHttpListener",
+            LoadBalancerArn=Ref(alb),
+            Port=4318,
+            Protocol="HTTP",
+            DefaultActions=[
+                Action(
+                    Type="fixed-response",
+                    FixedResponseConfig=FixedResponseConfig(
+                        StatusCode="404",
+                        ContentType="text/plain",
+                        MessageBody="no listener rule matched",
+                    ),
+                )
+            ],
+        )
+    )
+
     t.add_output(Output("AlbArn", Value=Ref(alb)))
     t.add_output(Output("AlbDnsName", Value=GetAtt(alb, "DNSName")))
     t.add_output(Output("HttpsListenerArn", Value=Ref(listener)))
     t.add_output(Output("AdminHttpsListenerArn", Value=Ref(admin_listener)))
+    t.add_output(Output("OtelHttpListenerArn", Value=Ref(otel_listener)))
 
     return t
 
