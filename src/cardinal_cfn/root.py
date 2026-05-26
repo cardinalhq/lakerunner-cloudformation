@@ -568,6 +568,7 @@ def build() -> Template:
         "HttpsListenerArn": GetAtt(alb_stack, "Outputs.HttpsListenerArn"),
         "VpcId": Ref("VpcId"),
         "ServiceNamespaceId": Ref("ServiceNamespaceId"),
+        "ServiceNamespaceName": Ref("ServiceNamespaceName"),
         "OtelImage": otel_image,
         "OtelReplicas": Ref("OtelReplicas"),
         "OtelCpu": Ref("OtelCpu"),
