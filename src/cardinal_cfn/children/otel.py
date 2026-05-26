@@ -130,6 +130,17 @@ def build() -> Template:
         Parameter("HttpsListenerArn", Type="String", Description="ARN of the ALB HTTPS listener.")
     )
     t.add_parameter(
+        Parameter(
+            "AlbDnsName",
+            Type="String",
+            Description=(
+                "AWS-assigned ALB DNS name (e.g. internal-cardinal-...elb.amazonaws.com). "
+                "Surfaced as an output for callers that prefer the ALB path over "
+                "Cloud Map service discovery."
+            ),
+        )
+    )
+    t.add_parameter(
         Parameter("VpcId", Type="AWS::EC2::VPC::Id", Description="VPC ID (forwarded from root).")
     )
     t.add_parameter(
@@ -234,6 +245,7 @@ def build() -> Template:
                     "QueueArn",
                     "LicenseSecretArn",
                     "HttpsListenerArn",
+                    "AlbDnsName",
                     "VpcId",
                     "ServiceNamespaceId",
                     "ServiceNamespaceName",
@@ -407,6 +419,16 @@ def build() -> Template:
             Value=Sub(
                 f"http://cardinal-otel.${{ServiceNamespaceName}}:{_OTLP_HTTP_PORT}"
             ),
+        )
+    )
+    # AWS-assigned ALB DNS name -- publicly resolvable but resolves to private
+    # IPs (the ALB is internal-scheme). Useful for callers with VPC reachability
+    # that prefer the ALB path (HTTPS, /v1/* listener rule) over Cloud Map.
+    t.add_output(Output("OtelAlbDnsName", Value=Ref("AlbDnsName")))
+    t.add_output(
+        Output(
+            "OtelExternalUrl",
+            Value=Sub("https://${AlbDnsName}"),
         )
     )
     t.add_output(Output("OtelServiceName", Value=GetAtt(service, "Name")))
