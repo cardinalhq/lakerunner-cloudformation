@@ -20,9 +20,9 @@ jobs:
       CARDINAL_BUCKET_NAME: cardinal-cfn-us-east-1
       CARDINAL_BUCKET_REGION: us-east-1
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -51,7 +51,7 @@ jobs:
           source .venv/bin/activate
           ./build.sh
 
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: arn:aws:iam::992382549843:role/cardinal-cfn-publisher
           aws-region: ${{ env.AWS_REGION }}
