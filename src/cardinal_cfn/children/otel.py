@@ -143,6 +143,16 @@ def build() -> Template:
             ),
         )
     )
+    t.add_parameter(
+        Parameter(
+            "ServiceNamespaceName",
+            Type="String",
+            Description=(
+                "Cloud Map private DNS namespace name (e.g. cardinal.local). "
+                "Used only to compose the OtelInternalUrl output."
+            ),
+        )
+    )
 
     # ---------------------------------------------------------------------
     # Image override
@@ -226,6 +236,7 @@ def build() -> Template:
                     "HttpsListenerArn",
                     "VpcId",
                     "ServiceNamespaceId",
+                    "ServiceNamespaceName",
                 ],
             },
             {
@@ -385,6 +396,17 @@ def build() -> Template:
         Output(
             "OtelEndpoint",
             Value=Sub(f"alb:${{HttpsListenerArn}}:{_OTLP_HTTP_PORT}"),
+        )
+    )
+    # In-cluster OTLP/HTTP URL via Cloud Map service discovery. Consumers that
+    # want a directly-dialable endpoint (instead of building one themselves
+    # from the service name and namespace) read this output.
+    t.add_output(
+        Output(
+            "OtelInternalUrl",
+            Value=Sub(
+                f"http://cardinal-otel.${{ServiceNamespaceName}}:{_OTLP_HTTP_PORT}"
+            ),
         )
     )
     t.add_output(Output("OtelServiceName", Value=GetAtt(service, "Name")))
