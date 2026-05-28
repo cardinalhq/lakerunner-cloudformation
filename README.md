@@ -101,6 +101,9 @@ for the layered teardown procedure.
   -- `cardinal-cleanup` task for wiping a test install
 - [`end-to-end-test-plan.md`](docs/operations/end-to-end-test-plan.md)
   -- pre-pivot acceptance test plan (Jenkins-driven)
+- [`deploy-scripts/README.md`](deploy-scripts/README.md)
+  -- env-var-driven wrappers for the four product stacks + the cleanup
+  driver (intended for Jenkins job invocation)
 
 ## Development
 
