@@ -267,6 +267,22 @@ def test_alb_to_maestro_ports(td):
     assert dex["FromPort"] == 5556
 
 
+def test_maestro_to_lakerunner_cross_tier_ingress(td):
+    """Maestro reaches query-api (8080) and admin-api (9091) via Cloud Map
+    bypassing the ALB. Without these per-tier SG rules, the lakerunner
+    provisioning worker hangs with a headers-timeout and the
+    maestro_integrations row stays in 'error' status."""
+    q = td["Resources"]["QueryFromMaestro"]["Properties"]
+    assert q["FromPort"] == 8080
+    assert q["GroupId"] == {"Ref": "QuerySecurityGroup"}
+    assert q["SourceSecurityGroupId"] == {"Ref": "MaestroSecurityGroup"}
+
+    a = td["Resources"]["ControlAdminApiFromMaestro"]["Properties"]
+    assert a["FromPort"] == 9091
+    assert a["GroupId"] == {"Ref": "ControlSecurityGroup"}
+    assert a["SourceSecurityGroupId"] == {"Ref": "MaestroSecurityGroup"}
+
+
 def test_outputs(td):
     expected = {
         "AlbSecurityGroupId",

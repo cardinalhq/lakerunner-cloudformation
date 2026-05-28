@@ -357,6 +357,32 @@ def build() -> Template:
             Description=f"{tier_title} to otel-collector self-telemetry",
         ))
 
+    # Maestro -> lakerunner cross-tier calls via Cloud Map service discovery.
+    # The Maestro and mcp-gateway containers call query-api (8080) and
+    # admin-api (9091) directly at their cardinal.local DNS names, bypassing
+    # the ALB. Without these SG rules, the "Lakerunner provisioning worker"
+    # in maestro hangs on a headers-timeout when trying to register a new org
+    # against admin-api, leaving the maestro_integrations row in 'error'
+    # status and the org disconnected from its lakerunner deployment.
+    t.add_resource(SecurityGroupIngress(
+        "QueryFromMaestro",
+        GroupId=Ref(query_sg),
+        SourceSecurityGroupId=Ref(maestro_sg),
+        IpProtocol="tcp",
+        FromPort=_QUERY_API_PORT,
+        ToPort=_QUERY_API_PORT,
+        Description="Maestro to query-api Cloud Map",
+    ))
+    t.add_resource(SecurityGroupIngress(
+        "ControlAdminApiFromMaestro",
+        GroupId=Ref(control_sg),
+        SourceSecurityGroupId=Ref(maestro_sg),
+        IpProtocol="tcp",
+        FromPort=_ADMIN_API_PORT,
+        ToPort=_ADMIN_API_PORT,
+        Description="Maestro to admin-api Cloud Map",
+    ))
+
     # ALB -> maestro UI on 4200 and dex on 5556
     t.add_resource(SecurityGroupIngress(
         "MaestroUiFromAlb",
