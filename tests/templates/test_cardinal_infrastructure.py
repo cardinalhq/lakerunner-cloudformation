@@ -19,8 +19,8 @@ def td():
 
 def test_required_parameters(td):
     for n in (
+        "VpcId",
         "PrivateSubnets",
-        "DBSecurityGroupId",
         "DBEngineVersion",
         "DBInstanceClass",
         "DBAllocatedStorage",
@@ -33,6 +33,11 @@ def test_required_parameters(td):
         "LicenseData",
     ):
         assert n in td["Parameters"], f"missing parameter: {n}"
+
+
+def test_no_customer_supplied_db_sg(td):
+    """The RDS security group is now stack-owned (not customer-supplied)."""
+    assert "DBSecurityGroupId" not in td["Parameters"]
 
 
 def test_license_data_is_no_echo(td):
@@ -57,7 +62,7 @@ def test_lifecycle_days_default(td):
 
 
 def test_recovery_override_defaults(td):
-    """Defaults match the names data-setup.sh creates today."""
+    """Defaults match the canonical Cardinal resource names."""
     assert td["Parameters"]["LicenseSecretName"]["Default"] == "cardinal-license"
     assert td["Parameters"]["AdminKeySecretName"]["Default"] == "cardinal-admin-key"
     assert (
@@ -366,7 +371,7 @@ def test_rds_uses_snapshot(td):
 
 
 # ---------------------------------------------------------------------------
-# Outputs (must match data-setup.sh JSON keys 1:1)
+# Outputs (consumed by the lakerunner stack as parameters)
 # ---------------------------------------------------------------------------
 
 
@@ -375,6 +380,7 @@ _EXPECTED_OUTPUT_KEYS = {
     "DbPort",
     "DbName",
     "DbMasterSecretArn",
+    "RdsSecurityGroupId",
     "IngestBucketName",
     "IngestQueueUrl",
     "IngestQueueArn",
@@ -387,6 +393,15 @@ _EXPECTED_OUTPUT_KEYS = {
 
 def test_outputs_match_script_contract(td):
     assert set(td["Outputs"].keys()) == _EXPECTED_OUTPUT_KEYS
+
+
+def test_creates_rds_security_group(td):
+    types = [r["Type"] for r in td["Resources"].values()]
+    assert types.count("AWS::EC2::SecurityGroup") == 1, (
+        "infra stack must own exactly one SG (the RDS SG)"
+    )
+    sg = td["Resources"]["RdsSecurityGroup"]
+    assert sg["DeletionPolicy"] == "Retain"
 
 
 def test_outputs_have_no_export(td):

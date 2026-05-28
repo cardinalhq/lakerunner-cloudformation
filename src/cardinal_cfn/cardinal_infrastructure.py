@@ -9,12 +9,9 @@ Customer-deployable peer to ``cardinal-vpc``. Creates the resources that
 - License / admin-key secrets
 - /cardinal/storage-profiles and /cardinal/api-keys SSM parameters
 
-Conceptually a CloudFormation port of ``scripts/data-setup.sh``; the
-opinionated config (engine version, sizing, lifecycle days, password
-shape, secret JSON layout) mirrors the script 1:1.
-
-Outputs match the keys the script emits, so the lakerunner stack can
-consume either path identically.
+The opinionated config (engine version, sizing, lifecycle days,
+password shape, secret JSON layout) is the single supported infra
+path -- the older shell driver was removed.
 
 Recovery from a failed first create
 -----------------------------------
@@ -50,6 +47,7 @@ from troposphere import (
     Tags,
     Template,
 )
+from troposphere.ec2 import SecurityGroup
 from troposphere.rds import DBInstance, DBSubnetGroup
 from troposphere.s3 import (
     AbortIncompleteMultipartUpload,
@@ -76,7 +74,7 @@ APPLICATION = "cardinal-lakerunner"
 
 
 def _tags(*, component: str) -> Tags:
-    """Tag set matching scripts/data-setup.sh's ``tags_json_array``."""
+    """Standard Cardinal tag set for infra-stack resources."""
 
     return Tags(
         Application=APPLICATION,
@@ -112,6 +110,16 @@ def build() -> Template:
     # Parameters
     # -----------------------------------------------------------------------
 
+    vpc_id = t.add_parameter(
+        Parameter(
+            "VpcId",
+            Type="AWS::EC2::VPC::Id",
+            Description=(
+                "VPC the RDS instance and its security group live in. "
+                "Same VPC the lakerunner stack is deployed into."
+            ),
+        )
+    )
     private_subnets = t.add_parameter(
         Parameter(
             "PrivateSubnets",
@@ -119,16 +127,6 @@ def build() -> Template:
             Description=(
                 "Two or more private subnets in distinct AZs for the RDS "
                 "subnet group."
-            ),
-        )
-    )
-    db_sg_id = t.add_parameter(
-        Parameter(
-            "DBSecurityGroupId",
-            Type="AWS::EC2::SecurityGroup::Id",
-            Description=(
-                "Security group attached to the RDS instance. The customer "
-                "creates this and grants the lakerunner ECS tasks ingress."
             ),
         )
     )
@@ -273,7 +271,7 @@ def build() -> Template:
         groups=[
             {
                 "label": "Networking",
-                "parameters": ["PrivateSubnets", "DBSecurityGroupId"],
+                "parameters": ["VpcId", "PrivateSubnets"],
             },
             {
                 "label": "Database sizing",
@@ -309,8 +307,8 @@ def build() -> Template:
             },
         ],
         labels={
+            "VpcId": "VPC for the RDS instance",
             "PrivateSubnets": "Private subnets (2+ in distinct AZs)",
-            "DBSecurityGroupId": "Security group for the RDS instance",
             "DBEngineVersion": "PostgreSQL engine version",
             "DBInstanceClass": "RDS instance class",
             "DBAllocatedStorage": "Storage (GiB)",
@@ -432,6 +430,28 @@ def build() -> Template:
     # RDS subnet group + master secret + DB instance + target attachment
     # -----------------------------------------------------------------------
 
+    db_security_group = t.add_resource(
+        _retain(
+            SecurityGroup(
+                "RdsSecurityGroup",
+                GroupDescription=(
+                    "Cardinal RDS. Ingress rules are added by the "
+                    "lakerunner stack (one per task tier that needs DB "
+                    "access)."
+                ),
+                VpcId=Ref(vpc_id),
+                SecurityGroupEgress=[
+                    {
+                        "IpProtocol": "-1",
+                        "CidrIp": "0.0.0.0/0",
+                        "Description": "All egress (RDS does not initiate connections; default kept for AWS::EC2::SecurityGroup parity).",
+                    }
+                ],
+                Tags=_tags(component="rds-sg"),
+            )
+        )
+    )
+
     db_subnet_group = t.add_resource(
         _retain(
             DBSubnetGroup(
@@ -481,7 +501,7 @@ def build() -> Template:
                     SecretArn=Ref(db_master_secret),
                 ),
                 DBSubnetGroupName=Ref(db_subnet_group),
-                VPCSecurityGroups=[Ref(db_sg_id)],
+                VPCSecurityGroups=[Ref(db_security_group)],
                 PubliclyAccessible=False,
                 MultiAZ=False,
                 BackupRetentionPeriod=7,
@@ -545,7 +565,7 @@ def build() -> Template:
     # (lakerunner migrate, since #109/#110) imports these into configdb and
     # expects YAML *lists* -- a top-level map (e.g. "{}") fails to unmarshal
     # into []initialize.StorageProfile and aborts the migration. Mirror
-    # data-setup.sh: seed storage-profiles with an install-specific profile
+    # Seed storage-profiles with an install-specific profile
     # (bucket + region substituted) and api-keys with an empty list.
     # -----------------------------------------------------------------------
 
@@ -609,7 +629,7 @@ def build() -> Template:
     )
 
     # -----------------------------------------------------------------------
-    # Outputs (1:1 with the JSON keys that scripts/data-setup.sh emits).
+    # Outputs (consumed as parameters by the lakerunner stack).
     # -----------------------------------------------------------------------
 
     def _emit_output(name: str, description: str, value) -> None:
@@ -621,6 +641,10 @@ def build() -> Template:
             )
         )
 
+    _emit_output("RdsSecurityGroupId",
+                 "Security group ID attached to the RDS instance. The lakerunner "
+                 "stack adds tier-specific ingress rules to this group.",
+                 Ref(db_security_group))
     _emit_output("DbEndpoint", "RDS endpoint hostname.",
                  GetAtt(db_instance, "Endpoint.Address"))
     _emit_output("DbPort", "RDS endpoint port.",

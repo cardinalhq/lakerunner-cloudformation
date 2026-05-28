@@ -2,89 +2,89 @@
 
 What the **running application** has access to.
 
-Every IAM role and security group is **pre-created by the customer's
-IT** and supplied as a parameter ARN/ID. Cardinal's CloudFormation never
-creates IAM roles or security groups. The authoritative reference for
-what each customer-supplied role's trust + inline policy must contain is
-`docs/operations/required-roles.md` (generated from
-`src/cardinal_cfn/required_roles_doc.py`, which composes the policy
-fragments in `src/cardinal_cfn/iam_policies.py`).
+Every IAM role and security group is created by the `Security` nested
+stack in `cardinal-lakerunner`. The customer no longer supplies any of
+them. (The one exception is the `cardinal-cleanup` stack, which uses a
+customer-supplied teardown role -- documented in
+[`cleanup.md`](cleanup.md).)
 
 This doc is the "what does the running software actually do?" half of
-the permissions story. Install-time permissions for the operator role
-deploying the templates live in `permissions-infrastructure.md`.
+the permissions story. Install-time permissions for the deployer
+principal live in [`permissions-infrastructure.md`](permissions-infrastructure.md).
 
-## IAM roles (all customer-supplied)
+## IAM roles (all stack-created in the `Security` child)
 
-### Service-launch role (shared)
+### Shared execution role
 
-| Role parameter | Trust | Why | Required permissions |
-|---|---|---|---|
-| `ExecutionRoleArn` | `ecs-tasks.amazonaws.com` | ECS uses this at task launch on every Fargate task to pull the image, write the bootstrap log stream, and resolve `secrets:` blocks on container definitions. | AWS-managed `AmazonECSTaskExecutionRolePolicy` (ECR pull, base CW Logs) + `secretsmanager:GetSecretValue` on `cardinal-*` + `ssm:GetParameter*` on `parameter/cardinal/*`. |
+`ExecutionRole` (logical id) -- trust `ecs-tasks.amazonaws.com`. ECS
+uses it at task launch on every Fargate task to pull the image, write
+the bootstrap log stream, and resolve `secrets:` blocks on container
+definitions.
 
-### ECS task role (shared across all services)
+Permissions: AWS-managed `AmazonECSTaskExecutionRolePolicy` (ECR pull,
+base CW Logs) + `secretsmanager:GetSecretValue` on `cardinal-*` +
+`ssm:GetParameter*` on `parameter/cardinal/*`.
 
-| Role parameter | Trust | Why | Required permissions |
-|---|---|---|---|
-| `TaskRoleArn` | `ecs-tasks.amazonaws.com` | Used by every lakerunner ECS task (query / process / control / otel / maestro). One shared role across services; customers who want finer separation can pass different ARNs for different services in a future refactor. | S3 RW on the ingest bucket, SQS RW on the ingest queue, SSM read on `/cardinal/*`, secrets read on `cardinal-*`, CW Logs writes to `/cardinal/*`, `ecs:DescribeServices` / `ecs:UpdateService` on the cluster, `ecs:DescribeTasks` / `ecs:ListTasks`, `bedrock:InvokeModel(WithResponseStream)` on `foundation-model/*`. |
+### Per-tier task roles
 
-### DB migrator
+One per child stack. Trust is always `ecs-tasks.amazonaws.com`.
 
-The migrator is **not** Lambda-backed -- it runs as an ECS service
-(`migration.yaml`: a Fargate task that runs `lakerunner migrate`, then a
-`keepalive` container that idles). It uses `TaskRoleArn` for the migrator's
-task role and `ExecutionRoleArn` for image pull / secret resolution -- no
-dedicated role. So no `MigrationLambdaRoleArn` parameter exists.
+| Role | Used by | Permissions (over and above bare-minimum CW logs) |
+|---|---|---|
+| `MigrationRole` | `Migration` child's migrator task. | `secretsmanager:GetSecretValue` on the db-master secret; `ssm:GetParameter*` on `/cardinal/storage-profiles` and `/cardinal/api-keys`. |
+| `QueryRole` | query-api + query-worker. | db-master + license secret read; storage-profiles + api-keys SSM read; `s3:GetObject` / `s3:ListBucket` on the ingest bucket; `ecs:DescribeServices`, `ecs:ListTasks`, `ecs:DescribeTasks` scoped to the cluster (query-api's ECS-based worker discovery). |
+| `ProcessRole` | process-{logs,metrics,traces} + pubsub-sqs. | db-master + license secret read; storage-profiles SSM read; `s3:GetObject` / `s3:PutObject` / `s3:DeleteObject` / `s3:ListBucket` on the ingest bucket; `sqs:ReceiveMessage` / `sqs:DeleteMessage` / `sqs:GetQueueAttributes` on the ingest queue; `bedrock:InvokeModel{,WithResponseStream}` on `foundation-model/*`. |
+| `ControlRole` | sweeper + monitoring + admin-api + alert-evaluator. | db-master + license + admin-key secret read; storage-profiles + api-keys SSM read; `s3:GetObject` / `s3:DeleteObject` / `s3:ListBucket` on the ingest bucket (sweeper); `ecs:UpdateService` / `ecs:DescribeServices` scoped to the cluster (monitoring's autoscaler). |
+| `OtelRole` | otel-gateway collector. | License secret read; CW Logs writes only. |
+| `MaestroRole` | maestro + dex sidecar. | db-master + license + admin-key secret read; storage-profiles + api-keys SSM read. |
 
-### TLS certificate
-
-No Lambda. If you pass an existing `CertificateArn` (ACM or IAM server cert),
-`cert.yaml` just forwards it. If `CertificateArn` is empty and you pass the cert
-material as PEM parameters (`CertificateBody` / `CertificatePrivateKey` /
-`CertificateChain`), `cert.yaml` creates an `AWS::IAM::ServerCertificate` from
-them and the ALB HTTPS listener uses its ARN. There is no `CertLambdaRoleArn`
-parameter. The deployer needs `iam:UploadServerCertificate` /
-`iam:DeleteServerCertificate` (etc.) for the PEM path -- see the infrastructure
-permissions doc.
+The migrator runs as an ECS service (`migration.yaml`: Fargate task
+that runs `lakerunner migrate`, then a `keepalive` container that
+idles). No Lambda anywhere in the product. The TLS cert path either
+forwards a supplied `CertificateArn` or creates an
+`AWS::IAM::ServerCertificate` from PEM parameters.
 
 ## Resource policies
 
 | Policy | Owner | Why |
 |---|---|---|
-| `IngestQueuePolicy` (SQS) | `cardinal-data-setup` Lambda | S3 cannot deliver `s3:ObjectCreated:*` to SQS without an explicit grant. Allows `sqs:SendMessage` from `s3.amazonaws.com` only when `aws:SourceAccount = ${AccountId}` (blocks cross-account spam). |
+| `IngestQueuePolicy` (SQS) | `cardinal-infrastructure` stack | S3 cannot deliver `s3:ObjectCreated:*` to SQS without an explicit grant. Allows `sqs:SendMessage` from `s3.amazonaws.com` only when `aws:SourceAccount = ${AccountId}` (blocks cross-account spam). |
 
-## Security groups (all customer-supplied)
+## Security groups (all stack-created)
 
-All three live in the customer's VPC. Tasks run in private subnets with
+All live in the customer's VPC. Tasks run in private subnets with
 `AssignPublicIp: DISABLED`; the ALB is `Scheme: internal`.
 
-| SG parameter | Used by | Required ingress | Egress | Why |
+| SG (logical id) | Used by | Inbound | Outbound | Why |
 |---|---|---|---|---|
-| `TaskSgId` | Every ECS task in the install. | TCP 0-65535 from self (task-to-task via Cloud Map); TCP 0-65535 from `AlbSgId` (ALB → targets). | All. | Egress is open because tasks need AWS APIs, ECR, Bedrock, etc. through customer NAT/VPC endpoints. Self-ingress enables internal service-to-service routing without going through the ALB. |
-| `AlbSgId` | The ALB only. | TCP 443 and TCP 9443 from the customer's VPC CIDR (= `0.0.0.0/0` is fine, since the ALB is internal). | All. | 443 carries query/maestro/otel; 9443 is a dedicated admin-api listener (admin-api's UI serves at `/`, which would clash with path-pattern rules on 443). |
-| `DbSgId` | The RDS instance (attached by the data-setup Lambda; lakerunner CFN does not consume the SG ID directly). | TCP 5432 from `TaskSgId` only. | All. | Defense-in-depth on top of `PubliclyAccessible: false` and private-subnet placement. |
+| `AlbSecurityGroup` (`cardinal-alb-sg`) | The ALB. | TCP 443 / 9443 / 4318 from `AlbAllowedCidr1..3` (default: all RFC1918). | All. | 443 carries query/maestro/otel; 9443 is the dedicated admin-api listener; 4318 is OTLP/HTTP. |
+| `MigrationSecurityGroup` (`cardinal-svc-migration-sg`) | One-shot migrator task. | None. | All. | Migrator initiates DB + ECR + Secrets connections; never receives traffic. |
+| `QuerySecurityGroup` (`cardinal-svc-query-sg`) | query-api + query-worker. | TCP 8080 from `AlbSecurityGroup`; TCP 8081 from self (query-api → query-worker). | All. | ALB hits 8080 on query-api; query-api hits the worker on 8081 over the shared tier SG. |
+| `ProcessSecurityGroup` (`cardinal-svc-process-sg`) | process-{logs,metrics,traces} + pubsub-sqs. | None. | All. | Process tier is pull-only (SQS + S3 + DB). |
+| `ControlSecurityGroup` (`cardinal-svc-control-sg`) | sweeper + monitoring + admin-api + alert-evaluator. | TCP 9091 from `AlbSecurityGroup` (admin-api). | All. | Only admin-api is ALB-attached; the rest are pull-only. |
+| `OtelSecurityGroup` (`cardinal-svc-otel-sg`) | otel-gateway collector. | TCP 4318 from `AlbSecurityGroup`; TCP 4318 from each of `Query` / `Process` / `Control` / `Maestro` SGs (self-telemetry). | All. | OTLP/HTTP ingestion. |
+| `MaestroSecurityGroup` (`cardinal-svc-maestro-sg`) | maestro + dex sidecar. | TCP 4200 (maestro UI) and TCP 5556 (dex) from `AlbSecurityGroup`. | All. | Maestro's UI catch-all + dex's `/dex/*`. |
+| `RdsSecurityGroup` (`cardinal-rds-sg`, owned by the infra stack) | The RDS instance. | TCP 5432 from `Migration` / `Query` / `Process` / `Control` / `Maestro` task SGs (added by the lakerunner Security child). | All. | OTel does not need DB; no rule. |
 
 ## Network and data posture
 
 - All ECS services: `AssignPublicIp: DISABLED`, private subnets.
 - DB: `StorageEncrypted: true`, `LRDB_SSLMODE: require`, master password
-  generated by the data-setup Lambda into Secrets Manager.
-- Ingest bucket: customer-data-bearing, owned by the data-setup Lambda
-  (lakerunner CFN can be freely deleted without touching ingest data).
-- License/admin secrets: created by the data-setup Lambda; the
-  Lambda's default `RequestType=Delete` is a no-op.
-- Service-to-service traffic stays inside `TaskSgId` via Cloud Map private DNS.
-- ECS rolling deploys run with the deployment circuit breaker enabled, so a
-  bad image rolls back automatically.
+  generated by `cardinal-infrastructure` into Secrets Manager.
+- Ingest bucket: customer-data-bearing, `Retain` on stack delete.
+- License/admin secrets: `Retain` on stack delete.
+- Service-to-service traffic stays inside the tier SGs (and the
+  query-tier self-ingress for api → worker) via Cloud Map private DNS.
+- ECS rolling deploys run with the deployment circuit breaker enabled,
+  so a bad image rolls back automatically.
 
 ## What is **not** granted
 
 - No role grants `s3:*` or `sqs:*` on resources outside the install
-  (Cardinal's policy templates use `cardinal-*` ARN scopes).
-- No running service grants `iam:*`. (The deployer needs `iam:PassRole` on
-  `TaskRoleArn` / `ExecutionRoleArn` to register ECS task definitions, and on
-  `CertLambdaRoleArn` if the PEM cert path is used -- see the infrastructure
-  permissions doc.)
+  (all ARN scopes are `cardinal-ingest-*` and `cardinal-ingest`).
+- No running service has `iam:*`. The deployer needs `iam:PassRole` on
+  the stack-created roles to register ECS task definitions -- see the
+  install-time permissions doc.
 - No role grants `ec2:*`, `rds:*`, or `kms:*` to the running services.
 - No security group exposes anything to the public internet -- the ALB
-  is internal-scheme, so its `0.0.0.0/0` rules are VPC-local.
+  is internal-scheme.
