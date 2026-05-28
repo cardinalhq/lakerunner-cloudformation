@@ -32,6 +32,7 @@ yes_flag="false"
 
 # --- optional ---
 lakerunner_stack_name="cardinal-lakerunner"
+infra_stack_name="cardinal-infrastructure"
 cleanup_stack_name="cardinal-cleanup"
 template_base_url="$DEFAULT_TEMPLATE_BASE_URL"
 wait_self_delete="false"
@@ -56,6 +57,9 @@ Required:
 
 Optional:
   --lakerunner-stack-name NAME          Default: cardinal-lakerunner.
+  --infra-stack-name NAME               Default: cardinal-infrastructure.
+                                        The cleanup task discovers retained
+                                        resources from this stack.
   --cleanup-stack-name NAME             Default: cardinal-cleanup.
   --template-base-url URL               Default: cardinal-cfn-us-east-1 bucket.
   --wait-self-delete                    Wait for the cleanup stack's own
@@ -82,6 +86,7 @@ while [ $# -gt 0 ]; do
         --cleanup-execution-role-arn)   cleanup_execution_role_arn="$2";   shift 2 ;;
         --deployer-role-arn)            deployer_role_arn="$2";            shift 2 ;;
         --lakerunner-stack-name)        lakerunner_stack_name="$2";        shift 2 ;;
+        --infra-stack-name)             infra_stack_name="$2";             shift 2 ;;
         --cleanup-stack-name)           cleanup_stack_name="$2";           shift 2 ;;
         --template-base-url)            template_base_url="$2";            shift 2 ;;
         --wait-self-delete)             wait_self_delete="true";           shift   ;;
@@ -166,6 +171,7 @@ aws --region "$region" cloudformation create-stack \
     --capabilities CAPABILITY_IAM \
     --parameters \
         ParameterKey=LakerunnerStackName,ParameterValue="$lakerunner_stack_name" \
+        ParameterKey=InfraStackName,ParameterValue="$infra_stack_name" \
         ParameterKey=CleanupTaskRoleArn,ParameterValue="$cleanup_task_role_arn" \
         ParameterKey=CleanupExecutionRoleArn,ParameterValue="$cleanup_execution_role_arn" \
         ParameterKey=ClusterName,ParameterValue="$cluster_name" \

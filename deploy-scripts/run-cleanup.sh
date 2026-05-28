@@ -26,6 +26,7 @@ require_env CLEANUP_EXECUTION_ROLE_ARN
 require_env DEPLOYER_ROLE_ARN
 
 LAKERUNNER_STACK_NAME="${LAKERUNNER_STACK_NAME:-cardinal-lakerunner}"
+INFRA_STACK_NAME="${INFRA_STACK_NAME:-cardinal-infrastructure}"
 CLEANUP_STACK_NAME="${CLEANUP_STACK_NAME:-cardinal-cleanup}"
 TEMPLATE_BUCKET="${TEMPLATE_BUCKET:-cardinal-cfn-${REGION}}"
 TEMPLATE_BASE_URL="${TEMPLATE_BASE_URL:-https://${TEMPLATE_BUCKET}.s3.${REGION}.amazonaws.com/lakerunner}"
@@ -54,6 +55,7 @@ exec "$REPO_ROOT/scripts/cleanup-lakerunner.sh" \
   --cleanup-execution-role-arn "$CLEANUP_EXECUTION_ROLE_ARN" \
   --deployer-role-arn "$DEPLOYER_ROLE_ARN" \
   --lakerunner-stack-name "$LAKERUNNER_STACK_NAME" \
+  --infra-stack-name "$INFRA_STACK_NAME" \
   --cleanup-stack-name "$CLEANUP_STACK_NAME" \
   --template-base-url "$TEMPLATE_BASE_URL" \
   "${WAIT_FLAG[@]}" \

@@ -80,8 +80,13 @@ def test_script_in_entrypoint_not_command(td):
     c = td["Resources"]["CleanupTaskDefinition"]["Properties"]["ContainerDefinitions"][0]
     assert c["EntryPoint"][:2] == ["/bin/sh", "-c"]
     script_body = c["EntryPoint"][2]
-    assert "ownership_ok()" in script_body
     assert "drain_services" in script_body
+    assert "delete_lakerunner_stack" in script_body
+    assert "empty_ingest_bucket" in script_body
+    assert "delete_infra_stack" in script_body
+    assert "delete_ingest_bucket" in script_body
+    assert "delete_secrets" in script_body
+    assert "delete_rds_snapshots" in script_body
     assert "self_delete" in script_body
     assert c["Command"] == []
 
@@ -94,6 +99,7 @@ def test_environment_pins_required_vars(td):
         "AWS_ACCOUNT_ID":        {"Ref": "AWS::AccountId"},
         "CLUSTER_NAME":          {"Ref": "ClusterName"},
         "LAKERUNNER_STACK_NAME": {"Ref": "LakerunnerStackName"},
+        "INFRA_STACK_NAME":      {"Ref": "InfraStackName"},
         "CLEANUP_STACK_NAME":    {"Ref": "AWS::StackName"},
         "DEPLOYER_ROLE_ARN":     {"Ref": "DeployerRoleArn"},
     }

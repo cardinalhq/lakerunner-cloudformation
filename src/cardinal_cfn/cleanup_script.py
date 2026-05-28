@@ -10,6 +10,18 @@ The script is POSIX (``sh``), not bash. The container image
 (``public.ecr.aws/aws-cli/aws-cli:latest``) provides ``sh``, ``aws``,
 and ``python3`` -- and crucially NOT ``jq`` -- so JSON parsing uses
 inline ``python3 -c`` snippets.
+
+The script implements the four-step teardown ordered as:
+
+  1. drain + delete the cardinal-lakerunner CFN stack
+  2. empty the ingest S3 bucket
+  3. delete the cardinal-infrastructure CFN stack (CFN snapshots+deletes
+     the RDS instance because its DeletionPolicy is Snapshot; every
+     other data-layer resource has DeletionPolicy: Retain and survives)
+  4. sweep the Retain'd resources (S3 bucket itself, secrets, SSM
+     parameters, SQS queue, RDS subnet group, the RDS final snapshot)
+
+Then self-deletes the cardinal-cleanup stack.
 """
 
 SCRIPT = r"""#!/bin/sh
@@ -26,6 +38,7 @@ fail() { log "FATAL: $*"; exit 2; }
 [ -n "${ECS_CONTAINER_METADATA_URI_V4:-}" ] \
     || fail "ECS_CONTAINER_METADATA_URI_V4 is unset; not running under ECS Fargate?"
 [ -n "${LAKERUNNER_STACK_NAME:-}" ] || fail "LAKERUNNER_STACK_NAME is unset"
+[ -n "${INFRA_STACK_NAME:-}" ]      || fail "INFRA_STACK_NAME is unset"
 [ -n "${CLEANUP_STACK_NAME:-}" ]    || fail "CLEANUP_STACK_NAME is unset"
 [ -n "${DEPLOYER_ROLE_ARN:-}" ]     || fail "DEPLOYER_ROLE_ARN is unset"
 [ -n "${CLUSTER_NAME:-}" ]          || fail "CLUSTER_NAME is unset"
@@ -49,57 +62,80 @@ export AWS_DEFAULT_REGION="$REGION"
 unset AWS_REGION
 
 log "account=$ACCOUNT region=$REGION"
-log "lakerunner_stack=$LAKERUNNER_STACK_NAME cleanup_stack=$CLEANUP_STACK_NAME cluster=$CLUSTER_NAME"
+log "lakerunner_stack=$LAKERUNNER_STACK_NAME infra_stack=$INFRA_STACK_NAME"
+log "cleanup_stack=$CLEANUP_STACK_NAME cluster=$CLUSTER_NAME"
 
-# Deterministic resource names. The S3 bucket, SQS queue, secrets, and SSM
-# parameters are explicitly named by both the legacy shell installer and
-# the CFN infrastructure stack, so the literals below match both.
+# ---------------------------------------------------------------------------
+# Pre-step: discover the physical IDs of every resource the cardinal-
+# infrastructure stack owns. We must do this BEFORE we delete the stack;
+# once the wrapper is gone we cannot recover the CFN-generated names.
 #
-# DB_ID and DB_SUBNET_GROUP are the names the (removed) shell installer
-# used. Against a CFN-deployed infra stack those resources have CFN-
-# generated names; the lookups will return ResourceNotFound and the
-# script logs+skips them. For CFN-installed environments, prefer
-# deleting the infrastructure stack directly; see tearing-down.md.
-BUCKET="cardinal-ingest-${ACCOUNT}-${REGION}"
-DB_ID="cardinal-db"
-DB_SUBNET_GROUP="cardinal-db-subnet-group"
-QUEUE_NAME="cardinal-ingest"
-SECRETS="cardinal-db-master cardinal-license cardinal-admin-key"
-SSM_PARAMS="/cardinal/storage-profiles /cardinal/api-keys"
+# DBInstance is the only resource with DeletionPolicy: Snapshot. Everything
+# else is Retain, so step 3 (delete-stack) leaves them behind for step 4 to
+# sweep up.
+# ---------------------------------------------------------------------------
+INGEST_BUCKET=""
+DB_INSTANCE_ID=""
+DB_SUBNET_GROUP=""
+INGEST_QUEUE_URL=""
+SECRET_IDS=""   # space-separated ARNs / names
+SSM_PARAMS=""   # space-separated names
 
-OWNERSHIP_SKIPS=0
-
-# Ownership-tag predicate. Returns 0 if the supplied JSON tag list
-# (canonical AWS shape: array of {Key,Value}) has
-# Application=cardinal-lakerunner AND ManagedBy belongs to the known set of
-# Cardinal-infra tag values. Otherwise returns 1.
-ownership_ok() {
-    printf '%s' "$1" | python3 -c '
+INFRA_EXISTS=false
+if aws cloudformation describe-stacks --stack-name "$INFRA_STACK_NAME" >/dev/null 2>&1; then
+    INFRA_EXISTS=true
+    log "discovering retained resources from $INFRA_STACK_NAME"
+    infra_res_json=$(aws cloudformation list-stack-resources \
+        --stack-name "$INFRA_STACK_NAME" --output json)
+    discovered=$(printf '%s' "$infra_res_json" | python3 -c '
 import json, sys
-tags = json.load(sys.stdin)
-got = {t["Key"]: t["Value"] for t in tags}
-ok = (
-    got.get("Application") == "cardinal-lakerunner"
-    and got.get("ManagedBy") in (
-        "cardinal-cfn-infrastructure",
-        "cardinal-data-setup-script",
-    )
-)
-sys.exit(0 if ok else 1)
-'
+data = json.load(sys.stdin)
+out = {
+    "bucket": "", "db_instance": "", "db_subnet_group": "",
+    "queue_url": "", "secrets": [], "ssm_params": [],
 }
+for r in data.get("StackResourceSummaries", []):
+    t   = r.get("ResourceType", "")
+    pid = r.get("PhysicalResourceId", "")
+    if not pid:
+        continue
+    if   t == "AWS::S3::Bucket":               out["bucket"] = pid
+    elif t == "AWS::RDS::DBInstance":          out["db_instance"] = pid
+    elif t == "AWS::RDS::DBSubnetGroup":       out["db_subnet_group"] = pid
+    elif t == "AWS::SQS::Queue":               out["queue_url"] = pid
+    elif t == "AWS::SecretsManager::Secret":   out["secrets"].append(pid)
+    elif t == "AWS::SSM::Parameter":           out["ssm_params"].append(pid)
+print(json.dumps(out))
+')
+    INGEST_BUCKET=$(printf '%s' "$discovered"    | python3 -c 'import json,sys; print(json.load(sys.stdin)["bucket"])')
+    DB_INSTANCE_ID=$(printf '%s' "$discovered"   | python3 -c 'import json,sys; print(json.load(sys.stdin)["db_instance"])')
+    DB_SUBNET_GROUP=$(printf '%s' "$discovered"  | python3 -c 'import json,sys; print(json.load(sys.stdin)["db_subnet_group"])')
+    INGEST_QUEUE_URL=$(printf '%s' "$discovered" | python3 -c 'import json,sys; print(json.load(sys.stdin)["queue_url"])')
+    SECRET_IDS=$(printf '%s' "$discovered"       | python3 -c 'import json,sys; print(" ".join(json.load(sys.stdin)["secrets"]))')
+    SSM_PARAMS=$(printf '%s' "$discovered"       | python3 -c 'import json,sys; print(" ".join(json.load(sys.stdin)["ssm_params"]))')
+    log "discovered:"
+    log "  bucket           = $INGEST_BUCKET"
+    log "  db_instance      = $DB_INSTANCE_ID"
+    log "  db_subnet_group  = $DB_SUBNET_GROUP"
+    log "  queue_url        = $INGEST_QUEUE_URL"
+    log "  secrets          = $SECRET_IDS"
+    log "  ssm_params       = $SSM_PARAMS"
+else
+    log "$INFRA_STACK_NAME absent; step 3 and step 4 sweep will be no-ops"
+fi
 
-# ---------------------------------------------------------------------------
-# Step 1 -- drain Cardinal ECS services.
+# ===========================================================================
+# Step 1 -- drain Cardinal ECS services + delete the cardinal-lakerunner CFN
+# stack.
 #
-# We never list services off the cluster; we walk cardinal-lakerunner's
-# stack-resource tree and pull AWS::ECS::Service physical IDs (full ARNs).
-# This means a non-Cardinal service in the same cluster is invisible to us.
-# ---------------------------------------------------------------------------
+# Drain: walk the lakerunner stack tree, find every AWS::ECS::Service, set
+# desiredCount=0, stop running and pending tasks, wait up to 5 minutes for
+# zero. delete-stack on a draining service can race the deployment, so we do
+# the drain ourselves first.
+# ===========================================================================
 
 # Recursively yields each lakerunner-owned ECS service ARN by walking the
 # root + any AWS::CloudFormation::Stack children, paginated via NextToken.
-# Output: one service ARN per line, on stdout.
 discover_services() {
     stack_name="$1"
     next=""
@@ -134,8 +170,7 @@ print(json.load(sys.stdin).get("NextToken") or "")
     done
 }
 
-# Extracts the last "/"-separated segment of an ECS service ARN -- the name
-# AWS CLI's --service / --service-name flags expect (they reject full ARNs).
+# Extracts the last "/"-separated segment of an ECS service ARN.
 service_name_of() { printf '%s' "${1##*/}"; }
 
 drain_services() {
@@ -197,11 +232,6 @@ print(sum(1 for s in data.get("services", []) if s.get("runningCount", 0) or s.g
 
 drain_services
 
-# ---------------------------------------------------------------------------
-# Step 2 -- delete the cardinal-lakerunner CFN stack.
-# Always uses $DEPLOYER_ROLE_ARN as --role-arn so the task-role IAM only
-# needs iam:PassRole on the single deployer-role ARN.
-# ---------------------------------------------------------------------------
 delete_lakerunner_stack() {
     status=$(aws cloudformation describe-stacks \
         --stack-name "$LAKERUNNER_STACK_NAME" \
@@ -225,27 +255,25 @@ delete_lakerunner_stack() {
 
 delete_lakerunner_stack
 
-# ---------------------------------------------------------------------------
-# Step 3 -- drain + delete the S3 ingest bucket.
-# Ownership-tag gated. Handles versioned buckets and in-flight multipart
-# uploads (delete-bucket fails BucketNotEmpty otherwise).
-# ---------------------------------------------------------------------------
-delete_s3_bucket() {
-    if ! aws s3api head-bucket --bucket "$BUCKET" >/dev/null 2>&1; then
-        log "S3 bucket $BUCKET already absent"
+# ===========================================================================
+# Step 2 -- empty the ingest S3 bucket.
+#
+# Bucket has DeletionPolicy: Retain so it survives step 3 unchanged. We empty
+# it now so step 4 can delete-bucket cleanly (delete-bucket requires empty).
+# ===========================================================================
+empty_ingest_bucket() {
+    if [ -z "$INGEST_BUCKET" ]; then
+        log "ingest bucket unknown (infra stack absent); skipping empty"
         return 0
     fi
-    tag_set=$(aws s3api get-bucket-tagging --bucket "$BUCKET" \
-        --query 'TagSet' --output json 2>/dev/null || echo '[]')
-    if ! ownership_ok "$tag_set"; then
-        log "REFUSE: S3 bucket $BUCKET missing Cardinal ownership tags; skipping"
-        OWNERSHIP_SKIPS=$((OWNERSHIP_SKIPS + 1))
+    if ! aws s3api head-bucket --bucket "$INGEST_BUCKET" >/dev/null 2>&1; then
+        log "ingest bucket $INGEST_BUCKET already absent"
         return 0
     fi
-    log "draining bucket $BUCKET"
-    aws s3 rm "s3://$BUCKET" --recursive --only-show-errors || true
+    log "emptying bucket $INGEST_BUCKET"
+    aws s3 rm "s3://$INGEST_BUCKET" --recursive --only-show-errors || true
     while :; do
-        listing=$(aws s3api list-object-versions --bucket "$BUCKET" \
+        listing=$(aws s3api list-object-versions --bucket "$INGEST_BUCKET" \
             --max-items 1000 --output json 2>/dev/null || printf '{}')
         delete_json=$(printf '%s' "$listing" | python3 -c '
 import json, sys
@@ -257,10 +285,10 @@ if not out:
 print(json.dumps({"Objects": out, "Quiet": True}))
 ') || break
         log "  deleting versioned batch"
-        aws s3api delete-objects --bucket "$BUCKET" --delete "$delete_json" >/dev/null
+        aws s3api delete-objects --bucket "$INGEST_BUCKET" --delete "$delete_json" >/dev/null
     done
     log "aborting in-flight multipart uploads"
-    aws s3api list-multipart-uploads --bucket "$BUCKET" --output json 2>/dev/null \
+    aws s3api list-multipart-uploads --bucket "$INGEST_BUCKET" --output json 2>/dev/null \
     | python3 -c '
 import json, sys
 data = json.load(sys.stdin)
@@ -268,131 +296,80 @@ for u in data.get("Uploads", []):
     print(u["Key"] + "\t" + u["UploadId"])
 ' | while IFS="$(printf '\t')" read -r key upload_id; do
         [ -z "$key" ] && continue
-        aws s3api abort-multipart-upload --bucket "$BUCKET" \
+        aws s3api abort-multipart-upload --bucket "$INGEST_BUCKET" \
             --key "$key" --upload-id "$upload_id" >/dev/null || true
     done
-    log "deleting bucket $BUCKET"
-    aws s3api delete-bucket --bucket "$BUCKET"
 }
 
-delete_s3_bucket
+empty_ingest_bucket
 
-# ---------------------------------------------------------------------------
-# Step 4 + 5 -- RDS instance + subnet group. Each ownership-tag gated.
-# ---------------------------------------------------------------------------
-delete_rds() {
-    db_arn=$(aws rds describe-db-instances --db-instance-identifier "$DB_ID" \
-        --query 'DBInstances[0].DBInstanceArn' --output text 2>/dev/null || echo "")
-    if [ -z "$db_arn" ] || [ "$db_arn" = "None" ]; then
-        log "RDS $DB_ID already absent"
-    else
-        tags=$(aws rds list-tags-for-resource --resource-name "$db_arn" \
-            --query 'TagList' --output json 2>/dev/null || echo '[]')
-        if ! ownership_ok "$tags"; then
-            log "REFUSE: RDS $DB_ID missing Cardinal ownership tags; skipping"
-            OWNERSHIP_SKIPS=$((OWNERSHIP_SKIPS + 1))
-        else
-            prot=$(aws rds describe-db-instances --db-instance-identifier "$DB_ID" \
-                --query 'DBInstances[0].DeletionProtection' --output text)
-            if [ "$prot" = "True" ]; then
-                log "disabling deletion-protection on $DB_ID"
-                aws rds modify-db-instance --db-instance-identifier "$DB_ID" \
-                    --no-deletion-protection --apply-immediately >/dev/null
-            fi
-            log "deleting RDS $DB_ID (skip-final-snapshot)"
-            aws rds delete-db-instance --db-instance-identifier "$DB_ID" \
-                --skip-final-snapshot --delete-automated-backups >/dev/null
-            log "waiting for $DB_ID delete (5-10 min)"
-            aws rds wait db-instance-deleted --db-instance-identifier "$DB_ID"
-        fi
-    fi
-
-    sg_arn=$(aws rds describe-db-subnet-groups --db-subnet-group-name "$DB_SUBNET_GROUP" \
-        --query 'DBSubnetGroups[0].DBSubnetGroupArn' --output text 2>/dev/null || echo "")
-    if [ -z "$sg_arn" ] || [ "$sg_arn" = "None" ]; then
-        log "RDS subnet group $DB_SUBNET_GROUP already absent"
+# ===========================================================================
+# Step 3 -- delete the cardinal-infrastructure CFN stack.
+#
+# CFN-side ordering: DBInstance has DeletionPolicy: Snapshot, so CFN takes a
+# final snapshot and deletes the RDS instance. Every other data-layer
+# resource has DeletionPolicy: Retain and survives this step; step 4 sweeps
+# them up. Crucially the secret/RDS ordering is CFN's problem here, not
+# ours -- if we manually delete the DB or the master secret first we hit a
+# "secret can't be found" error during the in-flight snapshot.
+# ===========================================================================
+delete_infra_stack() {
+    if [ "$INFRA_EXISTS" != "true" ]; then
+        log "$INFRA_STACK_NAME already absent"
         return 0
     fi
-    sg_tags=$(aws rds list-tags-for-resource --resource-name "$sg_arn" \
-        --query 'TagList' --output json 2>/dev/null || echo '[]')
-    if ! ownership_ok "$sg_tags"; then
-        log "REFUSE: RDS subnet group missing Cardinal ownership tags; skipping"
-        OWNERSHIP_SKIPS=$((OWNERSHIP_SKIPS + 1))
-        return 0
+    log "deleting CFN stack $INFRA_STACK_NAME (10+ min for RDS snapshot)"
+    aws cloudformation delete-stack \
+        --stack-name "$INFRA_STACK_NAME" \
+        --role-arn "$DEPLOYER_ROLE_ARN"
+    if ! aws cloudformation wait stack-delete-complete --stack-name "$INFRA_STACK_NAME"; then
+        log "ERROR: stack-delete-complete wait failed for $INFRA_STACK_NAME"
+        log "       step 4 will still try to wipe the retained data resources"
+        return 1
     fi
-    log "deleting RDS subnet group $DB_SUBNET_GROUP"
-    aws rds delete-db-subnet-group --db-subnet-group-name "$DB_SUBNET_GROUP"
+    log "stack $INFRA_STACK_NAME deleted"
 }
 
-# ---------------------------------------------------------------------------
-# Step 6 -- SQS queue. Ownership-tag gated.
-# ---------------------------------------------------------------------------
-delete_sqs() {
-    url=$(aws sqs get-queue-url --queue-name "$QUEUE_NAME" \
-        --query QueueUrl --output text 2>/dev/null || echo "")
-    if [ -z "$url" ] || [ "$url" = "None" ]; then
-        log "SQS $QUEUE_NAME already absent"
+delete_infra_stack
+
+# ===========================================================================
+# Step 4 -- sweep the Retain'd resources.
+#
+# No data is preserved. We use the physical IDs we discovered from the infra
+# stack BEFORE step 3, so a CFN-generated name in the previous deploy is no
+# obstacle.
+# ===========================================================================
+
+# 4a -- S3 bucket (now empty from step 2)
+delete_ingest_bucket() {
+    if [ -z "$INGEST_BUCKET" ]; then return 0; fi
+    if ! aws s3api head-bucket --bucket "$INGEST_BUCKET" >/dev/null 2>&1; then
+        log "ingest bucket $INGEST_BUCKET already absent"
         return 0
     fi
-    tags=$(aws sqs list-queue-tags --queue-url "$url" --output json 2>/dev/null || echo '{}')
-    tag_list=$(printf '%s' "$tags" | python3 -c '
-import json, sys
-data = json.load(sys.stdin)
-print(json.dumps([{"Key": k, "Value": v} for k, v in (data.get("Tags") or {}).items()]))
-')
-    if ! ownership_ok "$tag_list"; then
-        log "REFUSE: SQS $QUEUE_NAME missing Cardinal ownership tags; skipping"
-        OWNERSHIP_SKIPS=$((OWNERSHIP_SKIPS + 1))
-        return 0
-    fi
-    log "deleting SQS $url"
-    aws sqs delete-queue --queue-url "$url"
+    log "deleting bucket $INGEST_BUCKET"
+    aws s3api delete-bucket --bucket "$INGEST_BUCKET"
 }
 
-delete_rds
-delete_sqs
-
-# ---------------------------------------------------------------------------
-# Step 7 -- the three cardinal-* secrets. Each ownership-tag gated and
-# force-deleted (no recovery window).
-# ---------------------------------------------------------------------------
+# 4b -- secrets (DB master + license + admin-key; all force-deleted with no
+# recovery window since the user accepted destructive cleanup)
 delete_secrets() {
-    for s in $SECRETS; do
-        out=$(aws secretsmanager describe-secret --secret-id "$s" \
-            --output json 2>/dev/null || echo "")
-        if [ -z "$out" ]; then
-            log "secret $s already absent"
+    for sid in $SECRET_IDS; do
+        if ! aws secretsmanager describe-secret --secret-id "$sid" >/dev/null 2>&1; then
+            log "secret $sid already absent"
             continue
         fi
-        tags=$(printf '%s' "$out" | python3 -c '
-import json, sys
-print(json.dumps(json.load(sys.stdin).get("Tags") or []))
-')
-        if ! ownership_ok "$tags"; then
-            log "REFUSE: secret $s missing Cardinal ownership tags; skipping"
-            OWNERSHIP_SKIPS=$((OWNERSHIP_SKIPS + 1))
-            continue
-        fi
-        log "force-deleting secret $s"
-        aws secretsmanager delete-secret --secret-id "$s" \
+        log "force-deleting secret $sid"
+        aws secretsmanager delete-secret --secret-id "$sid" \
             --force-delete-without-recovery >/dev/null
     done
 }
 
-# ---------------------------------------------------------------------------
-# Step 8 -- the two /cardinal/* SSM parameters. Each ownership-tag gated.
-# ---------------------------------------------------------------------------
+# 4c -- SSM parameters (storage profiles + api keys)
 delete_ssm() {
     for p in $SSM_PARAMS; do
         if ! aws ssm get-parameter --name "$p" >/dev/null 2>&1; then
             log "SSM parameter $p already absent"
-            continue
-        fi
-        tags=$(aws ssm list-tags-for-resource --resource-type Parameter \
-            --resource-id "$p" --query 'TagList' --output json 2>/dev/null || echo '[]')
-        if ! ownership_ok "$tags"; then
-            log "REFUSE: SSM parameter $p missing Cardinal ownership tags; skipping"
-            OWNERSHIP_SKIPS=$((OWNERSHIP_SKIPS + 1))
             continue
         fi
         log "deleting SSM parameter $p"
@@ -400,19 +377,58 @@ delete_ssm() {
     done
 }
 
+# 4d -- SQS ingest queue
+delete_sqs() {
+    if [ -z "$INGEST_QUEUE_URL" ]; then return 0; fi
+    if ! aws sqs get-queue-attributes --queue-url "$INGEST_QUEUE_URL" \
+            --attribute-names QueueArn >/dev/null 2>&1; then
+        log "SQS queue $INGEST_QUEUE_URL already absent"
+        return 0
+    fi
+    log "deleting SQS queue $INGEST_QUEUE_URL"
+    aws sqs delete-queue --queue-url "$INGEST_QUEUE_URL"
+}
+
+# 4e -- RDS subnet group (only deletable after the DBInstance is gone; CFN's
+# delete-stack handled the DBInstance in step 3).
+delete_db_subnet_group() {
+    if [ -z "$DB_SUBNET_GROUP" ]; then return 0; fi
+    if ! aws rds describe-db-subnet-groups \
+            --db-subnet-group-name "$DB_SUBNET_GROUP" >/dev/null 2>&1; then
+        log "RDS subnet group $DB_SUBNET_GROUP already absent"
+        return 0
+    fi
+    log "deleting RDS subnet group $DB_SUBNET_GROUP"
+    aws rds delete-db-subnet-group --db-subnet-group-name "$DB_SUBNET_GROUP"
+}
+
+# 4f -- RDS snapshots produced by step 3 (Snapshot DeletionPolicy)
+delete_rds_snapshots() {
+    if [ -z "$DB_INSTANCE_ID" ]; then return 0; fi
+    snaps=$(aws rds describe-db-snapshots \
+        --db-instance-identifier "$DB_INSTANCE_ID" \
+        --snapshot-type manual \
+        --query 'DBSnapshots[].DBSnapshotIdentifier' --output text 2>/dev/null || echo "")
+    [ -z "$snaps" ] && return 0
+    for snap in $snaps; do
+        log "deleting RDS snapshot $snap"
+        aws rds delete-db-snapshot --db-snapshot-identifier "$snap" >/dev/null || true
+    done
+}
+
+delete_ingest_bucket
 delete_secrets
 delete_ssm
+delete_sqs
+delete_db_subnet_group
+delete_rds_snapshots
 
-# ---------------------------------------------------------------------------
-# Step 9 -- self-delete the cardinal-cleanup stack. Async; we do NOT wait,
-# because CFN will tear down the very task definition and log group we're
+# ===========================================================================
+# Step 5 -- self-delete the cardinal-cleanup stack. Async; we do NOT wait,
+# because CFN will tear down the very task definition and log group we are
 # running under. The driver observes task STOPPED via describe-tasks long
 # before CFN finishes.
-#
-# The delete-stack call passes --role-arn $DEPLOYER_ROLE_ARN because the
-# task role does not own (and should not own) ecs:DeregisterTaskDefinition
-# or logs:DeleteLogGroup.
-# ---------------------------------------------------------------------------
+# ===========================================================================
 self_delete() {
     log "firing async delete-stack on $CLEANUP_STACK_NAME"
     if ! aws cloudformation delete-stack \
@@ -423,14 +439,7 @@ self_delete() {
     fi
 }
 
-# Exit non-zero if any ownership skip happened, so the driver can surface
-# the partial cleanup. Self-delete is fired regardless (destructive work is
-# already done) and does not influence the exit code.
 self_delete
-if [ "$OWNERSHIP_SKIPS" -ne 0 ]; then
-    log "cleanup INCOMPLETE: $OWNERSHIP_SKIPS resource(s) skipped due to ownership tag mismatch"
-    exit 1
-fi
 log "cleanup complete"
 exit 0
 """

@@ -20,8 +20,11 @@ def test_template_builds():
     assert "AWS::Logs::LogGroup" in yaml_text
     # The full shell body is embedded literally; check distinctive markers
     # from each phase survive YAML serialization.
-    assert "ownership_ok()" in yaml_text
     assert "drain_services" in yaml_text
+    assert "delete_lakerunner_stack" in yaml_text
+    assert "empty_ingest_bucket" in yaml_text
+    assert "delete_infra_stack" in yaml_text
+    assert "delete_secrets" in yaml_text
     assert "self_delete" in yaml_text
 
 

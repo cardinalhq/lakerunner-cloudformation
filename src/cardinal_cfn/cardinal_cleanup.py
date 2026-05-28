@@ -44,6 +44,17 @@ def build() -> Template:
         Default="cardinal-lakerunner",
         Description="The cardinal-lakerunner CFN stack name to tear down.",
     ))
+    p_infra = t.add_parameter(Parameter(
+        "InfraStackName",
+        Type="String",
+        Default="cardinal-infrastructure",
+        Description=(
+            "The cardinal-infrastructure CFN stack name. The cleanup task "
+            "discovers the bucket/RDS/queue/secret/SSM physical IDs from "
+            "this stack before deleting it, so step 4 can sweep the "
+            "Retain'd resources by their actual (CFN-generated) names."
+        ),
+    ))
     p_task_role = t.add_parameter(Parameter(
         "CleanupTaskRoleArn",
         Type="String",
@@ -105,6 +116,7 @@ def build() -> Template:
                 Environment(Name="AWS_ACCOUNT_ID",        Value=Ref("AWS::AccountId")),
                 Environment(Name="CLUSTER_NAME",          Value=Ref(p_cluster)),
                 Environment(Name="LAKERUNNER_STACK_NAME", Value=Ref(p_lakerunner)),
+                Environment(Name="INFRA_STACK_NAME",      Value=Ref(p_infra)),
                 Environment(Name="CLEANUP_STACK_NAME",    Value=Ref("AWS::StackName")),
                 Environment(Name="DEPLOYER_ROLE_ARN",     Value=Ref(p_deployer)),
             ],
