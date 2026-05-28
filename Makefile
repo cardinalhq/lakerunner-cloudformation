@@ -39,6 +39,7 @@ lint:	## Run cfn-lint on every generated template
 	  generated-templates/cardinal-vpc.yaml \
 	  generated-templates/cardinal-alb-sg.yaml \
 	  generated-templates/cardinal-infrastructure.yaml \
+	  generated-templates/cardinal-cleanup.yaml \
 	  generated-templates/cardinal-lakerunner.yaml \
 	  generated-templates/cardinal-lakerunner/*.yaml
 

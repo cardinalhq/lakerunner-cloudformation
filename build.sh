@@ -27,6 +27,9 @@ python3 -m cardinal_cfn.cardinal_alb_sg > generated-templates/cardinal-alb-sg.ya
 echo "Generating cardinal-infrastructure.yaml..."
 python3 -m cardinal_cfn.cardinal_infrastructure > generated-templates/cardinal-infrastructure.yaml
 
+echo "Generating cardinal-cleanup.yaml..."
+python3 -m cardinal_cfn.cardinal_cleanup > generated-templates/cardinal-cleanup.yaml
+
 # ---------------------------------------------------------------------------
 # Lakerunner stack (root + 8 nested children). Children take role ARNs,
 # security-group IDs, and infra identifiers (cluster, RDS, S3, SQS, secrets,
@@ -47,6 +50,7 @@ echo "Linting CFN templates..."
 cfn-lint generated-templates/cardinal-vpc.yaml \
          generated-templates/cardinal-alb-sg.yaml \
          generated-templates/cardinal-infrastructure.yaml \
+         generated-templates/cardinal-cleanup.yaml \
          generated-templates/cardinal-lakerunner.yaml \
          generated-templates/cardinal-lakerunner/*.yaml || \
   echo "cfn-lint completed with warnings"
