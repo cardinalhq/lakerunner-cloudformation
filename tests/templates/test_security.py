@@ -84,6 +84,40 @@ def test_execution_role_uses_managed_ecs_policy(td):
     )
 
 
+def test_execution_role_can_read_each_infra_secret_arn(td):
+    """The execution role pulls task `secrets:` env vars at container start.
+
+    DBMasterSecret is CFN-generated and does NOT match a `cardinal-*` prefix,
+    so its ARN must be granted explicitly via Ref(DbMasterSecretArn). Same
+    for License and AdminKey (they happen to have cardinal-* names but the
+    template should rely on the parameter ARNs, not a wildcard).
+    """
+    role = td["Resources"]["ExecutionRole"]["Properties"]
+    policies = role.get("Policies", [])
+    assert policies, "ExecutionRole must declare inline policies"
+
+    secret_stmts = []
+    for p in policies:
+        for s in p.get("PolicyDocument", {}).get("Statement", []):
+            if s.get("Sid") == "ResolveCardinalSecrets":
+                secret_stmts.append(s)
+    assert len(secret_stmts) == 1, "expected exactly one ResolveCardinalSecrets statement"
+
+    stmt = secret_stmts[0]
+    resources = stmt["Resource"]
+    assert isinstance(resources, list), (
+        "ResolveCardinalSecrets.Resource must be a list of specific secret ARNs, "
+        "not a wildcard -- DBMasterSecret has a CFN-generated name and the "
+        "cardinal-* wildcard does not match it"
+    )
+    refs = {tuple(sorted(r.items())) if isinstance(r, dict) else r for r in resources}
+    for param in ("DbMasterSecretArn", "LicenseSecretArn", "AdminKeySecretArn"):
+        assert (("Ref", param),) in refs, (
+            f"ExecutionRole must grant secrets:GetSecretValue on Ref({param}); "
+            f"got resources={resources}"
+        )
+
+
 def test_all_task_roles_trust_ecs_tasks(td):
     for role_id in (
         "MigrationRole", "QueryRole", "ProcessRole",
