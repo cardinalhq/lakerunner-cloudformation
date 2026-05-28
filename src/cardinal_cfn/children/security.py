@@ -68,6 +68,7 @@ _QUERY_API_PORT = 8080
 _QUERY_WORKER_PORT = 8081
 _ADMIN_API_PORT = 9091
 _OTLP_HTTP_PORT = 4318
+_OTEL_HEALTH_PORT = 13133  # otel.py's target group sets HealthCheckPort=13133
 _MAESTRO_PORT = 4200
 _MAESTRO_DEX_PORT = 5556
 
@@ -285,7 +286,10 @@ def build() -> Template:
         Description="ALB to admin-api",
     ))
 
-    # ALB -> otel on 4318
+    # ALB -> otel on 4318 (data plane) and 13133 (health check). The OTel
+    # target group routes traffic to 4318 but health-checks 13133, so both
+    # ports must be reachable from the ALB SG or the ECS task is marked
+    # unhealthy and the deployment circuit breaker rolls the stack back.
     t.add_resource(SecurityGroupIngress(
         "OtelFromAlb",
         GroupId=Ref(otel_sg),
@@ -293,7 +297,16 @@ def build() -> Template:
         IpProtocol="tcp",
         FromPort=_OTLP_HTTP_PORT,
         ToPort=_OTLP_HTTP_PORT,
-        Description="ALB to otel-collector",
+        Description="ALB to otel-collector data plane",
+    ))
+    t.add_resource(SecurityGroupIngress(
+        "OtelHealthFromAlb",
+        GroupId=Ref(otel_sg),
+        SourceSecurityGroupId=Ref(alb_sg),
+        IpProtocol="tcp",
+        FromPort=_OTEL_HEALTH_PORT,
+        ToPort=_OTEL_HEALTH_PORT,
+        Description="ALB health probe to otel-collector",
     ))
     # Lakerunner tasks -> otel on 4318 (self-telemetry from each tier)
     for tier_title, tier_ref in [
