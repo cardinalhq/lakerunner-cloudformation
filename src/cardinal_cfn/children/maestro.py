@@ -138,6 +138,19 @@ def build() -> Template:
             ),
         )
     )
+    t.add_parameter(Parameter(
+        "BucketName",
+        Type="String",
+        Description=(
+            "Ingest S3 bucket name (the cardinal-infrastructure stack's "
+            "IngestBucketName output). Maestro consumes this only to seed "
+            "the MAESTRO_BOOTSTRAP_BUCKET_* env vars so its in-process "
+            "Lakerunner provisioning worker can recreate the "
+            "organization_buckets join row that it currently wipes on "
+            "every provision_org cycle. No S3 IAM is granted to the "
+            "maestro task role -- the bucket name is metadata only."
+        ),
+    ))
     t.add_parameter(Parameter("DbEndpoint", Type="String", Description="RDS endpoint hostname."))
     t.add_parameter(Parameter("DbPort", Type="String", Default="5432", Description="RDS port."))
     t.add_parameter(
@@ -525,6 +538,15 @@ def build() -> Template:
             Environment(Name="MAESTRO_BOOTSTRAP_ORG_ID", Value=Ref("OrganizationId")),
             Environment(Name="MAESTRO_BOOTSTRAP_ORG_NAME", Value=Ref("OrgName")),
             Environment(Name="MAESTRO_BOOTSTRAP_OWNER_EMAIL", Value=Ref("DexAdminEmail")),
+            # Bucket coordinates so a maestro version newer than the broken
+            # v1.45.9 can re-populate organization_buckets after
+            # provision_org instead of leaving the join row absent (which
+            # broke every Explore query until the migration task force-ran
+            # ensure-storage-profile).
+            Environment(Name="MAESTRO_BOOTSTRAP_BUCKET_NAME", Value=Ref("BucketName")),
+            Environment(Name="MAESTRO_BOOTSTRAP_BUCKET_REGION", Value=Ref("AWS::Region")),
+            Environment(Name="MAESTRO_BOOTSTRAP_BUCKET_CLOUD_PROVIDER", Value="aws"),
+            Environment(Name="MAESTRO_BOOTSTRAP_BUCKET_COLLECTOR_NAME", Value="lakerunner"),
             Environment(
                 Name="MAESTRO_BOOTSTRAP_LAKERUNNER_QUERY_API_URL",
                 Value=Sub("http://query-api.${ServiceNamespaceName}:8080"),

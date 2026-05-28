@@ -187,6 +187,14 @@ def test_maestro_stack_depends_on_migration(td):
     assert "Migration" in deps
 
 
+def test_maestro_stack_receives_bucket_name(td):
+    """Root must forward the ingest bucket name to the Maestro child so its
+    MAESTRO_BOOTSTRAP_BUCKET_* env vars can drive the post-fix maestro
+    image to recreate the organization_buckets join row."""
+    params = td["Resources"]["Maestro"]["Properties"]["Parameters"]
+    assert params["BucketName"] == {"Ref": "IngestBucketName"}
+
+
 def test_template_url_uses_kebab_case_filenames(td):
     """Module names like services_query map to services-query.yaml."""
     migration_url = td["Resources"]["Migration"]["Properties"]["TemplateURL"]
