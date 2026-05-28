@@ -203,6 +203,19 @@ def test_query_self_ingress_to_worker(td):
     assert rule["GroupId"] == {"Ref": "QuerySecurityGroup"}
 
 
+def test_query_self_ingress_for_artifact_fetch(td):
+    """query-api fetches Parquet artifacts from workers over plain HTTP on
+    8081 (separate from the 8082 gRPC control stream). Without this rule
+    queries dispatch successfully but fail with
+    "context deadline exceeded" at the artifact-fetch step and Maestro
+    shows no data."""
+    rule = td["Resources"]["QueryWorkerArtifactFromQuery"]["Properties"]
+    assert rule["FromPort"] == 8081
+    assert rule["ToPort"] == 8081
+    assert rule["SourceSecurityGroupId"] == {"Ref": "QuerySecurityGroup"}
+    assert rule["GroupId"] == {"Ref": "QuerySecurityGroup"}
+
+
 def test_alb_to_admin_api(td):
     rule = td["Resources"]["ControlAdminApiFromAlb"]["Properties"]
     assert rule["FromPort"] == 9091
