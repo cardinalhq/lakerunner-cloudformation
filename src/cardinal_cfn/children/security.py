@@ -375,10 +375,14 @@ def build() -> Template:
                                 "secretsmanager:GetSecretValue",
                                 "secretsmanager:DescribeSecret",
                             ],
-                            "Resource": Sub(
-                                "arn:${AWS::Partition}:secretsmanager:"
-                                "${AWS::Region}:${AWS::AccountId}:secret:cardinal-*"
-                            ),
+                            # The DBMaster secret is CFN-generated and does NOT match
+                            # the cardinal-* prefix, so list the actual ARNs the
+                            # infrastructure stack hands us instead of a wildcard.
+                            "Resource": [
+                                Ref("DbMasterSecretArn"),
+                                Ref("LicenseSecretArn"),
+                                Ref("AdminKeySecretArn"),
+                            ],
                         },
                         {
                             "Sid": "ResolveCardinalSsm",
