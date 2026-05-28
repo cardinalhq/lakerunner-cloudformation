@@ -282,17 +282,159 @@ def test_query_role_has_ecs_describe_tasks(td):
     assert "ecs:ListTasks" in actions
 
 
+# ---------------------------------------------------------------------------
+# Per-tier role contract -- the source-of-truth audit lives in
+# docs/operations/iam-roles.md. Each tier role is asserted both *positively*
+# (must have these actions, scoped where AWS permits) and *negatively* (must
+# NOT have these actions, to keep blast radius tight). If you add a new
+# permission to a tier role, update the doc + this table + the matching
+# helper below in the same change.
+# ---------------------------------------------------------------------------
+
+# Set of forbidden actions used by `test_otel_role_is_minimal` below.
+_FORBIDDEN_FOR_OTEL = {
+    "s3:GetObject", "s3:ListBucket", "s3:DeleteObject",
+    "sqs:ReceiveMessage", "bedrock:InvokeModel",
+    "ecs:UpdateService", "ecs:DescribeTasks",
+}
+
+
+def _role_actions(td: dict, role_id: str) -> set[str]:
+    role = td["Resources"][role_id]["Properties"]
+    actions: list[str] = []
+    for p in role.get("Policies", []) or []:
+        for s in p.get("PolicyDocument", {}).get("Statement", []):
+            a = s.get("Action", [])
+            actions.extend(a if isinstance(a, list) else [a])
+    return set(actions)
+
+
+# Per-role (required-actions, forbidden-actions) contract derived from the
+# IAM-roles doc. Adjust both this table and the doc when permissions change.
+_TIER_ROLE_CONTRACT = {
+    "MigrationRole": (
+        {  # required
+            "secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret",
+            "ssm:GetParameter", "ssm:GetParameters",
+            "logs:CreateLogStream", "logs:PutLogEvents",
+        },
+        {  # forbidden
+            "s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket",
+            "sqs:ReceiveMessage", "bedrock:InvokeModel",
+            "ecs:UpdateService", "ecs:DescribeTasks",
+        },
+    ),
+    "QueryRole": (
+        {
+            "secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret",
+            "ssm:GetParameter", "ssm:GetParameters",
+            "s3:GetObject", "s3:ListBucket", "s3:GetBucketLocation",
+            "logs:CreateLogStream", "logs:PutLogEvents",
+            "ecs:DescribeTasks", "ecs:ListTasks", "ecs:DescribeServices",
+        },
+        {
+            "s3:PutObject", "s3:DeleteObject",
+            "sqs:ReceiveMessage", "bedrock:InvokeModel",
+            "ecs:UpdateService",
+        },
+    ),
+    "ProcessRole": (
+        {
+            "secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret",
+            "ssm:GetParameter", "ssm:GetParameters",
+            "s3:GetObject", "s3:PutObject", "s3:DeleteObject",
+            "s3:ListBucket", "s3:GetBucketLocation",
+            "sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes",
+            "bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream",
+            "logs:CreateLogStream", "logs:PutLogEvents",
+        },
+        {
+            "ecs:UpdateService", "ecs:DescribeTasks",
+        },
+    ),
+    "ControlRole": (
+        {
+            "secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret",
+            "ssm:GetParameter", "ssm:GetParameters",
+            "s3:GetObject", "s3:ListBucket", "s3:DeleteObject",
+            "ecs:UpdateService", "ecs:DescribeServices",
+            "logs:CreateLogStream", "logs:PutLogEvents",
+        },
+        {
+            "s3:PutObject",  # sweeper/alert-evaluator never write to S3
+            "sqs:ReceiveMessage", "bedrock:InvokeModel",
+        },
+    ),
+    "OtelRole": (
+        {
+            "secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret",
+            "s3:PutObject",
+            "logs:CreateLogStream", "logs:PutLogEvents",
+        },
+        _FORBIDDEN_FOR_OTEL,
+    ),
+    "MaestroRole": (
+        {
+            "secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret",
+            "ssm:GetParameter", "ssm:GetParameters",
+            "logs:CreateLogStream", "logs:PutLogEvents",
+        },
+        {
+            "s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket",
+            "sqs:ReceiveMessage", "bedrock:InvokeModel",
+            "ecs:UpdateService", "ecs:DescribeTasks",
+        },
+    ),
+}
+
+
+@pytest.mark.parametrize("role_id", sorted(_TIER_ROLE_CONTRACT.keys()))
+def test_tier_role_required_actions_present(td, role_id):
+    required, _ = _TIER_ROLE_CONTRACT[role_id]
+    actions = _role_actions(td, role_id)
+    missing = required - actions
+    assert not missing, (
+        f"{role_id} is missing required actions: {sorted(missing)!r}. "
+        f"See docs/operations/iam-roles.md for the contract."
+    )
+
+
+@pytest.mark.parametrize("role_id", sorted(_TIER_ROLE_CONTRACT.keys()))
+def test_tier_role_forbidden_actions_absent(td, role_id):
+    _, forbidden = _TIER_ROLE_CONTRACT[role_id]
+    actions = _role_actions(td, role_id)
+    overreach = forbidden & actions
+    assert not overreach, (
+        f"{role_id} overreaches with actions it should not have: "
+        f"{sorted(overreach)!r}. See docs/operations/iam-roles.md."
+    )
+
+
 def test_otel_role_is_minimal(td):
-    """OTel role only reads the license + writes CW logs."""
+    """OTel role only reads the license, writes CW logs, and puts raw OTLP
+    signals into the ``otel-raw/`` prefix of the ingest bucket. It must NOT
+    have read/list/delete on the bucket, SQS consume, Bedrock, or ECS API."""
     role = td["Resources"]["OtelRole"]["Properties"]
     statements = role["Policies"][0]["PolicyDocument"]["Statement"]
     actions = []
     for s in statements:
         a = s["Action"]
         actions.extend(a if isinstance(a, list) else [a])
-    # No S3, no SQS, no Bedrock, no ECS.
-    forbidden = {"s3:GetObject", "sqs:ReceiveMessage", "bedrock:InvokeModel",
-                 "ecs:UpdateService", "ecs:DescribeTasks"}
-    assert not (forbidden & set(actions)), (
-        f"otel role overreaches: {forbidden & set(actions)!r}"
+    assert not (_FORBIDDEN_FOR_OTEL & set(actions)), (
+        f"otel role overreaches: {_FORBIDDEN_FOR_OTEL & set(actions)!r}"
     )
+    # Must be able to PutObject into otel-raw/ (the awss3 exporter target).
+    put_stmts = [s for s in statements if "s3:PutObject" in (
+        s["Action"] if isinstance(s["Action"], list) else [s["Action"]]
+    )]
+    assert put_stmts, "OtelRole must grant s3:PutObject (for awss3 exporter)"
+    for s in put_stmts:
+        res = s["Resource"]
+        res_strs = res if isinstance(res, list) else [res]
+        for r in res_strs:
+            if isinstance(r, dict) and "Fn::Sub" in r:
+                template = r["Fn::Sub"]
+                assert template.endswith("/otel-raw/*"), (
+                    f"OtelRole PutObject resource must be scoped to otel-raw/* "
+                    f"prefix; got: {template}"
+                )

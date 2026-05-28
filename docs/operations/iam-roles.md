@@ -1,0 +1,261 @@
+# IAM roles in `cardinal-lakerunner`
+
+This document is the source of truth for **what each ECS task role and the
+shared execution role need, and why.** When a future container needs new
+AWS APIs, edit this doc first, then update `src/cardinal_cfn/children/security.py`
+to match. Every entry below is enforced by an assertion in
+`tests/templates/test_security.py` -- if you add a permission to the code
+without updating this doc + the matching test, the build is wrong.
+
+The Security child stack
+(`src/cardinal_cfn/children/security.py`) creates **one shared
+ExecutionRole and one TaskRole per service tier**. The root stack
+(`src/cardinal_cfn/root.py`) wires each TaskRole to the child template
+that owns the service(s) using it. There are no per-container roles --
+every container in a tier shares that tier's role.
+
+## Role inventory
+
+| Role | Defined at | Used as TaskRoleArn by | Used as ExecutionRoleArn by |
+|---|---|---|---|
+| `ExecutionRole` | security.py | -- | **all 13 services** (one per task definition) |
+| `MigrationRole` | security.py | migration.py (`MigratorService`) | -- |
+| `QueryRole` | security.py | services_query.py (`QueryApiService`, `QueryWorkerService`) | -- |
+| `ProcessRole` | security.py | services_process.py (`ProcessLogsService`, `ProcessMetricsService`, `ProcessTracesService`, `PubsubSqsService`) | -- |
+| `ControlRole` | security.py | services_control.py (`SweeperService`, `MonitoringService`, `AdminApiService`, `AlertEvaluatorService`) | -- |
+| `OtelRole` | security.py | otel.py (`OtelGrpcService`) | -- |
+| `MaestroRole` | security.py | maestro.py (`MaestroService`) | -- |
+
+## ExecutionRole
+
+The execution role is what **Fargate uses on the agent side** to:
+
+1. Pull the container image from ECR.
+2. Resolve every `Secrets:` entry in the TaskDefinition by calling
+   `secretsmanager:GetSecretValue` or `ssm:GetParameters` *before* the
+   container starts and injecting the value as an env var.
+3. Create the CloudWatch log group + put log events.
+
+A missing perm here surfaces as `ResourceInitializationError: unable to
+pull secrets ... AccessDeniedException` and the deployment circuit
+breaker rolls the stack back. Items 1 and 3 come from the
+AWS-managed `AmazonECSTaskExecutionRolePolicy`; item 2 we own.
+
+### Containers that pull from Secrets Manager
+
+Walk: each TaskDefinition's `secrets:` block lists which Secrets Manager
+ARNs the ExecutionRole must read. Aggregated:
+
+| Secret ARN (parameter Ref) | Pulled by containers in tiers |
+|---|---|
+| `DbMasterSecretArn` | migration (configdb-init, migrator, ensure-storage-profile), query (query-api, query-worker), process (process-{logs,metrics,traces}, pubsub-sqs), control (admin-api, alert-evaluator, monitoring, sweeper), maestro (db-init, mcp-gateway, maestro) |
+| `LicenseSecretArn` | query, process, control, otel, maestro (every container that pulls LICENSE_DATA) |
+| `AdminKeySecretArn` | control (admin-api), maestro (maestro) |
+
+### Containers that pull from SSM Parameter Store
+
+| SSM parameter (parameter Ref) | Pulled by containers in tiers |
+|---|---|
+| `StorageProfilesParamName` | migration (migrator container injects as `STORAGE_PROFILES_YAML`) |
+| `ApiKeysParamName` | migration (migrator container injects as `API_KEYS_YAML`) |
+
+### ExecutionRole policy
+
+```text
+ResolveCardinalSecrets:  secretsmanager:GetSecretValue,DescribeSecret
+                         on [DbMasterSecretArn, LicenseSecretArn, AdminKeySecretArn]
+
+ResolveCardinalSsm:      ssm:GetParameter,GetParameters
+                         on arn:aws:ssm:<region>:<acct>:parameter/cardinal/*
+                         (matches /cardinal/storage-profiles and /cardinal/api-keys)
+
+Managed: arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+         (ECR pull + CloudWatch Logs CreateLogStream/PutLogEvents)
+```
+
+**Why explicit ARN refs, not `cardinal-*` wildcard?** The DBMaster secret has a
+CFN-generated physical name (`DBMasterSecret-<hash>-<random>`) and does not
+match `cardinal-*`. License and Admin secrets do have `cardinal-` names but
+are listed by ARN for consistency and so a wildcard tightening never breaks
+the contract again. See PR #135 for the regression.
+
+## MigrationRole
+
+| Service(s) | Containers |
+|---|---|
+| `MigratorService` | configdb-init, migrator, ensure-storage-profile, keepalive |
+
+**What the containers do at runtime:**
+- `configdb-init`: connects to RDS with username/password (no AWS API).
+- `migrator`: `lakerunner migrate --databases=lrdb,configdb`. Connects to
+  RDS with username/password; reads storage-profiles + api-keys YAML
+  passed in via env var; may re-fetch Secrets / SSM on hot-reload.
+- `ensure-storage-profile`: seeds canonical storage profile into
+  configdb via SQL.
+- `keepalive`: sleeps.
+
+**Required policy:**
+```text
+ReadSecrets:    secretsmanager:Get/DescribeSecret on [DbMasterSecretArn]
+ReadSsmParams:  ssm:GetParameter,GetParameters on [StorageProfilesParamName, ApiKeysParamName]
+CloudWatchLogs: logs:CreateLogStream,PutLogEvents on the tier log groups
+```
+
+**Must NOT have:** S3 (no data plane), SQS, Bedrock, ECS API.
+
+## QueryRole
+
+| Service(s) | Containers |
+|---|---|
+| `QueryApiService` | query-api |
+| `QueryWorkerService` | query-worker |
+
+**What the containers do at runtime:**
+- `query-api`: receives queries from the ALB; reads cooked Parquet from
+  `s3://<ingest-bucket>/db/...`; queries lrdb for index/metadata;
+  fans out to query-workers discovered via `ecs:DescribeTasks` on the
+  cluster.
+- `query-worker`: receives subqueries from query-api; reads cooked
+  Parquet from S3.
+
+**Required policy:**
+```text
+ReadSecrets:    secretsmanager:Get/DescribeSecret on [DbMasterSecretArn, LicenseSecretArn]
+ReadSsmParams:  ssm:GetParameter,GetParameters on [StorageProfilesParamName, ApiKeysParamName]
+IngestBucketRead: s3:GetObject,ListBucket,GetBucketLocation on ${BucketName}[/*]
+CloudWatchLogs: logs:CreateLogStream,PutLogEvents on tier log groups
+DescribeWorkerTasks: ecs:DescribeServices,DescribeTasks,ListTasks
+                    restricted by Condition ArnEquals ecs:cluster=${ClusterArn}
+```
+
+**Must NOT have:** S3 write/delete (read-only on the query path), SQS,
+Bedrock, ECS UpdateService.
+
+## ProcessRole
+
+| Service(s) | Containers |
+|---|---|
+| `ProcessLogsService` | process-logs |
+| `ProcessMetricsService` | process-metrics |
+| `ProcessTracesService` | process-traces |
+| `PubsubSqsService` | pubsub-sqs |
+
+**What the containers do at runtime:**
+- `process-{logs,metrics,traces}`: consume SQS notifications about new
+  `otel-raw/` uploads; download the raw OTLP files from S3; transform
+  to cooked Parquet; write back to S3 under `db/`. May call Bedrock
+  foundation models for enrichment (see PR -- per-tier roles spec).
+- `pubsub-sqs`: keeps the S3 → SQS notification queue drained / forwards
+  events; reads SQS, may write back acknowledgements.
+
+**Required policy:**
+```text
+ReadSecrets:    secretsmanager:Get/DescribeSecret on [DbMasterSecretArn, LicenseSecretArn]
+ReadSsmParams:  ssm:GetParameter,GetParameters on [StorageProfilesParamName, ApiKeysParamName]
+IngestBucketReadWrite: s3:GetObject,PutObject,DeleteObject,ListBucket,GetBucketLocation on ${BucketName}[/*]
+IngestQueueConsume: sqs:ReceiveMessage,DeleteMessage,GetQueueAttributes on ${QueueArn}
+InvokeBedrockFoundationModels:
+    bedrock:InvokeModel,InvokeModelWithResponseStream on arn:aws:bedrock:*::foundation-model/*
+CloudWatchLogs: logs:CreateLogStream,PutLogEvents on tier log groups
+```
+
+**Must NOT have:** ECS API.
+
+## ControlRole
+
+| Service(s) | Containers |
+|---|---|
+| `SweeperService` | sweeper |
+| `MonitoringService` | monitoring |
+| `AdminApiService` | admin-api |
+| `AlertEvaluatorService` | alert-evaluator |
+
+**What the containers do at runtime:**
+- `sweeper`: deletes objects from the ingest bucket past the lifecycle
+  cutoff (after S3 lifecycle has tagged them) and houses-keeps lrdb.
+- `monitoring`: autoscales `process-{logs,metrics,traces}` by calling
+  `ecs:UpdateService` on the cluster (uses the `Process*Replicas`
+  parameters as the ceiling).
+- `admin-api`: admin REST API. Bcrypts the bootstrap admin key from
+  Secrets Manager, writes initial state into lrdb.
+- `alert-evaluator`: runs alert queries against lrdb + S3 cooked data;
+  delivers webhooks (no AWS API for the delivery path).
+
+**Required policy:**
+```text
+ReadSecrets:    secretsmanager:Get/DescribeSecret on [DbMasterSecretArn, LicenseSecretArn, AdminKeySecretArn]
+ReadSsmParams:  ssm:GetParameter,GetParameters on [StorageProfilesParamName, ApiKeysParamName]
+SweeperS3Cleanup: s3:GetObject,ListBucket,DeleteObject on ${BucketName}[/*]
+                  (alert-evaluator also reads under this statement)
+MonitoringEcsScale: ecs:UpdateService,DescribeServices
+                    restricted by Condition ArnEquals ecs:cluster=${ClusterArn}
+CloudWatchLogs: logs:CreateLogStream,PutLogEvents on tier log groups
+```
+
+**Must NOT have:** S3 write to `otel-raw/` or `db/` (sweeper only deletes
+expired files; writes are reserved for OTel + process tier), SQS consume,
+Bedrock, ALB API.
+
+## OtelRole
+
+| Service(s) | Containers |
+|---|---|
+| `OtelGrpcService` | otel-grpc |
+
+**What the container does at runtime:**
+- `otel-grpc`: terminates inbound OTLP gRPC/HTTP (4317 / 4318) from
+  customer collectors; passes through the cardinalhq `chq` processors;
+  writes raw protobuf signal batches under `s3://<ingest-bucket>/otel-raw/...`
+  via the `awss3` exporter.
+
+**Required policy:**
+```text
+ReadSecrets:    secretsmanager:Get/DescribeSecret on [LicenseSecretArn]
+OtelRawWrite:   s3:PutObject on arn:aws:s3:::${BucketName}/otel-raw/*
+                (scoped to the write prefix; OTel never reads or deletes)
+CloudWatchLogs: logs:CreateLogStream,PutLogEvents on tier log groups
+```
+
+**Must NOT have:** S3 GetObject / ListBucket / DeleteObject (write-only
+on `otel-raw/`), SQS, Bedrock, ECS API.
+
+## MaestroRole
+
+| Service(s) | Containers |
+|---|---|
+| `MaestroService` | db-init, mcp-gateway, wait-for-mcp, maestro, dex-init, dex |
+
+**What the containers do at runtime:**
+- `db-init`: runs Maestro's SQL migrations.
+- `mcp-gateway`: serves MCP protocol on an internal port; talks to
+  lakerunner query-api via Cloud Map.
+- `wait-for-mcp`: localhost poll.
+- `maestro`: web UI + REST API. Talks to lrdb, calls lakerunner via
+  internal endpoints (Cloud Map), bootstrap admin key passed in via env.
+- `dex-init`: bootstraps DEX storage in lrdb.
+- `dex`: DEX OIDC IDP. Stores state in lrdb.
+
+**Required policy:**
+```text
+ReadSecrets:    secretsmanager:Get/DescribeSecret on [DbMasterSecretArn, LicenseSecretArn, AdminKeySecretArn]
+ReadSsmParams:  ssm:GetParameter,GetParameters on [StorageProfilesParamName, ApiKeysParamName]
+CloudWatchLogs: logs:CreateLogStream,PutLogEvents on tier log groups
+```
+
+**Must NOT have:** S3, SQS, Bedrock, ECS API.
+
+## Rule for adding new permissions
+
+1. State the **container + AWS API call** in plain English in this doc
+   first.
+2. Add the IAM statement to the appropriate tier role in
+   `src/cardinal_cfn/children/security.py`.
+3. Add a regression assertion to `tests/templates/test_security.py`.
+4. If the new perm changes the ExecutionRole's expected
+   `ResolveCardinalSecrets` / `ResolveCardinalSsm` shape, also update
+   the matching assertion in `test_execution_role_can_read_each_infra_secret_arn`.
+
+Resource scoping is mandatory wherever AWS allows it (ECS cluster condition,
+S3 prefix, Bedrock partition). `Resource: "*"` is only acceptable for
+APIs that AWS does not allow resource scoping on (e.g.
+`ecs:ListTasks`).

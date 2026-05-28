@@ -566,6 +566,19 @@ def build() -> Template:
                     "Version": "2012-10-17",
                     "Statement": [
                         _stmt_secrets_read(["LicenseSecretArn"]),
+                        # OTel writes raw OTLP signals under otel-raw/ in the
+                        # ingest bucket via the awss3 exporter; the
+                        # process-{logs,metrics,traces} tier reads them and
+                        # writes cooked output under db/. Restrict to the
+                        # write-side prefix only.
+                        {
+                            "Sid": "OtelRawWrite",
+                            "Effect": "Allow",
+                            "Action": ["s3:PutObject"],
+                            "Resource": Sub(
+                                "arn:${AWS::Partition}:s3:::${BucketName}/otel-raw/*"
+                            ),
+                        },
                         _stmt_cw_logs(),
                     ],
                 },
