@@ -705,6 +705,7 @@ def build() -> Template:
         "DbEndpoint": Ref("DbEndpoint"),
         "DbPort": Ref("DbPort"),
         "DbSecretArn": Ref("DbMasterSecretArn"),
+        "BucketName": Ref("IngestBucketName"),
         "LicenseSecretArn": Ref("LicenseSecretArn"),
         "MigrationComplete": migration_complete,
         "MaestroImage": maestro_image,

@@ -263,6 +263,19 @@ def test_maestro_container_has_bootstrap_env(td):
     )
 
 
+def test_maestro_container_has_bootstrap_bucket_env(td):
+    """Bucket coordinates so a fixed maestro version can re-insert the
+    organization_buckets join row after provision_org (v1.45.9 wipes it
+    without re-inserting; deploy-time ensure-storage-profile only runs
+    on stack-image change)."""
+    maestro_c = _container(td, "maestro")
+    env = {e["Name"]: e["Value"] for e in maestro_c.get("Environment", [])}
+    assert env["MAESTRO_BOOTSTRAP_BUCKET_NAME"] == {"Ref": "BucketName"}
+    assert env["MAESTRO_BOOTSTRAP_BUCKET_REGION"] == {"Ref": "AWS::Region"}
+    assert env["MAESTRO_BOOTSTRAP_BUCKET_CLOUD_PROVIDER"] == "aws"
+    assert env["MAESTRO_BOOTSTRAP_BUCKET_COLLECTOR_NAME"] == "lakerunner"
+
+
 def test_maestro_container_admin_api_key_from_secret(td):
     """The seeded datasource's admin key is the same cardinal-admin-key secret
     that admin-api validates via ADMIN_INITIAL_API_KEY."""
