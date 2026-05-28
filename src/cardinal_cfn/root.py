@@ -199,7 +199,37 @@ def build() -> Template:
     t.add_parameter(Parameter(
         "PrivateSubnets",
         Type="List<AWS::EC2::Subnet::Id>",
-        Description="Private subnet IDs (>=2 across different AZs).",
+        Description=(
+            "Private subnet IDs (>=2 across different AZs). All ECS tasks "
+            "run here. When AlbScheme=internal (default), the ALB also "
+            "lives in these subnets."
+        ),
+    ))
+    t.add_parameter(Parameter(
+        "AlbScheme",
+        Type="String",
+        Default="internal",
+        AllowedValues=["internal", "internet-facing"],
+        Description=(
+            "ALB scheme. Default 'internal': ALB is private and reachable "
+            "only from inside the VPC (production posture). "
+            "'internet-facing' exposes the ALB to the public internet -- "
+            "useful in test/dev environments where OIDC redirect URLs "
+            "need to resolve from a developer's browser. When set to "
+            "'internet-facing' you MUST supply PublicSubnets and SHOULD "
+            "set AlbAllowedCidr1=0.0.0.0/0 to actually accept world "
+            "traffic."
+        ),
+    ))
+    t.add_parameter(Parameter(
+        "PublicSubnets",
+        Type="CommaDelimitedList",
+        Default="",
+        Description=(
+            "Public subnet IDs (>=2 across different AZs). Required when "
+            "AlbScheme=internet-facing; ignored otherwise. The ALB attaches "
+            "to these so its DNS resolves to internet-routable IPs."
+        ),
     ))
     t.add_parameter(Parameter(
         "CertificateArn",
@@ -406,6 +436,7 @@ def build() -> Template:
         groups=[
             {"label": "Networking",
              "parameters": ["VpcId", "PrivateSubnets",
+                            "AlbScheme", "PublicSubnets",
                             "AlbAllowedCidr1", "AlbAllowedCidr2", "AlbAllowedCidr3",
                             "ServiceNamespaceName",
                             "CertificateArn",
@@ -449,6 +480,16 @@ def build() -> Template:
     install_long = install_id_long()
     private_subnets_csv = Join(",", Ref("PrivateSubnets"))
 
+    # ALB subnet selection. When AlbScheme=internet-facing, the ALB attaches
+    # to the public subnets so its DNS resolves to internet-routable IPs;
+    # otherwise it stays in the private subnets the rest of the tier uses.
+    t.add_condition("AlbIsInternetFacing", Equals(Ref("AlbScheme"), "internet-facing"))
+    alb_subnets_csv = If(
+        "AlbIsInternetFacing",
+        Join(",", Ref("PublicSubnets")),
+        private_subnets_csv,
+    )
+
     # ---------------------------------------------------------------------
     # Cloud Map private DNS namespace (created by the root, not a child)
     # ---------------------------------------------------------------------
@@ -470,6 +511,7 @@ def build() -> Template:
         "AlbAllowedCidr1": Ref("AlbAllowedCidr1"),
         "AlbAllowedCidr2": Ref("AlbAllowedCidr2"),
         "AlbAllowedCidr3": Ref("AlbAllowedCidr3"),
+        "AlbScheme": Ref("AlbScheme"),
         "RdsSecurityGroupId": Ref("RdsSecurityGroupId"),
         "ClusterArn": Ref("ClusterArn"),
         "BucketName": Ref("IngestBucketName"),
@@ -513,7 +555,8 @@ def build() -> Template:
         "InstallIdShort": install_short,
         "InstallIdLong": install_long,
         "VpcId": Ref("VpcId"),
-        "PrivateSubnetsCsv": private_subnets_csv,
+        "AlbSubnetsCsv": alb_subnets_csv,
+        "Scheme": Ref("AlbScheme"),
         "AlbSgId": sec_alb_sg,
         "CertificateArn": GetAtt(cert_stack, "Outputs.EffectiveCertificateArn"),
     }, depends_on=["Cert"])

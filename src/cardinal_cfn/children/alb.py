@@ -4,10 +4,16 @@ The ALB security group and the ALB-to-task ingress rules are customer-owned
 (see ``docs/operations/required-roles.md``); this stack consumes the SG ID
 and never creates or mutates security groups.
 
-The OTel listener is HTTP (not HTTPS): the ALB is internal-scheme and the
+The OTel listener is HTTP (not HTTPS): when the ALB is internal-scheme the
 deployment model assumes the caller has VPC-layer reachability (peering /
-TGW / VPN). Plain OTLP/HTTP on 4318 matches the target group's protocol
-and removes the need to install the ALB cert on external senders.
+TGW / VPN). Plain OTLP/HTTP on 4318 matches the target group's protocol and
+removes the need to install the ALB cert on external senders.
+
+The ``Scheme`` parameter selects between internal (default; production) and
+internet-facing (for test/dev environments where browser access from outside
+the VPC is required -- e.g. so OIDC redirects to the ALB's DNS resolve from
+a developer's laptop). When internet-facing, the operator must supply public
+subnets via the root's ``PublicSubnets`` parameter.
 """
 
 from troposphere import (
@@ -48,9 +54,28 @@ def build() -> Template:
     )
     t.add_parameter(
         Parameter(
-            "PrivateSubnetsCsv",
+            "AlbSubnetsCsv",
             Type="String",
-            Description="Comma-separated private subnet IDs.",
+            Description=(
+                "Comma-separated subnet IDs the ALB is attached to. Must be "
+                "private subnets when Scheme=internal; public subnets when "
+                "Scheme=internet-facing. Wired by the root template."
+            ),
+        )
+    )
+    t.add_parameter(
+        Parameter(
+            "Scheme",
+            Type="String",
+            Default="internal",
+            AllowedValues=["internal", "internet-facing"],
+            Description=(
+                "ALB scheme. Default 'internal' keeps the ALB private and "
+                "requires VPC-layer reachability (peering / TGW / VPN / SSM "
+                "port-forward). Set 'internet-facing' for dev/test "
+                "environments where browser access from outside the VPC is "
+                "needed -- e.g. OIDC redirect-back-to-ALB flows."
+            ),
         )
     )
     t.add_parameter(
@@ -71,8 +96,8 @@ def build() -> Template:
     alb = t.add_resource(
         LoadBalancer(
             "Alb",
-            Scheme="internal",
-            Subnets=Split(",", Ref("PrivateSubnetsCsv")),
+            Scheme=Ref("Scheme"),
+            Subnets=Split(",", Ref("AlbSubnetsCsv")),
             SecurityGroups=[Ref("AlbSgId")],
             Type="application",
             Tags=cardinal_tags(component="networking", role="alb"),

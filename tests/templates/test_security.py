@@ -210,6 +210,33 @@ def test_alb_to_otel_4318(td):
     assert rule["SourceSecurityGroupId"] == {"Ref": "AlbSecurityGroup"}
 
 
+def test_internet_facing_ingress_rules_per_alb_port(td):
+    """When AlbScheme=internet-facing, the Security child adds a 0.0.0.0/0
+    ingress rule on every ALB port (443, 9443, 4318) gated by the
+    AlbIsInternetFacing condition. Operators who leave AlbScheme=internal
+    don't get these rules (the resource is conditional)."""
+    expected_ports = {443, 9443, 4318}
+    rules = {}
+    for r in td["Resources"].values():
+        if r["Type"] == "AWS::EC2::SecurityGroupIngress" and \
+           r.get("Condition") == "AlbIsInternetFacing":
+            rules[r["Properties"]["FromPort"]] = r["Properties"]
+    assert set(rules.keys()) == expected_ports, (
+        f"missing internet-facing ALB ingress rule on ports "
+        f"{expected_ports - set(rules.keys())!r}"
+    )
+    for port, props in rules.items():
+        assert props["CidrIp"] == "0.0.0.0/0", (
+            f"internet-facing ingress on {port} must be 0.0.0.0/0; "
+            f"got {props['CidrIp']!r}"
+        )
+        assert props["GroupId"] == {"Ref": "AlbSecurityGroup"}
+
+
+def test_alb_scheme_condition_present(td):
+    assert "AlbIsInternetFacing" in td.get("Conditions", {})
+
+
 def test_alb_to_otel_health_13133(td):
     """The OTel target group health-checks on port 13133, not 4318. Without
     an ALB-SG -> OTel-SG rule on 13133 the ECS task is marked unhealthy by
