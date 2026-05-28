@@ -43,6 +43,17 @@ fi
 SERVICE_NAMESPACE_NAME="${SERVICE_NAMESPACE_NAME:-cardinal.local}"
 ORGANIZATION_ID="${ORGANIZATION_ID:-12340000-0000-4000-8000-000000000000}"
 
+# ALB scheme. Default 'internal' (production posture). Set 'internet-facing'
+# in test environments where browser access from outside the VPC is required.
+# When internet-facing, PUBLIC_SUBNETS is mandatory and the operator should
+# also set ALB_ALLOWED_CIDR1=0.0.0.0/0 to accept world traffic.
+ALB_SCHEME="${ALB_SCHEME:-internal}"
+PUBLIC_SUBNETS="${PUBLIC_SUBNETS:-}"
+ALB_ALLOWED_CIDR1="${ALB_ALLOWED_CIDR1:-}"
+if [ "$ALB_SCHEME" = "internet-facing" ] && [ -z "$PUBLIC_SUBNETS" ]; then
+  die "PUBLIC_SUBNETS is required when ALB_SCHEME=internet-facing"
+fi
+
 TEMPLATE_URL="https://${TEMPLATE_BUCKET}.s3.${REGION}.amazonaws.com/lakerunner/${VERSION}/cardinal-lakerunner.yaml"
 TEMPLATE_BASE_URL="https://${TEMPLATE_BUCKET}.s3.${REGION}.amazonaws.com/lakerunner/${VERSION}/cardinal-lakerunner/"
 
@@ -102,7 +113,8 @@ python3 - "$PARAMS_FILE" \
   "$CLUSTER_NAME" "$CLUSTER_ARN" \
   "$CERTIFICATE_ARN" \
   "$DEX_ADMIN_EMAIL" "$DEX_ADMIN_PASSWORD_HASH" "$OIDC_SUPERADMIN_EMAILS" \
-  "$TEMPLATE_BASE_URL" "$ORGANIZATION_ID" "$SERVICE_NAMESPACE_NAME" <<'PY'
+  "$TEMPLATE_BASE_URL" "$ORGANIZATION_ID" "$SERVICE_NAMESPACE_NAME" \
+  "$ALB_SCHEME" "$PUBLIC_SUBNETS" "$ALB_ALLOWED_CIDR1" <<'PY'
 import json, os, sys
 
 (out_path,
@@ -114,7 +126,8 @@ import json, os, sys
  cluster_name, cluster_arn,
  cert_arn,
  dex_email, dex_hash, oidc_admins,
- tmpl_base, org_id, ns_name) = sys.argv[1:]
+ tmpl_base, org_id, ns_name,
+ alb_scheme, public_subnets, alb_allowed_cidr1) = sys.argv[1:]
 
 cert_body  = os.environ.get("CERT_BODY", "")
 cert_key   = os.environ.get("CERT_KEY", "")
@@ -146,7 +159,11 @@ params = [
     {"ParameterKey": "OrganizationId",            "ParameterValue": org_id},
     {"ParameterKey": "ServiceNamespaceName",      "ParameterValue": ns_name},
     {"ParameterKey": "OtelConfigYaml",            "ParameterValue": ""},
+    {"ParameterKey": "AlbScheme",                 "ParameterValue": alb_scheme},
+    {"ParameterKey": "PublicSubnets",             "ParameterValue": public_subnets},
 ]
+if alb_allowed_cidr1:
+    params.append({"ParameterKey": "AlbAllowedCidr1", "ParameterValue": alb_allowed_cidr1})
 with open(out_path, "w") as f:
     json.dump(params, f, indent=2)
 PY
