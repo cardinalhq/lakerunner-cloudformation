@@ -114,6 +114,18 @@ def build() -> Template:
         Description="Third CIDR block allowed inbound to the ALB. Blank to skip.",
     ))
     t.add_parameter(Parameter(
+        "AlbScheme",
+        Type="String",
+        Default="internal",
+        AllowedValues=["internal", "internet-facing"],
+        Description=(
+            "ALB scheme. When 'internet-facing', the Security child "
+            "automatically adds a 0.0.0.0/0 ingress rule on each ALB port "
+            "in addition to the AlbAllowedCidr1/2/3 rules. Pure convenience "
+            "so the operator doesn't have to remember to flip the CIDRs."
+        ),
+    ))
+    t.add_parameter(Parameter(
         "RdsSecurityGroupId",
         Type="AWS::EC2::SecurityGroup::Id",
         Description=(
@@ -203,6 +215,26 @@ def build() -> Template:
                 CidrIp=Ref(f"AlbAllowedCidr{cidr_idx}"),
                 Description=f"ALB inbound on {port} from AlbAllowedCidr{cidr_idx}",
             ))
+
+    # When Scheme=internet-facing, layer a 0.0.0.0/0 rule on every ALB port
+    # on top of the AlbAllowedCidr1/2/3 rules above. Gated by an explicit
+    # condition so deploying with the default (internal) doesn't surprise
+    # the operator by exposing the ALB.
+    t.add_condition(
+        "AlbIsInternetFacing",
+        Equals(Ref("AlbScheme"), "internet-facing"),
+    )
+    for port in _ALB_INGRESS:
+        t.add_resource(SecurityGroupIngress(
+            f"AlbIngress{port}FromInternet",
+            Condition="AlbIsInternetFacing",
+            GroupId=Ref(alb_sg),
+            IpProtocol="tcp",
+            FromPort=port,
+            ToPort=port,
+            CidrIp="0.0.0.0/0",
+            Description=f"ALB inbound on {port} from 0.0.0.0/0 (internet-facing)",
+        ))
 
     # ----------------------------------------------------------------------
     # Task SGs (per tier)

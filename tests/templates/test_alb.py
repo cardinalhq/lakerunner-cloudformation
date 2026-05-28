@@ -14,7 +14,7 @@ def template_dict():
 
 def test_required_parameters(template_dict):
     for n in ("InstallIdShort", "InstallIdLong", "VpcId",
-              "PrivateSubnetsCsv", "AlbSgId"):
+              "AlbSubnetsCsv", "AlbSgId", "Scheme"):
         assert n in template_dict["Parameters"], f"missing parameter: {n}"
 
 
@@ -25,21 +25,20 @@ def test_no_internally_managed_security_group(template_dict):
     assert len(sgs) == 0
 
 
-def test_no_public_subnet_or_alb_scheme_parameters(template_dict):
-    for n in ("PublicSubnetsCsv", "AlbScheme"):
-        assert n not in template_dict["Parameters"], (
-            f"parameter {n} should have been removed"
-        )
+def test_scheme_parameter_defaults_internal(template_dict):
+    p = template_dict["Parameters"]["Scheme"]
+    assert p["Default"] == "internal"
+    assert set(p["AllowedValues"]) == {"internal", "internet-facing"}
 
 
-def test_alb_is_internal(template_dict):
+def test_alb_scheme_is_parameter_driven(template_dict):
     alb_def = next(
         v for v in template_dict["Resources"].values()
         if v["Type"] == "AWS::ElasticLoadBalancingV2::LoadBalancer"
     )
-    assert alb_def["Properties"]["Scheme"] == "internal"
+    assert alb_def["Properties"]["Scheme"] == {"Ref": "Scheme"}
     subnets = alb_def["Properties"]["Subnets"]
-    assert subnets == {"Fn::Split": [",", {"Ref": "PrivateSubnetsCsv"}]}
+    assert subnets == {"Fn::Split": [",", {"Ref": "AlbSubnetsCsv"}]}
 
 
 def test_creates_load_balancer(template_dict):

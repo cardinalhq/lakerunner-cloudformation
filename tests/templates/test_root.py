@@ -58,19 +58,34 @@ def test_no_customer_supplied_iam_or_sg_parameters(td):
         )
 
 
-def test_no_public_subnet_or_alb_scheme_parameters(td):
-    for n in ("PublicSubnets", "AlbScheme"):
-        assert n not in td["Parameters"], (
-            f"parameter {n} should have been removed"
-        )
+def test_alb_scheme_defaults_to_internal(td):
+    p = td["Parameters"]["AlbScheme"]
+    assert p["Default"] == "internal"
+    assert set(p["AllowedValues"]) == {"internal", "internet-facing"}
 
 
-def test_alb_stack_does_not_receive_public_subnets_or_scheme(td):
+def test_public_subnets_parameter_defaults_to_empty(td):
+    """PublicSubnets is optional -- only required when AlbScheme=internet-facing,
+    ignored otherwise. Default empty so internal-scheme installs don't have to
+    fabricate placeholder subnets."""
+    p = td["Parameters"]["PublicSubnets"]
+    assert p["Type"] == "CommaDelimitedList"
+    assert p["Default"] == ""
+
+
+def test_alb_child_receives_scheme_and_subnets_conditional(td):
     params = td["Resources"]["Alb"]["Properties"]["Parameters"]
-    for n in ("PublicSubnetsCsv", "AlbScheme"):
-        assert n not in params, (
-            f"Alb should no longer be passed {n}"
-        )
+    assert params["Scheme"] == {"Ref": "AlbScheme"}
+    # AlbSubnetsCsv picks between PublicSubnets and PrivateSubnets via an If.
+    sub_param = params["AlbSubnetsCsv"]
+    assert "Fn::If" in sub_param
+    if_args = sub_param["Fn::If"]
+    assert if_args[0] == "AlbIsInternetFacing"
+
+
+def test_security_child_receives_alb_scheme(td):
+    sec_params = td["Resources"]["Security"]["Properties"]["Parameters"]
+    assert sec_params["AlbScheme"] == {"Ref": "AlbScheme"}
 
 
 def test_template_base_url_default_pattern(td):
@@ -191,8 +206,15 @@ def test_outputs(td):
         assert n in td["Outputs"], f"missing output: {n}"
 
 
-def test_no_public_subnets_condition(td):
-    assert "HasPublicSubnets" not in td.get("Conditions", {})
+def test_alb_is_internet_facing_condition(td):
+    """The condition controls which subnet list the ALB attaches to. Root
+    declares it; the Security child has its own equivalent condition for
+    its 0.0.0.0/0 ingress rules."""
+    conditions = td.get("Conditions", {})
+    assert "AlbIsInternetFacing" in conditions
+    assert conditions["AlbIsInternetFacing"] == {
+        "Fn::Equals": [{"Ref": "AlbScheme"}, "internet-facing"]
+    }
 
 
 def test_service_namespace_created_in_root(td):
