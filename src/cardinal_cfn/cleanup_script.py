@@ -77,6 +77,7 @@ log "cleanup_stack=$CLEANUP_STACK_NAME cluster=$CLUSTER_NAME"
 INGEST_BUCKET=""
 DB_INSTANCE_ID=""
 DB_SUBNET_GROUP=""
+RDS_SG_ID=""
 INGEST_QUEUE_URL=""
 SECRET_IDS=""   # space-separated ARNs / names
 SSM_PARAMS=""   # space-separated names
@@ -91,7 +92,7 @@ if aws cloudformation describe-stacks --stack-name "$INFRA_STACK_NAME" >/dev/nul
 import json, sys
 data = json.load(sys.stdin)
 out = {
-    "bucket": "", "db_instance": "", "db_subnet_group": "",
+    "bucket": "", "db_instance": "", "db_subnet_group": "", "rds_sg": "",
     "queue_url": "", "secrets": [], "ssm_params": [],
 }
 for r in data.get("StackResourceSummaries", []):
@@ -102,6 +103,7 @@ for r in data.get("StackResourceSummaries", []):
     if   t == "AWS::S3::Bucket":               out["bucket"] = pid
     elif t == "AWS::RDS::DBInstance":          out["db_instance"] = pid
     elif t == "AWS::RDS::DBSubnetGroup":       out["db_subnet_group"] = pid
+    elif t == "AWS::EC2::SecurityGroup":       out["rds_sg"] = pid
     elif t == "AWS::SQS::Queue":               out["queue_url"] = pid
     elif t == "AWS::SecretsManager::Secret":   out["secrets"].append(pid)
     elif t == "AWS::SSM::Parameter":           out["ssm_params"].append(pid)
@@ -110,6 +112,7 @@ print(json.dumps(out))
     INGEST_BUCKET=$(printf '%s' "$discovered"    | python3 -c 'import json,sys; print(json.load(sys.stdin)["bucket"])')
     DB_INSTANCE_ID=$(printf '%s' "$discovered"   | python3 -c 'import json,sys; print(json.load(sys.stdin)["db_instance"])')
     DB_SUBNET_GROUP=$(printf '%s' "$discovered"  | python3 -c 'import json,sys; print(json.load(sys.stdin)["db_subnet_group"])')
+    RDS_SG_ID=$(printf '%s' "$discovered"        | python3 -c 'import json,sys; print(json.load(sys.stdin)["rds_sg"])')
     INGEST_QUEUE_URL=$(printf '%s' "$discovered" | python3 -c 'import json,sys; print(json.load(sys.stdin)["queue_url"])')
     SECRET_IDS=$(printf '%s' "$discovered"       | python3 -c 'import json,sys; print(" ".join(json.load(sys.stdin)["secrets"]))')
     SSM_PARAMS=$(printf '%s' "$discovered"       | python3 -c 'import json,sys; print(" ".join(json.load(sys.stdin)["ssm_params"]))')
@@ -117,6 +120,7 @@ print(json.dumps(out))
     log "  bucket           = $INGEST_BUCKET"
     log "  db_instance      = $DB_INSTANCE_ID"
     log "  db_subnet_group  = $DB_SUBNET_GROUP"
+    log "  rds_sg           = $RDS_SG_ID"
     log "  queue_url        = $INGEST_QUEUE_URL"
     log "  secrets          = $SECRET_IDS"
     log "  ssm_params       = $SSM_PARAMS"
@@ -402,7 +406,20 @@ delete_db_subnet_group() {
     aws rds delete-db-subnet-group --db-subnet-group-name "$DB_SUBNET_GROUP"
 }
 
-# 4f -- RDS snapshots produced by step 3 (Snapshot DeletionPolicy)
+# 4f -- RDS security group (DeletionPolicy: Retain on the infra stack so it
+# survives lakerunner stack deletes; cleanup must wipe it or the customer's
+# VPC delete is blocked by this dependency).
+delete_rds_security_group() {
+    if [ -z "$RDS_SG_ID" ]; then return 0; fi
+    if ! aws ec2 describe-security-groups --group-ids "$RDS_SG_ID" >/dev/null 2>&1; then
+        log "RDS security group $RDS_SG_ID already absent"
+        return 0
+    fi
+    log "deleting RDS security group $RDS_SG_ID"
+    aws ec2 delete-security-group --group-id "$RDS_SG_ID"
+}
+
+# 4g -- RDS snapshots produced by step 3 (Snapshot DeletionPolicy)
 delete_rds_snapshots() {
     if [ -z "$DB_INSTANCE_ID" ]; then return 0; fi
     snaps=$(aws rds describe-db-snapshots \
@@ -421,6 +438,7 @@ delete_secrets
 delete_ssm
 delete_sqs
 delete_db_subnet_group
+delete_rds_security_group
 delete_rds_snapshots
 
 # ===========================================================================
