@@ -36,7 +36,7 @@ images:
   lakerunner: "public.ecr.aws/cardinalhq.io/lakerunner:v1.24.0"
   maestro:    "public.ecr.aws/cardinalhq.io/maestro:v1.43.11"
   otel:       "public.ecr.aws/cardinalhq.io/cardinalhq-otel-collector:v1.7.0"
-  dex:        "ghcr.io/dexidp/dex:v2.41.1"
+  dex:        "public.ecr.aws/cardinalhq.io/dex-customization:v0.1.0"
   dex_init:   "public.ecr.aws/docker/library/busybox:1.37"
   db_init:    "ghcr.io/cardinalhq/initcontainer-grafana:latest"
 
