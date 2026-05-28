@@ -70,7 +70,6 @@ jobs:
           PRERELEASE: ${{ steps.version.outputs.prerelease }}
         run: |
           ROOT_URL="https://${CARDINAL_BUCKET_NAME}.s3.${CARDINAL_BUCKET_REGION}.amazonaws.com/lakerunner/${VERSION}/cardinal-lakerunner.yaml"
-          VPC_URL="https://${CARDINAL_BUCKET_NAME}.s3.${CARDINAL_BUCKET_REGION}.amazonaws.com/lakerunner/${VERSION}/cardinal-vpc.yaml"
           PRERELEASE_FLAG=()
           if [[ "${PRERELEASE}" == "true" ]]; then
             PRERELEASE_FLAG=(--prerelease)
@@ -79,7 +78,5 @@ jobs:
             --title "$VERSION" \
             "${PRERELEASE_FLAG[@]}" \
             --notes "**Lakerunner root template:** $ROOT_URL
-
-          **Optional VPC template:** $VPC_URL
 
           Paste the root URL into the CloudFormation console to deploy."

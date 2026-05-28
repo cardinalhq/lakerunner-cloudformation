@@ -19,7 +19,7 @@ In scope:
 
 Out of scope (one-time setup, persists across trials):
 
-- VPC + subnets. Pre-existing in the test account; either deployed once from `cardinal-vpc.yaml` via Console / `aws cloudformation create-stack`, or a customer-supplied VPC. Customers will already have a working VPC -- this test mirrors that assumption.
+- VPC + subnets. Pre-existing in the test account; either deployed once from `lrdev-vpc.yaml` via Console / `aws cloudformation create-stack`, or a manually-supplied VPC. Customers will already have a working VPC -- this test mirrors that assumption by standing up customer-equivalent networking ahead of time.
 - Region: **us-east-1** in the test account. The published template bucket lives in us-east-2; cross-region template fetch is fine, leave `TemplateBaseUrl` at its default.
 
 Explicitly NOT in scope (intentional simplifications because there is no public DNS available for the test environment):
@@ -41,18 +41,18 @@ Capture the account ID and the IAM identity (user or assumed role) the Jenkins A
 Either:
 
 - **Use an existing VPC** in the account. Capture VpcId and at least two private subnet IDs in distinct AZs. The application stack runs entirely in private subnets behind an internal ALB; public subnets are not used by this stack.
-- **Or deploy the Cardinal VPC stack once** via the AWS Console or CLI (this stack survives all subsequent trials):
+- **Or deploy the lrdev VPC stack once** via the AWS Console or CLI (this stack survives all subsequent trials; it is internal test scaffolding, not a customer artifact):
 
     ```sh
     aws cloudformation create-stack \
         --region us-east-1 \
-        --stack-name cardinal-vpc \
-        --template-url https://cardinal-cfn.s3.us-east-2.amazonaws.com/lakerunner/<version>/cardinal-vpc.yaml \
+        --stack-name lrdev-vpc \
+        --template-url https://cardinal-cfn.s3.us-east-2.amazonaws.com/lakerunner/<version>/lrdev-vpc.yaml \
         --capabilities CAPABILITY_NAMED_IAM
     aws cloudformation wait stack-create-complete \
-        --region us-east-1 --stack-name cardinal-vpc
+        --region us-east-1 --stack-name lrdev-vpc
     aws cloudformation describe-stacks \
-        --region us-east-1 --stack-name cardinal-vpc \
+        --region us-east-1 --stack-name lrdev-vpc \
         --query 'Stacks[0].Outputs' --output table
     ```
 
@@ -396,8 +396,8 @@ sh scripts/teardown-lakerunner.sh --stack-name cardinal-lakerunner-test --region
 
 # Tear down the VPC stack (only if you deployed it for this test session;
 # otherwise leave it for next time).
-aws cloudformation delete-stack --stack-name cardinal-vpc --region us-east-1
-aws cloudformation wait stack-delete-complete --stack-name cardinal-vpc --region us-east-1
+aws cloudformation delete-stack --stack-name lrdev-vpc --region us-east-1
+aws cloudformation wait stack-delete-complete --stack-name lrdev-vpc --region us-east-1
 
 # Delete Jenkins credentials staged in pre-flight D + E if no longer needed.
 ```

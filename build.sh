@@ -18,8 +18,8 @@ mkdir -p generated-templates/cardinal-lakerunner
 
 export PYTHONPATH="$(pwd)/src${PYTHONPATH:+:$PYTHONPATH}"
 
-echo "Generating cardinal-vpc.yaml..."
-python3 -m cardinal_cfn.cardinal_vpc > generated-templates/cardinal-vpc.yaml
+echo "Generating lrdev-vpc.yaml..."
+python3 -m cardinal_cfn.lrdev_vpc > generated-templates/lrdev-vpc.yaml
 
 echo "Generating cardinal-infrastructure.yaml..."
 python3 -m cardinal_cfn.cardinal_infrastructure > generated-templates/cardinal-infrastructure.yaml
@@ -44,7 +44,7 @@ done
 
 echo
 echo "Linting CFN templates..."
-cfn-lint generated-templates/cardinal-vpc.yaml \
+cfn-lint generated-templates/lrdev-vpc.yaml \
          generated-templates/cardinal-infrastructure.yaml \
          generated-templates/cardinal-cleanup.yaml \
          generated-templates/cardinal-lakerunner.yaml \

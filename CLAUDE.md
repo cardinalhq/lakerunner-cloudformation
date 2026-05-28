@@ -15,7 +15,7 @@ When in doubt, the design spec wins.
 
 Two customer-facing CloudFormation root templates:
 
-- `cardinal-vpc.yaml` — optional VPC (skipped by customers using their own VPC)
+- `lrdev-vpc.yaml` — internal test-env VPC scaffolding (not customer-facing; we use it to simulate a customer-supplied VPC in our test account)
 - `cardinal-lakerunner.yaml` — application root, composed of eight nested children
 
 Plus a single shell driver:
@@ -54,7 +54,7 @@ src/
     defaults.py              # cardinal-defaults.yaml loader
     children/                # one module per nested-stack child
     root.py                  # parent template generator
-    cardinal_vpc.py          # standalone VPC generator
+    lrdev_vpc.py             # internal test-env VPC generator (lrdev-vpc.yaml)
 scripts/
   data-setup.sh              # infra provisioner (raw AWS CLI; idempotent)
   deploy-lakerunner.sh       # CFN deploy driver
@@ -73,7 +73,7 @@ Generated templates go to `generated-templates/`, mirroring the S3 key layout:
 
 ```
 generated-templates/
-  cardinal-vpc.yaml
+  lrdev-vpc.yaml
   cardinal-lakerunner.yaml             # the root
   cardinal-lakerunner/                 # the children, mirrors S3 prefix
     alb.yaml
@@ -172,7 +172,7 @@ For debugging a single template, generators can be invoked directly (PYTHONPATH=
 ```sh
 python3 -m cardinal_cfn.children.<child>   # emits child YAML to stdout
 python3 -m cardinal_cfn.root               # emits root YAML
-python3 -m cardinal_cfn.cardinal_vpc       # emits VPC YAML
+python3 -m cardinal_cfn.lrdev_vpc          # emits internal lrdev VPC YAML
 ```
 
 All templates must pass cfn-lint with no errors. Warnings are tolerable when explainable; `.cfnlintrc` carries the project-wide ignores.

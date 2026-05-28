@@ -1,15 +1,15 @@
-"""Tests for the cardinal-vpc standalone template."""
+"""Tests for the lrdev-vpc standalone template."""
 
 import json
 
 import pytest
 
-from cardinal_cfn import cardinal_vpc
+from cardinal_cfn import lrdev_vpc
 
 
 @pytest.fixture
 def td():
-    return json.loads(cardinal_vpc.build().to_json())
+    return json.loads(lrdev_vpc.build().to_json())
 
 
 def test_required_parameters(td):
@@ -17,8 +17,8 @@ def test_required_parameters(td):
         assert n in td["Parameters"], f"missing parameter: {n}"
 
 
-def test_environment_default_is_cardinal(td):
-    assert td["Parameters"]["EnvironmentName"]["Default"] == "cardinal"
+def test_environment_default_is_lrdev(td):
+    assert td["Parameters"]["EnvironmentName"]["Default"] == "lrdev"
 
 
 def test_create_nat_gateway_default_yes(td):
