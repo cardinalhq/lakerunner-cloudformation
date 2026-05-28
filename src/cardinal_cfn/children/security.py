@@ -261,7 +261,7 @@ def build() -> Template:
         IpProtocol="tcp",
         FromPort=_QUERY_API_PORT,
         ToPort=_QUERY_API_PORT,
-        Description="ALB -> query-api",
+        Description="ALB to query-api",
     ))
     # query-api -> query-worker on 8081 (self-referential within the tier SG)
     t.add_resource(SecurityGroupIngress(
@@ -271,7 +271,7 @@ def build() -> Template:
         IpProtocol="tcp",
         FromPort=_QUERY_WORKER_PORT,
         ToPort=_QUERY_WORKER_PORT,
-        Description="query-api -> query-worker (same tier SG)",
+        Description="query-api to query-worker (same tier SG)",
     ))
 
     # ALB -> admin-api on 9091
@@ -282,7 +282,7 @@ def build() -> Template:
         IpProtocol="tcp",
         FromPort=_ADMIN_API_PORT,
         ToPort=_ADMIN_API_PORT,
-        Description="ALB -> admin-api",
+        Description="ALB to admin-api",
     ))
 
     # ALB -> otel on 4318
@@ -293,7 +293,7 @@ def build() -> Template:
         IpProtocol="tcp",
         FromPort=_OTLP_HTTP_PORT,
         ToPort=_OTLP_HTTP_PORT,
-        Description="ALB -> otel-collector",
+        Description="ALB to otel-collector",
     ))
     # Lakerunner tasks -> otel on 4318 (self-telemetry from each tier)
     for tier_title, tier_ref in [
@@ -309,7 +309,7 @@ def build() -> Template:
             IpProtocol="tcp",
             FromPort=_OTLP_HTTP_PORT,
             ToPort=_OTLP_HTTP_PORT,
-            Description=f"{tier_title} -> otel-collector self-telemetry",
+            Description=f"{tier_title} to otel-collector self-telemetry",
         ))
 
     # ALB -> maestro UI on 4200 and dex on 5556
@@ -320,7 +320,7 @@ def build() -> Template:
         IpProtocol="tcp",
         FromPort=_MAESTRO_PORT,
         ToPort=_MAESTRO_PORT,
-        Description="ALB -> maestro UI",
+        Description="ALB to maestro UI",
     ))
     t.add_resource(SecurityGroupIngress(
         "MaestroDexFromAlb",
@@ -329,7 +329,7 @@ def build() -> Template:
         IpProtocol="tcp",
         FromPort=_MAESTRO_DEX_PORT,
         ToPort=_MAESTRO_DEX_PORT,
-        Description="ALB -> maestro dex",
+        Description="ALB to maestro dex",
     ))
 
     # ----------------------------------------------------------------------
@@ -350,7 +350,7 @@ def build() -> Template:
             IpProtocol="tcp",
             FromPort=5432,
             ToPort=5432,
-            Description=f"{tier_title} -> RDS 5432",
+            Description=f"{tier_title} to RDS 5432",
         ))
 
     # ----------------------------------------------------------------------
