@@ -1,16 +1,18 @@
 # Installing Cardinal lakerunner
 
-Install is one shell-script run followed by one CloudFormation stack:
+Install is two CloudFormation stacks:
 
-1. [`install-infrastructure.md`](install-infrastructure.md) -- run
-   `scripts/data-setup.sh`. Provisions RDS, S3 ingest, SQS, secrets,
-   SSM, the ECS cluster, and the Cloud Map namespace via raw AWS CLI.
-   Idempotent. Emits a JSON document that names every resource.
-2. [`install-lakerunner.md`](install-lakerunner.md) --
-   `cardinal-lakerunner` CloudFormation stack. Creates the ALB, the ECS
-   services, and the DB-migration ECS service. Consumes the script's
-   JSON output as input parameters along with the customer-supplied
-   IAM role ARNs and security group IDs.
+1. [`install-infrastructure.md`](install-infrastructure.md) -- deploy
+   `cardinal-infrastructure.yaml`. Provisions RDS + its security group,
+   S3 ingest bucket, SQS ingest queue, secrets, and SSM parameters. All
+   data-bearing resources carry `Retain` / `Snapshot` policies.
+2. [`install-lakerunner.md`](install-lakerunner.md) -- deploy
+   `cardinal-lakerunner.yaml`. Creates the ALB, the ECS services, the
+   DB-migration ECS service, the Cloud Map private DNS namespace, the
+   ALB SG, six per-tier task SGs, and seven IAM roles (one shared
+   execution role + six per-tier task roles). Consumes the
+   infrastructure stack's outputs as parameters along with the
+   customer-supplied VPC + ECS cluster identifiers.
 
 The optional `cardinal-vpc` stack is a convenience for ephemeral test
 environments only -- production installs always bring their own VPC.
@@ -19,12 +21,14 @@ For the broader operational topics:
 
 - [`certificates.md`](certificates.md) -- TLS certificate options.
 - [`permissions-infrastructure.md`](permissions-infrastructure.md) --
-  what the operator running `data-setup.sh` needs.
+  what the operator deploying the templates needs.
 - [`permissions-lakerunner.md`](permissions-lakerunner.md) -- what
   the running application has access to.
 - [`deploying.md`](deploying.md) -- using a CloudFormation service
   role to avoid rollback-permission wedges.
 - [`tearing-down.md`](tearing-down.md) -- layered teardown procedure.
+- [`cleanup.md`](cleanup.md) -- `cardinal-cleanup` stack for wiping a
+  test install.
 - [`jenkins-deploy.md`](jenkins-deploy.md) -- pre-pivot Jenkinsfile
   for the lakerunner stack (legacy installs).
 - [`end-to-end-test-plan.md`](end-to-end-test-plan.md) -- runtime

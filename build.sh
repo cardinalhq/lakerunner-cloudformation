@@ -21,9 +21,6 @@ export PYTHONPATH="$(pwd)/src${PYTHONPATH:+:$PYTHONPATH}"
 echo "Generating cardinal-vpc.yaml..."
 python3 -m cardinal_cfn.cardinal_vpc > generated-templates/cardinal-vpc.yaml
 
-echo "Generating cardinal-alb-sg.yaml..."
-python3 -m cardinal_cfn.cardinal_alb_sg > generated-templates/cardinal-alb-sg.yaml
-
 echo "Generating cardinal-infrastructure.yaml..."
 python3 -m cardinal_cfn.cardinal_infrastructure > generated-templates/cardinal-infrastructure.yaml
 
@@ -31,14 +28,14 @@ echo "Generating cardinal-cleanup.yaml..."
 python3 -m cardinal_cfn.cardinal_cleanup > generated-templates/cardinal-cleanup.yaml
 
 # ---------------------------------------------------------------------------
-# Lakerunner stack (root + 8 nested children). Children take role ARNs,
-# security-group IDs, and infra identifiers (cluster, RDS, S3, SQS, secrets,
-# SSM params) as parameters from the customer / scripts/data-setup.sh.
+# Lakerunner stack (root + 9 nested children). The Security child owns all
+# SGs and IAM roles; other children take SG IDs and role ARNs from it
+# rather than from customer-supplied parameters.
 # ---------------------------------------------------------------------------
 echo "Generating cardinal-lakerunner.yaml (root)..."
 python3 -m cardinal_cfn.root > generated-templates/cardinal-lakerunner.yaml
 
-for child in alb cert migration \
+for child in security alb cert migration \
              services_query services_process services_control otel maestro; do
   out_name=$(echo "$child" | tr '_' '-')
   echo "Generating cardinal-lakerunner/${out_name}.yaml..."
@@ -48,7 +45,6 @@ done
 echo
 echo "Linting CFN templates..."
 cfn-lint generated-templates/cardinal-vpc.yaml \
-         generated-templates/cardinal-alb-sg.yaml \
          generated-templates/cardinal-infrastructure.yaml \
          generated-templates/cardinal-cleanup.yaml \
          generated-templates/cardinal-lakerunner.yaml \

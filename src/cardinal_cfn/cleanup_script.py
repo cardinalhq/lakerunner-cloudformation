@@ -51,9 +51,15 @@ unset AWS_REGION
 log "account=$ACCOUNT region=$REGION"
 log "lakerunner_stack=$LAKERUNNER_STACK_NAME cleanup_stack=$CLEANUP_STACK_NAME cluster=$CLUSTER_NAME"
 
-# Deterministic resource names that data-setup.sh creates. These are baked in
-# as literals -- env-overriding them would not help an attacker because IAM
-# scopes are pinned to these exact names.
+# Deterministic resource names. The S3 bucket, SQS queue, secrets, and SSM
+# parameters are explicitly named by both the legacy shell installer and
+# the CFN infrastructure stack, so the literals below match both.
+#
+# DB_ID and DB_SUBNET_GROUP are the names the (removed) shell installer
+# used. Against a CFN-deployed infra stack those resources have CFN-
+# generated names; the lookups will return ResourceNotFound and the
+# script logs+skips them. For CFN-installed environments, prefer
+# deleting the infrastructure stack directly; see tearing-down.md.
 BUCKET="cardinal-ingest-${ACCOUNT}-${REGION}"
 DB_ID="cardinal-db"
 DB_SUBNET_GROUP="cardinal-db-subnet-group"
@@ -63,9 +69,10 @@ SSM_PARAMS="/cardinal/storage-profiles /cardinal/api-keys"
 
 OWNERSHIP_SKIPS=0
 
-# Ownership-tag predicate. Returns 0 if the supplied JSON tag list (canonical
-# AWS shape: array of {Key,Value}) has Application=cardinal-lakerunner AND
-# ManagedBy=cardinal-data-setup-script. Otherwise returns 1.
+# Ownership-tag predicate. Returns 0 if the supplied JSON tag list
+# (canonical AWS shape: array of {Key,Value}) has
+# Application=cardinal-lakerunner AND ManagedBy belongs to the known set of
+# Cardinal-infra tag values. Otherwise returns 1.
 ownership_ok() {
     printf '%s' "$1" | python3 -c '
 import json, sys
@@ -73,7 +80,10 @@ tags = json.load(sys.stdin)
 got = {t["Key"]: t["Value"] for t in tags}
 ok = (
     got.get("Application") == "cardinal-lakerunner"
-    and got.get("ManagedBy") == "cardinal-data-setup-script"
+    and got.get("ManagedBy") in (
+        "cardinal-cfn-infrastructure",
+        "cardinal-data-setup-script",
+    )
 )
 sys.exit(0 if ok else 1)
 '

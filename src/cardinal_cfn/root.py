@@ -4,13 +4,13 @@ The root is a thin orchestrator. It declares the customer-facing parameter
 surface and stands up the nested children with TemplateURL pointing at the
 vendor S3 bucket.
 
-All infra (RDS, S3 ingest, SQS, secrets, SSM parameters, ECS cluster, Cloud
-Map namespace) is created out-of-band by ``scripts/data-setup.sh``; its
-identifiers arrive as parameters. All IAM roles and security groups are
-pre-created by the customer's IT and passed in as ARN/ID parameters. The
-lakerunner stack itself only owns ECS task-tier resources, the ALB and its
-listener rules, and the migration / cert custom resources -- the application,
-nothing else.
+Data resources (RDS, S3 ingest bucket, SQS, secrets, SSM parameters) are
+created by ``cardinal-infrastructure.yaml`` and threaded into this stack
+as parameters. Every security group and IAM role the lakerunner tier
+needs is created by the ``Security`` child stack here -- nothing on the
+SG/role surface is customer-supplied any more. The customer's
+contributions are: ECS cluster + VPC + private subnets + license token
+(plus the small set of feature/sizing knobs).
 """
 
 import os
@@ -27,6 +27,7 @@ from troposphere import (
     If,
 )
 from troposphere.cloudformation import Stack
+from troposphere.servicediscovery import PrivateDnsNamespace
 
 from cardinal_cfn.install_id import install_id_short, install_id_long
 from cardinal_cfn.parameters import add_parameter_group_metadata, add_no_echo_parameter
@@ -138,57 +139,38 @@ def _add_sizing_parameters(t: Template, specs: list[dict]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Customer-supplied IAM role + SG parameter specs.
-# ---------------------------------------------------------------------------
-_ROLE_SG_PARAMS = [
-    ("TaskRoleArn", "String", None,
-     "ARN of the ECS task role used by every lakerunner ECS task."),
-    ("ExecutionRoleArn", "String", None,
-     "ARN of the ECS task execution role (used at task launch to pull "
-     "images and resolve secrets)."),
-    ("TaskSgId", "AWS::EC2::SecurityGroup::Id", None,
-     "Security group ID applied to every ECS task in the install."),
-    ("AlbSgId", "AWS::EC2::SecurityGroup::Id", None,
-     "Security group ID applied to the shared ALB."),
-]
-
-
-# ---------------------------------------------------------------------------
-# Infra-setup output parameters: identifiers for the resources the
-# scripts/data-setup.sh driver already created. Names match the script's
-# JSON output keys 1:1. Sensitive values (license/admin) come in as Secret
-# ARNs -- the underlying secret values stay in Secrets Manager and are
-# never seen by CloudFormation.
+# Infrastructure-stack outputs threaded in as parameters. These come from
+# cardinal-infrastructure.yaml outputs. Sensitive values (license/admin)
+# arrive as Secret ARNs -- the underlying secret values stay in Secrets
+# Manager and are never seen by CloudFormation.
 # ---------------------------------------------------------------------------
 _INFRA_SETUP_PARAMS = [
-    ("DbEndpoint", "String", None, "RDS endpoint hostname (infra-setup output)."),
+    ("DbEndpoint", "String", None, "RDS endpoint hostname (infra output)."),
     ("DbPort", "String", "5432", "RDS port."),
     ("DbName", "String", "lakerunner", "Lakerunner database name."),
     ("DbMasterSecretArn", "String", None,
-     "ARN of the master DB credentials secret (infra-setup output)."),
+     "ARN of the master DB credentials secret (infra output)."),
+    ("RdsSecurityGroupId", "AWS::EC2::SecurityGroup::Id", None,
+     "Security group ID attached to the RDS instance (infra output). "
+     "The Security child adds tier-specific 5432 ingress rules to it."),
     ("IngestBucketName", "String", None,
-     "Name of the S3 ingest bucket (infra-setup output)."),
+     "Name of the S3 ingest bucket (infra output)."),
     ("IngestQueueUrl", "String", None,
-     "URL of the SQS ingest queue (infra-setup output)."),
+     "URL of the SQS ingest queue (infra output)."),
     ("IngestQueueArn", "String", None,
-     "ARN of the SQS ingest queue (infra-setup output)."),
+     "ARN of the SQS ingest queue (infra output)."),
     ("LicenseSecretArn", "String", None,
-     "ARN of the cardinal-license secret (infra-setup output)."),
+     "ARN of the cardinal-license secret (infra output)."),
     ("AdminKeySecretArn", "String", None,
-     "ARN of the cardinal-admin-key secret (infra-setup output)."),
+     "ARN of the cardinal-admin-key secret (infra output)."),
     ("StorageProfilesParamName", "String", None,
-     "Name of the SSM parameter holding storage_profiles YAML (infra-setup output)."),
+     "Name of the SSM parameter holding storage_profiles YAML (infra output)."),
     ("ApiKeysParamName", "String", None,
-     "Name of the SSM parameter holding api_keys YAML (infra-setup output)."),
+     "Name of the SSM parameter holding api_keys YAML (infra output)."),
     ("ClusterName", "String", None,
-     "Name of the ECS cluster (infra-setup output)."),
+     "Name of the ECS cluster (customer-supplied)."),
     ("ClusterArn", "String", None,
-     "ARN of the ECS cluster (infra-setup output)."),
-    ("ServiceNamespaceId", "String", None,
-     "Cloud Map private DNS namespace ID for in-cluster service discovery "
-     "(infra-setup output)."),
-    ("ServiceNamespaceName", "String", None,
-     "Cloud Map private DNS namespace name (infra-setup output)."),
+     "ARN of the ECS cluster (customer-supplied)."),
 ]
 
 
@@ -231,12 +213,46 @@ def build() -> Template:
     ))
 
     # ---------------------------------------------------------------------
-    # Customer-supplied IAM roles / security groups
+    # ALB inbound CIDRs. Up to three; blanks are skipped. Default RFC1918.
     # ---------------------------------------------------------------------
-    _add_string_params(t, _ROLE_SG_PARAMS)
+    t.add_parameter(Parameter(
+        "AlbAllowedCidr1",
+        Type="String",
+        Default="10.0.0.0/8",
+        AllowedPattern=r"^$|^\d{1,3}(\.\d{1,3}){3}/\d{1,2}$",
+        Description="First CIDR block allowed inbound to the ALB.",
+    ))
+    t.add_parameter(Parameter(
+        "AlbAllowedCidr2",
+        Type="String",
+        Default="172.16.0.0/12",
+        AllowedPattern=r"^$|^\d{1,3}(\.\d{1,3}){3}/\d{1,2}$",
+        Description="Second CIDR block allowed inbound to the ALB. Blank to skip.",
+    ))
+    t.add_parameter(Parameter(
+        "AlbAllowedCidr3",
+        Type="String",
+        Default="192.168.0.0/16",
+        AllowedPattern=r"^$|^\d{1,3}(\.\d{1,3}){3}/\d{1,2}$",
+        Description="Third CIDR block allowed inbound to the ALB. Blank to skip.",
+    ))
 
     # ---------------------------------------------------------------------
-    # Infra-setup outputs threaded in as parameters
+    # Cloud Map (in-cluster service discovery) namespace name
+    # ---------------------------------------------------------------------
+    t.add_parameter(Parameter(
+        "ServiceNamespaceName",
+        Type="String",
+        Default="cardinal.local",
+        AllowedPattern=r"^[a-z0-9]([a-z0-9.-]{0,61}[a-z0-9])?$",
+        Description=(
+            "Private DNS namespace name created for in-cluster service "
+            "discovery (cardinal-otel.<name>:4318, query-api.<name>:8080, ...)."
+        ),
+    ))
+
+    # ---------------------------------------------------------------------
+    # Infra-stack outputs threaded in as parameters
     # ---------------------------------------------------------------------
     _add_string_params(t, _INFRA_SETUP_PARAMS)
 
@@ -330,7 +346,7 @@ def build() -> Template:
         Default="Yes",
         AllowedValues=["Yes", "No"],
         Description=(
-            "When No, the MaestroStack nested stack is skipped entirely. "
+            "When No, the Maestro nested stack is skipped entirely. "
             "Flip to No to recover the overall stack if maestro fails to "
             "create or update."
         ),
@@ -389,12 +405,13 @@ def build() -> Template:
         t,
         groups=[
             {"label": "Networking",
-             "parameters": ["VpcId", "PrivateSubnets", "CertificateArn",
+             "parameters": ["VpcId", "PrivateSubnets",
+                            "AlbAllowedCidr1", "AlbAllowedCidr2", "AlbAllowedCidr3",
+                            "ServiceNamespaceName",
+                            "CertificateArn",
                             "CertificateBody", "CertificatePrivateKey",
                             "CertificateChain"]},
-            {"label": "IAM roles + security groups",
-             "parameters": [name for name, *_ in _ROLE_SG_PARAMS]},
-            {"label": "Infra-setup outputs",
+            {"label": "Infrastructure-stack outputs",
              "parameters": [name for name, *_ in _INFRA_SETUP_PARAMS]},
             {"label": "Sizing", "parameters": sizing_param_names},
             {"label": "Images", "parameters": image_param_names},
@@ -433,9 +450,57 @@ def build() -> Template:
     private_subnets_csv = Join(",", Ref("PrivateSubnets"))
 
     # ---------------------------------------------------------------------
+    # Cloud Map private DNS namespace (created by the root, not a child)
+    # ---------------------------------------------------------------------
+    namespace = t.add_resource(PrivateDnsNamespace(
+        "ServiceNamespace",
+        Name=Ref("ServiceNamespaceName"),
+        Vpc=Ref("VpcId"),
+        Description="Cardinal in-cluster service discovery namespace.",
+    ))
+    namespace_id = GetAtt(namespace, "Id")
+    namespace_name = Ref("ServiceNamespaceName")
+
+    # ---------------------------------------------------------------------
+    # Security child (SGs + IAM). Instantiated first; every other child
+    # consumes its outputs.
+    # ---------------------------------------------------------------------
+    security_stack = _add_child(t, "Security", "security.yaml", {
+        "VpcId": Ref("VpcId"),
+        "AlbAllowedCidr1": Ref("AlbAllowedCidr1"),
+        "AlbAllowedCidr2": Ref("AlbAllowedCidr2"),
+        "AlbAllowedCidr3": Ref("AlbAllowedCidr3"),
+        "RdsSecurityGroupId": Ref("RdsSecurityGroupId"),
+        "ClusterArn": Ref("ClusterArn"),
+        "BucketName": Ref("IngestBucketName"),
+        "QueueArn": Ref("IngestQueueArn"),
+        "DbMasterSecretArn": Ref("DbMasterSecretArn"),
+        "LicenseSecretArn": Ref("LicenseSecretArn"),
+        "AdminKeySecretArn": Ref("AdminKeySecretArn"),
+        "StorageProfilesParamName": Ref("StorageProfilesParamName"),
+        "ApiKeysParamName": Ref("ApiKeysParamName"),
+    })
+
+    sec_alb_sg = GetAtt(security_stack, "Outputs.AlbSecurityGroupId")
+    sec_migration_sg = GetAtt(security_stack, "Outputs.MigrationSecurityGroupId")
+    sec_query_sg = GetAtt(security_stack, "Outputs.QuerySecurityGroupId")
+    sec_process_sg = GetAtt(security_stack, "Outputs.ProcessSecurityGroupId")
+    sec_control_sg = GetAtt(security_stack, "Outputs.ControlSecurityGroupId")
+    sec_otel_sg = GetAtt(security_stack, "Outputs.OtelSecurityGroupId")
+    sec_maestro_sg = GetAtt(security_stack, "Outputs.MaestroSecurityGroupId")
+
+    exec_role = GetAtt(security_stack, "Outputs.ExecutionRoleArn")
+    migration_role = GetAtt(security_stack, "Outputs.MigrationRoleArn")
+    query_role = GetAtt(security_stack, "Outputs.QueryRoleArn")
+    process_role = GetAtt(security_stack, "Outputs.ProcessRoleArn")
+    control_role = GetAtt(security_stack, "Outputs.ControlRoleArn")
+    otel_role = GetAtt(security_stack, "Outputs.OtelRoleArn")
+    maestro_role = GetAtt(security_stack, "Outputs.MaestroRoleArn")
+
+    # ---------------------------------------------------------------------
     # Nested children
     # ---------------------------------------------------------------------
-    cert_stack = _add_child(t, "CertStack", "cert.yaml", {
+    cert_stack = _add_child(t, "Cert", "cert.yaml", {
         "InstallIdShort": install_short,
         "InstallIdLong": install_long,
         "CertificateArn": Ref("CertificateArn"),
@@ -444,23 +509,23 @@ def build() -> Template:
         "CertificateChain": Ref("CertificateChain"),
     })
 
-    alb_stack = _add_child(t, "AlbStack", "alb.yaml", {
+    alb_stack = _add_child(t, "Alb", "alb.yaml", {
         "InstallIdShort": install_short,
         "InstallIdLong": install_long,
         "VpcId": Ref("VpcId"),
         "PrivateSubnetsCsv": private_subnets_csv,
-        "AlbSgId": Ref("AlbSgId"),
+        "AlbSgId": sec_alb_sg,
         "CertificateArn": GetAtt(cert_stack, "Outputs.EffectiveCertificateArn"),
-    }, depends_on=["CertStack"])
+    }, depends_on=["Cert"])
 
-    migration_stack = _add_child(t, "MigrationStack", "migration.yaml", {
+    migration_stack = _add_child(t, "Migration", "migration.yaml", {
         "InstallIdShort": install_short,
         "InstallIdLong": install_long,
         "ClusterArn": Ref("ClusterArn"),
         "ClusterName": Ref("ClusterName"),
-        "TaskSecurityGroupId": Ref("TaskSgId"),
-        "ExecutionRoleArn": Ref("ExecutionRoleArn"),
-        "TaskRoleArn": Ref("TaskRoleArn"),
+        "TaskSecurityGroupId": sec_migration_sg,
+        "ExecutionRoleArn": exec_role,
+        "TaskRoleArn": migration_role,
         "PrivateSubnetsCsv": private_subnets_csv,
         "DbEndpoint": Ref("DbEndpoint"),
         "DbPort": Ref("DbPort"),
@@ -471,22 +536,23 @@ def build() -> Template:
         "OrgId": Ref("OrganizationId"),
         "IngestBucketName": Ref("IngestBucketName"),
         "LakerunnerImage": lakerunner_image,
-        "DbInitImage": Ref("DbInitImage"),
+        "DbInitImage": db_init_image,
     })
 
     migration_complete = GetAtt(migration_stack, "Outputs.MigrationServiceArn")
 
     # Common cross-stack parameter dict shared by query / process / control.
-    # Each tier extends with its own sizing parameters as needed.
-    def _service_tier_common() -> dict:
+    # Each tier extends with its own sizing parameters and tier-specific SG +
+    # task role.
+    def _service_tier_common(*, task_sg, task_role) -> dict:
         return {
             "InstallIdShort": install_short,
             "InstallIdLong": install_long,
             "ClusterArn": Ref("ClusterArn"),
             "ClusterName": Ref("ClusterName"),
-            "TaskSecurityGroupId": Ref("TaskSgId"),
-            "ExecutionRoleArn": Ref("ExecutionRoleArn"),
-            "TaskRoleArn": Ref("TaskRoleArn"),
+            "TaskSecurityGroupId": task_sg,
+            "ExecutionRoleArn": exec_role,
+            "TaskRoleArn": task_role,
             "PrivateSubnetsCsv": private_subnets_csv,
             "DbEndpoint": Ref("DbEndpoint"),
             "DbPort": Ref("DbPort"),
@@ -501,12 +567,13 @@ def build() -> Template:
             "SelfTelemetryEnabled": self_telemetry_enabled,
         }
 
-    services_query_params = _service_tier_common()
+    services_query_params = _service_tier_common(
+        task_sg=sec_query_sg, task_role=query_role,
+    )
     services_query_params.update({
         "HttpsListenerArn": GetAtt(alb_stack, "Outputs.HttpsListenerArn"),
         "VpcId": Ref("VpcId"),
-        "ClusterName": Ref("ClusterName"),
-        "ServiceNamespaceId": Ref("ServiceNamespaceId"),
+        "ServiceNamespaceId": namespace_id,
         "QueryApiReplicas": Ref("QueryApiReplicas"),
         "QueryApiCpu": Ref("QueryApiCpu"),
         "QueryApiMemory": Ref("QueryApiMemory"),
@@ -514,10 +581,12 @@ def build() -> Template:
         "QueryWorkerCpu": Ref("QueryWorkerCpu"),
         "QueryWorkerMemory": Ref("QueryWorkerMemory"),
     })
-    _add_child(t, "ServicesQueryStack", "services-query.yaml",
-               services_query_params, depends_on=["MigrationStack"])
+    _add_child(t, "Query", "services-query.yaml",
+               services_query_params, depends_on=["Migration"])
 
-    services_process_params = _service_tier_common()
+    services_process_params = _service_tier_common(
+        task_sg=sec_process_sg, task_role=process_role,
+    )
     services_process_params.update({
         "ProcessLogsReplicas": Ref("ProcessLogsReplicas"),
         "ProcessLogsMemory": Ref("ProcessLogsMemory"),
@@ -528,18 +597,19 @@ def build() -> Template:
         "PubsubSqsReplicas": Ref("PubsubSqsReplicas"),
     })
     services_process_stack = _add_child(
-        t, "ServicesProcessStack", "services-process.yaml",
-        services_process_params, depends_on=["MigrationStack"])
+        t, "Process", "services-process.yaml",
+        services_process_params, depends_on=["Migration"])
 
-    services_control_params = _service_tier_common()
+    services_control_params = _service_tier_common(
+        task_sg=sec_control_sg, task_role=control_role,
+    )
     services_control_params.update({
         "HttpsListenerArn": GetAtt(alb_stack, "Outputs.HttpsListenerArn"),
         "AdminHttpsListenerArn": GetAtt(alb_stack, "Outputs.AdminHttpsListenerArn"),
         "AdminApiKeySecretArn": Ref("AdminKeySecretArn"),
         "VpcId": Ref("VpcId"),
-        "ServiceNamespaceName": Ref("ServiceNamespaceName"),
-        "ServiceNamespaceId": Ref("ServiceNamespaceId"),
-        "ClusterName": Ref("ClusterName"),
+        "ServiceNamespaceName": namespace_name,
+        "ServiceNamespaceId": namespace_id,
         "ProcessLogsServiceName":
             GetAtt(services_process_stack, "Outputs.ProcessLogsServiceName"),
         "ProcessMetricsServiceName":
@@ -550,17 +620,17 @@ def build() -> Template:
         "ProcessMetricsReplicas": Ref("ProcessMetricsReplicas"),
         "ProcessTracesReplicas": Ref("ProcessTracesReplicas"),
     })
-    _add_child(t, "ServicesControlStack", "services-control.yaml",
+    _add_child(t, "Control", "services-control.yaml",
                services_control_params,
-               depends_on=["MigrationStack", "ServicesProcessStack"])
+               depends_on=["Migration", "Process"])
 
-    _add_child(t, "OtelStack", "otel.yaml", {
+    _add_child(t, "Otel", "otel.yaml", {
         "InstallIdShort": install_short,
         "InstallIdLong": install_long,
         "ClusterArn": Ref("ClusterArn"),
-        "TaskSecurityGroupId": Ref("TaskSgId"),
-        "ExecutionRoleArn": Ref("ExecutionRoleArn"),
-        "TaskRoleArn": Ref("TaskRoleArn"),
+        "TaskSecurityGroupId": sec_otel_sg,
+        "ExecutionRoleArn": exec_role,
+        "TaskRoleArn": otel_role,
         "PrivateSubnetsCsv": private_subnets_csv,
         "BucketName": Ref("IngestBucketName"),
         "QueueArn": Ref("IngestQueueArn"),
@@ -568,8 +638,8 @@ def build() -> Template:
         "OtelHttpListenerArn": GetAtt(alb_stack, "Outputs.OtelHttpListenerArn"),
         "AlbDnsName": GetAtt(alb_stack, "Outputs.AlbDnsName"),
         "VpcId": Ref("VpcId"),
-        "ServiceNamespaceId": Ref("ServiceNamespaceId"),
-        "ServiceNamespaceName": Ref("ServiceNamespaceName"),
+        "ServiceNamespaceId": namespace_id,
+        "ServiceNamespaceName": namespace_name,
         "OtelImage": otel_image,
         "OtelReplicas": Ref("OtelReplicas"),
         "OtelCpu": Ref("OtelCpu"),
@@ -577,18 +647,18 @@ def build() -> Template:
         "OtelConfigYaml": Ref("OtelConfigYaml"),
     })
 
-    maestro_stack = _add_child(t, "MaestroStack", "maestro.yaml", {
+    maestro_stack = _add_child(t, "Maestro", "maestro.yaml", {
         "InstallIdShort": install_short,
         "InstallIdLong": install_long,
         "ClusterArn": Ref("ClusterArn"),
-        "TaskSecurityGroupId": Ref("TaskSgId"),
-        "ExecutionRoleArn": Ref("ExecutionRoleArn"),
-        "TaskRoleArn": Ref("TaskRoleArn"),
+        "TaskSecurityGroupId": sec_maestro_sg,
+        "ExecutionRoleArn": exec_role,
+        "TaskRoleArn": maestro_role,
         "PrivateSubnetsCsv": private_subnets_csv,
         "VpcId": Ref("VpcId"),
         "HttpsListenerArn": GetAtt(alb_stack, "Outputs.HttpsListenerArn"),
         "AlbDnsName": GetAtt(alb_stack, "Outputs.AlbDnsName"),
-        "ServiceNamespaceName": Ref("ServiceNamespaceName"),
+        "ServiceNamespaceName": namespace_name,
         "DbEndpoint": Ref("DbEndpoint"),
         "DbPort": Ref("DbPort"),
         "DbSecretArn": Ref("DbMasterSecretArn"),
@@ -608,7 +678,7 @@ def build() -> Template:
         "AdminApiKeySecretArn": Ref("AdminKeySecretArn"),
         "OrganizationId": Ref("OrganizationId"),
         "OrgName": Ref("OrgName"),
-    }, depends_on=["MigrationStack"], condition="DeployMaestroEnabled")
+    }, depends_on=["Migration"], condition="DeployMaestroEnabled")
 
     # ---------------------------------------------------------------------
     # Top-level outputs

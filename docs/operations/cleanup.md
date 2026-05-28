@@ -1,6 +1,6 @@
 # Tearing down a Cardinal install (cleanup-lakerunner.sh)
 
-This document is for operators (Jenkins, or an authorized human) tearing down a full Cardinal install end-to-end. The procedure deletes the `cardinal-lakerunner` CloudFormation stack and the `cardinal-*` data resources that `scripts/data-setup.sh` provisioned, but **only those**: the customer's ECS cluster, Cloud Map namespace, IAM roles, security groups, subnets, and VPC are not touched.
+This document is for operators (Jenkins, or an authorized human) tearing down a full Cardinal install end-to-end. The procedure deletes the `cardinal-lakerunner` and `cardinal-infrastructure` CloudFormation stacks and the `cardinal-*` data resources retained by the infrastructure stack, but **only those**: the customer's ECS cluster, subnets, and VPC are not touched.
 
 For partial cleanup (e.g. leaving the lakerunner stack in place, or only wiping the data layer), this is the wrong tool. Use the AWS CLI directly.
 
@@ -16,7 +16,7 @@ For partial cleanup (e.g. leaving the lakerunner stack in place, or only wiping 
 
 ## Prerequisites
 
-1. The `cardinal-cfn-deployer` CFN service role (or equivalent) — same role used by `scripts/deploy-lakerunner.sh`.
+1. The `cardinal-cfn-deployer` CFN service role (or equivalent) — same role used to deploy `cardinal-lakerunner` and `cardinal-infrastructure`.
 1. A privileged ECS task role (and execution role) that the cleanup task will assume. See "Required IAM policies" below for the exact statement.
 1. The operator's own IAM role with the policies in the same section.
 1. The customer's ECS cluster name, two private subnets, and a security group the task can use.
@@ -47,7 +47,7 @@ Without `--yes` the script prints the plan and exits with code 2 so Jenkins can 
     - Derive account from `sts:GetCallerIdentity` and region from the ECS task metadata endpoint (not from `AWS_REGION` / `AWS_ACCOUNT_ID` env).
     - Walk `cardinal-lakerunner` root + nested children via `cloudformation:ListStackResources` to find ECS services, set `DesiredCount=0`, stop running and pending tasks, wait up to 5 minutes for `runningCount=0 AND pendingCount=0`.
     - `cloudformation:DeleteStack cardinal-lakerunner --role-arn $DEPLOYER_ROLE_ARN`, wait for delete-complete.
-    - For each cardinal-* data resource (S3 ingest bucket, RDS instance, RDS subnet group, SQS queue, the three cardinal-* secrets, the two `/cardinal/*` SSM parameters): read tags via the resource's own API, **refuse to delete unless `Application=cardinal-lakerunner` AND `ManagedBy=cardinal-data-setup-script`** are both present. Resources tagged correctly are wiped; others are logged and skipped and the final exit code is 1.
+    - For each cardinal-* data resource (S3 ingest bucket, RDS instance, RDS subnet group, SQS queue, the three cardinal-* secrets, the two `/cardinal/*` SSM parameters): read tags via the resource's own API, **refuse to delete unless `Application=cardinal-lakerunner` AND `ManagedBy` is one of `cardinal-cfn-infrastructure` or `cardinal-data-setup-script`** are both present. Resources tagged correctly are wiped; others are logged and skipped and the final exit code is 1.
     - Fire `cloudformation:DeleteStack cardinal-cleanup --role-arn $DEPLOYER_ROLE_ARN` asynchronously and exit. CFN handles the cleanup-stack teardown after the task ends.
 1. Driver tails logs to its stdout; exits with the task's exit code.
 

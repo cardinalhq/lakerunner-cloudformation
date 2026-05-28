@@ -12,10 +12,8 @@ The stack creates the data-plane resources consumed by the
 queue, the four `cardinal-*` secrets, and the two `/cardinal/*` SSM
 parameters.
 
-The stack always creates its own resources. There is no mode for adopting
-resources that `data-setup.sh` already created; an account that wants the
-CloudFormation-managed data plane runs this stack instead of `data-setup.sh`,
-not on top of it.
+The stack always creates its own resources. It is the single supported
+infra path -- there is no shell-script alternative.
 
 Replace these placeholders in the examples:
 
@@ -33,12 +31,12 @@ Create this file as `infrastructure-parameters.json`:
 ```json
 [
   {
-    "ParameterKey": "PrivateSubnets",
-    "ParameterValue": "subnet-aaaaaaaa,subnet-bbbbbbbb"
+    "ParameterKey": "VpcId",
+    "ParameterValue": "vpc-0123456789abcdef0"
   },
   {
-    "ParameterKey": "DBSecurityGroupId",
-    "ParameterValue": "sg-0123456789abcdef0"
+    "ParameterKey": "PrivateSubnets",
+    "ParameterValue": "subnet-aaaaaaaa,subnet-bbbbbbbb"
   },
   {
     "ParameterKey": "LicenseData",
@@ -47,9 +45,9 @@ Create this file as `infrastructure-parameters.json`:
 ]
 ```
 
-`PrivateSubnets` must contain two or more private subnet IDs in distinct AZs,
-as a single comma-separated string. Do not include a `VpcId`; this stack does
-not have a `VpcId` parameter.
+`PrivateSubnets` must contain two or more private subnet IDs in distinct
+AZs, as a single comma-separated string. `VpcId` must match the VPC the
+subnets live in; the stack creates the RDS security group in this VPC.
 
 Run the stack:
 
@@ -87,12 +85,12 @@ Example:
 ```json
 [
   {
-    "ParameterKey": "PrivateSubnets",
-    "ParameterValue": "subnet-aaaaaaaa,subnet-bbbbbbbb"
+    "ParameterKey": "VpcId",
+    "ParameterValue": "vpc-0123456789abcdef0"
   },
   {
-    "ParameterKey": "DBSecurityGroupId",
-    "ParameterValue": "sg-0123456789abcdef0"
+    "ParameterKey": "PrivateSubnets",
+    "ParameterValue": "subnet-aaaaaaaa,subnet-bbbbbbbb"
   },
   {
     "ParameterKey": "LicenseData",
@@ -126,8 +124,8 @@ named resource and you intentionally want the retry to use a different name.
 
 ## See also
 
-- [`install-infrastructure.md`](install-infrastructure.md): the
-  `data-setup.sh` shell path and prerequisite infrastructure.
+- [`install-infrastructure.md`](install-infrastructure.md): the prerequisite
+  infrastructure overview.
 - [`install-lakerunner.md`](install-lakerunner.md): the application stack that
   consumes this stack's outputs.
 - `src/cardinal_cfn/cardinal_infrastructure.py`: the template generator.

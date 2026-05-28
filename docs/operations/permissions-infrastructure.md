@@ -1,65 +1,64 @@
 # Permissions — infrastructure (install-time)
 
 What the **deployer principal** (CI role, human, or service account that
-runs `cloudformation deploy` against the lakerunner templates) needs in
+runs `cloudformation deploy` against the Cardinal templates) needs in
 order to create, update, and tear down the AWS resources the templates
 declare.
 
 This is the "what does your platform team need to provision?" half of the
 permissions story. Runtime permissions — the IAM roles assumed by the
-running tasks themselves — live in `permissions-lakerunner.md`. The
-trust + inline policy contents for **every** customer-supplied IAM role
-are in `required-roles.md`.
+running tasks themselves — live in `permissions-lakerunner.md` (those
+roles are now stack-created; the customer no longer supplies them).
 
-VPC is bring-your-own and intentionally excluded.
-
-The lakerunner stack creates neither IAM roles nor security groups nor
-data-bearing resources. The deployer therefore does not need `iam:*`,
-`rds:*`, `s3:*`, `sqs:*`, `secretsmanager:*`, `ssm:*`, or
-`ec2:*SecurityGroup*` permissions for the lakerunner stack itself. Those
-permissions are required only by:
-
-1. The IT principal that pre-creates the IAM roles and security groups
-   (one-time, scoped to the cookbook contents).
-2. The data-setup Lambda's execution role (auditable, granted
-   create+update+delete on its own scope).
+VPC and ECS cluster are bring-your-own and intentionally excluded.
 
 ## Scope assumptions
 
 - Resource ARNs match `cardinal-*` and `/cardinal/*` (S3 bucket, SQS
-  queue, secrets, SSM params, log groups) where the AWS API supports
-  name-prefix scoping.
-- `iam:PassRole` is scoped to `arn:aws:iam::${account}:role/cardinal-*`.
+  queue, secrets, SSM params, log groups, IAM roles, security groups
+  via Name tag) where the AWS API supports name-prefix scoping.
+- `iam:PassRole` is scoped to `arn:aws:iam::${account}:role/*` because
+  the lakerunner stack creates per-tier roles with CFN-generated
+  physical names. Tighten to your install prefix if needed.
 - No `kms:*` is required — the templates rely on AWS-managed keys for
   RDS, Secrets Manager, and S3.
-- The deployer never touches running data planes — it only creates,
-  updates, and deletes infrastructure.
 
 ## API actions by AWS service
 
 | Service | Why the deployer needs it | Minimum API actions |
 |---|---|---|
 | `cloudformation` | Create/update/delete the root stack and the nested children; CFN reads the published S3 templates. | `CreateStack`, `UpdateStack`, `DeleteStack`, `DescribeStacks`, `DescribeStackEvents`, `DescribeStackResources`, `DescribeStackResource`, `GetTemplate`, `ListStacks`, `CreateChangeSet`, `DescribeChangeSet`, `ExecuteChangeSet`, `DeleteChangeSet` |
-| `iam` | `iam:PassRole` to pass the customer-supplied `TaskRoleArn` / `ExecutionRoleArn` to ECS; plus server-certificate actions for `cert.yaml`'s PEM path (`AWS::IAM::ServerCertificate`). No `iam:CreateRole` / `CreatePolicy` or other role/policy write actions. | `PassRole`, `UploadServerCertificate`, `DeleteServerCertificate`, `GetServerCertificate`, `ListServerCertificates`, `TagServerCertificate`, `UntagServerCertificate` |
-| `ecs` | Cluster, task definitions, services. | `CreateCluster`, `DeleteCluster`, `DescribeClusters`, `RegisterTaskDefinition`, `DeregisterTaskDefinition`, `DescribeTaskDefinition`, `CreateService`, `UpdateService`, `DeleteService`, `DescribeServices`, `ListServices`, `ListTasks`, `DescribeTasks`, `TagResource` |
-| `elasticloadbalancingv2` | ALB, two listeners, target groups, listener rules. | `CreateLoadBalancer`, `DeleteLoadBalancer`, `DescribeLoadBalancers`, `ModifyLoadBalancerAttributes`, `CreateListener`, `DeleteListener`, `ModifyListener`, `DescribeListeners`, `CreateTargetGroup`, `DeleteTargetGroup`, `DescribeTargetGroups`, `ModifyTargetGroup`, `CreateRule`, `DeleteRule`, `ModifyRule`, `DescribeRules`, `AddTags`, `RemoveTags`, `DescribeTags` |
+| `iam` | Stack-created task roles + execution role; `iam:PassRole` to register ECS task definitions; server-certificate actions for the optional PEM cert path. | `CreateRole`, `DeleteRole`, `GetRole`, `UpdateRole`, `PutRolePolicy`, `DeleteRolePolicy`, `GetRolePolicy`, `ListRolePolicies`, `AttachRolePolicy`, `DetachRolePolicy`, `ListAttachedRolePolicies`, `TagRole`, `UntagRole`, `ListRoleTags`, `PassRole`, `UploadServerCertificate`, `DeleteServerCertificate`, `GetServerCertificate`, `ListServerCertificates`, `TagServerCertificate`, `UntagServerCertificate` |
+| `ec2` (security groups only) | Stack-created SGs: 1 ALB SG, 6 task SGs, 1 RDS SG (infra stack); cross-stack ingress rules. | `CreateSecurityGroup`, `DeleteSecurityGroup`, `DescribeSecurityGroups`, `DescribeSecurityGroupRules`, `AuthorizeSecurityGroupIngress`, `RevokeSecurityGroupIngress`, `AuthorizeSecurityGroupEgress`, `RevokeSecurityGroupEgress`, `ModifySecurityGroupRules`, `UpdateSecurityGroupRuleDescriptionsIngress`, `UpdateSecurityGroupRuleDescriptionsEgress`, `CreateTags`, `DeleteTags`, `DescribeTags` |
+| `rds` | RDS instance + DB subnet group (infrastructure stack). | `CreateDBInstance`, `DeleteDBInstance`, `ModifyDBInstance`, `DescribeDBInstances`, `CreateDBSubnetGroup`, `DeleteDBSubnetGroup`, `DescribeDBSubnetGroups`, `AddTagsToResource`, `RemoveTagsFromResource`, `ListTagsForResource` |
+| `s3` | Ingest bucket + lifecycle + notification config (infrastructure stack). | `CreateBucket`, `DeleteBucket`, `PutBucketTagging`, `GetBucketTagging`, `PutBucketLifecycleConfiguration`, `GetBucketLifecycleConfiguration`, `PutBucketNotificationConfiguration`, `GetBucketNotificationConfiguration`, `PutBucketPolicy`, `GetBucketPolicy`, `DeleteBucketPolicy`, `PutBucketPublicAccessBlock`, `GetBucketPublicAccessBlock`, `GetBucketLocation`, `ListBucket` |
+| `sqs` | Ingest queue + queue policy. | `CreateQueue`, `DeleteQueue`, `GetQueueAttributes`, `SetQueueAttributes`, `ListQueueTags`, `TagQueue`, `UntagQueue` |
+| `secretsmanager` | License, admin-key, db-master secrets + the secret-target attachment. | `CreateSecret`, `DeleteSecret`, `DescribeSecret`, `UpdateSecret`, `TagResource`, `UntagResource`, `ListSecrets`, `PutSecretValue`, `GetSecretValue` (for the SecretTargetAttachment lookup) |
+| `ssm` | Storage-profiles + api-keys parameters. | `PutParameter`, `DeleteParameter`, `GetParameter`, `GetParameters`, `AddTagsToResource`, `RemoveTagsFromResource`, `ListTagsForResource` |
+| `ecs` | Task definitions, services (the lakerunner stack does NOT create the cluster). | `RegisterTaskDefinition`, `DeregisterTaskDefinition`, `DescribeTaskDefinition`, `CreateService`, `UpdateService`, `DeleteService`, `DescribeServices`, `ListServices`, `ListTasks`, `DescribeTasks`, `TagResource`, `UntagResource`, `ListTagsForResource` |
+| `elasticloadbalancingv2` | ALB, three listeners (443, 9443, 4318), target groups, listener rules. | `CreateLoadBalancer`, `DeleteLoadBalancer`, `DescribeLoadBalancers`, `ModifyLoadBalancerAttributes`, `CreateListener`, `DeleteListener`, `ModifyListener`, `DescribeListeners`, `CreateTargetGroup`, `DeleteTargetGroup`, `DescribeTargetGroups`, `ModifyTargetGroup`, `CreateRule`, `DeleteRule`, `ModifyRule`, `DescribeRules`, `AddTags`, `RemoveTags`, `DescribeTags` |
 | `logs` | Per-service log groups + retention. | `CreateLogGroup`, `DeleteLogGroup`, `PutRetentionPolicy`, `DescribeLogGroups`, `TagResource`, `UntagResource`, `ListTagsForResource` |
-| `servicediscovery` | Cloud Map private DNS namespace + per-service entries. | `CreatePrivateDnsNamespace`, `DeleteNamespace`, `GetNamespace`, `ListNamespaces`, `CreateService`, `DeleteService`, `GetService`, `ListServices`, `GetOperation`, `TagResource`, `UntagResource`, `ListTagsForResource` |
+| `servicediscovery` | Cloud Map private DNS namespace (created by the lakerunner root) + per-service registrations. | `CreatePrivateDnsNamespace`, `DeleteNamespace`, `GetNamespace`, `ListNamespaces`, `CreateService`, `DeleteService`, `GetService`, `ListServices`, `GetOperation`, `TagResource`, `UntagResource`, `ListTagsForResource` |
+
+The deploy must be invoked with `--capabilities CAPABILITY_IAM` so
+CloudFormation can manage the IAM roles created by the `Security`
+child stack.
 
 ## What the deployer does **not** need
 
-- `iam:*` write actions (`CreateRole`, `PutRolePolicy`, etc.). Roles
-  are pre-created by the customer's IT.
-- `ec2:*SecurityGroup*` write actions. SGs are pre-created by the
-  customer's IT.
-- `rds:*`, `s3:*`, `sqs:*`, `secretsmanager:*`, `ssm:*`. The
-  data-bearing resources are owned by the data-setup Lambda's role
-  (auditable, scoped to its own resources).
-- Anything under `ec2:*Vpc*`, `ec2:*Subnet*`, `ec2:*RouteTable*`,
-  `ec2:*InternetGateway*`, `ec2:*NatGateway*` — VPC is bring-your-own.
+- VPC / subnet / route table / IGW / NAT / TGW write actions. VPC is
+  bring-your-own (or use the optional `cardinal-vpc.yaml`).
+- ECS cluster create/delete. Cluster is bring-your-own.
 - `kms:*` — no customer-managed keys are provisioned.
-- `bedrock:*` — Bedrock is runtime-only on the customer-supplied task role.
-- `acm:*` — required only by the optional cert-import Lambda's own role,
-  not by the deployer.
+- `bedrock:*` — Bedrock is runtime-only on the process-tier task role.
 - Any `*:*` or account-wide read.
 - Any cross-account permissions.
+
+## Tearing down
+
+Same actions as create; plus the `Retain` / `Snapshot` policies on the
+infra-tier data resources mean a `delete-stack` leaves orphans behind
+on purpose. Wiping the data is a deliberate operator step covered in
+[`cleanup.md`](cleanup.md) (the `cardinal-cleanup` stack uses a
+separate, narrowly-scoped customer-supplied `CleanupTaskRoleArn` — see
+that doc for the policy).

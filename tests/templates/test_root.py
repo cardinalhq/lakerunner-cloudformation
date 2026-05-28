@@ -18,16 +18,18 @@ def test_required_parameters(td):
         "PrivateSubnets",
         "CertificateArn",
         "TemplateBaseUrl",
-        # IAM + SG parameters now customer-supplied
-        "TaskRoleArn",
-        "ExecutionRoleArn",
-        "TaskSgId",
-        "AlbSgId",
-        # Infra-setup outputs threaded in
+        # ALB inbound CIDRs (up to 3, all default to RFC1918)
+        "AlbAllowedCidr1",
+        "AlbAllowedCidr2",
+        "AlbAllowedCidr3",
+        # Cloud Map namespace name (stack creates the namespace)
+        "ServiceNamespaceName",
+        # Infrastructure-stack outputs threaded in
         "DbEndpoint",
         "DbPort",
         "DbName",
         "DbMasterSecretArn",
+        "RdsSecurityGroupId",
         "IngestBucketName",
         "IngestQueueUrl",
         "IngestQueueArn",
@@ -37,16 +39,23 @@ def test_required_parameters(td):
         "ApiKeysParamName",
         "ClusterName",
         "ClusterArn",
-        "ServiceNamespaceId",
-        "ServiceNamespaceName",
     ):
         assert n in td["Parameters"], f"missing parameter: {n}"
 
 
 def test_no_phase1_data_or_secret_input_parameters(td):
-    """license/api/storage payloads are owned by the infra-setup script."""
+    """license/api/storage payloads are owned by the infrastructure stack."""
     for n in ("LicenseData", "ApiKeysOverride", "StorageProfilesOverride"):
         assert n not in td["Parameters"], f"unexpected legacy parameter: {n}"
+
+
+def test_no_customer_supplied_iam_or_sg_parameters(td):
+    """SGs and IAM roles are stack-owned -- customers no longer supply them."""
+    for n in ("TaskRoleArn", "ExecutionRoleArn", "TaskSgId", "AlbSgId",
+              "ServiceNamespaceId"):
+        assert n not in td["Parameters"], (
+            f"parameter {n} should have been removed (stack-owned now)"
+        )
 
 
 def test_no_public_subnet_or_alb_scheme_parameters(td):
@@ -57,10 +66,10 @@ def test_no_public_subnet_or_alb_scheme_parameters(td):
 
 
 def test_alb_stack_does_not_receive_public_subnets_or_scheme(td):
-    params = td["Resources"]["AlbStack"]["Properties"]["Parameters"]
+    params = td["Resources"]["Alb"]["Properties"]["Parameters"]
     for n in ("PublicSubnetsCsv", "AlbScheme"):
         assert n not in params, (
-            f"AlbStack should no longer be passed {n}"
+            f"Alb should no longer be passed {n}"
         )
 
 
@@ -76,8 +85,7 @@ def test_console_parameter_groups(td):
     labels = [g["Label"]["default"] for g in groups]
     assert labels == [
         "Networking",
-        "IAM roles + security groups",
-        "Infra-setup outputs",
+        "Infrastructure-stack outputs",
         "Sizing",
         "Images",
         "Advanced",
@@ -85,29 +93,30 @@ def test_console_parameter_groups(td):
 
 
 def test_nested_stack_count(td):
-    """Infra-script pivot removes the cluster child -> 8 nested children remain."""
+    """Security child added -> 9 nested children total."""
     nested = [r for r in td["Resources"].values() if r["Type"] == "AWS::CloudFormation::Stack"]
-    assert len(nested) == 8
+    assert len(nested) == 9
 
 
 def test_nested_stack_logical_ids(td):
     nested = {k for k, v in td["Resources"].items()
               if v["Type"] == "AWS::CloudFormation::Stack"}
     expected = {
-        "AlbStack",
-        "CertStack",
-        "MigrationStack",
-        "ServicesQueryStack",
-        "ServicesProcessStack",
-        "ServicesControlStack",
-        "OtelStack",
-        "MaestroStack",
+        "Security",
+        "Alb",
+        "Cert",
+        "Migration",
+        "Query",
+        "Process",
+        "Control",
+        "Otel",
+        "Maestro",
     }
     assert nested == expected
 
 
 def test_no_legacy_data_stacks(td):
-    """The infra-script pivot deletes database/storage/config/cluster children."""
+    """No data-tier stacks live in the lakerunner root."""
     nested = {k for k, v in td["Resources"].items()
               if v["Type"] == "AWS::CloudFormation::Stack"}
     for legacy in ("DatabaseStack", "StorageStack", "ConfigStack", "ClusterStack"):
@@ -115,26 +124,26 @@ def test_no_legacy_data_stacks(td):
 
 
 def test_service_tier_stacks_depend_on_migration(td):
-    for logical_id in ("ServicesQueryStack", "ServicesProcessStack", "ServicesControlStack"):
+    for logical_id in ("Query", "Process", "Control"):
         deps = td["Resources"][logical_id].get("DependsOn", [])
         if isinstance(deps, str):
             deps = [deps]
-        assert "MigrationStack" in deps, f"{logical_id} missing MigrationStack DependsOn"
+        assert "Migration" in deps, f"{logical_id} missing Migration DependsOn"
 
 
 def test_services_control_depends_on_services_process(td):
-    """The monitoring service in services-control consumes services-process
-    outputs (process-* service names) for its ECS autoscaler wiring."""
-    deps = td["Resources"]["ServicesControlStack"].get("DependsOn", [])
+    """The monitoring service in Control consumes Process outputs
+    (process-* service names) for its ECS autoscaler wiring."""
+    deps = td["Resources"]["Control"].get("DependsOn", [])
     if isinstance(deps, str):
         deps = [deps]
-    assert "ServicesProcessStack" in deps
+    assert "Process" in deps
 
 
 def test_services_control_receives_monitoring_autoscaler_inputs(td):
     """Root must thread the cluster name + 3 process service names + 3 replica
-    parameters into services-control so the monitoring autoscaler can scale."""
-    params = td["Resources"]["ServicesControlStack"]["Properties"]["Parameters"]
+    parameters into Control so the monitoring autoscaler can scale."""
+    params = td["Resources"]["Control"]["Properties"]["Parameters"]
     for n in (
         "ClusterName",
         "ProcessLogsServiceName",
@@ -144,39 +153,36 @@ def test_services_control_receives_monitoring_autoscaler_inputs(td):
         "ProcessMetricsReplicas",
         "ProcessTracesReplicas",
     ):
-        assert n in params, f"ServicesControlStack missing parameter: {n}"
+        assert n in params, f"Control missing parameter: {n}"
     for n, src_output in (
         ("ProcessLogsServiceName", "ProcessLogsServiceName"),
         ("ProcessMetricsServiceName", "ProcessMetricsServiceName"),
         ("ProcessTracesServiceName", "ProcessTracesServiceName"),
     ):
         getatt = params[n].get("Fn::GetAtt")
-        assert getatt == ["ServicesProcessStack", f"Outputs.{src_output}"], (
-            f"{n} must come from ServicesProcessStack output; got {params[n]!r}"
+        assert getatt == ["Process", f"Outputs.{src_output}"], (
+            f"{n} must come from Process output; got {params[n]!r}"
         )
 
 
 def test_maestro_stack_depends_on_migration(td):
-    deps = td["Resources"]["MaestroStack"].get("DependsOn", [])
+    deps = td["Resources"]["Maestro"].get("DependsOn", [])
     if isinstance(deps, str):
         deps = [deps]
-    assert "MigrationStack" in deps
+    assert "Migration" in deps
 
 
 def test_template_url_uses_kebab_case_filenames(td):
     """Module names like services_query map to services-query.yaml."""
-    # MigrationStack's TemplateURL should reference migration.yaml.
-    migration_url = td["Resources"]["MigrationStack"]["Properties"]["TemplateURL"]
-    # Sub renders to {"Fn::Sub": "${TemplateBaseUrl}migration.yaml"}
+    migration_url = td["Resources"]["Migration"]["Properties"]["TemplateURL"]
     assert "migration.yaml" in json.dumps(migration_url)
-    # ServicesQueryStack -> services-query.yaml
-    sq_url = td["Resources"]["ServicesQueryStack"]["Properties"]["TemplateURL"]
+    security_url = td["Resources"]["Security"]["Properties"]["TemplateURL"]
+    assert "security.yaml" in json.dumps(security_url)
+    sq_url = td["Resources"]["Query"]["Properties"]["TemplateURL"]
     assert "services-query.yaml" in json.dumps(sq_url)
-    # ServicesProcessStack -> services-process.yaml
-    sp_url = td["Resources"]["ServicesProcessStack"]["Properties"]["TemplateURL"]
+    sp_url = td["Resources"]["Process"]["Properties"]["TemplateURL"]
     assert "services-process.yaml" in json.dumps(sp_url)
-    # ServicesControlStack -> services-control.yaml
-    sc_url = td["Resources"]["ServicesControlStack"]["Properties"]["TemplateURL"]
+    sc_url = td["Resources"]["Control"]["Properties"]["TemplateURL"]
     assert "services-control.yaml" in json.dumps(sc_url)
 
 
@@ -187,3 +193,22 @@ def test_outputs(td):
 
 def test_no_public_subnets_condition(td):
     assert "HasPublicSubnets" not in td.get("Conditions", {})
+
+
+def test_service_namespace_created_in_root(td):
+    """Cloud Map private DNS namespace is created in the root, not customer-supplied."""
+    ns = td["Resources"].get("ServiceNamespace")
+    assert ns is not None, "root must create the Cloud Map namespace inline"
+    assert ns["Type"] == "AWS::ServiceDiscovery::PrivateDnsNamespace"
+
+
+def test_security_child_runs_before_others(td):
+    """Security must not DependsOn anything; Alb consumes its outputs."""
+    sec = td["Resources"]["Security"]
+    assert "DependsOn" not in sec, "Security should be the first child to instantiate"
+    # Alb gets AlbSgId from Security's output.
+    alb_params = td["Resources"]["Alb"]["Properties"]["Parameters"]
+    alb_sg = alb_params.get("AlbSgId")
+    assert alb_sg == {"Fn::GetAtt": ["Security", "Outputs.AlbSecurityGroupId"]}, (
+        f"Alb.AlbSgId must come from Security output; got {alb_sg!r}"
+    )

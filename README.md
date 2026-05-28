@@ -8,23 +8,30 @@ second's parameters.
 ## Install flow
 
 1. **IT prereqs (one-time, out of band).** Customer's IT pre-creates
-   five IAM roles and three security groups using the cookbook in
-   [`docs/operations/required-roles.md`](docs/operations/required-roles.md).
-2. **Stack 1: infrastructure** -- `cardinal-data-setup`. Creates RDS,
-   S3 ingest, SQS, secrets, SSM. Runbook:
+   the **ECS cluster** and the **VPC + private subnets**. Nothing
+   else. All security groups and IAM roles are created by the
+   templates.
+2. **Stack 1: infrastructure** -- `cardinal-infrastructure`. Creates
+   RDS (+ its security group), S3 ingest bucket, SQS ingest queue,
+   the `cardinal-*` secrets, and the two `/cardinal/*` SSM parameters.
+   All carry `DeletionPolicy: Retain` / `Snapshot`. Runbook:
    [`docs/operations/install-infrastructure.md`](docs/operations/install-infrastructure.md).
-3. **Stack 2: application** -- `cardinal-lakerunner`. Creates ECS
-   cluster, ALB, twelve services, custom-resource Lambdas. Consumes
-   stack 1's outputs as inputs. Runbook:
+3. **Stack 2: application** -- `cardinal-lakerunner`. Creates the
+   Cloud Map private DNS namespace, the ALB + its security group, six
+   per-tier task security groups, six per-tier IAM task roles + one
+   shared execution role, twelve ECS services, and the DB-migration
+   ECS service. Consumes stack 1's outputs as inputs. Runbook:
    [`docs/operations/install-lakerunner.md`](docs/operations/install-lakerunner.md).
 
 ```
-                +----------------+         +-----------------+
-IT prereqs ---> | data-setup     | -- 13 outputs --> | lakerunner |
-(roles + SGs)   | (data layer)   |         | (application)   |
-                +----------------+         +-----------------+
-                  RDS, S3, SQS,            ECS, ALB, services,
-                  secrets, SSM             custom resources
+              +-------------------+        +-----------------+
+ECS cluster ->| infrastructure    | -- outputs --> | lakerunner |
+VPC+subnets   | (RDS, S3, SQS,    |        | (application)   |
+              |  secrets, SSM,    |        |                 |
+              |  cardinal-rds-sg) |        | ECS, ALB,       |
+              +-------------------+        | services, SGs,  |
+                                           | IAM roles       |
+                                           +-----------------+
 ```
 
 The optional `cardinal-vpc` stack is for ephemeral test environments
@@ -34,10 +41,10 @@ only -- production installs always bring their own VPC.
 
 Per release tag at `https://cardinal-cfn-us-east-1.s3.us-east-1.amazonaws.com/lakerunner/<VERSION>/`:
 
-- `cardinal-data-setup.yaml` (+ `cardinal-data-setup-lambda.zip`)
+- `cardinal-infrastructure.yaml`
 - `cardinal-lakerunner.yaml` (+ nested children under `cardinal-lakerunner/`)
+- `cardinal-cleanup.yaml` (optional teardown task)
 - `cardinal-vpc.yaml` (test only)
-- `cardinal-deployer-role.yaml` (optional CFN service role)
 
 There is no `latest` tag -- pin to a specific release tag (e.g.
 `v0.0.41`) for reproducibility.
@@ -45,42 +52,39 @@ There is no `latest` tag -- pin to a specific release tag (e.g.
 ## Air-gapped deployment
 
 Mirror the entire `lakerunner/<VERSION>/` prefix to your own S3 bucket
-and override `TemplateBaseUrl` on the lakerunner stack and
-`LambdaCodeS3Bucket` / `LambdaCodeS3Key` on the data-setup stack to
-point at your bucket. Override the per-image parameters
-(`LakerunnerImage`, `MaestroImage`, etc.) to point at your private
-registry.
+and override `TemplateBaseUrl` on the lakerunner root to point at your
+bucket. Override the per-image parameters (`LakerunnerImage`,
+`MaestroImage`, etc.) to point at your private registry.
 
 ## Architecture
 
-The `cardinal-lakerunner` root template orchestrates twelve nested
+The `cardinal-lakerunner` root template orchestrates nine nested
 stacks:
 
-- `cluster` -- ECS cluster + base log group
-- `alb` -- ALB + listener + target groups
-- `cert` -- optional ACM cert importer (only when shipping PEMs)
-- `migration` -- one-shot DB migration via Lambda-backed custom resource
-- `services-query` -- query-api, query-worker
-- `services-process` -- process-{logs,metrics,traces}, pubsub-sqs
-- `services-control` -- sweeper, monitoring, admin-api, alert-evaluator
-- `otel` -- OTEL collector
-- `maestro` -- Maestro + bundled DEX OIDC
+- `Security` -- ALB SG, six per-tier task SGs, six per-tier task IAM
+  roles, the shared ECS execution role, and ingress rules into the
+  infra-owned RDS SG.
+- `Alb` -- ALB + listeners (443 / 9443 / 4318)
+- `Cert` -- optional ACM cert importer (only when shipping PEMs)
+- `Migration` -- one-shot DB migration via an ECS service
+- `Query` -- query-api, query-worker
+- `Process` -- process-{logs,metrics,traces}, pubsub-sqs
+- `Control` -- sweeper, monitoring, admin-api, alert-evaluator
+- `Otel` -- OTEL collector
+- `Maestro` -- Maestro + bundled DEX OIDC
 
 The data layer (RDS, S3 ingest, SQS, license / DB / admin secrets, SSM
-parameters) is created by the `cardinal-data-setup` Lambda outside any
-CloudFormation stack and survives `delete-stack` of either stack by
-design. See
-[`docs/operations/tearing-down.md`](docs/operations/tearing-down.md)
+parameters) is created by the `cardinal-infrastructure` stack with
+`Retain` / `Snapshot` policies and survives `delete-stack` by design.
+See [`docs/operations/tearing-down.md`](docs/operations/tearing-down.md)
 for the layered teardown procedure.
 
 ## Operational docs
 
 - [`install-infrastructure.md`](docs/operations/install-infrastructure.md)
-  -- runbook: deploy the data-setup stack
+  -- runbook: deploy the infrastructure stack
 - [`install-lakerunner.md`](docs/operations/install-lakerunner.md)
   -- runbook: deploy the application stack
-- [`required-roles.md`](docs/operations/required-roles.md)
-  -- IAM cookbook for IT prereqs
 - [`certificates.md`](docs/operations/certificates.md)
   -- TLS certificate options
 - [`permissions-infrastructure.md`](docs/operations/permissions-infrastructure.md)
@@ -91,8 +95,8 @@ for the layered teardown procedure.
   -- using a CloudFormation service role
 - [`tearing-down.md`](docs/operations/tearing-down.md)
   -- layered teardown procedure
-- [`jenkins-deploy.md`](docs/operations/jenkins-deploy.md)
-  -- legacy pre-pivot Jenkinsfile (lakerunner stack only)
+- [`cleanup.md`](docs/operations/cleanup.md)
+  -- `cardinal-cleanup` task for wiping a test install
 - [`end-to-end-test-plan.md`](docs/operations/end-to-end-test-plan.md)
   -- pre-pivot acceptance test plan (Jenkins-driven)
 
