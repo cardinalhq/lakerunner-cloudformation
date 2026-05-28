@@ -65,9 +65,14 @@ def _tags(*, component: str) -> Tags:
 # --------------------------------------------------------------------------
 _ALB_INGRESS = [443, 9443, 4318]
 _QUERY_API_PORT = 8080
-# query-worker's gRPC control-stream port. v1.32.0 of the lakerunner image
-# moved the worker port from 8081 to 8082; bumping this also bumps the
-# QueryWorkerFromQuery SG ingress rule below so query-api can connect.
+# query-worker exposes TWO ports:
+#   8081 - HTTP REST artifact fetch (query-api -> worker via
+#          GET /api/v1/artifacts/<id>; segments stream Parquet back)
+#   8082 - gRPC control stream / Discovery bridge (query-api -> worker
+#          long-lived bidi RPC for work assignment)
+# Both must be open in the QuerySG self-referential ingress or queries
+# dispatch but artifact fetches time out with "context deadline exceeded".
+_QUERY_WORKER_ARTIFACT_PORT = 8081
 _QUERY_WORKER_PORT = 8082
 _ADMIN_API_PORT = 9091
 _OTLP_HTTP_PORT = 4318
@@ -299,7 +304,11 @@ def build() -> Template:
         ToPort=_QUERY_API_PORT,
         Description="ALB to query-api",
     ))
-    # query-api -> query-worker on 8081 (self-referential within the tier SG)
+    # query-api -> query-worker (self-referential within the tier SG).
+    # Two ports: 8081 for HTTP REST artifact fetch, 8082 for gRPC control
+    # stream / Discovery bridge. Missing either one produces
+    # "context deadline exceeded" on artifact fetch (8081) or
+    # "no available workers" on dispatch (8082).
     t.add_resource(SecurityGroupIngress(
         "QueryWorkerFromQuery",
         GroupId=Ref(query_sg),
@@ -307,7 +316,16 @@ def build() -> Template:
         IpProtocol="tcp",
         FromPort=_QUERY_WORKER_PORT,
         ToPort=_QUERY_WORKER_PORT,
-        Description="query-api to query-worker (same tier SG)",
+        Description="query-api to query-worker gRPC control stream (same tier SG)",
+    ))
+    t.add_resource(SecurityGroupIngress(
+        "QueryWorkerArtifactFromQuery",
+        GroupId=Ref(query_sg),
+        SourceSecurityGroupId=Ref(query_sg),
+        IpProtocol="tcp",
+        FromPort=_QUERY_WORKER_ARTIFACT_PORT,
+        ToPort=_QUERY_WORKER_ARTIFACT_PORT,
+        Description="query-api to query-worker HTTP artifact fetch (same tier SG)",
     ))
 
     # ALB -> admin-api on 9091
