@@ -193,9 +193,14 @@ def test_alb_to_query_ingress(td):
 
 
 def test_query_self_ingress_to_worker(td):
+    """query-api uses a gRPC control stream to talk to query-workers; the
+    v1.32.0 image moved that port from 8081 to 8082. The ingress rule must
+    track the image's actual listener."""
     rule = td["Resources"]["QueryWorkerFromQuery"]["Properties"]
-    assert rule["FromPort"] == 8081
+    assert rule["FromPort"] == 8082
+    assert rule["ToPort"] == 8082
     assert rule["SourceSecurityGroupId"] == {"Ref": "QuerySecurityGroup"}
+    assert rule["GroupId"] == {"Ref": "QuerySecurityGroup"}
 
 
 def test_alb_to_admin_api(td):

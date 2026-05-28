@@ -131,8 +131,8 @@ services:
     memory_mib: 8192
     replicas: 8
     ingress:
-      port: 8081
-      description: "From Query API"
+      port: 8082
+      description: "From Query API (gRPC control stream)"
     health_check:
       type: "go"
       command: ["/app/bin/lakerunner", "sysinfo"]
