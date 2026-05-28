@@ -11,7 +11,7 @@
 make build
 ```
 
-Generates `generated-templates/cardinal-vpc.yaml`, `generated-templates/cardinal-lakerunner.yaml`, and the eleven nested children under `generated-templates/cardinal-lakerunner/`. Runs `cfn-lint` on the lot.
+Generates `generated-templates/lrdev-vpc.yaml`, `generated-templates/cardinal-lakerunner.yaml`, and the eleven nested children under `generated-templates/cardinal-lakerunner/`. Runs `cfn-lint` on the lot.
 
 ## Test
 
@@ -28,7 +28,7 @@ The suite uses pytest + cloud-radar; offline, no AWS credentials needed.
 
 - `src/cardinal_cfn/` — generator package
   - `root.py` — root template (`cardinal-lakerunner.yaml`)
-  - `cardinal_vpc.py` — standalone VPC template (`cardinal-vpc.yaml`)
+  - `lrdev_vpc.py` — internal test-env VPC scaffolding (`lrdev-vpc.yaml`)
   - `children/` — eleven nested stack generators
   - `defaults.py`, `naming.py`, `parameters.py`, `images.py`, `policies.py`, `install_id.py`, `listener_priorities.py` — shared helpers
 - `cardinal-defaults.yaml` — service definitions, image references, API keys seed, storage profile defaults

@@ -1,7 +1,8 @@
 """cardinal-infrastructure: standalone data-plane template.
 
-Customer-deployable peer to ``cardinal-vpc``. Creates the resources that
-``cardinal-lakerunner`` needs as inputs but does not manage itself:
+Customer-deployable prerequisite for ``cardinal-lakerunner``. Creates the
+resources that ``cardinal-lakerunner`` needs as inputs but does not manage
+itself:
 
 - RDS PostgreSQL instance + DB subnet group + master secret
 - S3 ingest bucket + lifecycle policy + S3 -> SQS notification

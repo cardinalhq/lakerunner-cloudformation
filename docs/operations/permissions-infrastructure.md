@@ -47,7 +47,7 @@ child stack.
 ## What the deployer does **not** need
 
 - VPC / subnet / route table / IGW / NAT / TGW write actions. VPC is
-  bring-your-own (or use the optional `cardinal-vpc.yaml`).
+  bring-your-own.
 - ECS cluster create/delete. Cluster is bring-your-own.
 - `kms:*` — no customer-managed keys are provisioned.
 - `bedrock:*` — Bedrock is runtime-only on the process-tier task role.

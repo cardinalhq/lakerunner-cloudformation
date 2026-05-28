@@ -20,7 +20,7 @@ this stack reaches `CREATE_COMPLETE`.
 | Layer | Owned by | Where it lives |
 |---|---|---|
 | ECS cluster | Customer's IT (out of band) | Pre-created; identifiers passed as `cardinal-lakerunner` parameters. |
-| VPC + private subnets | Customer's IT (or `cardinal-vpc.yaml`) | Passed as parameters into both stacks. |
+| VPC + private subnets | Customer's IT (out of band) | Passed as parameters into both stacks. |
 | Data layer (RDS + RDS SG, S3, SQS, secrets, SSM) | `cardinal-infrastructure` stack | All resources retained on stack delete. **This document.** |
 | Application layer (ALB, ECS services, migration, cert, *all SGs and IAM roles*) | `cardinal-lakerunner` stack | Stateless. **Next document.** |
 
@@ -31,8 +31,6 @@ The customer's IT team must pre-create:
 - **An ECS cluster.** Any name is fine; capture the cluster name and
   the cluster ARN.
 - **A VPC** with **at least two private subnets in distinct AZs**.
-  (`cardinal-vpc.yaml` is offered as an optional helper for customers
-  who want a VPC stood up alongside Cardinal.)
 
 That is the entire IT prereq surface. **No IAM roles, no security
 groups, and no Cloud Map namespace are required from IT.** The

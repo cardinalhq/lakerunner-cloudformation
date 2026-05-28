@@ -14,8 +14,9 @@ Install is two CloudFormation stacks:
    infrastructure stack's outputs as parameters along with the
    customer-supplied VPC + ECS cluster identifiers.
 
-The optional `cardinal-vpc` stack is a convenience for ephemeral test
-environments only -- production installs always bring their own VPC.
+Production installs always bring their own VPC. The repo also ships an
+`lrdev-vpc` template that we use internally to stand up customer-equivalent
+networking in our test account; it is not part of the customer install.
 
 For the broader operational topics:
 

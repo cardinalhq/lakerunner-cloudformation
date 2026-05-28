@@ -1,8 +1,9 @@
-"""cardinal-vpc: standalone VPC template.
+"""lrdev-vpc: standalone VPC template for our internal lakerunner test environment.
 
-Optional pre-step a customer can deploy if they don't already have a VPC.
-The resulting VpcId / subnet CSVs / endpoint SG are then fed as inputs to
-the cardinal-lakerunner root template.
+Stands in for a VPC the customer would normally bring. Used to spin up the
+prerequisite networking our test account needs before deploying the real
+cardinal-* product stacks against it. The resulting VpcId / subnet CSVs /
+endpoint SG feed into cardinal-infrastructure and cardinal-lakerunner.
 
 Layout (minimum viable):
 - 1 VPC, 2 public + 2 private subnets across 2 AZs
@@ -50,18 +51,19 @@ def _vpc_tags(*, role: str) -> Tags:
     """
     return Tags(
         Name=Sub(f"${{EnvironmentName}}-{role}"),
-        Project="cardinal",
+        Project="lrdev",
         Component="networking",
         Role=role,
-        ManagedBy="cardinal-cfn",
+        ManagedBy="lrdev-cfn",
     )
 
 
 def build() -> Template:
     t = Template()
     t.set_description(
-        "Cardinal VPC: standalone VPC with public/private subnets across 2 AZs, "
-        "optional NAT Gateway, S3 gateway endpoint, and optional interface endpoints."
+        "lrdev VPC: standalone VPC for our internal lakerunner test environment "
+        "(public/private subnets across 2 AZs, optional NAT Gateway, S3 gateway "
+        "endpoint, and optional interface endpoints). Not a customer-facing stack."
     )
 
     # Parameters
@@ -69,7 +71,7 @@ def build() -> Template:
         Parameter(
             "EnvironmentName",
             Type="String",
-            Default="cardinal",
+            Default="lrdev",
             Description="Environment name used in resource Name tags.",
             AllowedPattern=r"^[a-zA-Z][a-zA-Z0-9-]*$",
         )
@@ -268,7 +270,7 @@ def build() -> Template:
     vpce_sg = t.add_resource(
         SecurityGroup(
             "VpcEndpointSecurityGroup",
-            GroupDescription="Cardinal VPC endpoints security group (HTTPS from VPC)",
+            GroupDescription="lrdev VPC endpoints security group (HTTPS from VPC)",
             VpcId=Ref(vpc),
             SecurityGroupIngress=[
                 SecurityGroupRule(

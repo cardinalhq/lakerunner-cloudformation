@@ -7,14 +7,14 @@ import json
 
 import pytest
 
-from cardinal_cfn import cardinal_infrastructure, cardinal_vpc, root
+from cardinal_cfn import cardinal_infrastructure, lrdev_vpc, root
 from cardinal_cfn.children import (
     alb, cert, migration,
     services_query, services_process, services_control, otel, maestro,
 )
 
 _TEMPLATES = [
-    ("cardinal-vpc", cardinal_vpc),
+    ("lrdev-vpc", lrdev_vpc),
     ("cardinal-infrastructure", cardinal_infrastructure),
     ("cardinal-lakerunner (root)", root),
     ("alb", alb),

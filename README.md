@@ -34,8 +34,10 @@ VPC+subnets   | (RDS, S3, SQS,    |        | (application)   |
                                            +-----------------+
 ```
 
-The optional `cardinal-vpc` stack is for ephemeral test environments
-only -- production installs always bring their own VPC.
+Production installs always bring their own VPC. For our internal
+ephemeral test environments the repo ships an `lrdev-vpc` template that
+synthesises a customer-equivalent VPC; it is scaffolding for our test
+account, not a customer-facing artifact.
 
 ## Published templates
 
@@ -44,7 +46,7 @@ Per release tag at `https://cardinal-cfn-us-east-1.s3.us-east-1.amazonaws.com/la
 - `cardinal-infrastructure.yaml`
 - `cardinal-lakerunner.yaml` (+ nested children under `cardinal-lakerunner/`)
 - `cardinal-cleanup.yaml` (optional teardown task)
-- `cardinal-vpc.yaml` (test only)
+- `lrdev-vpc.yaml` (internal test scaffolding; customers ignore)
 
 There is no `latest` tag -- pin to a specific release tag (e.g.
 `v0.0.41`) for reproducibility.
