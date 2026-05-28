@@ -27,13 +27,14 @@ For partial cleanup (e.g. leaving the lakerunner stack in place, or only wiping 
 ```sh
 scripts/cleanup-lakerunner.sh \
     --region us-east-1 \
-    --version v0.0.46 \
+    --version v0.0.83 \
     --cluster-name <CLUSTER> \
     --private-subnets subnet-aaa,subnet-bbb \
     --task-sg-id sg-ccc \
     --cleanup-task-role-arn      arn:aws:iam::<ACCT>:role/cardinal-cleanup \
     --cleanup-execution-role-arn arn:aws:iam::<ACCT>:role/cardinal-cleanup-exec \
     --deployer-role-arn          arn:aws:iam::<ACCT>:role/cardinal-cfn-deployer \
+    --infra-stack-name           cardinal-infrastructure \
     --yes
 ```
 
@@ -43,18 +44,20 @@ Without `--yes` the script prints the plan and exits with code 2 so Jenkins can 
 
 1. Driver creates `cardinal-cleanup` (`--role-arn cardinal-cfn-deployer`) from the published `cardinal-cleanup.yaml`. The stack provisions a `cardinal-cleanup` task definition and a log group.
 1. Driver launches the task in the customer's cluster.
-1. Inside the task:
-    - Derive account from `sts:GetCallerIdentity` and region from the ECS task metadata endpoint (not from `AWS_REGION` / `AWS_ACCOUNT_ID` env).
-    - Walk `cardinal-lakerunner` root + nested children via `cloudformation:ListStackResources` to find ECS services, set `DesiredCount=0`, stop running and pending tasks, wait up to 5 minutes for `runningCount=0 AND pendingCount=0`.
-    - `cloudformation:DeleteStack cardinal-lakerunner --role-arn $DEPLOYER_ROLE_ARN`, wait for delete-complete.
-    - For each cardinal-* data resource (S3 ingest bucket, RDS instance, RDS subnet group, SQS queue, the three cardinal-* secrets, the two `/cardinal/*` SSM parameters): read tags via the resource's own API, **refuse to delete unless `Application=cardinal-lakerunner` AND `ManagedBy` is one of `cardinal-cfn-infrastructure` or `cardinal-data-setup-script`** are both present. Resources tagged correctly are wiped; others are logged and skipped and the final exit code is 1.
-    - Fire `cloudformation:DeleteStack cardinal-cleanup --role-arn $DEPLOYER_ROLE_ARN` asynchronously and exit. CFN handles the cleanup-stack teardown after the task ends.
+1. Inside the task, the four-step teardown runs:
+    1. **Drain + delete cardinal-lakerunner.** Walk the stack tree via `cloudformation:ListStackResources` to find ECS services; set `DesiredCount=0`; stop running and pending tasks; wait up to 5 minutes for `runningCount=0 AND pendingCount=0`. Then `cloudformation:DeleteStack cardinal-lakerunner --role-arn $DEPLOYER_ROLE_ARN`, wait for delete-complete.
+    1. **Empty the ingest S3 bucket.** All versions + in-flight multipart uploads.
+    1. **Delete cardinal-infrastructure.** CFN handles the DBInstance via its `DeletionPolicy: Snapshot` (final snapshot + delete). Every other data-layer resource has `DeletionPolicy: Retain` and survives this step. Crucially this means the secret/RDS ordering is CFN's problem, not the task's; if the task tried to delete the master secret first the in-flight snapshot would fail with "secret can't be found".
+    1. **Sweep the Retain'd resources.** Using the physical IDs discovered from cardinal-infrastructure *before* step 3 (once the stack is gone, the CFN-generated names are unrecoverable): delete the bucket, force-delete every secret (DBMaster + license + admin-key), delete the SSM parameters, delete the SQS queue, delete the RDS subnet group, delete every RDS snapshot the step-3 final-snapshot left behind.
+1. Fire `cloudformation:DeleteStack cardinal-cleanup --role-arn $DEPLOYER_ROLE_ARN` asynchronously and exit. CFN handles the cleanup-stack teardown after the task ends.
 1. Driver tails logs to its stdout; exits with the task's exit code.
+
+The cleanup task SG must **not** be a `cardinal-lakerunner`-owned SG -- if it is, the SG cannot be deleted (the cleanup task's ENI is using it) and step 1's `delete-stack cardinal-lakerunner` deadlocks. Use a customer-supplied or VPC-level SG.
 
 ## Exit codes
 
 - `0` — task succeeded; cleanup stack self-delete in progress.
-- `1` — task ran but failed (non-zero exit code), or ownership-tag skip occurred and the cleanup is partial, or self-delete wait failed.
+- `1` — task ran but failed (non-zero exit code), or self-delete wait failed.
 - `2` — pre-flight failure: missing argument, missing `--yes`, etc.
 
 ## Recovery from a failed run

@@ -123,8 +123,11 @@ Destructive. Refuses to run unless `CONFIRM=DELETE` is set. Delegates to
 | `CLEANUP_EXECUTION_ROLE_ARN` | yes | -- | Fargate execution role. |
 | `DEPLOYER_ROLE_ARN` | yes | -- | CFN service role used to delete the lakerunner stack. |
 | `LAKERUNNER_STACK_NAME` | no | `cardinal-lakerunner` | |
+| `INFRA_STACK_NAME` | no | `cardinal-infrastructure` | Cleanup discovers retained-resource physical IDs from this stack before deleting it. |
 | `CLEANUP_STACK_NAME` | no | `cardinal-cleanup` | |
 | `WAIT_SELF_DELETE` | no | `false` | Set to `true` to block until cleanup stack self-deletes. |
+
+> **`TASK_SG_ID` must not be a `cardinal-lakerunner`-owned SG.** If it is, the cleanup task's ENI keeps the SG alive, and step 1's `delete-stack cardinal-lakerunner` deadlocks waiting for the SG to free. Use a customer-supplied / VPC-level SG that doesn't belong to the install you're tearing down.
 
 ## Jenkins job topology (recommended)
 
