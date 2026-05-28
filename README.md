@@ -93,6 +93,8 @@ for the layered teardown procedure.
   -- what the deployer principal needs
 - [`permissions-lakerunner.md`](docs/operations/permissions-lakerunner.md)
   -- what the running application has access to
+- [`iam-roles.md`](docs/operations/iam-roles.md)
+  -- per-tier IAM role contract (what each container needs and why); test-enforced
 - [`deploying.md`](docs/operations/deploying.md)
   -- using a CloudFormation service role
 - [`tearing-down.md`](docs/operations/tearing-down.md)
