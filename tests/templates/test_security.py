@@ -210,6 +210,21 @@ def test_alb_to_otel_4318(td):
     assert rule["SourceSecurityGroupId"] == {"Ref": "AlbSecurityGroup"}
 
 
+def test_alb_to_otel_health_13133(td):
+    """The OTel target group health-checks on port 13133, not 4318. Without
+    an ALB-SG -> OTel-SG rule on 13133 the ECS task is marked unhealthy by
+    the ALB and the deployment circuit breaker rolls the stack back.
+
+    OTel is the only tier that uses HealthCheckPort != traffic-port, so the
+    other tiers do not need a separate health-port ingress rule (the
+    data-plane rule already covers them)."""
+    rule = td["Resources"]["OtelHealthFromAlb"]["Properties"]
+    assert rule["FromPort"] == 13133
+    assert rule["ToPort"] == 13133
+    assert rule["SourceSecurityGroupId"] == {"Ref": "AlbSecurityGroup"}
+    assert rule["GroupId"] == {"Ref": "OtelSecurityGroup"}
+
+
 def test_self_telemetry_otel_ingress(td):
     """Query / process / control / maestro all reach the otel collector on 4318."""
     for source in ("Query", "Process", "Control", "Maestro"):
