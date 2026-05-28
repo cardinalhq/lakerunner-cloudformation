@@ -65,7 +65,10 @@ def _tags(*, component: str) -> Tags:
 # --------------------------------------------------------------------------
 _ALB_INGRESS = [443, 9443, 4318]
 _QUERY_API_PORT = 8080
-_QUERY_WORKER_PORT = 8081
+# query-worker's gRPC control-stream port. v1.32.0 of the lakerunner image
+# moved the worker port from 8081 to 8082; bumping this also bumps the
+# QueryWorkerFromQuery SG ingress rule below so query-api can connect.
+_QUERY_WORKER_PORT = 8082
 _ADMIN_API_PORT = 9091
 _OTLP_HTTP_PORT = 4318
 _OTEL_HEALTH_PORT = 13133  # otel.py's target group sets HealthCheckPort=13133
