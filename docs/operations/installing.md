@@ -34,3 +34,5 @@ For the broader operational topics:
   for the lakerunner stack (legacy installs).
 - [`end-to-end-test-plan.md`](end-to-end-test-plan.md) -- runtime
   verification checklist.
+- [`remote-ingest.md`](remote-ingest.md) -- adding telemetry from a
+  second AWS account via cross-account remote ingest.
