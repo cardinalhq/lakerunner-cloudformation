@@ -30,6 +30,12 @@ python3 -m cardinal_cfn.cardinal_infrastructure > generated-templates/cardinal-i
 echo "Generating cardinal-cleanup.yaml..."
 python3 -m cardinal_cfn.cardinal_cleanup > generated-templates/cardinal-cleanup.yaml
 
+echo "Generating cardinal-remote-ingest.yaml..."
+python3 -m cardinal_cfn.remote_ingest > generated-templates/cardinal-remote-ingest.yaml
+
+echo "Generating cardinal-remote-collector.yaml..."
+python3 -m cardinal_cfn.remote_collector > generated-templates/cardinal-remote-collector.yaml
+
 # ---------------------------------------------------------------------------
 # Lakerunner stack (root + 9 nested children). The Security child owns all
 # SGs and IAM roles; other children take SG IDs and role ARNs from it
@@ -51,6 +57,8 @@ cfn-lint generated-templates/lrdev-vpc.yaml \
          generated-templates/lrdev-baseinfra.yaml \
          generated-templates/cardinal-infrastructure.yaml \
          generated-templates/cardinal-cleanup.yaml \
+         generated-templates/cardinal-remote-ingest.yaml \
+         generated-templates/cardinal-remote-collector.yaml \
          generated-templates/cardinal-lakerunner.yaml \
          generated-templates/cardinal-lakerunner/*.yaml || \
   echo "cfn-lint completed with warnings"

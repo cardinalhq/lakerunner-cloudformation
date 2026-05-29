@@ -40,6 +40,8 @@ lint:	## Run cfn-lint on every generated template
 	  generated-templates/lrdev-baseinfra.yaml \
 	  generated-templates/cardinal-infrastructure.yaml \
 	  generated-templates/cardinal-cleanup.yaml \
+	  generated-templates/cardinal-remote-ingest.yaml \
+	  generated-templates/cardinal-remote-collector.yaml \
 	  generated-templates/cardinal-lakerunner.yaml \
 	  generated-templates/cardinal-lakerunner/*.yaml
 
