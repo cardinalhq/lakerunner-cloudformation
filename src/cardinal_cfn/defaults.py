@@ -8,6 +8,7 @@ import yaml
 _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 _DEFAULTS_PATH = os.path.join(_REPO_ROOT, "cardinal-defaults.yaml")
 _OTEL_CONFIG_PATH = os.path.join(_REPO_ROOT, "cardinal-otel-config.yaml")
+_REMOTE_OTEL_CONFIG_PATH = os.path.join(_REPO_ROOT, "cardinal-remote-otel-config.yaml")
 
 
 def load_defaults() -> dict:
@@ -35,4 +36,14 @@ def load_otel_default_config() -> str:
     override it via the OtelConfigYaml root parameter.
     """
     with open(_OTEL_CONFIG_PATH, "r") as f:
+        return f.read()
+
+
+def load_remote_otel_default_config() -> str:
+    """Return cardinal-remote-otel-config.yaml as a string.
+
+    Same shape as load_otel_default_config but with role_arn on each awss3
+    exporter so the remote collector assumes the cross-account writer role.
+    """
+    with open(_REMOTE_OTEL_CONFIG_PATH, "r") as f:
         return f.read()

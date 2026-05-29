@@ -1,0 +1,84 @@
+# Remote-account cardinalhq-otel-collector config. Identical to
+# cardinal-otel-config.yaml except each awss3 exporter assumes the
+# cross-account writer role (LRDB_S3_ROLE_ARN) before writing to the
+# main-account ingest bucket. Used by cardinal-remote-collector.yaml.
+#
+# Env-var contract (set by the remote collector stack):
+#   LRDB_S3_BUCKET    - main-account remote-ingest bucket
+#   LRDB_S3_REGION    - bucket region (the main/lakerunner region, NOT the
+#                       remote account's region)
+#   LRDB_S3_ROLE_ARN  - writer role ARN to assume for the cross-account write
+#   ORG               - organization UUID for the s3_prefix path
+#   COLLECTOR         - collector name (defaults to "lakerunner")
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  memory_limiter:
+    limit_mib: 1024
+    check_interval: 1s
+  batch:
+    timeout: 10s
+    send_batch_max_size: 2000
+    send_batch_size: 1000
+
+exporters:
+  awss3/logs:
+    s3uploader:
+      region: ${env:LRDB_S3_REGION}
+      s3_bucket: ${env:LRDB_S3_BUCKET}
+      s3_prefix: otel-raw/${env:ORG}/${env:COLLECTOR}
+      s3_force_path_style: true
+      s3_partition_format: 'year=%Y/month=%m/day=%d/hour=%H/minute=%M'
+      compression: gzip
+    role_arn: ${env:LRDB_S3_ROLE_ARN}
+    marshaler: otlp_proto
+
+  awss3/metrics:
+    s3uploader:
+      region: ${env:LRDB_S3_REGION}
+      s3_bucket: ${env:LRDB_S3_BUCKET}
+      s3_prefix: otel-raw/${env:ORG}/${env:COLLECTOR}
+      s3_force_path_style: true
+      s3_partition_format: 'year=%Y/month=%m/day=%d/hour=%H/minute=%M'
+      compression: gzip
+    role_arn: ${env:LRDB_S3_ROLE_ARN}
+    marshaler: otlp_proto
+
+  awss3/traces:
+    s3uploader:
+      region: ${env:LRDB_S3_REGION}
+      s3_bucket: ${env:LRDB_S3_BUCKET}
+      s3_prefix: otel-raw/${env:ORG}/${env:COLLECTOR}
+      s3_force_path_style: true
+      s3_partition_format: 'year=%Y/month=%m/day=%d/hour=%H/minute=%M'
+      compression: gzip
+    role_arn: ${env:LRDB_S3_ROLE_ARN}
+    marshaler: otlp_proto
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions:
+    - health_check
+  pipelines:
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [awss3/logs]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [awss3/metrics]
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [awss3/traces]
