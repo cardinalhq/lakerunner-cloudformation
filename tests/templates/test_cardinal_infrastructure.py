@@ -459,3 +459,43 @@ def test_no_resource_is_conditional(td):
     """Import mode was the only source of resource-level conditions."""
     for lid, res in td["Resources"].items():
         assert "Condition" not in res, f"{lid} should not be conditional"
+
+
+# ---------------------------------------------------------------------------
+# Cross-account remote ingest support
+# ---------------------------------------------------------------------------
+
+
+def test_queue_policy_allows_remote_ingest_buckets(td):
+    """A second statement lets cardinal-remote-ingest-* buckets in this account
+    notify the queue, without naming each bucket."""
+    qp = next(
+        r for r in td["Resources"].values()
+        if r["Type"] == "AWS::SQS::QueuePolicy"
+    )
+    stmts = qp["Properties"]["PolicyDocument"]["Statement"]
+    arnlikes = [
+        s["Condition"]["ArnLike"]["aws:SourceArn"]
+        for s in stmts
+        if "Condition" in s and "ArnLike" in s["Condition"]
+    ]
+    assert {"Fn::Sub": "arn:${AWS::Partition}:s3:::cardinal-remote-ingest-*"} in arnlikes
+    for s in stmts:
+        assert s["Condition"]["StringEquals"]["aws:SourceAccount"] == {"Ref": "AWS::AccountId"}
+
+
+def test_additional_storage_profiles_parameter(td):
+    assert "AdditionalStorageProfilesYaml" in td["Parameters"]
+    assert td["Parameters"]["AdditionalStorageProfilesYaml"]["Default"] == ""
+
+
+def test_storage_profiles_value_appends_additional(td):
+    ssm_params = [
+        r for r in td["Resources"].values()
+        if r["Type"] == "AWS::SSM::Parameter"
+    ]
+    sp = next(
+        r for r in ssm_params
+        if "use_path_style" in json.dumps(r["Properties"]["Value"])
+    )
+    assert "AdditionalStorageProfilesYaml" in json.dumps(sp["Properties"]["Value"])

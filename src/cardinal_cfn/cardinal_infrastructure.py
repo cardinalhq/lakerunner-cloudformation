@@ -230,6 +230,19 @@ def build() -> Template:
             AllowedPattern=r"^/[A-Za-z0-9._/-]{1,1011}$",
         )
     )
+    additional_storage_profiles = t.add_parameter(
+        Parameter(
+            "AdditionalStorageProfilesYaml",
+            Type="String",
+            Default="",
+            Description=(
+                "Extra storage-profile YAML list items appended after the seeded "
+                "profile (e.g. cardinal-remote-ingest StorageProfileSnippet "
+                "outputs). Leave blank for none. Re-run the migrator after "
+                "changing this so it re-imports into configdb."
+            ),
+        )
+    )
     organization_id = t.add_parameter(
         Parameter(
             "OrganizationId",
@@ -287,6 +300,7 @@ def build() -> Template:
                 "parameters": [
                     "IngestBucketName",
                     "IngestBucketLifecycleDays",
+                    "AdditionalStorageProfilesYaml",
                 ],
             },
             {
@@ -315,6 +329,7 @@ def build() -> Template:
             "DBAllocatedStorage": "Storage (GiB)",
             "IngestBucketName": "Ingest bucket name (blank = default)",
             "IngestBucketLifecycleDays": "Ingest object retention (days)",
+            "AdditionalStorageProfilesYaml": "Additional storage-profile YAML (remote buckets)",
             "LicenseData": "License token (z64:...)",
             "OrganizationId": "Organization UUID",
             "InitialIngestApiKey": "Initial ingest API key (blank = none)",
@@ -381,7 +396,32 @@ def build() -> Template:
                                 )
                             },
                         },
-                    }
+                    },
+                    {
+                        # Cross-account remote ingest: cardinal-remote-ingest
+                        # stacks create same-account buckets (named
+                        # cardinal-remote-ingest-*) that notify this queue. Grant
+                        # by prefix so each new bucket works without editing this
+                        # infra-owned policy. Still gated to this account.
+                        "Effect": "Allow",
+                        "Principal": {"Service": "s3.amazonaws.com"},
+                        "Action": [
+                            "sqs:SendMessage",
+                            "sqs:GetQueueAttributes",
+                            "sqs:GetQueueUrl",
+                        ],
+                        "Resource": GetAtt(ingest_queue, "Arn"),
+                        "Condition": {
+                            "StringEquals": {
+                                "aws:SourceAccount": Ref("AWS::AccountId")
+                            },
+                            "ArnLike": {
+                                "aws:SourceArn": Sub(
+                                    "arn:${AWS::Partition}:s3:::cardinal-remote-ingest-*"
+                                )
+                            },
+                        },
+                    },
                 ],
             },
         )
@@ -584,9 +624,11 @@ def build() -> Template:
                     "  region: ${AWS::Region}\n"
                     "  bucket: ${BucketName}\n"
                     "  insecure_tls: false\n"
-                    "  use_path_style: true\n",
+                    "  use_path_style: true\n"
+                    "${Additional}",
                     OrgId=Ref(organization_id),
                     BucketName=bucket_name_value,
+                    Additional=Ref(additional_storage_profiles),
                 ),
                 Description="Cardinal storage profiles (YAML; operator-managed).",
                 Tags={
