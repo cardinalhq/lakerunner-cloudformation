@@ -45,8 +45,8 @@ def test_license_data_is_no_echo(td):
 
 
 def test_db_engine_version_default_matches_test_account(td):
-    """The script's test deploys land on Postgres 18.3 -- pin same default."""
-    assert td["Parameters"]["DBEngineVersion"]["Default"] == "18.3"
+    """The script's test deploys land on Postgres 18.4 -- pin same default."""
+    assert td["Parameters"]["DBEngineVersion"]["Default"] == "18.4"
 
 
 def test_db_instance_class_default(td):
