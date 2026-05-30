@@ -40,6 +40,7 @@ from troposphere import (
 )
 from troposphere.ecs import (
     AwsvpcConfiguration,
+    CapacityProviderStrategyItem,
     DeploymentCircuitBreaker,
     DeploymentConfiguration,
     Environment,
@@ -375,7 +376,9 @@ def build() -> Template:
         Service(
             "OtelGrpcService",
             Cluster=Ref("ClusterArn"),
-            LaunchType="FARGATE",
+            CapacityProviderStrategy=[
+                CapacityProviderStrategyItem(CapacityProvider="FARGATE_SPOT", Weight=1),
+            ],
             DesiredCount=Ref("OtelReplicas"),
             TaskDefinition=Ref(task_def),
             NetworkConfiguration=NetworkConfiguration(

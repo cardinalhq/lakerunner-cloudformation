@@ -195,7 +195,10 @@ def test_creates_ecs_service(template_dict):
 
 def test_service_runs_one_fargate_task_no_lb(template_dict):
     svc = _service(template_dict)["Properties"]
-    assert svc["LaunchType"] == "FARGATE"
+    assert "LaunchType" not in svc
+    assert svc["CapacityProviderStrategy"] == [
+        {"CapacityProvider": "FARGATE_SPOT", "Weight": 1}
+    ]
     assert svc["DesiredCount"] == 1
     assert svc["TaskDefinition"] == {"Ref": "MigratorTaskDef"}
     assert "LoadBalancers" not in svc

@@ -83,6 +83,28 @@ def test_build_task_definition_accepts_ref_cpu_memory():
     assert rendered["Properties"]["Memory"] == {"Ref": "QueryApiMemory"}
 
 
+def test_build_task_definition_runs_on_arm64():
+    from troposphere import Ref
+    from troposphere.logs import LogGroup
+
+    lg = LogGroup("L", LogGroupName="x")
+    td = services_common.build_task_definition(
+        service_key="query-api",
+        image_ref="image",
+        cpu=1024,
+        memory_mib=2048,
+        execution_role_arn_param="ExecutionRoleArn",
+        task_role_arn=Ref("TaskRoleArn"),
+        environment=[],
+        log_group_ref=lg,
+    )
+    rendered = json.loads(json.dumps(td, default=lambda o: o.to_dict()))
+    assert rendered["Properties"]["RuntimePlatform"] == {
+        "CpuArchitecture": "ARM64",
+        "OperatingSystemFamily": "LINUX",
+    }
+
+
 def test_build_ecs_service_has_circuit_breaker_and_rolling_deploy():
     svc = services_common.build_ecs_service(
         service_key="query-api",
@@ -99,3 +121,21 @@ def test_build_ecs_service_has_circuit_breaker_and_rolling_deploy():
     assert dc.get("MaximumPercent") == 200
     assert dc.get("DeploymentCircuitBreaker", {}).get("Enable") is True
     assert dc.get("DeploymentCircuitBreaker", {}).get("Rollback") is True
+
+
+def test_build_ecs_service_uses_fargate_spot():
+    svc = services_common.build_ecs_service(
+        service_key="query-api",
+        cluster_arn_param="ClusterArn",
+        task_definition_ref="MyTaskDef",
+        desired_count=2,
+        subnets_csv_param="PrivateSubnetsCsv",
+        security_group_id_param="TaskSecurityGroupId",
+        container_name="query-api",
+    )
+    rendered = json.loads(json.dumps(svc, default=lambda o: o.to_dict()))
+    props = rendered["Properties"]
+    assert "LaunchType" not in props
+    assert props["CapacityProviderStrategy"] == [
+        {"CapacityProvider": "FARGATE_SPOT", "Weight": 1}
+    ]

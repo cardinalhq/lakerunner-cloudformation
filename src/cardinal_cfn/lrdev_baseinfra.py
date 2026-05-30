@@ -57,6 +57,10 @@ def build() -> Template:
     cluster = t.add_resource(
         Cluster(
             "EcsCluster",
+            # Associate both Fargate capacity providers so services can run on
+            # FARGATE_SPOT. A customer-supplied cluster must do the same for the
+            # lakerunner services (which request FARGATE_SPOT) to schedule.
+            CapacityProviders=["FARGATE", "FARGATE_SPOT"],
             ClusterSettings=[
                 ClusterSetting(Name="containerInsights", Value="enabled"),
             ],
