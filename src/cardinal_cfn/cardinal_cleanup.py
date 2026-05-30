@@ -22,6 +22,7 @@ from troposphere.ecs import (
     ContainerDefinition,
     Environment,
     LogConfiguration,
+    RuntimePlatform,
     TaskDefinition,
 )
 from troposphere.logs import LogGroup
@@ -99,6 +100,10 @@ def build() -> Template:
         Family="cardinal-cleanup",
         RequiresCompatibilities=["FARGATE"],
         NetworkMode="awsvpc",
+        RuntimePlatform=RuntimePlatform(
+            CpuArchitecture="ARM64",
+            OperatingSystemFamily="LINUX",
+        ),
         Cpu="512",
         Memory="1024",
         TaskRoleArn=Ref(p_task_role),

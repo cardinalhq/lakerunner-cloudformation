@@ -42,6 +42,7 @@ from troposphere.ecs import (
     ContainerDependency,
     Environment,
     LogConfiguration,
+    RuntimePlatform,
     Secret,
     TaskDefinition,
 )
@@ -337,6 +338,10 @@ def build() -> Template:
             Family="cardinal-migrator",
             NetworkMode="awsvpc",
             RequiresCompatibilities=["FARGATE"],
+            RuntimePlatform=RuntimePlatform(
+                CpuArchitecture="ARM64",
+                OperatingSystemFamily="LINUX",
+            ),
             Cpu="256",
             Memory="512",
             ExecutionRoleArn=Ref("ExecutionRoleArn"),

@@ -7,6 +7,7 @@ The caller is responsible for adding it to a template.
 from troposphere import GetAtt, Ref, Split, Sub
 from troposphere.ecs import (
     AwsvpcConfiguration,
+    CapacityProviderStrategyItem,
     ContainerDefinition,
     DeploymentCircuitBreaker,
     DeploymentConfiguration,
@@ -15,6 +16,7 @@ from troposphere.ecs import (
     LogConfiguration,
     NetworkConfiguration,
     PortMapping,
+    RuntimePlatform,
     Service,
     ServiceRegistry,
     TaskDefinition,
@@ -191,6 +193,10 @@ def build_task_definition(
         _resource_title(service_key, "TaskDef"),
         RequiresCompatibilities=["FARGATE"],
         NetworkMode="awsvpc",
+        RuntimePlatform=RuntimePlatform(
+            CpuArchitecture="ARM64",
+            OperatingSystemFamily="LINUX",
+        ),
         Cpu=_coerce_size(cpu),
         Memory=_coerce_size(memory_mib),
         ExecutionRoleArn=Ref(execution_role_arn_param),
@@ -235,7 +241,9 @@ def build_ecs_service(
     """
     kwargs: dict = dict(
         Cluster=Ref(cluster_arn_param),
-        LaunchType="FARGATE",
+        CapacityProviderStrategy=[
+            CapacityProviderStrategyItem(CapacityProvider="FARGATE_SPOT", Weight=1),
+        ],
         DesiredCount=desired_count,
         TaskDefinition=Ref(task_definition_ref),
         NetworkConfiguration=NetworkConfiguration(

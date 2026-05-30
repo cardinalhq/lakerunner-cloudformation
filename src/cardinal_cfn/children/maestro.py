@@ -35,6 +35,7 @@ from troposphere import (
 )
 from troposphere.ecs import (
     AwsvpcConfiguration,
+    CapacityProviderStrategyItem,
     ContainerDefinition,
     DeploymentCircuitBreaker,
     DeploymentConfiguration,
@@ -44,6 +45,7 @@ from troposphere.ecs import (
     MountPoint,
     NetworkConfiguration,
     PortMapping,
+    RuntimePlatform,
     Secret,
     Service,
     TaskDefinition,
@@ -672,6 +674,10 @@ def build() -> Template:
             "MaestroTaskDef",
             RequiresCompatibilities=["FARGATE"],
             NetworkMode="awsvpc",
+            RuntimePlatform=RuntimePlatform(
+                CpuArchitecture="ARM64",
+                OperatingSystemFamily="LINUX",
+            ),
             Cpu=Ref("MaestroTaskCpu"),
             Memory=Ref("MaestroTaskMemory"),
             ExecutionRoleArn=Ref("ExecutionRoleArn"),
@@ -741,7 +747,9 @@ def build() -> Template:
         Service(
             "MaestroService",
             Cluster=Ref("ClusterArn"),
-            LaunchType="FARGATE",
+            CapacityProviderStrategy=[
+                CapacityProviderStrategyItem(CapacityProvider="FARGATE_SPOT", Weight=1),
+            ],
             DesiredCount=1,
             TaskDefinition=Ref(task_def),
             NetworkConfiguration=NetworkConfiguration(
