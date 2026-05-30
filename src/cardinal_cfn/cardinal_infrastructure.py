@@ -135,7 +135,7 @@ def build() -> Template:
         Parameter(
             "DBEngineVersion",
             Type="String",
-            Default="18.3",
+            Default="18.4",
             Description="PostgreSQL engine version for the RDS instance.",
         )
     )
