@@ -50,7 +50,7 @@ def test_db_engine_version_default_matches_test_account(td):
 
 
 def test_db_instance_class_default(td):
-    assert td["Parameters"]["DBInstanceClass"]["Default"] == "db.t3.medium"
+    assert td["Parameters"]["DBInstanceClass"]["Default"] == "db.r7g.large"
 
 
 def test_db_allocated_storage_default(td):

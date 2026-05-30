@@ -57,7 +57,7 @@ Optional sizing knobs:
 | Parameter | Default | Notes |
 |---|---|---|
 | `DBEngineVersion` | `18.3` | PostgreSQL engine version. |
-| `DBInstanceClass` | `db.t3.medium` | RDS instance class. |
+| `DBInstanceClass` | `db.r7g.large` | RDS instance class. |
 | `DBAllocatedStorage` | `100` | RDS GiB. |
 | `IngestBucketLifecycleDays` | `7` | Ingest object expiry. |
 
