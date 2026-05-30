@@ -143,7 +143,7 @@ def build() -> Template:
         Parameter(
             "DBInstanceClass",
             Type="String",
-            Default="db.t3.medium",
+            Default="db.r7g.large",
             Description="RDS instance class.",
         )
     )

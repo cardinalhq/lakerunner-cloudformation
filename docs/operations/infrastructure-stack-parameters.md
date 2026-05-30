@@ -76,7 +76,7 @@ other than the defaults:
 | Parameter | Default |
 |---|---|
 | `DBEngineVersion` | `18.3` |
-| `DBInstanceClass` | `db.t3.medium` |
+| `DBInstanceClass` | `db.r7g.large` |
 | `DBAllocatedStorage` | `100` |
 | `IngestBucketLifecycleDays` | `7` |
 
