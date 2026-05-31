@@ -46,6 +46,26 @@ an app-like team can own and update them on independent cadences.
 
 ## Key decisions
 
+### Pull model (load-bearing invariant)
+
+The only cross-account data path is **lakerunner pulling from a satellite by
+assuming that satellite's role** and consuming its own SQS / reading-and-deleting
+its own S3. Nothing pushes the other way:
+
+- A satellite bucket **must not** publish notifications to a central queue in the
+  lakerunner account, or to any other account. Its S3→SQS notification targets only
+  its own in-account, in-region queue.
+- A satellite **must not** make any outbound call to the lakerunner account or to
+  another satellite. Its only reference to the lakerunner account is the passive
+  trust-policy grant on the role it creates.
+- Lakerunner contacts a satellite only via the assumed per-account role, scoped to
+  one account at a time.
+
+This keeps every account isolated and makes the trust direction one-way
+(lakerunner → satellite, pull). The rejected "central queue receiving cross-account
+S3 notifications" is a push model and is out of bounds for this reason, independent
+of the multi-queue capability that already makes it unnecessary.
+
 ### Uniform account adoption
 
 The lakerunner account is not a special data source. If it emits telemetry it runs
