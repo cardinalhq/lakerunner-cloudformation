@@ -46,7 +46,7 @@ customer-provided input or the explicit product of one owned stack.
 | `lakerunner-infra-rds` | DBA / infra | RDS (or adopt an existing cluster) + the SG and ingress rules it wants (ingress from base's task SGs) + db-master secret | RDS **Snapshot**; an adopted existing cluster is untouched |
 | `lakerunner-services` | lakerunner app team | ALB + listeners, ECS services / task defs / target groups / listener rules / log groups, Cloud Map namespace, migration service. **Creates no roles, SGs, RDS, or buckets** — references them by ARN/name | all **Delete** |
 | `satellite-infra-base` | source-account infra | otel-raw bucket (ephemeral) + lifecycle, SQS queue, S3→SQS notification (all in-account/in-region), per-account assume-role | everything **Delete** (raw bucket is ephemeral) |
-| `satellite-services` | source-account app | otel-collector (ECS) writing into the raw bucket via an in-account path | **Delete** |
+| `satellite-services` | source-account app | otel-collector (ECS) writing into the raw bucket via an in-account path, plus a private DNS namespace + collector service-discovery record so in-account components can reach it | **Delete** |
 
 ### Naming
 
@@ -159,6 +159,24 @@ stack edit on every adoption) or use a name-convention account-wildcard policy.
 AssumeRole avoids both: the lakerunner side stays static and the satellite side stays
 explicit.
 
+### Service discovery (Cloud Map)
+
+Both `-services` stacks own a Cloud Map **private DNS namespace** (name is a
+parameter, default `cardinal.internal`; a different account/VPC/hosted zone in each,
+so no collision):
+
+- `lakerunner-services` — the app tiers discover each other through it
+  (query-worker ↔ query-api, etc.).
+- `satellite-services` — registers the collector as `otel-collector.cardinal.internal`
+  so other in-account components can reach OTLP `:4317`/`:4318`. This is the one place
+  in a satellite something connects *to* a Cardinal component; it is in-account and
+  does not cross the account boundary, so it does not affect the pull model.
+
+A private DNS namespace is a Route 53 private hosted zone (~$0.50/month + query
+charges) and is deleted with its `-services` stack. Cloud Map DNS round-robins across
+replicas rather than health-aware load balancing; an internal NLB is the documented
+upgrade if a satellite ever needs real connection balancing for the collector.
+
 ### Cooked centralized, raw deletable
 
 Satellite buckets are otel-raw-only. Cooked data is written to the lakerunner
@@ -207,6 +225,8 @@ complexity.
 ## Open items to pin in the plan
 
 - Internal app-tier nesting stays inside `lakerunner-services` (assumed; confirm).
-- Cloud Map namespace ownership (services vs. customer-supplied input vs. base).
 - Secret placement: db-master with `-rds`; license/admin with `-base` (both
   externally referenced, so `Retain`).
+
+(Resolved: Cloud Map namespaces are owned by each `-services` stack, name
+parameterized, default `cardinal.internal` — see Service discovery above.)
