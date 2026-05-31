@@ -173,9 +173,15 @@ so no collision):
   does not cross the account boundary, so it does not affect the pull model.
 
 A private DNS namespace is a Route 53 private hosted zone (~$0.50/month + query
-charges) and is deleted with its `-services` stack. Cloud Map DNS round-robins across
-replicas rather than health-aware load balancing; an internal NLB is the documented
-upgrade if a satellite ever needs real connection balancing for the collector.
+charges) and is deleted with its `-services` stack. We deliberately use plain Cloud
+Map service-discovery DNS rather than a load balancer in front of the collector:
+customer-managed apps need a *predictable* name, and a bare DNS record avoids LB
+target-registration and connection-draining delays on every task replacement — so
+restarts, image updates, and Fargate Spot recycles recover faster. The trade-off is
+that DNS round-robins across replicas (no health-aware balancing) and a single-task
+collector has a brief no-endpoint window during a recycle; OTLP senders retry/buffer,
+and running two collector replicas removes the gap. An internal NLB remains the
+documented upgrade if a satellite ever needs real connection balancing.
 
 ### Cooked centralized, raw deletable
 
