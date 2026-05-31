@@ -45,8 +45,28 @@ customer-provided input or the explicit product of one owned stack.
 | `lakerunner-infra-base` | IT / security | task SGs, ALB SG, ECS execution role + per-tier task roles, the poller's `sts:AssumeRole` grant, and the **cooked-only write bucket** (no SQS, never a notification source) | roles/SGs **Delete**; cooked bucket **Retain** |
 | `lakerunner-infra-rds` | DBA / infra | RDS (or adopt an existing cluster) + the SG and ingress rules it wants (ingress from base's task SGs) + db-master secret | RDS **Snapshot**; an adopted existing cluster is untouched |
 | `lakerunner-services` | lakerunner app team | ALB + listeners, ECS services / task defs / target groups / listener rules / log groups, Cloud Map namespace, migration service. **Creates no roles, SGs, RDS, or buckets** — references them by ARN/name | all **Delete** |
-| `satellite-infra` | source-account infra | otel-raw bucket (ephemeral) + lifecycle, SQS queue, S3→SQS notification (all in-account/in-region), per-account assume-role | everything **Delete** (raw bucket is ephemeral) |
-| `satellite-collector` | source-account app | otel-collector (ECS) writing into the raw bucket via an in-account path | **Delete** |
+| `satellite-infra-base` | source-account infra | otel-raw bucket (ephemeral) + lifecycle, SQS queue, S3→SQS notification (all in-account/in-region), per-account assume-role | everything **Delete** (raw bucket is ephemeral) |
+| `satellite-services` | source-account app | otel-collector (ECS) writing into the raw bucket via an in-account path | **Delete** |
+
+### Naming
+
+Top-level stack names are `cardinal-` prefixed and share a common suffix grammar
+across both account types (`-infra-base` = roles/SGs/buckets, `-infra-rds` =
+database, `-services` = app tier; a satellite has no `-rds`):
+
+- lakerunner account: `cardinal-lakerunner-infra-base`,
+  `cardinal-lakerunner-infra-rds`, `cardinal-lakerunner-services`
+- satellite account: `cardinal-satellite-infra-base`, `cardinal-satellite-services`
+
+CloudFormation stack names allow 128 characters; these (~30) are well within limits.
+
+Nested children cannot have their physical names set — CloudFormation generates
+`<parent>-<LogicalId>-<random>` for any `AWS::CloudFormation::Stack`. We control the
+middle segment via clean logical IDs (`Alb`, `Migration`, `ServicesQuery`, ...), so a
+child reads as `cardinal-lakerunner-services-Alb-AB12CD`; the random suffix is
+unavoidable. Resources *within* stacks keep the existing convention — CFN-generated
+physical names plus a `Name` tag, `cardinal-` prefix (`chq-` only where an AWS
+length cap forces it).
 
 ### Team isolation (the load-bearing rule)
 
@@ -177,9 +197,9 @@ complexity.
 - **`lakerunner-services`** (the current `root.py`) keeps its internal app-tier
   nesting but creates no roles/SGs/RDS/buckets; it is fully parameter-driven and
   driver-wired to `base` and `rds` outputs.
-- **New**: `satellite-infra` generator (raw bucket + SQS + S3→SQS notification +
+- **New**: `satellite-infra-base` generator (raw bucket + SQS + S3→SQS notification +
   per-account assume-role).
-- **New**: `satellite-collector` generator (otel-collector ECS, in-account write
+- **New**: `satellite-services` generator (otel-collector ECS, in-account write
   path).
 - **VPC/subnets** become inputs to base/rds/services; no `cardinal-*` stack creates a
   VPC.
