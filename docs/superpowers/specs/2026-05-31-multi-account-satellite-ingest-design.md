@@ -183,6 +183,28 @@ collector has a brief no-endpoint window during a recycle; OTLP senders retry/bu
 and running two collector replicas removes the gap. An internal NLB remains the
 documented upgrade if a satellite ever needs real connection balancing.
 
+### ALB surface = maestro only; the APIs are DNS-only
+
+The embedded lakerunner UI is being retired — **maestro is the one and only UI** — so
+the only browser-facing surfaces in `lakerunner-services` are maestro's UI and its
+bundled DEX OIDC (ALB listener rules, priorities 200/210). Everything else is in-VPC
+Cloud Map DNS:
+
+- `query-api` and `admin-api` are **DNS-only**. They already register Cloud Map
+  ServiceDiscovery records (maestro reaches them at `query-api.cardinal.internal:8080`
+  / `admin-api.cardinal.internal:9091`); they get **no ALB target group or listener
+  rule**. Consumers are server-to-server inside the VPC (maestro, and an in-VPC — or
+  zone-associated — Grafana datasource backend). A browser never talks to either
+  directly.
+- The dedicated **admin-api `9443` listener is removed**; it existed only to serve the
+  deprecated embedded admin UI. Admin is driven through maestro.
+- Listener priorities **100 (query-api) and 110 (admin-api) are freed**. Dropping
+  query-api from the ALB also removes its two-slot workaround (its routes exceed the
+  5-path-pattern ALB limit) — moot once it is DNS-only.
+
+Net effect: the ALB carries only maestro's browser traffic; query and admin paths are
+in-VPC DNS, consistent with the spot-friendly, no-drain rationale above.
+
 ### Cooked centralized, raw deletable
 
 Satellite buckets are otel-raw-only. Cooked data is written to the lakerunner
@@ -233,6 +255,9 @@ complexity.
 - Internal app-tier nesting stays inside `lakerunner-services` (assumed; confirm).
 - Secret placement: db-master with `-rds`; license/admin with `-base` (both
   externally referenced, so `Retain`).
+- Revisit the `otel-grpc` ALB rule (priority 300): under the uniform model the
+  lakerunner account's own collector is satellite-style (DNS-reachable), so its ALB
+  exposure may also be droppable — confirm before the plan.
 
 (Resolved: Cloud Map namespaces are owned by each `-services` stack, name
 parameterized, default `cardinal.internal` — see Service discovery above.)
