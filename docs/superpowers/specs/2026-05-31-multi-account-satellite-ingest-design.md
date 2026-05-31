@@ -46,7 +46,7 @@ customer-provided input or the explicit product of one owned stack.
 | `lakerunner-infra-rds` | DBA / infra | RDS (or adopt an existing cluster) + the SG and ingress rules it wants (ingress from base's task SGs) + db-master secret | RDS **Snapshot**; an adopted existing cluster is untouched |
 | `lakerunner-services` | lakerunner app team | ALB + listeners, ECS services / task defs / target groups / listener rules / log groups, Cloud Map namespace, migration service. **Creates no roles, SGs, RDS, or buckets** — references them by ARN/name | all **Delete** |
 | `satellite-infra-base` | source-account infra | otel-raw bucket (ephemeral) + lifecycle, SQS queue, S3→SQS notification (all in-account/in-region), per-account assume-role | everything **Delete** (raw bucket is ephemeral) |
-| `satellite-services` | source-account app | otel-collector (ECS) writing into the raw bucket via an in-account path, plus a private DNS namespace + collector service-discovery record so in-account components can reach it | **Delete** |
+| `satellite-services` | source-account app | otel-collector (ECS) behind an **ALB** (stable, cross-region ingest endpoint) writing into the raw bucket | **Delete** |
 
 ### Naming
 
@@ -159,29 +159,35 @@ stack edit on every adoption) or use a name-convention account-wildcard policy.
 AssumeRole avoids both: the lakerunner side stays static and the satellite side stays
 explicit.
 
-### Service discovery (Cloud Map)
+### Service discovery and ingest endpoints
 
-Both `-services` stacks own a Cloud Map **private DNS namespace** (name is a
-parameter, default `cardinal.internal`; a different account/VPC/hosted zone in each,
-so no collision):
+Two different needs, two different mechanisms:
 
-- `lakerunner-services` — the app tiers discover each other through it
-  (query-worker ↔ query-api, etc.).
-- `satellite-services` — registers the collector as `otel-collector.cardinal.internal`
-  so other in-account components can reach OTLP `:4317`/`:4318`. This is the one place
-  in a satellite something connects *to* a Cardinal component; it is in-account and
-  does not cross the account boundary, so it does not affect the pull model.
+**Internal service-to-service → Cloud Map DNS (no load balancer).** Only
+`lakerunner-services` owns a Cloud Map **private DNS namespace** (name is a parameter,
+default `cardinal.internal`). The app tiers discover each other through it
+(query-worker ↔ query-api, etc.), and maestro reaches the now-DNS-only APIs at
+`query-api.cardinal.internal:8080` / `admin-api.cardinal.internal:9091`. We use plain
+DNS rather than a load balancer for these internal hops because a bare record avoids
+LB target-registration and connection-draining delays on every task replacement — so
+restarts, image bumps, and Fargate Spot recycles recover faster. ~$0.50/month for the
+private hosted zone, deleted with the stack.
 
-A private DNS namespace is a Route 53 private hosted zone (~$0.50/month + query
-charges) and is deleted with its `-services` stack. We deliberately use plain Cloud
-Map service-discovery DNS rather than a load balancer in front of the collector:
-customer-managed apps need a *predictable* name, and a bare DNS record avoids LB
-target-registration and connection-draining delays on every task replacement — so
-restarts, image updates, and Fargate Spot recycles recover faster. The trade-off is
-that DNS round-robins across replicas (no health-aware balancing) and a single-task
-collector has a brief no-endpoint window during a recycle; OTLP senders retry/buffer,
-and running two collector replicas removes the gap. An internal NLB remains the
-documented upgrade if a satellite ever needs real connection balancing.
+**Collector ingest → ALB (cross-region front door).** `satellite-services` puts the
+collector **behind an ALB** rather than a DNS name, because sources in multiple
+regions send to the same collector and the collector is the natural place to let
+traffic cross regions. The ALB's own hostname is the stable endpoint, so the satellite
+needs **no Cloud Map namespace at all**. An ALB also gives health-aware balancing and
+graceful draining, which suits a front door receiving from many senders. The
+lakerunner-account collector (its own telemetry, satellite-style) follows the same
+ALB-fronted pattern.
+
+Collector-ALB sub-decisions to pin in the plan: scheme (internet-facing with
+auth/TLS for cross-region/cross-account senders, vs. internal reachable via
+TGW/peering); ALB gRPC (HTTP/2) target group for OTLP `:4317` plus OTLP/HTTP `:4318`
+(NLB is the L4/static-IP alternative); TLS via the existing `cert.yaml` machinery;
+and authentication on the ingest endpoint, which is required once it is reachable
+across regions/accounts.
 
 ### ALB surface = maestro only; the APIs are DNS-only
 
@@ -255,9 +261,11 @@ complexity.
 - Internal app-tier nesting stays inside `lakerunner-services` (assumed; confirm).
 - Secret placement: db-master with `-rds`; license/admin with `-base` (both
   externally referenced, so `Retain`).
-- Revisit the `otel-grpc` ALB rule (priority 300): under the uniform model the
-  lakerunner account's own collector is satellite-style (DNS-reachable), so its ALB
-  exposure may also be droppable — confirm before the plan.
+- Collector-ALB scheme + auth: internet-facing (auth/TLS) vs internal
+  (TGW/peering), and the authentication mechanism on the ingest endpoint — see
+  Service discovery and ingest endpoints.
 
-(Resolved: Cloud Map namespaces are owned by each `-services` stack, name
-parameterized, default `cardinal.internal` — see Service discovery above.)
+(Resolved: only `lakerunner-services` owns a Cloud Map namespace, for internal
+service-to-service discovery; the collector — satellite and lakerunner-account —
+is ALB-fronted for cross-region ingest, no namespace. The `otel-grpc` shared-ALB
+listener rule is superseded by the collector's own ALB.)
