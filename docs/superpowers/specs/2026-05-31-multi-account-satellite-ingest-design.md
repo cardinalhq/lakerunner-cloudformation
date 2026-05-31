@@ -33,16 +33,57 @@ introduces:
 
 ## Architecture
 
-Three deployment units with distinct team ownership:
+The system normalizes to a set of **self-contained, top-level stacks**, each owned
+by a distinct team, each with defined inputs and defined outputs. Nothing the system
+needs is implicit: a VPC, subnets, SGs, roles, RDS, buckets, and queues are either a
+customer-provided input or the explicit product of one owned stack.
 
-| Unit | Owner | Creates |
-|---|---|---|
-| **Lakerunner setup** | platform team, once | RDS, roles, security groups, secrets, DB/SSM seed, the **cooked-only instance bucket** (no SQS, never a notification source), and the application service stacks. No collector. No ingest bucket or ingest SQS. |
-| **Satellite infra stack** (new) | source-account infra team, per account | otel-raw S3 bucket + lifecycle, SQS queue, S3→SQS notification (all in-account / in-region), and a **per-account IAM role** the lakerunner poller assumes — scoped to exactly that bucket (S3 read/delete) and that queue (SQS consume), trusting the lakerunner principal. |
-| **Satellite collector stack** (new) | source-account app team, per account | the otel-collector (ECS) writing into the raw bucket via an in-account path. |
+### Stacks
 
-The infra and collector stacks are deliberately separate so an infra-like team and
-an app-like team can own and update them on independent cadences.
+| Stack | Team | Creates | On delete |
+|---|---|---|---|
+| `lakerunner-infra-base` | IT / security | task SGs, ALB SG, ECS execution role + per-tier task roles, the poller's `sts:AssumeRole` grant, and the **cooked-only write bucket** (no SQS, never a notification source) | roles/SGs **Delete**; cooked bucket **Retain** |
+| `lakerunner-infra-rds` | DBA / infra | RDS (or adopt an existing cluster) + the SG and ingress rules it wants (ingress from base's task SGs) + db-master secret | RDS **Snapshot**; an adopted existing cluster is untouched |
+| `lakerunner-services` | lakerunner app team | ALB + listeners, ECS services / task defs / target groups / listener rules / log groups, Cloud Map namespace, migration service. **Creates no roles, SGs, RDS, or buckets** — references them by ARN/name | all **Delete** |
+| `satellite-infra` | source-account infra | otel-raw bucket (ephemeral) + lifecycle, SQS queue, S3→SQS notification (all in-account/in-region), per-account assume-role | everything **Delete** (raw bucket is ephemeral) |
+| `satellite-collector` | source-account app | otel-collector (ECS) writing into the raw bucket via an in-account path | **Delete** |
+
+### Team isolation (the load-bearing rule)
+
+Stacks are split along *who is allowed to change what*, not along technical layers:
+
+- `lakerunner-services` creates **no IAM roles, no security groups, no RDS, no
+  buckets**. It consumes them as ARN/name parameters. The app team can freely update
+  an ECS service, task definition, or listener rule; they cannot mint or alter an IAM
+  role.
+- Roles and SGs live in `lakerunner-infra-base`, owned by IT/security. Changing or
+  adding a role is an IT action run against `base`, in coordination/isolation —
+  additive role changes never require touching the running services stack.
+- RDS is its own stack because the customer may bring an existing cluster, and DB
+  ownership is a separate concern; it configures the SGs/ingress it wants rather than
+  having another stack reach into its SG.
+
+### Wiring (driver, not cross-stack references)
+
+Each top-level stack is independently deployable with explicit inputs/outputs. The
+Jenkins driver reads one stack's outputs and passes them as parameters to the next —
+there are **no `Fn::ImportValue` or cross-stack `GetAtt` references between top-level
+stacks**. Deploy order in the lakerunner account is `base → rds → services`
+(`rds` and `services` consume `base` outputs; `services` also consumes `rds`
+outputs). Satellite stacks deploy independently in their own accounts.
+
+Inside `lakerunner-services`, the existing app-tier children (alb, migration,
+services-query/process/control, otel, maestro) remain nested under the services root
+and wire to each other via `GetAtt` — they are one deployable unit owned by one team.
+Only the `base / rds / services / satellite-*` boundaries are driver-wired.
+
+### VPC
+
+A VPC and subnets are a **customer-provided input**, threaded as parameters into the
+stacks that need them (base for SG placement, rds for the subnet group, services for
+ECS networking). No `cardinal-*` stack creates a VPC. `lrdev-vpc` remains a standalone
+helper — a test-env simulation of a customer VPC, or a true from-scratch build for
+customers who want one — and is never part of the `base → rds → services` chain.
 
 ## Key decisions
 
@@ -122,13 +163,30 @@ complexity.
 
 ## What changes in the generators
 
-Additive, plus one relocation:
+- **Promote `Security` out of the services root.** Today `root.py` nests the
+  `Security` child, which mints the ECS execution role, the per-tier task roles, the
+  ALB SG, and the task SGs. These move into a standalone `lakerunner-infra-base` stack
+  (IT-owned). `lakerunner-services` gains parameters for every role ARN and SG id it
+  currently resolves via `GetAtt security_stack.Outputs.*`. The base stack also adds
+  the poller's `sts:AssumeRole` grant and owns the cooked-only write bucket.
+- **Split infra into `-base` and `-rds`.** RDS, its SG, the RDS ingress rules (now
+  fed base's task-SG ids as input), and the db-master secret live in
+  `lakerunner-infra-rds`. The current `cardinal_infrastructure.py` no longer owns the
+  ingest bucket / ingest SQS / S3→SQS notification at all — those move to
+  `satellite-infra`.
+- **`lakerunner-services`** (the current `root.py`) keeps its internal app-tier
+  nesting but creates no roles/SGs/RDS/buckets; it is fully parameter-driven and
+  driver-wired to `base` and `rds` outputs.
+- **New**: `satellite-infra` generator (raw bucket + SQS + S3→SQS notification +
+  per-account assume-role).
+- **New**: `satellite-collector` generator (otel-collector ECS, in-account write
+  path).
+- **VPC/subnets** become inputs to base/rds/services; no `cardinal-*` stack creates a
+  VPC.
 
-- **New**: satellite infra stack generator (bucket + SQS + S3→SQS notification +
-  assume-role).
-- **New**: satellite collector stack generator (otel-collector ECS, in-account
-  write path).
-- **Lakerunner setup**: owns a cooked-only instance bucket and does **not** own the
-  ingest bucket / ingest SQS / S3→SQS notification (those now live in the satellite
-  infra stack). The lakerunner poller role gains `sts:AssumeRole`; it loses any direct
-  ingest-bucket/queue grants.
+## Open items to pin in the plan
+
+- Internal app-tier nesting stays inside `lakerunner-services` (assumed; confirm).
+- Cloud Map namespace ownership (services vs. customer-supplied input vs. base).
+- Secret placement: db-master with `-rds`; license/admin with `-base` (both
+  externally referenced, so `Retain`).
