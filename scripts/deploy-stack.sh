@@ -7,14 +7,33 @@
 # Self-contained: depends only on a POSIX shell, the AWS CLI v2, and jq.  Does
 # not depend on the cardinal_cfn Python package.
 #
+# Pure environment-variable interface (no flags).  Inputs:
+#
+#   Required:
+#     STACK_NAME     Stack to create or upgrade.
+#     TEMPLATE_URL   S3 URL of the generated template.
+#     REGION         AWS region (never defaulted -- a wrong region is hard to
+#                    undo, so it must be set explicitly).
+#
+#   Optional:
+#     FROM_STACKS        Space-separated upstream stack names.  An Output whose
+#                        key equals a target parameter name supplies it.
+#     PARAMS             Newline-separated Key=Value parameter overrides
+#                        (highest precedence).  Newline-separated, not
+#                        semicolon-separated, because some values (e.g.
+#                        PubsubSqsEnv) contain semicolons.
+#     MAPS               Newline-separated TargetParam=SourceOutputKey entries.
+#     DEPLOYER_ROLE_ARN  Passed via --role-arn to create-change-set.
+#     NO_EXECUTE         Non-empty: create and describe the change set, then stop.
+#
 # Mode is auto-detected from describe-stacks: missing stack -> CREATE,
 # existing stack -> UPDATE.
 #
 # Per-parameter resolution precedence (from the target template's
 # get-template-summary Parameters list):
-#   1. --param Key=Value          explicit override (highest precedence)
-#   2. --map TargetParam=SrcKey   value of an upstream Output named SrcKey
-#   3. --from-stack output        an upstream Output whose key == the param name
+#   1. PARAMS Key=Value           explicit override (highest precedence)
+#   2. MAPS TargetParam=SrcKey    value of an upstream Output named SrcKey
+#   3. FROM_STACKS output         an upstream Output whose key == the param name
 #   4. UPDATE only: UsePreviousValue:true (carry the current stack value)
 #   5. the template's Default
 #   6. otherwise FAIL, listing the unresolved required parameters
@@ -26,20 +45,34 @@ set -eu
 
 CHANGE_SET_PREFIX="cardinal-deploy-"
 
-stack_name=""
-template_url=""
-region=""
-deployer_role_arn=""
-no_execute="false"
+stack_name="${STACK_NAME:-}"
+template_url="${TEMPLATE_URL:-}"
+region="${REGION:-}"
+deployer_role_arn="${DEPLOYER_ROLE_ARN:-}"
+no_execute=""
+[ -n "${NO_EXECUTE:-}" ] && no_execute="true"
 
 # Repeatable collections, stored newline-delimited in shell variables.
 from_stacks=""      # one stack name per line
 param_overrides=""  # one Key=Value per line
+file_params=""      # one ParamName=/path/to/file per line
 maps=""             # one TargetParam=SourceOutputKey per line
 
-# Internal test hook: resolve parameters from local JSON fixtures and print the
-# resolved list, without touching AWS.
-internal_resolve=""
+# FROM_STACKS is space-separated on input; normalize to one stack name per line.
+if [ -n "${FROM_STACKS:-}" ]; then
+    for sname in $FROM_STACKS; do
+        from_stacks="${from_stacks}${sname}
+"
+    done
+fi
+# PARAMS, FILE_PARAMS, and MAPS are already newline-separated on input.
+[ -n "${PARAMS:-}" ] && param_overrides="$PARAMS"
+[ -n "${FILE_PARAMS:-}" ] && file_params="$FILE_PARAMS"
+[ -n "${MAPS:-}" ] && maps="$MAPS"
+
+# Internal test hook state: resolve parameters from local JSON fixtures and
+# print the resolved list, without touching AWS.  Engaged only via the
+# positional --internal-resolve-params hook in main(); not an env-var input.
 internal_resolve_summary=""
 internal_resolve_upstream=""
 internal_resolve_current=""
@@ -50,22 +83,28 @@ work_dir=""
 
 usage() {
     cat <<'EOF'
-Usage: deploy-stack.sh --stack-name NAME --template-url URL --region REGION [options]
+deploy-stack.sh -- generic chained CloudFormation deploy driver.
+
+All inputs come from environment variables (no flags).
 
 Required:
-  --stack-name NAME           Stack to create or upgrade.
-  --template-url URL          S3 URL of the generated template.
-  --region    REGION          AWS region.
-
-Chaining (all repeatable):
-  --from-stack NAME           Pull Outputs from NAME; an Output whose key equals
-                              a target parameter name supplies that parameter.
-  --param Key=Value           Explicit parameter override (highest precedence).
-  --map TargetParam=SrcKey    Assign TargetParam from upstream Output SrcKey.
+  STACK_NAME      Stack to create or upgrade.
+  TEMPLATE_URL    S3 URL of the generated template.
+  REGION          AWS region (never defaulted; must be set explicitly).
 
 Optional:
-  --deployer-role-arn ARN     Pass via --role-arn to create-change-set.
-  --no-execute                Create and describe the change set, then stop.
+  FROM_STACKS         Space-separated upstream stack names; an Output whose key
+                      equals a target parameter name supplies that parameter.
+  PARAMS              Newline-separated Key=Value parameter overrides (highest
+                      precedence).  Newline- (not semicolon-) separated so that
+                      values containing semicolons are safe.
+  FILE_PARAMS         Newline-separated ParamName=/path/to/file entries.  Each
+                      file's full content (multi-line/PEM safe) becomes that
+                      parameter's value.  Same explicit-override tier as PARAMS;
+                      if both set the same parameter, PARAMS wins.
+  MAPS                Newline-separated TargetParam=SourceOutputKey entries.
+  DEPLOYER_ROLE_ARN   Passed via --role-arn to create-change-set.
+  NO_EXECUTE          Non-empty: create and describe the change set, then stop.
 
 Exit codes:
   0  success or no-op
@@ -89,8 +128,8 @@ fail() {
 # Pure parameter resolver.  Reads three JSON files:
 #   summary_file  : the target template's get-template-summary Parameters array
 #   upstream_file : a JSON object {ParamName: Value} of all candidate upstream
-#                   values (from --from-stack outputs, --map'd outputs, and
-#                   --param overrides), already merged in precedence order by
+#                   values (from FROM_STACKS outputs, MAPS'd outputs, and
+#                   PARAMS overrides), already merged in precedence order by
 #                   the caller (later wins).  An object key present here is a
 #                   resolved value.
 #   current_file  : the current stack's Parameters array (UPDATE) or [] (CREATE)
@@ -145,7 +184,7 @@ resolve_params() {
 
     missing=$(printf '%s' "$resolved" | jq -r '[.[] | select(._missing == true) | .ParameterKey] | join(", ")')
     if [ -n "$missing" ]; then
-        fail 2 "no value (override, --map, upstream output, current value, or default) for required parameter(s): $missing"
+        fail 2 "no value (override, MAPS, upstream output, current value, or default) for required parameter(s): $missing"
     fi
 
     printf '%s\n' "$resolved" | jq '.'
@@ -220,41 +259,17 @@ cleanup() {
     exit "$rc"
 }
 
-parse_args() {
-    while [ $# -gt 0 ]; do
-        case "$1" in
-            --stack-name) stack_name="$2"; shift 2 ;;
-            --template-url) template_url="$2"; shift 2 ;;
-            --region) region="$2"; shift 2 ;;
-            --from-stack) from_stacks="${from_stacks}$2
-"; shift 2 ;;
-            --param) param_overrides="${param_overrides}$2
-"; shift 2 ;;
-            --map) maps="${maps}$2
-"; shift 2 ;;
-            --deployer-role-arn) deployer_role_arn="$2"; shift 2 ;;
-            --no-execute) no_execute="true"; shift ;;
-            --internal-resolve-params)
-                internal_resolve="true"
-                internal_resolve_summary="$2"
-                internal_resolve_upstream="$3"
-                internal_resolve_current="$4"
-                shift 4
-                ;;
-            -h|--help) usage; exit 0 ;;
-            *) fail 2 "unknown argument: $1" ;;
-        esac
-    done
-}
-
 # Build the merged upstream-values JSON object into "$1", in precedence order
-# (lowest first so later assignments win):  --from-stack -> --map -> --param.
+# (lowest first so later assignments win):
+#   FROM_STACKS -> MAPS -> FILE_PARAMS -> PARAMS.
+# FILE_PARAMS and PARAMS share the explicit-override tier; PARAMS is applied
+# last so a literal PARAMS value wins over a FILE_PARAMS file for the same key.
 build_upstream_values() {
     out_file="$1"
 
     merged='{}'
 
-    # 3. --from-stack: every Output keyed by its OutputKey.
+    # 3. FROM_STACKS: every Output keyed by its OutputKey.
     if [ -n "$from_stacks" ]; then
         printf '%s' "$from_stacks" | while IFS= read -r sname; do
             [ -n "$sname" ] || continue
@@ -282,15 +297,15 @@ build_upstream_values() {
         rm -f "$out_file.fromstacks"
     fi
 
-    # 2. --map TargetParam=SourceOutputKey: resolve SourceOutputKey from the
+    # 2. MAPS TargetParam=SourceOutputKey: resolve SourceOutputKey from the
     #    already-merged from-stack outputs.
     if [ -n "$maps" ]; then
-        printf '%s' "$maps" | while IFS= read -r entry; do
+        printf '%s\n' "$maps" | while IFS= read -r entry; do
             [ -n "$entry" ] || continue
             tgt=${entry%%=*}
             src=${entry#*=}
             if [ "$tgt" = "$entry" ] || [ -z "$tgt" ] || [ -z "$src" ]; then
-                fail 2 "--map expects TargetParam=SourceOutputKey, got: $entry"
+                fail 2 "MAPS expects TargetParam=SourceOutputKey, got: $entry"
             fi
             printf '%s\t%s\n' "$tgt" "$src"
         done >"$out_file.maps"
@@ -300,21 +315,48 @@ build_upstream_values() {
                 | reduce $pairs[] as $p ($m;
                     ($p[1]) as $src
                     | if ($m | has($src)) then . + {($p[0]): $m[$src]}
-                      else error("--map source output not found upstream: " + $src + " (for " + $p[0] + ")")
+                      else error("MAPS source output not found upstream: " + $src + " (for " + $p[0] + ")")
                       end)
             '
-        ) || fail 2 "failed resolving --map entries (see message above)"
+        ) || fail 2 "failed resolving MAPS entries (see message above)"
         rm -f "$out_file.maps"
     fi
 
-    # 1. --param Key=Value: highest precedence.
+    # 1b. FILE_PARAMS ParamName=/path/to/file: read each file's full content as
+    #     the value via jq --rawfile, so multi-line / PEM material is JSON-escaped
+    #     correctly.  Applied before PARAMS so a literal PARAMS value wins.
+    if [ -n "$file_params" ]; then
+        printf '%s\n' "$file_params" | while IFS= read -r entry; do
+            [ -n "$entry" ] || continue
+            key=${entry%%=*}
+            path=${entry#*=}
+            if [ "$key" = "$entry" ] || [ -z "$key" ] || [ -z "$path" ]; then
+                fail 2 "FILE_PARAMS expects ParamName=/path/to/file, got: $entry"
+            fi
+            if [ ! -r "$path" ]; then
+                fail 2 "FILE_PARAMS file not readable for $key: $path"
+            fi
+            printf '%s\t%s\n' "$key" "$path"
+        done >"$out_file.fileparams" || exit $?
+        while IFS="$(printf '\t')" read -r key path; do
+            [ -n "$key" ] || continue
+            merged=$(
+                jq -nc --argjson m "$merged" --arg key "$key" --rawfile val "$path" '
+                    $m + {($key): $val}
+                '
+            ) || fail 2 "failed reading FILE_PARAMS file for $key: $path"
+        done <"$out_file.fileparams"
+        rm -f "$out_file.fileparams"
+    fi
+
+    # 1. PARAMS Key=Value: highest precedence.
     if [ -n "$param_overrides" ]; then
-        printf '%s' "$param_overrides" | while IFS= read -r entry; do
+        printf '%s\n' "$param_overrides" | while IFS= read -r entry; do
             [ -n "$entry" ] || continue
             key=${entry%%=*}
             val=${entry#*=}
             if [ "$key" = "$entry" ] || [ -z "$key" ]; then
-                fail 2 "--param expects Key=Value, got: $entry"
+                fail 2 "PARAMS expects Key=Value, got: $entry"
             fi
             printf '%s\t%s\n' "$key" "$val"
         done >"$out_file.params"
@@ -331,10 +373,29 @@ build_upstream_values() {
 }
 
 main() {
-    parse_args "$@"
+    # Internal test hook: build the merged upstream-values object from the
+    # env (PARAMS/FILE_PARAMS/MAPS) and print it, never touching AWS.  Only
+    # valid when FROM_STACKS is empty (FROM_STACKS would require AWS).  Used to
+    # unit-test FILE_PARAMS multi-line resolution.
+    if [ "${1:-}" = "--internal-build-upstream" ]; then
+        if ! command -v jq >/dev/null 2>&1; then
+            fail 2 "jq is required for --internal-build-upstream"
+        fi
+        if [ -n "$from_stacks" ]; then
+            fail 2 "--internal-build-upstream cannot be used with FROM_STACKS set"
+        fi
+        work_dir=$(mktemp -d)
+        build_upstream_values "$work_dir/upstream.json"
+        cat "$work_dir/upstream.json"
+        return 0
+    fi
 
-    # Internal test hook: resolve from fixtures only, never touch AWS.
-    if [ -n "$internal_resolve" ]; then
+    # Internal test hook: resolve from fixtures only, never touch AWS.  Engaged
+    # by the positional --internal-resolve-params SUMMARY UPSTREAM CURRENT form.
+    if [ "${1:-}" = "--internal-resolve-params" ]; then
+        internal_resolve_summary="$2"
+        internal_resolve_upstream="$3"
+        internal_resolve_current="$4"
         if ! command -v jq >/dev/null 2>&1; then
             fail 2 "jq is required for --internal-resolve-params"
         fi
@@ -354,9 +415,13 @@ main() {
 
     preflight
 
-    if [ -z "$stack_name" ] || [ -z "$template_url" ] || [ -z "$region" ]; then
+    missing_required=""
+    [ -z "$stack_name" ] && missing_required="$missing_required STACK_NAME"
+    [ -z "$template_url" ] && missing_required="$missing_required TEMPLATE_URL"
+    [ -z "$region" ] && missing_required="$missing_required REGION"
+    if [ -n "$missing_required" ]; then
         usage >&2
-        fail 2 "--stack-name, --template-url, and --region are required"
+        fail 2 "missing required: $(echo "$missing_required" | sed 's/^ //; s/ /, /g')"
     fi
 
     log "checking whether stack $stack_name exists in $region"
@@ -481,7 +546,7 @@ main() {
             --change-set-name "$change_set_name" \
             --region "$region" \
             --query 'ChangeSetId' --output text)
-        log "--no-execute set; leaving change set in place"
+        log "NO_EXECUTE set; leaving change set in place"
         log "change set name: $change_set_name"
         log "change set ARN:  $cs_arn"
         change_set_name=""
@@ -517,6 +582,11 @@ main() {
     log "deploy complete (mode=$mode)"
     return 0
 }
+
+# -h/--help short-circuit before the env-var path.
+case "${1:-}" in
+    -h|--help) usage; exit 0 ;;
+esac
 
 trap cleanup EXIT INT TERM HUP
 

@@ -4,6 +4,7 @@ These tests soft-skip the shellcheck step when shellcheck is not on PATH so
 that contributors and CI runners without it installed are not blocked.
 """
 
+import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -47,9 +48,14 @@ def test_syntax_clean(script):
 
 
 @pytest.mark.parametrize("script", SCRIPTS, ids=lambda p: p.name)
-def test_no_args_prints_usage_and_fails(script):
-    """A bare invocation should print usage and exit non-zero (validation
-    failure), not blow up with a syntax error or silently succeed."""
+def test_missing_required_env_prints_usage_and_fails(script):
+    """With every required env var cleared, the script should print usage and
+    exit non-zero (validation failure), not blow up with a syntax error or
+    silently succeed.  The scripts are env-var driven (no flags), so a clean
+    env that omits the required vars is the failure path.
+
+    A minimal env (PATH only) clears STACK_NAME/REGION/VERSION/etc. for free.
+    """
     result = subprocess.run(
         ["sh", str(script)],
         capture_output=True,
@@ -57,10 +63,13 @@ def test_no_args_prints_usage_and_fails(script):
         env={"PATH": TEST_PATH},
     )
     assert result.returncode != 0, (
-        f"{script.name} should exit non-zero with no args, got 0"
+        f"{script.name} should exit non-zero with required env vars unset, got 0"
     )
-    assert "Usage:" in result.stderr, (
-        f"{script.name} should print usage to stderr with no args:\n{result.stderr}"
+    combined = result.stdout + result.stderr
+    assert ("REQUIRED" in combined.upper()) or ("missing required" in combined), (
+        f"{script.name} should print usage (a REQUIRED section) or a "
+        f"'missing required' line to stderr when required env vars are unset:\n"
+        f"{combined}"
     )
 
 
@@ -185,3 +194,70 @@ def test_resolver_resolves_when_all_satisfied(tmp_path):
     assert result.returncode == 0, result.stderr
     assert '"ParameterValue": "aval"' in result.stdout
     assert '"ParameterValue": "bdef"' in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# FILE_PARAMS: a ParamName=/path entry resolves to the file's full (possibly
+# multi-line / PEM) content.  Exercised via the --internal-build-upstream hook
+# which builds the merged upstream-values object from the env without AWS.
+# ---------------------------------------------------------------------------
+
+PEM_CONTENT = (
+    "-----BEGIN CERTIFICATE-----\n"
+    "line-two-with-special=chars;and:more\n"
+    "line-three\n"
+    "-----END CERTIFICATE-----\n"
+)
+
+
+def _build_upstream(env_extra):
+    env = {"PATH": TEST_PATH}
+    env.update(env_extra)
+    return subprocess.run(
+        ["sh", str(SCRIPTS_DIR / "deploy-stack.sh"), "--internal-build-upstream"],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+
+def test_file_params_resolves_multiline_file_content(tmp_path):
+    pem = tmp_path / "cert.pem"
+    pem.write_text(PEM_CONTENT)
+
+    result = _build_upstream({"FILE_PARAMS": f"CertificateBody={pem}"})
+    assert result.returncode == 0, result.stderr
+
+    merged = json.loads(result.stdout)
+    assert merged["CertificateBody"] == PEM_CONTENT, (
+        f"FILE_PARAMS value should equal the file content verbatim, got:\n"
+        f"{merged.get('CertificateBody')!r}"
+    )
+
+
+def test_file_params_unreadable_file_fails(tmp_path):
+    result = _build_upstream(
+        {"FILE_PARAMS": f"CertificateBody={tmp_path / 'does-not-exist.pem'}"}
+    )
+    assert result.returncode == 2, (
+        f"expected exit 2 for unreadable FILE_PARAMS file, got "
+        f"{result.returncode}:\n{result.stdout}\n{result.stderr}"
+    )
+    assert "FILE_PARAMS" in result.stderr
+
+
+def test_params_wins_over_file_params_for_same_key(tmp_path):
+    pem = tmp_path / "cert.pem"
+    pem.write_text(PEM_CONTENT)
+
+    result = _build_upstream(
+        {
+            "FILE_PARAMS": f"CertificateBody={pem}",
+            "PARAMS": "CertificateBody=literal-wins",
+        }
+    )
+    assert result.returncode == 0, result.stderr
+    merged = json.loads(result.stdout)
+    assert merged["CertificateBody"] == "literal-wins", (
+        "PARAMS should win over FILE_PARAMS for the same key"
+    )
