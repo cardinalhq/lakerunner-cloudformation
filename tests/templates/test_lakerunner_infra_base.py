@@ -69,7 +69,7 @@ def test_cooked_bucket_default_name(td):
 # ---------------------------------------------------------------------------
 
 
-def test_seven_security_groups(td):
+def test_six_security_groups(td):
     sgs = {n for n, r in td["Resources"].items()
            if r["Type"] == "AWS::EC2::SecurityGroup"}
     assert sgs == {
@@ -78,7 +78,6 @@ def test_seven_security_groups(td):
         "QuerySecurityGroup",
         "ProcessSecurityGroup",
         "ControlSecurityGroup",
-        "OtelSecurityGroup",
         "MaestroSecurityGroup",
     }
 
@@ -141,7 +140,7 @@ def test_sibling_ingress_rule_exists(td):
 
 
 # ---------------------------------------------------------------------------
-# Task 4: exec role + 6 task roles with name-pattern IAM
+# Task 4: exec role + 5 task roles with name-pattern IAM
 # ---------------------------------------------------------------------------
 
 
@@ -173,7 +172,7 @@ def test_exec_role_ssm_scoped_to_cardinal(td):
 def test_all_task_roles_use_name_pattern_secrets(td):
     """No task role references a threaded secret ARN param."""
     for role in ("MigrationRole", "QueryRole", "ProcessRole", "ControlRole",
-                 "OtelRole", "MaestroRole"):
+                 "MaestroRole"):
         stmts = _role_statements(td, role)
         secrets = next(s for s in stmts if s["Sid"] == "ReadSecrets")
         res = secrets["Resource"]
@@ -303,14 +302,12 @@ def test_all_outputs_present(td):
         "QuerySecurityGroupId",
         "ProcessSecurityGroupId",
         "ControlSecurityGroupId",
-        "OtelSecurityGroupId",
         "MaestroSecurityGroupId",
         "ExecutionRoleArn",
         "MigrationRoleArn",
         "QueryRoleArn",
         "ProcessRoleArn",
         "ControlRoleArn",
-        "OtelRoleArn",
         "MaestroRoleArn",
         "CookedBucketName",
         "LicenseSecretArn",

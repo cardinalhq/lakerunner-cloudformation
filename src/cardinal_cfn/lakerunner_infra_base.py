@@ -9,9 +9,9 @@ Resources created:
 
 - 1 ALB SG (cardinal-alb-sg). Inbound 443 / 9443 / 4318 from the
   AlbAllowedCidr1/2/3 params; all egress.
-- 6 task SGs, one per child tier (migration/query/process/control/otel/
+- 5 task SGs, one per child tier (migration/query/process/control/
   maestro) with tier-specific inter-tier ingress; all egress.
-- 1 shared ECS task execution role + 6 per-tier task roles.
+- 1 shared ECS task execution role + 5 per-tier task roles.
 - 1 cooked bucket (durable; cooked-only output; Retain).
 - license + admin-key secrets (Retain, named cardinal-*).
 - storage-profiles + api-keys SSM params (operator-managed).
@@ -95,8 +95,6 @@ _QUERY_API_PORT = 8080
 _QUERY_WORKER_ARTIFACT_PORT = 8081
 _QUERY_WORKER_PORT = 8082
 _ADMIN_API_PORT = 9091
-_OTLP_HTTP_PORT = 4318
-_OTEL_HEALTH_PORT = 13133  # otel.py's target group sets HealthCheckPort=13133
 _MAESTRO_PORT = 4200
 _MAESTRO_DEX_PORT = 5556
 
@@ -403,11 +401,6 @@ def build() -> Template:
         component="svc-control-sg",
         description="Cardinal control tier (sweeper, monitoring, admin-api, alert-evaluator).",
     )
-    otel_sg = _task_sg(
-        "OtelSecurityGroup",
-        component="svc-otel-sg",
-        description="Cardinal otel collector tier.",
-    )
     maestro_sg = _task_sg(
         "MaestroSecurityGroup",
         component="svc-maestro-sg",
@@ -458,42 +451,6 @@ def build() -> Template:
         ToPort=_ADMIN_API_PORT,
         Description="ALB to admin-api",
     ))
-
-    # ALB -> otel on 4318 (data plane) and 13133 (health check).
-    t.add_resource(SecurityGroupIngress(
-        "OtelFromAlb",
-        GroupId=Ref(otel_sg),
-        SourceSecurityGroupId=Ref(alb_sg),
-        IpProtocol="tcp",
-        FromPort=_OTLP_HTTP_PORT,
-        ToPort=_OTLP_HTTP_PORT,
-        Description="ALB to otel-collector data plane",
-    ))
-    t.add_resource(SecurityGroupIngress(
-        "OtelHealthFromAlb",
-        GroupId=Ref(otel_sg),
-        SourceSecurityGroupId=Ref(alb_sg),
-        IpProtocol="tcp",
-        FromPort=_OTEL_HEALTH_PORT,
-        ToPort=_OTEL_HEALTH_PORT,
-        Description="ALB health probe to otel-collector",
-    ))
-    # Lakerunner tasks -> otel on 4318 (self-telemetry from each tier)
-    for tier_title, tier_ref in [
-        ("Query", query_sg),
-        ("Process", process_sg),
-        ("Control", control_sg),
-        ("Maestro", maestro_sg),
-    ]:
-        t.add_resource(SecurityGroupIngress(
-            f"OtelFrom{tier_title}",
-            GroupId=Ref(otel_sg),
-            SourceSecurityGroupId=Ref(tier_ref),
-            IpProtocol="tcp",
-            FromPort=_OTLP_HTTP_PORT,
-            ToPort=_OTLP_HTTP_PORT,
-            Description=f"{tier_title} to otel-collector self-telemetry",
-        ))
 
     # Maestro -> lakerunner cross-tier calls via Cloud Map service discovery
     # (query-api 8080, admin-api 9091), bypassing the ALB.
@@ -756,37 +713,6 @@ def build() -> Template:
         Tags=_tags(component="svc-control-role"),
     ))
 
-    otel_role = t.add_resource(Role(
-        "OtelRole",
-        AssumeRolePolicyDocument=_ecs_tasks_trust(),
-        Policies=[
-            Policy(
-                PolicyName="cardinal-svc-otel",
-                PolicyDocument={
-                    "Version": "2012-10-17",
-                    "Statement": [
-                        _stmt_secrets_read(),
-                        # OTel writes raw OTLP signals under otel-raw/ in the
-                        # cooked bucket via the awss3 exporter; restrict to that
-                        # write-side prefix. (security.py used the threaded
-                        # BucketName; here it is the cooked bucket base creates.)
-                        {
-                            "Sid": "OtelRawWrite",
-                            "Effect": "Allow",
-                            "Action": ["s3:PutObject"],
-                            "Resource": Sub(
-                                "arn:${AWS::Partition}:s3:::${BucketName}/otel-raw/*",
-                                BucketName=cooked_bucket_name_value,
-                            ),
-                        },
-                        _stmt_cw_logs(),
-                    ],
-                },
-            ),
-        ],
-        Tags=_tags(component="svc-otel-role"),
-    ))
-
     maestro_role = t.add_resource(Role(
         "MaestroRole",
         AssumeRolePolicyDocument=_ecs_tasks_trust(),
@@ -954,7 +880,6 @@ def build() -> Template:
     _emit("QuerySecurityGroupId", "Query tier SG id.", Ref(query_sg))
     _emit("ProcessSecurityGroupId", "Process tier SG id.", Ref(process_sg))
     _emit("ControlSecurityGroupId", "Control tier SG id.", Ref(control_sg))
-    _emit("OtelSecurityGroupId", "OTel tier SG id.", Ref(otel_sg))
     _emit("MaestroSecurityGroupId", "Maestro tier SG id.", Ref(maestro_sg))
 
     _emit("ExecutionRoleArn", "Shared ECS task execution role ARN.",
@@ -967,8 +892,6 @@ def build() -> Template:
           GetAtt(process_role, "Arn"))
     _emit("ControlRoleArn", "Control tier task role ARN.",
           GetAtt(control_role, "Arn"))
-    _emit("OtelRoleArn", "OTel tier task role ARN.",
-          GetAtt(otel_role, "Arn"))
     _emit("MaestroRoleArn", "Maestro tier task role ARN.",
           GetAtt(maestro_role, "Arn"))
 

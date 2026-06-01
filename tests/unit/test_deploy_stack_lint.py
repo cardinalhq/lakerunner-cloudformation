@@ -132,6 +132,60 @@ def test_lakerunner_services_passes_queue_params():
     assert "PubsubSqsEnv" not in text, "old shell-blob PubsubSqsEnv still present"
 
 
+def test_lakerunner_services_requires_dex_admin_password_hash():
+    """Maestro/DEX will not start without DEX_ADMIN_PASSWORD_HASH, so the
+    wrapper must validate it as a REQUIRED env var (collect-all-missing)."""
+    text = (SCRIPTS_DIR / "deploy-lakerunner-services.sh").read_text()
+    assert 'missing="$missing DEX_ADMIN_PASSWORD_HASH"' in text, (
+        "DEX_ADMIN_PASSWORD_HASH is not in the required-vars validation"
+    )
+
+
+def test_lakerunner_services_supports_alb_scheme():
+    """The services wrapper forwards an optional ALB_SCHEME -> AlbScheme param,
+    mirroring the infra-base wrapper."""
+    text = (SCRIPTS_DIR / "deploy-lakerunner-services.sh").read_text()
+    assert "AlbScheme=$ALB_SCHEME" in text
+
+
+def test_lakerunner_services_drops_otel_replicas():
+    """The lakerunner-services template no longer has an OtelReplicas param;
+    the wrapper must not pass it (dead plumbing)."""
+    text = (SCRIPTS_DIR / "deploy-lakerunner-services.sh").read_text()
+    assert "OTEL_REPLICAS" not in text
+    assert "OtelReplicas" not in text
+
+
+def test_lakerunner_services_cleanup_cert_propagates_status():
+    """The cleanup_cert EXIT trap must preserve the child's exit status: it
+    captures $? first, then rm -rf, then exits with the captured status -- so a
+    FAILED deploy (non-zero child) does not false-green to 0 via rm's success.
+
+    Verified behaviorally with a tiny sh harness reproducing the trap idiom:
+    the body exits 3 and the harness must exit 3, not 0.
+    """
+    text = (SCRIPTS_DIR / "deploy-lakerunner-services.sh").read_text()
+    # Static: the corrected idiom is present (capture-first, clear, re-exit).
+    assert "status=$?" in text
+    assert "trap - EXIT" in text
+    assert 'exit "$status"' in text
+
+    # Behavioral: the same trap idiom must propagate a non-zero child status.
+    harness = (
+        "cleanup() { status=$?; rm -rf /tmp/nonexistent-xyzzy; "
+        'trap - EXIT; exit "$status"; }\n'
+        "trap cleanup EXIT INT TERM HUP\n"
+        "exit 3\n"
+    )
+    result = subprocess.run(
+        ["sh", "-c", harness], capture_output=True, text=True
+    )
+    assert result.returncode == 3, (
+        f"trap idiom must propagate the child's non-zero status, got "
+        f"{result.returncode}"
+    )
+
+
 def test_resolver_precedence_param_over_upstream(tmp_path):
     """End-to-end of the pure resolver via the internal hook: --param-class
     upstream value wins, a default fills gaps, and an unsatisfied required
