@@ -328,13 +328,21 @@ def _service_items(td, suffix):
     return res["Properties"]["CapacityProviderStrategy"]
 
 
-def test_query_workers_have_ondemand_fallback(td):
-    # query-api and query-worker scale out to spot, but a rolling upgrade must
-    # place a first NEW task before draining the old; Base=1 on FARGATE
-    # guarantees that first replica places even in a transient FARGATE_SPOT
-    # shortage. Scale-out replicas stay spot-weighted.
-    for suffix in ("QueryApiService", "QueryWorkerService"):
-        assert _service_strategy(td, suffix) == {"FARGATE_SPOT", "FARGATE"}, suffix
-        by_provider = {i["CapacityProvider"]: i for i in _service_items(td, suffix)}
-        assert by_provider["FARGATE"]["Base"] == 1, suffix
-        assert "Base" not in by_provider["FARGATE_SPOT"], suffix
+def test_query_api_is_pure_on_demand(td):
+    # query-api is a fixed-size API tier (not autoscaled): pure on-demand
+    # FARGATE so every replica places during a rolling deploy. No spot.
+    assert _service_strategy(td, "QueryApiService") == {"FARGATE"}
+    items = _service_items(td, "QueryApiService")
+    assert items == [{"CapacityProvider": "FARGATE", "Weight": 1}]
+    assert all("Base" not in i for i in items)
+
+
+def test_query_worker_has_ondemand_base_with_spot_scaleout(td):
+    # query-worker autoscales (to 8): Base=1 guarantees the first NEW task of a
+    # rolling upgrade lands on on-demand even in a transient FARGATE_SPOT
+    # shortage; scale-out replicas stay spot-weighted.
+    assert _service_strategy(td, "QueryWorkerService") == {"FARGATE_SPOT", "FARGATE"}
+    by_provider = {i["CapacityProvider"]: i for i in _service_items(td, "QueryWorkerService")}
+    assert by_provider["FARGATE"]["Base"] == 1
+    assert by_provider["FARGATE_SPOT"]["Weight"] == 4
+    assert "Base" not in by_provider["FARGATE_SPOT"]

@@ -153,13 +153,16 @@ def test_target_group_health_on_13133(td):
 # ---------------------------------------------------------------------------
 
 
-def test_service_uses_fargate_spot(td):
+def test_collector_service_is_pure_on_demand(td):
+    # The collector is the deploy-critical ingest path: pure on-demand FARGATE
+    # so every new task places during a rolling deploy. FARGATE_SPOT can't
+    # guarantee placement, so no spot tier anywhere.
     svc = next(
         r for r in td["Resources"].values() if r["Type"] == "AWS::ECS::Service"
     )
-    strategies = svc["Properties"]["CapacityProviderStrategy"]
-    providers = [s["CapacityProvider"] for s in strategies]
-    assert "FARGATE_SPOT" in providers
+    items = svc["Properties"]["CapacityProviderStrategy"]
+    assert items == [{"CapacityProvider": "FARGATE", "Weight": 1}]
+    assert all("Base" not in i for i in items)
 
 
 def test_service_no_cloud_map(td):

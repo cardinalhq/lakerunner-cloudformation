@@ -213,32 +213,37 @@ def _coerce_size(value):
     return value
 
 
-def capacity_provider_strategy(capacity: str = "spot") -> list:
+def capacity_provider_strategy(capacity: str = "ondemand") -> list:
     """Capacity-provider strategy for an ECS Service.
 
-    "spot" (scalable workers): pure FARGATE_SPOT — cheapest, and a transient
-    spot shortage only delays/skips an extra replica, never a deploy-critical
-    singleton task.
+    Three modes:
 
-    "fallback" (singletons/critical services): on-demand FARGATE for the first
-    task, spot-preferred for any scale-out beyond it. The crux is Base=1 on
-    FARGATE, not the weights.
+    "ondemand" (deploy-critical singletons and fixed-size tiers): pure on-demand
+    FARGATE for ALL replicas. The only deploy-reliable choice for a service
+    where every task must place during a rolling deploy. A weight-based strategy
+    does NOT give a single task failover — ECS weights only distribute MULTIPLE
+    tasks across providers; for any individual task ECS picks ONE provider, and
+    if FARGATE_SPOT has no capacity at that instant the task fails to place,
+    tripping the deployment circuit breaker and rolling the stack back. Used by
+    the migrator, the merged control service, maestro, pubsub-sqs, query-api,
+    and the satellite collector.
 
-    Weights ALONE do not fail over for a singleton. ECS capacity-provider
-    weights only distribute MULTIPLE tasks across providers; for a single task
-    (DesiredCount=1) ECS picks ONE provider by weight, and if that provider
-    (FARGATE_SPOT) has no capacity right now the task simply fails to place —
-    tripping the deployment circuit breaker and rolling the stack back. A
-    rolling deploy must place at least one NEW task before draining the old,
-    so every desired>=1 service hits this singleton-placement window on a dry
-    spot moment, regardless of steady-state replica count.
+    "fallback" (autoscaled scale-out workers): Base=1 on-demand FARGATE plus
+    weighted FARGATE_SPOT (4:1) for scale-out. The Base=1 guarantees the FIRST
+    replica always lands on on-demand — so a rolling deploy always has at least
+    one reliable task — while replicas beyond the first ride cheap spot. Only
+    one provider in a strategy may carry Base>0; it lives on FARGATE here. Used
+    by process-{logs,metrics,traces} and query-worker, which autoscale and can
+    tolerate a transient spot shortage on their extra replicas.
 
-    Base=1 on FARGATE guarantees the FIRST task of every service lands on
-    on-demand (reliable). For desired=1 singletons that one task is always on
-    on-demand. For scalable services (desired N>1) one task is on-demand and
-    the remaining N-1 are weighted 4:1 toward spot. Only one provider in a
-    strategy may carry Base>0; it lives on FARGATE here.
+    "spot": pure FARGATE_SPOT, an explicit opt-in only. DEPLOY-UNSAFE — a single
+    task can fail to place — for a customer who knowingly wants spot on a
+    non-critical, cost-sensitive service. No caller uses it.
     """
+    if capacity == "ondemand":
+        return [
+            CapacityProviderStrategyItem(CapacityProvider="FARGATE", Weight=1),
+        ]
     if capacity == "fallback":
         return [
             CapacityProviderStrategyItem(
@@ -266,7 +271,7 @@ def build_ecs_service(
     container_port: int | None = None,
     service_registry_ref=None,
     listener_rule_refs: list | None = None,
-    capacity: str = "spot",
+    capacity: str = "ondemand",
 ) -> Service:
     """ECS Fargate Service with rolling deploy + circuit breaker.
 

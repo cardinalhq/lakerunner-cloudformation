@@ -527,8 +527,9 @@ def build() -> Template:
     # ---------------------------------------------------------------------
     # The single control service. LoadBalancers targets the admin-api container;
     # ServiceRegistries puts the task's IP in Cloud Map as admin-api.<ns>.
-    # fallback capacity: spot-preferred with an on-demand FARGATE fallback so a
-    # transient FARGATE_SPOT shortage can't fail the one task a deploy needs.
+    # ondemand capacity: the merged control service is a deploy-critical
+    # singleton (desired=1), so its one task runs pure on-demand FARGATE — a
+    # transient FARGATE_SPOT shortage must never fail the task a deploy needs.
     # ---------------------------------------------------------------------
     control_service = t.add_resource(
         services_common.build_ecs_service(
@@ -543,7 +544,7 @@ def build() -> Template:
             container_port=admin_container_port,
             service_registry_ref=admin_discovery,
             listener_rule_refs=[admin_listener_rule],
-            capacity="fallback",
+            capacity="ondemand",
         )
     )
     t.add_output(Output("ControlServiceName", Value=GetAtt(control_service, "Name")))

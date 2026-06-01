@@ -357,12 +357,10 @@ def test_all_services_disable_public_ip(td):
         )
 
 
-def test_service_has_ondemand_fallback(td):
-    # Maestro is a deploy-critical singleton: on-demand FARGATE Base=1 so its
-    # one task always places on on-demand and a transient FARGATE_SPOT shortage
-    # can't fail a deploy.
+def test_service_is_pure_on_demand(td):
+    # Maestro is a deploy-critical singleton: pure on-demand FARGATE so its one
+    # task always places during a rolling deploy. No FARGATE_SPOT.
     svc = next(r for r in td["Resources"].values() if r["Type"] == "AWS::ECS::Service")
-    items = {s["CapacityProvider"]: s for s in svc["Properties"]["CapacityProviderStrategy"]}
-    assert set(items) == {"FARGATE_SPOT", "FARGATE"}
-    assert items["FARGATE"]["Base"] == 1
-    assert "Base" not in items["FARGATE_SPOT"]
+    items = svc["Properties"]["CapacityProviderStrategy"]
+    assert items == [{"CapacityProvider": "FARGATE", "Weight": 1}]
+    assert all("Base" not in i for i in items)

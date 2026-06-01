@@ -406,9 +406,9 @@ def build() -> Template:
             container_port=api_container_port,
             service_registry_ref=api_discovery,
             listener_rule_refs=[api_listener_rule],
-            # Base=1 on-demand first replica for reliable rolling upgrades;
-            # scale-out replicas stay spot-weighted.
-            capacity="fallback",
+            # Fixed-size API tier (default 2 replicas, not autoscaled): pure
+            # on-demand FARGATE so every replica places during a rolling upgrade.
+            capacity="ondemand",
         )
     )
 
