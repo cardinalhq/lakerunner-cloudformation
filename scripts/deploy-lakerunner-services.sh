@@ -59,13 +59,16 @@ Optional (template defaults preserved when unset):
   DEX_CLIENT_ID               (template default maestro-ui).
   OIDC_SUPERADMIN_EMAILS      (template default admin@cardinal.local).
   SATELLITE_SERVICES_STACK    Source of CollectorEndpoint for lakerunner self-
-                              telemetry.  When set, the wrapper reads the stack's
-                              CollectorEndpoint output and passes it as
-                              SelfTelemetryEndpoint.  When unset, self-telemetry
-                              stays disabled (SelfTelemetryEndpoint defaults '').
+                              telemetry (default cardinal-satellite-services).
+                              Self-telemetry is on by default: the wrapper reads
+                              this stack's CollectorEndpoint output and passes it
+                              as SelfTelemetryEndpoint.  If the stack or its
+                              CollectorEndpoint output is absent, it warns and
+                              leaves self-telemetry off (never blocks the deploy).
   SELF_TELEMETRY_ENDPOINT     Direct OTLP/HTTP endpoint override for self-
-                              telemetry (e.g. http://<alb>:4318).  Takes
-                              precedence over the SATELLITE_SERVICES_STACK pull.
+                              telemetry (e.g. http://<alb>:4318).  When non-empty,
+                              takes precedence over the SATELLITE_SERVICES_STACK
+                              pull.
   SERVICE_NAMESPACE_NAME      Cloud Map namespace (template default cardinal.local).
   PUBLIC_SUBNETS              Comma-separated public subnet ids (template default '').
   ALB_SCHEME                  internet-facing | internal (template default:
@@ -132,21 +135,25 @@ if [ -z "$queue_url" ] || [ -z "$role_arn" ]; then
 fi
 
 # --- Resolve the self-telemetry OTLP/HTTP endpoint. --------------------------
-# A direct SELF_TELEMETRY_ENDPOINT override wins; otherwise, when
-# SATELLITE_SERVICES_STACK is set, pull its CollectorEndpoint output.  When
-# neither is set, leave self_telemetry_endpoint empty so the template default
-# (disabled) is preserved.
+# Self-telemetry is on by default: the lakerunner account always runs a
+# satellite collector, so a standard deploy gets data flowing with no extra
+# operator config.  A non-empty SELF_TELEMETRY_ENDPOINT override wins; otherwise
+# pull the CollectorEndpoint output from SATELLITE_SERVICES_STACK (default
+# cardinal-satellite-services).  Resolution is GRACEFUL: a missing stack or a
+# missing CollectorEndpoint output warns and leaves self-telemetry off -- it
+# must never block the app deploy.
+satellite_services_stack="${SATELLITE_SERVICES_STACK:-cardinal-satellite-services}"
 self_telemetry_endpoint="${SELF_TELEMETRY_ENDPOINT:-}"
-if [ -z "$self_telemetry_endpoint" ] && [ -n "${SATELLITE_SERVICES_STACK:-}" ]; then
-    sat_services_outputs=$(aws cloudformation describe-stacks \
-        --stack-name "$SATELLITE_SERVICES_STACK" \
-        --region "$REGION" \
-        --query 'Stacks[0].Outputs' \
-        --output json)
-    self_telemetry_endpoint=$(printf '%s' "$sat_services_outputs" | jq -r '(.[] | select(.OutputKey == "CollectorEndpoint") | .OutputValue) // ""')
+if [ -z "$self_telemetry_endpoint" ]; then
+    if sat_services_outputs=$(aws cloudformation describe-stacks \
+            --stack-name "$satellite_services_stack" \
+            --region "$REGION" \
+            --query 'Stacks[0].Outputs' \
+            --output json 2>/dev/null); then
+        self_telemetry_endpoint=$(printf '%s' "$sat_services_outputs" | jq -r '(.[] | select(.OutputKey == "CollectorEndpoint") | .OutputValue) // ""')
+    fi
     if [ -z "$self_telemetry_endpoint" ]; then
-        echo "[deploy-lakerunner-services] ERROR: satellite-services stack '$SATELLITE_SERVICES_STACK' is missing the CollectorEndpoint output" >&2
-        exit 2
+        echo "[deploy-lakerunner-services] satellite collector endpoint not found in $satellite_services_stack; self-telemetry disabled" >&2
     fi
 fi
 
