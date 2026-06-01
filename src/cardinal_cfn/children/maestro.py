@@ -35,7 +35,6 @@ from troposphere import (
 )
 from troposphere.ecs import (
     AwsvpcConfiguration,
-    CapacityProviderStrategyItem,
     ContainerDefinition,
     DeploymentCircuitBreaker,
     DeploymentConfiguration,
@@ -747,9 +746,10 @@ def build() -> Template:
         Service(
             "MaestroService",
             Cluster=Ref("ClusterArn"),
-            CapacityProviderStrategy=[
-                CapacityProviderStrategyItem(CapacityProvider="FARGATE_SPOT", Weight=1),
-            ],
+            # Singleton: spot-preferred with an on-demand FARGATE fallback so a
+            # transient FARGATE_SPOT shortage can't block its task and trip the
+            # deploy circuit breaker.
+            CapacityProviderStrategy=services_common.capacity_provider_strategy("fallback"),
             DesiredCount=1,
             TaskDefinition=Ref(task_def),
             NetworkConfiguration=NetworkConfiguration(

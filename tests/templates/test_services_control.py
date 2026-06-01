@@ -380,3 +380,24 @@ def test_no_shared_resources_in_services_control(td):
     }
     found = {r["Type"] for r in td["Resources"].values()} & forbidden
     assert not found, f"services-control must not own shared resources; found {found}"
+
+
+def _service_strategy(td, suffix):
+    res = next(
+        r for lid, r in td["Resources"].items()
+        if r["Type"] == "AWS::ECS::Service" and lid.endswith(suffix)
+    )
+    return {s["CapacityProvider"] for s in res["Properties"]["CapacityProviderStrategy"]}
+
+
+def test_singleton_services_have_ondemand_fallback(td):
+    # sweeper, monitoring, admin-api, alert-evaluator are deploy-critical
+    # singletons: spot-preferred with an on-demand FARGATE fallback so a
+    # transient FARGATE_SPOT shortage can't fail a rolling deploy.
+    for suffix in (
+        "SweeperService",
+        "MonitoringService",
+        "AdminApiService",
+        "AlertEvaluatorService",
+    ):
+        assert _service_strategy(td, suffix) == {"FARGATE_SPOT", "FARGATE"}, suffix

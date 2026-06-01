@@ -213,6 +213,31 @@ def _coerce_size(value):
     return value
 
 
+def capacity_provider_strategy(capacity: str = "spot") -> list:
+    """Capacity-provider strategy for an ECS Service.
+
+    "spot" (scalable workers): pure FARGATE_SPOT — cheapest, and a transient
+    spot shortage only delays/skips an extra replica, never a deploy-critical
+    singleton task.
+
+    "fallback" (singletons/critical services): spot-preferred but with an
+    on-demand FARGATE fallback so a momentary FARGATE_SPOT capacity shortage
+    can't block the one new task a rolling deploy needs, which would otherwise
+    trip the circuit breaker and roll the whole stack back. Weights heavily
+    prefer spot; FARGATE is present purely as a fallback.
+    """
+    if capacity == "fallback":
+        return [
+            CapacityProviderStrategyItem(CapacityProvider="FARGATE_SPOT", Weight=4),
+            CapacityProviderStrategyItem(CapacityProvider="FARGATE", Weight=1),
+        ]
+    if capacity == "spot":
+        return [
+            CapacityProviderStrategyItem(CapacityProvider="FARGATE_SPOT", Weight=1),
+        ]
+    raise ValueError(f"unknown capacity mode: {capacity!r}")
+
+
 def build_ecs_service(
     *,
     service_key: str,
@@ -226,6 +251,7 @@ def build_ecs_service(
     container_port: int | None = None,
     service_registry_ref=None,
     listener_rule_refs: list | None = None,
+    capacity: str = "spot",
 ) -> Service:
     """ECS Fargate Service with rolling deploy + circuit breaker.
 
@@ -241,9 +267,7 @@ def build_ecs_service(
     """
     kwargs: dict = dict(
         Cluster=Ref(cluster_arn_param),
-        CapacityProviderStrategy=[
-            CapacityProviderStrategyItem(CapacityProvider="FARGATE_SPOT", Weight=1),
-        ],
+        CapacityProviderStrategy=capacity_provider_strategy(capacity),
         DesiredCount=desired_count,
         TaskDefinition=Ref(task_definition_ref),
         NetworkConfiguration=NetworkConfiguration(

@@ -372,6 +372,7 @@ def build() -> Template:
         subnets_csv_param="PrivateSubnetsCsv",
         security_group_id_param="TaskSecurityGroupId",
         container_name="keepalive",
+        capacity="fallback",
     )
     t.add_resource(migrator_service)
 

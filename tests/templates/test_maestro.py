@@ -355,3 +355,11 @@ def test_all_services_disable_public_ip(td):
         assert awsvpc["AssignPublicIp"] == "DISABLED", (
             f"AssignPublicIp must be DISABLED; got {awsvpc['AssignPublicIp']!r}"
         )
+
+
+def test_service_has_ondemand_fallback(td):
+    # Maestro is a deploy-critical singleton: spot-preferred with an on-demand
+    # FARGATE fallback so a transient FARGATE_SPOT shortage can't fail a deploy.
+    svc = next(r for r in td["Resources"].values() if r["Type"] == "AWS::ECS::Service")
+    providers = {s["CapacityProvider"] for s in svc["Properties"]["CapacityProviderStrategy"]}
+    assert providers == {"FARGATE_SPOT", "FARGATE"}
