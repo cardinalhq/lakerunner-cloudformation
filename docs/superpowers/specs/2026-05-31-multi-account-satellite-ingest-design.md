@@ -1,5 +1,27 @@
 # Multi-account satellite ingest — design
 
+## Trial-deployment defaults for deferred decisions
+
+These were left open during design and resolved as defaults to unblock
+implementation ahead of the first trial deployments. Each is a parameter or an
+easily-moved choice; revisit during trials.
+
+- **Collector ALB scheme:** parameter `AlbScheme`, default `internal` (consistent
+  with the private-subnets / no-public-IP posture). Cross-region senders reach an
+  internal ALB via the customer's inter-region connectivity (TGW/peering). Flip to
+  `internet-facing` at deploy time for public ingest — which then requires
+  authentication on the endpoint (not enabled by default).
+- **Satellite collector roles/SG:** created inside `satellite-services` (the stack is
+  self-contained, one small single-team unit), so the reviewed `satellite-infra-base`
+  stays frozen. The strict roles-external-to-services split is enforced only on the
+  lakerunner account, where multiple teams are involved.
+- **ECS cluster:** customer-supplied as a parameter on both `satellite-services` and
+  `lakerunner-services`.
+- **Secrets placement:** db-master with `lakerunner-infra-rds`; license/admin with
+  `lakerunner-infra-base` (both `Retain`).
+- **Cloud Map namespace:** owned by `lakerunner-services` only (default
+  `cardinal.internal`); the satellite collector is ALB-reachable, no namespace.
+
 ## Problem
 
 Lakerunner runs its main services in one "lakerunner account," but telemetry
