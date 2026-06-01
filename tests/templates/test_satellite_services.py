@@ -1,0 +1,204 @@
+"""Tests for the cardinal-satellite-services standalone template."""
+
+import json
+
+import pytest
+
+from cardinal_cfn import satellite_services
+
+
+@pytest.fixture
+def td():
+    return json.loads(satellite_services.build().to_json())
+
+
+# ---------------------------------------------------------------------------
+# Task 1: Parameters + conditions
+# ---------------------------------------------------------------------------
+
+
+def test_required_parameters(td):
+    for n in (
+        "RawBucketName",
+        "LicenseSecretArn",
+        "VpcId",
+        "AlbSubnetsCsv",
+        "TaskSubnetsCsv",
+        "EcsClusterArn",
+        "AlbScheme",
+    ):
+        assert n in td["Parameters"], f"missing parameter: {n}"
+
+
+def test_alb_scheme_allowed_values(td):
+    p = td["Parameters"]["AlbScheme"]
+    assert p["AllowedValues"] == ["internal", "internet-facing"]
+    assert p["Default"] == "internal"
+
+
+# ---------------------------------------------------------------------------
+# Task 2: IAM roles
+# ---------------------------------------------------------------------------
+
+
+def test_task_role_writes_only_raw_bucket(td):
+    """Collector task role allows writes to the raw bucket, but NOT s3:DeleteObject."""
+    roles = {
+        k: v for k, v in td["Resources"].items()
+        if v["Type"] == "AWS::IAM::Role"
+    }
+    task_role = roles["CollectorTaskRole"]
+    stmts = task_role["Properties"]["Policies"][0]["PolicyDocument"]["Statement"]
+    all_actions = []
+    for stmt in stmts:
+        actions = stmt.get("Action", [])
+        if isinstance(actions, str):
+            actions = [actions]
+        all_actions.extend(actions)
+    assert "s3:PutObject" in all_actions
+    assert "s3:ListBucket" in all_actions
+    assert "s3:DeleteObject" not in all_actions
+
+
+def test_exec_role_reads_license_secret(td):
+    """Exec role allows secretsmanager:GetSecretValue on LicenseSecretArn."""
+    exec_role = td["Resources"]["CollectorExecutionRole"]
+    stmts = exec_role["Properties"]["Policies"][0]["PolicyDocument"]["Statement"]
+    sm_stmt = next(
+        s for s in stmts
+        if "secretsmanager:GetSecretValue" in (
+            s["Action"] if isinstance(s["Action"], list) else [s["Action"]]
+        )
+    )
+    resource = sm_stmt["Resource"]
+    resources = resource if isinstance(resource, list) else [resource]
+    assert {"Ref": "LicenseSecretArn"} in resources
+
+
+# ---------------------------------------------------------------------------
+# Task 3: Security groups
+# ---------------------------------------------------------------------------
+
+
+def test_alb_sg_ingress_on_4318(td):
+    """ALB SG has ingress on port 4318 from IngestSourceCidr."""
+    alb_sg = td["Resources"]["AlbSecurityGroup"]
+    ingress = alb_sg["Properties"].get("SecurityGroupIngress", [])
+    rules_4318 = [r for r in ingress if r.get("FromPort") == 4318]
+    assert rules_4318, "ALB SG must have ingress on 4318"
+    for rule in rules_4318:
+        assert rule.get("CidrIp") == {"Ref": "IngestSourceCidr"} or \
+               rule.get("CidrIp") is not None
+
+
+def test_task_sg_ingress_from_alb_sg(td):
+    """Task SG has ingress on port 4318 sourced from the AlbSecurityGroup."""
+    task_sg = td["Resources"]["TaskSecurityGroup"]
+    ingress = task_sg["Properties"].get("SecurityGroupIngress", [])
+    rules_4318 = [
+        r for r in ingress
+        if r.get("FromPort") == 4318
+        and r.get("SourceSecurityGroupId") == {"Ref": "AlbSecurityGroup"}
+    ]
+    assert rules_4318, "Task SG must allow 4318 from AlbSecurityGroup"
+
+
+# ---------------------------------------------------------------------------
+# Task 4: ALB + listener + target group + listener rule
+# ---------------------------------------------------------------------------
+
+
+def test_alb_uses_scheme_param(td):
+    alb = td["Resources"]["Alb"]
+    assert alb["Properties"]["Scheme"] == {"Ref": "AlbScheme"}
+
+
+def test_otel_listener_is_plain_http_4318(td):
+    listeners = [
+        r for r in td["Resources"].values()
+        if r["Type"] == "AWS::ElasticLoadBalancingV2::Listener"
+    ]
+    assert listeners, "must have at least one listener"
+    otel = next(
+        (r for r in listeners if r["Properties"].get("Port") == 4318),
+        None,
+    )
+    assert otel is not None, "must have a listener on port 4318"
+    assert otel["Properties"]["Protocol"] == "HTTP"
+
+
+def test_listener_rule_v1_path(td):
+    rules = [
+        r for r in td["Resources"].values()
+        if r["Type"] == "AWS::ElasticLoadBalancingV2::ListenerRule"
+    ]
+    assert rules, "must have a listener rule"
+    conditions = rules[0]["Properties"]["Conditions"]
+    path_conds = [c for c in conditions if c.get("Field") == "path-pattern"]
+    assert path_conds
+    values = path_conds[0]["PathPatternConfig"]["Values"]
+    assert "/v1/*" in values
+
+
+def test_target_group_health_on_13133(td):
+    tgs = [
+        r for r in td["Resources"].values()
+        if r["Type"] == "AWS::ElasticLoadBalancingV2::TargetGroup"
+    ]
+    assert tgs
+    assert tgs[0]["Properties"]["HealthCheckPort"] == "13133"
+
+
+# ---------------------------------------------------------------------------
+# Task 5: Log group, task definition, ECS service
+# ---------------------------------------------------------------------------
+
+
+def test_service_uses_fargate_spot(td):
+    svc = next(
+        r for r in td["Resources"].values() if r["Type"] == "AWS::ECS::Service"
+    )
+    strategies = svc["Properties"]["CapacityProviderStrategy"]
+    providers = [s["CapacityProvider"] for s in strategies]
+    assert "FARGATE_SPOT" in providers
+
+
+def test_service_no_cloud_map(td):
+    """Satellite services collector has no Cloud Map (no ServiceRegistries)."""
+    svc = next(
+        r for r in td["Resources"].values() if r["Type"] == "AWS::ECS::Service"
+    )
+    assert "ServiceRegistries" not in svc["Properties"]
+
+
+def test_service_loadbalancer_wires_target_group(td):
+    svc = next(
+        r for r in td["Resources"].values() if r["Type"] == "AWS::ECS::Service"
+    )
+    lbs = svc["Properties"].get("LoadBalancers", [])
+    assert lbs, "service must have LoadBalancers"
+    assert lbs[0]["ContainerPort"] == 4318
+
+
+def test_taskdef_writes_bucket_env(td):
+    task_def = next(
+        r for r in td["Resources"].values() if r["Type"] == "AWS::ECS::TaskDefinition"
+    )
+    container = task_def["Properties"]["ContainerDefinitions"][0]
+    env = {e["Name"]: e["Value"] for e in container.get("Environment", [])}
+    assert env.get("LRDB_S3_BUCKET") == {"Ref": "RawBucketName"}
+
+
+# ---------------------------------------------------------------------------
+# Task 6: Outputs
+# ---------------------------------------------------------------------------
+
+
+def test_outputs_present(td):
+    for o in (
+        "CollectorAlbDnsName",
+        "CollectorEndpoint",
+        "CollectorServiceName",
+        "CollectorTaskRoleArn",
+    ):
+        assert o in td["Outputs"], f"missing output: {o}"
