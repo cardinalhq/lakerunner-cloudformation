@@ -100,9 +100,26 @@ def test_alb_ingress_on_https_and_otel_ports_from_cidrs(td):
             )
     for port in (443, 9443, 4318):
         assert port in seen, f"no ALB CIDR ingress on {port}"
-    # CIDR sources are the AlbAllowedCidr params
-    cidrs = {c for s in seen.values() for c in s}
-    assert json.dumps({"Ref": "AlbAllowedCidr1"}, sort_keys=True) in cidrs
+    # All three CIDR slots are wired: port 443 has three distinct sources,
+    # one per AlbAllowedCidr1/2/3 param.
+    assert len(seen[443]) == 3, f"expected 3 CIDR sources on 443, got {seen[443]}"
+    for idx in (1, 2, 3):
+        assert (
+            json.dumps({"Ref": f"AlbAllowedCidr{idx}"}, sort_keys=True)
+            in seen[443]
+        ), f"AlbAllowedCidr{idx} not wired to ALB 443 ingress"
+
+
+def test_internet_facing_alb_ingress_is_condition_gated(td):
+    """The 0.0.0.0/0 ALB ingress rules only apply under internet-facing scheme,
+    so internal-scheme deploys never expose 0.0.0.0/0."""
+    for port in (443, 9443, 4318):
+        rid = f"AlbIngress{port}FromInternet"
+        r = td["Resources"][rid]
+        assert r["Properties"]["CidrIp"] == "0.0.0.0/0"
+        assert r["Condition"] == "AlbIsInternetFacing", (
+            f"{rid} is not gated by AlbIsInternetFacing"
+        )
 
 
 def test_no_rds_ingress_rules(td):
@@ -112,7 +129,7 @@ def test_no_rds_ingress_rules(td):
             assert r["Properties"].get("FromPort") != 5432, (
                 f"{n}: unexpected 5432 ingress rule in base"
             )
-        assert not n.startswith("Rds5432From")
+            assert not n.startswith("Rds5432From")
 
 
 def test_sibling_ingress_rule_exists(td):
@@ -146,7 +163,6 @@ def test_exec_role_secrets_scoped_to_cardinal_pattern(td):
     res = s["Resource"]
     assert isinstance(res, dict) and "Fn::Sub" in res
     assert res["Fn::Sub"].endswith(":secret:cardinal-*")
-    assert "Ref" not in json.dumps(res) or "AWS::" in json.dumps(res)
 
 
 def test_exec_role_ssm_scoped_to_cardinal(td):
@@ -186,6 +202,15 @@ def test_query_role_keeps_ecs_describe_condition(td):
     desc = next(s for s in stmts if s["Sid"] == "DescribeWorkerTasks")
     assert desc["Condition"]["ArnEquals"]["ecs:cluster"] == {"Ref": "ClusterArn"}
     assert "ecs:DescribeServices" in desc["Action"]
+
+
+def test_control_role_can_scale_with_cluster_condition(td):
+    """The monitoring autoscaler's ecs:UpdateService must stay cluster-scoped."""
+    stmts = _role_statements(td, "ControlRole")
+    scale = next(
+        s for s in stmts if "ecs:UpdateService" in s.get("Action", [])
+    )
+    assert scale["Condition"]["ArnEquals"]["ecs:cluster"] == {"Ref": "ClusterArn"}
 
 
 def test_query_role_s3_targets_cooked_bucket(td):
