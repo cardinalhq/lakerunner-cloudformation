@@ -50,6 +50,9 @@ python3 -m cardinal_cfn.lakerunner_infra_base > generated-templates/cardinal-lak
 echo "Generating cardinal-lakerunner.yaml (root)..."
 python3 -m cardinal_cfn.root > generated-templates/cardinal-lakerunner.yaml
 
+echo "Generating cardinal-lakerunner-services.yaml (param-driven root)..."
+python3 -m cardinal_cfn.lakerunner_services > generated-templates/cardinal-lakerunner-services.yaml
+
 for child in security alb cert migration \
              services_query services_process services_control otel maestro; do
   out_name=$(echo "$child" | tr '_' '-')
@@ -68,6 +71,7 @@ cfn-lint generated-templates/lrdev-vpc.yaml \
          generated-templates/cardinal-lakerunner-infra-rds.yaml \
          generated-templates/cardinal-lakerunner-infra-base.yaml \
          generated-templates/cardinal-lakerunner.yaml \
+         generated-templates/cardinal-lakerunner-services.yaml \
          generated-templates/cardinal-lakerunner/*.yaml || \
   echo "cfn-lint completed with warnings"
 
