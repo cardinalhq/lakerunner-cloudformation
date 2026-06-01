@@ -27,13 +27,17 @@ def test_required_cross_stack_parameters(td):
         "TaskRoleArn",
         "PrivateSubnetsCsv",
         "BucketName",
-        "QueueArn",
         "LicenseSecretArn",
         "OtelHttpListenerArn",
         "AlbDnsName",
         "VpcId",
     ):
         assert n in td["Parameters"], f"missing parameter: {n}"
+
+
+def test_no_vestigial_queue_parameter(td):
+    """OTEL writes to S3 and does not consume SQS; the unused QueueArn was purged."""
+    assert "QueueArn" not in td["Parameters"], "vestigial QueueArn parameter present"
 
 
 def test_no_db_parameters(td):

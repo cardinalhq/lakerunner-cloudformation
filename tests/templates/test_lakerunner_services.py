@@ -82,12 +82,10 @@ def test_data_plane_params(td):
     # Removed/renamed sources
     assert "IngestBucketName" not in params
     assert "RdsSecurityGroupId" not in params
-    # SQS is optional in v1; QueueUrl/QueueArn still feed query/control/otel.
-    for n in ("QueueUrl", "QueueArn"):
-        assert n in params, f"missing queue param: {n}"
-        assert params[n]["Default"] == ""
-    # QueueRoleArn is gone -- replaced by the driver-supplied PubsubSqsEnv blob.
-    assert "QueueRoleArn" not in params
+    # Queue plumbing is fully purged -- pubsub-sqs gets the driver-supplied
+    # PubsubSqsEnv blob, and query/control/otel never consumed SQS.
+    for n in ("QueueUrl", "QueueArn", "QueueRoleArn"):
+        assert n not in params, f"vestigial queue param present: {n}"
 
 
 def test_pubsub_sqs_env_wired_to_process_child(td):

@@ -17,9 +17,9 @@ is optional.
 
 - ALB minimization is deferred: query-api and admin-api still attach to the
   ALB (minimization would require child edits in services-query/control/alb).
-- The process-tier SQS is optional/empty pending the pull-model queue
-  registration mechanism; ``QueueUrl``/``QueueArn`` default to "" so the
-  process tier can run with no queue for v1.
+- The process-tier SQS is driver-supplied: the pubsub-sqs container exports
+  the ``PubsubSqsEnv`` blob (built by the Jenkins driver from adopted-account
+  queue/role/region knowledge) before starting. Empty idles the service.
 - The cooked bucket backs both otel-raw writes and cooked data in the
   single-account interim.
 """
@@ -164,11 +164,6 @@ _INFRA_SETUP_PARAMS = [
     ("CookedBucketName", "String", None,
      "Name of the S3 cooked bucket (base infra output). Backs both otel-raw "
      "writes and cooked data in the single-account interim."),
-    ("QueueUrl", "String", "",
-     "Optional URL of the SQS pull-model queue. Empty for v1 (registration "
-     "mechanism pending); the process tier runs with no queue."),
-    ("QueueArn", "String", "",
-     "Optional ARN of the SQS pull-model queue. Empty for v1."),
     ("PubsubSqsEnv", "String", "",
      "Driver-supplied SQS env for pubsub-sqs: a shell-evalable string of "
      "SQS_QUEUE_URL[/REGION/ROLE_ARN] (+ numbered _N groups) the container "
@@ -610,8 +605,6 @@ def build() -> Template:
             "DbPort": Ref("DbPort"),
             "DbSecretArn": Ref("DbMasterSecretArn"),
             "BucketName": Ref("CookedBucketName"),
-            "QueueUrl": Ref("QueueUrl"),
-            "QueueArn": Ref("QueueArn"),
             "LicenseSecretArn": Ref("LicenseSecretArn"),
             "MigrationComplete": migration_complete,
             "LakerunnerImage": lakerunner_image,
@@ -639,10 +632,6 @@ def build() -> Template:
     services_process_params = _service_tier_common(
         task_sg=sec_process_sg, task_role=process_role,
     )
-    # The process tier no longer consumes the raw QueueUrl/QueueArn; pubsub-sqs
-    # gets the whole driver-built SQS env as one blob (PubsubSqsEnv) instead.
-    del services_process_params["QueueUrl"]
-    del services_process_params["QueueArn"]
     services_process_params.update({
         "PubsubSqsEnv": Ref("PubsubSqsEnv"),
         "ProcessLogsReplicas": Ref("ProcessLogsReplicas"),
@@ -690,7 +679,6 @@ def build() -> Template:
         "TaskRoleArn": otel_role,
         "PrivateSubnetsCsv": private_subnets_csv,
         "BucketName": Ref("CookedBucketName"),
-        "QueueArn": Ref("QueueArn"),
         "LicenseSecretArn": Ref("LicenseSecretArn"),
         "OtelHttpListenerArn": GetAtt(alb_stack, "Outputs.OtelHttpListenerArn"),
         "AlbDnsName": GetAtt(alb_stack, "Outputs.AlbDnsName"),
