@@ -203,11 +203,14 @@ def test_service_runs_one_fargate_task_no_lb(template_dict):
 
 
 def test_service_has_ondemand_fallback(template_dict):
-    # Singleton: spot-preferred but with an on-demand FARGATE fallback so a
-    # transient FARGATE_SPOT shortage can't fail the deploy.
+    # Singleton: on-demand FARGATE Base=1 so the migrator's one task always
+    # places on on-demand and a transient FARGATE_SPOT shortage can't fail the
+    # deploy.
     svc = _service(template_dict)["Properties"]
-    providers = {s["CapacityProvider"] for s in svc["CapacityProviderStrategy"]}
-    assert providers == {"FARGATE_SPOT", "FARGATE"}
+    items = {s["CapacityProvider"]: s for s in svc["CapacityProviderStrategy"]}
+    assert set(items) == {"FARGATE_SPOT", "FARGATE"}
+    assert items["FARGATE"]["Base"] == 1
+    assert "Base" not in items["FARGATE_SPOT"]
 
 
 def test_service_disables_public_ip(template_dict):

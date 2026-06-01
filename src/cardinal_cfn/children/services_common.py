@@ -220,16 +220,31 @@ def capacity_provider_strategy(capacity: str = "spot") -> list:
     spot shortage only delays/skips an extra replica, never a deploy-critical
     singleton task.
 
-    "fallback" (singletons/critical services): spot-preferred but with an
-    on-demand FARGATE fallback so a momentary FARGATE_SPOT capacity shortage
-    can't block the one new task a rolling deploy needs, which would otherwise
-    trip the circuit breaker and roll the whole stack back. Weights heavily
-    prefer spot; FARGATE is present purely as a fallback.
+    "fallback" (singletons/critical services): on-demand FARGATE for the first
+    task, spot-preferred for any scale-out beyond it. The crux is Base=1 on
+    FARGATE, not the weights.
+
+    Weights ALONE do not fail over for a singleton. ECS capacity-provider
+    weights only distribute MULTIPLE tasks across providers; for a single task
+    (DesiredCount=1) ECS picks ONE provider by weight, and if that provider
+    (FARGATE_SPOT) has no capacity right now the task simply fails to place —
+    tripping the deployment circuit breaker and rolling the stack back. A
+    rolling deploy must place at least one NEW task before draining the old,
+    so every desired>=1 service hits this singleton-placement window on a dry
+    spot moment, regardless of steady-state replica count.
+
+    Base=1 on FARGATE guarantees the FIRST task of every service lands on
+    on-demand (reliable). For desired=1 singletons that one task is always on
+    on-demand. For scalable services (desired N>1) one task is on-demand and
+    the remaining N-1 are weighted 4:1 toward spot. Only one provider in a
+    strategy may carry Base>0; it lives on FARGATE here.
     """
     if capacity == "fallback":
         return [
+            CapacityProviderStrategyItem(
+                CapacityProvider="FARGATE", Base=1, Weight=1
+            ),
             CapacityProviderStrategyItem(CapacityProvider="FARGATE_SPOT", Weight=4),
-            CapacityProviderStrategyItem(CapacityProvider="FARGATE", Weight=1),
         ]
     if capacity == "spot":
         return [

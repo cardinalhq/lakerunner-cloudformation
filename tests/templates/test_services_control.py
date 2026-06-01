@@ -452,9 +452,13 @@ def test_no_shared_resources_in_services_control(td):
 
 
 def test_control_service_has_ondemand_fallback(td):
-    # The merged control service is a deploy-critical singleton: spot-preferred
-    # with an on-demand FARGATE fallback so a transient FARGATE_SPOT shortage
-    # can't fail the one task a rolling deploy needs.
+    # The merged control service is a deploy-critical singleton (desired=1):
+    # on-demand FARGATE Base=1 guarantees its only task places on on-demand so a
+    # transient FARGATE_SPOT shortage can't fail the rolling deploy. This is the
+    # exact service that failed an upgrade in production with weight-only
+    # fallback (weights don't spread a single task).
     svc = td["Resources"]["ControlService"]
-    strategy = {s["CapacityProvider"] for s in svc["Properties"]["CapacityProviderStrategy"]}
-    assert strategy == {"FARGATE_SPOT", "FARGATE"}
+    items = {s["CapacityProvider"]: s for s in svc["Properties"]["CapacityProviderStrategy"]}
+    assert set(items) == {"FARGATE_SPOT", "FARGATE"}
+    assert items["FARGATE"]["Base"] == 1
+    assert "Base" not in items["FARGATE_SPOT"]

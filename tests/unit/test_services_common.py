@@ -154,9 +154,12 @@ def test_build_ecs_service_fallback_capacity():
     )
     rendered = json.loads(json.dumps(svc, default=lambda o: o.to_dict()))
     strat = rendered["Properties"]["CapacityProviderStrategy"]
+    # On-demand FARGATE carries Base=1 so a desired=1 singleton's only task is
+    # always placed on on-demand (reliable); FARGATE_SPOT is weighted for any
+    # scale-out replicas beyond the first.
     assert strat == [
+        {"CapacityProvider": "FARGATE", "Base": 1, "Weight": 1},
         {"CapacityProvider": "FARGATE_SPOT", "Weight": 4},
-        {"CapacityProvider": "FARGATE", "Weight": 1},
     ]
 
 
@@ -167,8 +170,23 @@ def test_capacity_provider_strategy_modes():
     }
     fallback = [i.to_dict() for i in services_common.capacity_provider_strategy("fallback")]
     assert fallback == [
+        {"CapacityProvider": "FARGATE", "Base": 1, "Weight": 1},
         {"CapacityProvider": "FARGATE_SPOT", "Weight": 4},
-        {"CapacityProvider": "FARGATE", "Weight": 1},
     ]
     with pytest.raises(ValueError):
         services_common.capacity_provider_strategy("nope")
+
+
+def test_fallback_fargate_carries_base_one():
+    """The crux of the singleton-placement bug: weights alone do not fail over
+    for a desired=1 service. Base=1 on the on-demand FARGATE provider is what
+    guarantees the first (and for singletons, only) task always places on
+    on-demand. Only one provider in a strategy may carry Base>0 — it's FARGATE.
+    """
+    items = services_common.capacity_provider_strategy("fallback")
+    by_provider = {i.to_dict()["CapacityProvider"]: i.to_dict() for i in items}
+    assert by_provider["FARGATE"]["Base"] == 1
+    assert "FARGATE_SPOT" in by_provider
+    assert "Base" not in by_provider["FARGATE_SPOT"]
+    bases = [d.get("Base", 0) for d in by_provider.values()]
+    assert sum(1 for b in bases if b) == 1
