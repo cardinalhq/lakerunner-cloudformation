@@ -273,8 +273,7 @@ build_upstream_values() {
         ' 2>/dev/null || echo '{}')
         # shellcheck disable=SC2030,SC2031
         merged=$(
-            cat "$out_file.fromstacks" \
-            | tr '\037' '\n' \
+            tr '\037' '\n' < "$out_file.fromstacks" \
             | jq -sc --argjson base "$merged" '
                 reduce (.[] | select(. != null)) as $arr ($base;
                     . + (($arr // []) | map({(.OutputKey): .OutputValue}) | add // {}))
