@@ -287,6 +287,42 @@ def build() -> Template:
         )
     )
 
+    t.add_output(
+        Output(
+            "RawBucketName",
+            Description="Raw ingest bucket name.",
+            Value=Ref("RawIngestBucket"),
+        )
+    )
+    t.add_output(
+        Output(
+            "RawQueueUrl",
+            Description="Raw ingest SQS queue URL.",
+            Value=Ref(queue),
+        )
+    )
+    t.add_output(
+        Output(
+            "RawQueueArn",
+            Description="Raw ingest SQS queue ARN.",
+            Value=GetAtt(queue, "Arn"),
+        )
+    )
+    t.add_output(
+        Output(
+            "LakerunnerAccessRoleArn",
+            Description="ARN of the role the Lakerunner poller assumes.",
+            Value=GetAtt("LakerunnerAccessRole", "Arn"),
+        )
+    )
+    t.add_output(
+        Output(
+            "Region",
+            Description="Region of this satellite's bucket/queue.",
+            Value=Ref("AWS::Region"),
+        )
+    )
+
     return t
 
 

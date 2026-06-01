@@ -133,3 +133,26 @@ def test_role_can_consume_only_its_queue(td):
     assert sqs["Resource"] == {"Fn::GetAtt": ["RawIngestQueue", "Arn"]}
     assert "sqs:ReceiveMessage" in sqs["Action"]
     assert "sqs:DeleteMessage" in sqs["Action"]
+
+
+def test_outputs_present(td):
+    for o in (
+        "RawBucketName",
+        "RawQueueUrl",
+        "RawQueueArn",
+        "LakerunnerAccessRoleArn",
+        "Region",
+    ):
+        assert o in td["Outputs"], f"missing output: {o}"
+
+
+def test_pull_model_no_remote_notification_target(td):
+    """Pull invariant: the bucket notifies only its own in-stack queue;
+    no resource targets a remote/central queue, and there is no outbound
+    push to the Lakerunner account."""
+    qcfg = td["Resources"]["RawIngestBucket"]["Properties"][
+        "NotificationConfiguration"
+    ]["QueueConfigurations"]
+    assert all(
+        c["Queue"] == {"Fn::GetAtt": ["RawIngestQueue", "Arn"]} for c in qcfg
+    )
