@@ -85,6 +85,18 @@ def build() -> Template:
     t.add_parameter(Parameter("QueueArn", Type="String", Description="ARN of the ingest SQS queue."))
     t.add_parameter(
         Parameter(
+            "QueueRoleArn",
+            Type="String",
+            Default="",
+            Description=(
+                "ARN of the cardinal-satellite-access role the pubsub-sqs binary "
+                "assumes (via STS) to reach the queue and the raw bucket behind "
+                "it. Empty uses the task role's own credentials directly."
+            ),
+        )
+    )
+    t.add_parameter(
+        Parameter(
             "LicenseSecretArn",
             Type="String",
             Description="ARN of the license Secrets Manager secret.",
@@ -240,6 +252,7 @@ def build() -> Template:
                     "BucketName",
                     "QueueUrl",
                     "QueueArn",
+                    "QueueRoleArn",
                     "LicenseSecretArn",
                     "MigrationComplete",
                 ],
@@ -276,9 +289,13 @@ def build() -> Template:
         Environment(Name="LRDB_DBNAME", Value="lakerunner"),
         Environment(Name="LRDB_SSLMODE", Value="require"),
         Environment(Name="LRDB_S3_BUCKET", Value=Ref("BucketName")),
-        Environment(Name="LRDB_SQS_QUEUE_URL", Value=Ref("QueueUrl")),
-        Environment(Name="LAKERUNNER_PUBSUB_SQS_QUEUE_URL", Value=Ref("QueueUrl")),
-        Environment(Name="LAKERUNNER_PUBSUB_SQS_REGION", Value=Ref("AWS::Region")),
+        # SQS group-0 contract read by the lakerunner binary (config/sqs.go
+        # DiscoverSQSQueues). A group is live only when SQS_QUEUE_URL is set; an
+        # empty URL idles. SQS_ROLE_ARN is the role the binary assumes (via STS)
+        # to reach the queue and the raw bucket behind it; empty uses task creds.
+        Environment(Name="SQS_QUEUE_URL", Value=Ref("QueueUrl")),
+        Environment(Name="SQS_REGION", Value=Ref("AWS::Region")),
+        Environment(Name="SQS_ROLE_ARN", Value=Ref("QueueRoleArn")),
         Environment(Name="CONFIGDB_HOST", Value=Ref("DbEndpoint")),
         Environment(Name="CONFIGDB_PORT", Value=Ref("DbPort")),
         Environment(Name="CONFIGDB_DBNAME", Value="configdb"),

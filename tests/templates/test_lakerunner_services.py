@@ -83,9 +83,17 @@ def test_data_plane_params(td):
     assert "IngestBucketName" not in params
     assert "RdsSecurityGroupId" not in params
     # SQS is optional in v1.
-    for n in ("QueueUrl", "QueueArn"):
+    for n in ("QueueUrl", "QueueArn", "QueueRoleArn"):
         assert n in params, f"missing queue param: {n}"
         assert params[n]["Default"] == ""
+
+
+def test_queue_role_arn_wired_to_process_child(td):
+    """QueueRoleArn (satellite access role) flows into the Process child so the
+    pubsub-sqs binary can assume it for the SQS group-0 contract."""
+    assert "QueueRoleArn" in td["Parameters"]
+    process = td["Resources"]["Process"]["Properties"]["Parameters"]
+    assert process["QueueRoleArn"] == {"Ref": "QueueRoleArn"}
 
 
 def test_children_present(td):

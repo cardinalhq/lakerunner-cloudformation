@@ -169,6 +169,10 @@ _INFRA_SETUP_PARAMS = [
      "mechanism pending); the process tier runs with no queue."),
     ("QueueArn", "String", "",
      "Optional ARN of the SQS pull-model queue. Empty for v1."),
+    ("QueueRoleArn", "String", "",
+     "Optional ARN of the cardinal-satellite-access role the pubsub-sqs binary "
+     "assumes to reach the queue and its raw bucket (satellite-infra-base "
+     "LakerunnerAccessRoleArn output). Empty uses the task role directly."),
     ("LicenseSecretArn", "String", None,
      "ARN of the cardinal-license secret (infra output)."),
     ("AdminKeySecretArn", "String", None,
@@ -635,6 +639,7 @@ def build() -> Template:
         task_sg=sec_process_sg, task_role=process_role,
     )
     services_process_params.update({
+        "QueueRoleArn": Ref("QueueRoleArn"),
         "ProcessLogsReplicas": Ref("ProcessLogsReplicas"),
         "ProcessLogsMemory": Ref("ProcessLogsMemory"),
         "ProcessMetricsReplicas": Ref("ProcessMetricsReplicas"),

@@ -32,6 +32,7 @@ def test_required_cross_stack_parameters(td):
         "BucketName",
         "QueueUrl",
         "QueueArn",
+        "QueueRoleArn",
         "LicenseSecretArn",
         "MigrationComplete",
         "LakerunnerImage",
@@ -265,6 +266,31 @@ def test_all_task_definitions_set_ssl_required(td):
             assert env.get("LRDB_SSLMODE") == "require", (
                 f"{container.get('Name')} LRDB_SSLMODE must be 'require'; got {env.get('LRDB_SSLMODE')!r}"
             )
+
+
+# ---------------------------------------------------------------------------
+# pubsub-sqs SQS env contract (config/sqs.go DiscoverSQSQueues group 0)
+# ---------------------------------------------------------------------------
+
+
+def _pubsub_env(td):
+    task_def = td["Resources"]["PubsubSqsTaskDef"]
+    container = task_def["Properties"]["ContainerDefinitions"][0]
+    return {e["Name"]: e["Value"] for e in container.get("Environment", [])}
+
+
+def test_pubsub_sqs_uses_real_sqs_group0_contract(td):
+    env = _pubsub_env(td)
+    assert env["SQS_QUEUE_URL"] == {"Ref": "QueueUrl"}, env.get("SQS_QUEUE_URL")
+    assert env["SQS_REGION"] == {"Ref": "AWS::Region"}, env.get("SQS_REGION")
+    assert env["SQS_ROLE_ARN"] == {"Ref": "QueueRoleArn"}, env.get("SQS_ROLE_ARN")
+
+
+def test_pubsub_sqs_drops_dead_env_names(td):
+    """The lakerunner binary no longer reads these; they must be gone."""
+    env = _pubsub_env(td)
+    for dead in ("LRDB_SQS_QUEUE_URL", "LAKERUNNER_PUBSUB_SQS_QUEUE_URL"):
+        assert dead not in env, f"dead SQS env still present: {dead}"
 
 
 # ---------------------------------------------------------------------------
