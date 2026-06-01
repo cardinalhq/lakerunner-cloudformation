@@ -45,7 +45,6 @@ def test_role_and_sg_params_present(td):
         "QuerySecurityGroupId",
         "ProcessSecurityGroupId",
         "ControlSecurityGroupId",
-        "OtelSecurityGroupId",
         "MaestroSecurityGroupId",
     ]
     role_params = [
@@ -54,7 +53,6 @@ def test_role_and_sg_params_present(td):
         "QueryRoleArn",
         "ProcessRoleArn",
         "ControlRoleArn",
-        "OtelRoleArn",
         "MaestroRoleArn",
     ]
     for n in sg_params:
@@ -83,7 +81,7 @@ def test_data_plane_params(td):
     assert "IngestBucketName" not in params
     assert "RdsSecurityGroupId" not in params
     # Queue plumbing is fully purged -- pubsub-sqs gets the driver-supplied
-    # PubsubSqsEnv blob, and query/control/otel never consumed SQS.
+    # PubsubSqsEnv blob, and query/control never consumed SQS.
     for n in ("QueueUrl", "QueueArn", "QueueRoleArn"):
         assert n not in params, f"vestigial queue param present: {n}"
 
@@ -109,7 +107,6 @@ def test_children_present(td):
         "Query",
         "Process",
         "Control",
-        "Otel",
         "Maestro",
     }
     assert nested == expected
@@ -120,5 +117,5 @@ def test_cooked_bucket_wired_to_children(td):
     ref = {"Ref": "CookedBucketName"}
     migration = td["Resources"]["Migration"]["Properties"]["Parameters"]
     assert migration["IngestBucketName"] == ref
-    otel = td["Resources"]["Otel"]["Properties"]["Parameters"]
-    assert otel["BucketName"] == ref
+    query = td["Resources"]["Query"]["Properties"]["Parameters"]
+    assert query["BucketName"] == ref
