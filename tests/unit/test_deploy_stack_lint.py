@@ -47,9 +47,14 @@ def test_syntax_clean(script):
 
 
 @pytest.mark.parametrize("script", SCRIPTS, ids=lambda p: p.name)
-def test_no_args_prints_usage_and_fails(script):
-    """A bare invocation should print usage and exit non-zero (validation
-    failure), not blow up with a syntax error or silently succeed."""
+def test_missing_required_env_prints_usage_and_fails(script):
+    """With every required env var cleared, the script should print usage and
+    exit non-zero (validation failure), not blow up with a syntax error or
+    silently succeed.  The scripts are env-var driven (no flags), so a clean
+    env that omits the required vars is the failure path.
+
+    A minimal env (PATH only) clears STACK_NAME/REGION/VERSION/etc. for free.
+    """
     result = subprocess.run(
         ["sh", str(script)],
         capture_output=True,
@@ -57,10 +62,13 @@ def test_no_args_prints_usage_and_fails(script):
         env={"PATH": TEST_PATH},
     )
     assert result.returncode != 0, (
-        f"{script.name} should exit non-zero with no args, got 0"
+        f"{script.name} should exit non-zero with required env vars unset, got 0"
     )
-    assert "Usage:" in result.stderr, (
-        f"{script.name} should print usage to stderr with no args:\n{result.stderr}"
+    combined = result.stdout + result.stderr
+    assert ("REQUIRED" in combined.upper()) or ("missing required" in combined), (
+        f"{script.name} should print usage (a REQUIRED section) or a "
+        f"'missing required' line to stderr when required env vars are unset:\n"
+        f"{combined}"
     )
 
 

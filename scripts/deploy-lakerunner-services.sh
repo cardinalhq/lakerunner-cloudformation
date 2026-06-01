@@ -6,19 +6,19 @@
 #   - lakerunner-infra-base : roles, security groups, secrets, SSM param names.
 #   - lakerunner-infra-rds  : Db{Endpoint,MasterSecretArn,Name,Port}.
 # All of those output names match the template's parameter names, so plain
-# --from-stack pulls wire them up.
+# FROM_STACKS pulls wire them up.
 #
 # Special case: PubsubSqsEnv is COMPUTED here.  It is not a single upstream
 # output -- we read three outputs from the satellite-infra-base stack and
 # assemble the env string the pubsub-sqs container expects:
 #   SQS_QUEUE_URL=<RawQueueUrl>;SQS_REGION=<Region>;SQS_ROLE_ARN=<LakerunnerAccessRoleArn>
-# then pass it via --param PubsubSqsEnv=... (highest precedence).
+# then pass it via a PARAMS line (highest precedence).
 #
-# OtelReplicas defaults to 0 here: in the satellite topology the same-account
+# OTEL_REPLICAS defaults to 0 here: in the satellite topology the same-account
 # satellite collector performs ingest, so the lakerunner-tier otel collector is
 # off by default.
 #
-# Thin wrapper over deploy-stack.sh.
+# Thin wrapper over deploy-stack.sh.  Pure environment-variable interface.
 
 set -eu
 
@@ -26,90 +26,54 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)
 DEFAULT_TEMPLATE_BASE_URL="https://cardinal-cfn.s3.us-east-2.amazonaws.com/lakerunner"
 TEMPLATE_KEY="cardinal-lakerunner-services.yaml"
 
-stack_name=""
-region=""
-version=""
-template_base_url="$DEFAULT_TEMPLATE_BASE_URL"
-deployer_role_arn=""
-no_execute=""
-
-infra_base_stack=""
-infra_rds_stack=""
-satellite_infra_base_stack=""
-
-vpc_id=""
-cluster_arn=""
-cluster_name=""
-private_subnets=""
-public_subnets=""
-service_namespace_name=""
-otel_replicas="0"   # default: lakerunner-tier collector off; satellite ingests
-
-# Images.
-lakerunner_image=""
-maestro_image=""
-otel_image=""
-dex_image=""
-dex_init_image=""
-db_init_image=""
-
-# Cert (ACM ARN, or PEM material).
-certificate_arn=""
-certificate_body_file=""
-certificate_private_key_file=""
-certificate_chain_file=""
-
-# Dex / OIDC.
-dex_admin_email=""
-dex_admin_password_hash=""
-dex_client_id=""
-oidc_superadmin_emails=""
-
 usage() {
-    cat <<'EOF'
-Usage: deploy-lakerunner-services.sh --stack-name NAME --region REGION --version VER \
-           --infra-base-stack NAME --infra-rds-stack NAME \
-           --satellite-infra-base-stack NAME [options]
+    cat <<EOF
+deploy-lakerunner-services.sh -- deploy the cardinal-lakerunner-services stack.
+
+All inputs come from environment variables (no flags).
 
 Required:
-  --stack-name NAME                  Stack to create/update.
-  --region REGION                    AWS region.
-  --version VERSION                  Published template tag.
-  --infra-base-stack NAME            Upstream lakerunner-infra-base.
-  --infra-rds-stack NAME             Upstream lakerunner-infra-rds.
-  --satellite-infra-base-stack NAME  Source of RawQueueUrl/Region/
-                                     LakerunnerAccessRoleArn for the computed
-                                     PubsubSqsEnv.
+  STACK_NAME                  Stack to create/update.
+  REGION                      AWS region (never defaulted; must be set explicitly).
+  VERSION                     Published template tag.
+  INFRA_BASE_STACK            Upstream lakerunner-infra-base.
+  INFRA_RDS_STACK             Upstream lakerunner-infra-rds.
+  SATELLITE_INFRA_BASE_STACK  Source of RawQueueUrl/Region/LakerunnerAccessRoleArn
+                              for the computed PubsubSqsEnv.
+  CLUSTER_ARN                 ECS cluster ARN.
+  CLUSTER_NAME                ECS cluster name (no upstream output for it).
+  VPC_ID                      VPC for the services.
+  PRIVATE_SUBNETS             Comma-separated private subnet ids.
 
-Networking / cluster add-ins:
-  --vpc-id VPC
-  --cluster-arn ARN
-  --cluster-name NAME
-  --private-subnets CSV
-  --public-subnets CSV
-  --service-namespace-name NAME
-  --otel-replicas N                  Default 0 (satellite collector ingests).
-
-Images:
-  --lakerunner-image REF             --maestro-image REF    --otel-image REF
-  --dex-image REF                    --dex-init-image REF   --db-init-image REF
-
-Cert (ACM ARN or PEM material):
-  --certificate-arn ARN
-  --certificate-body-file PATH       --certificate-private-key-file PATH
-  --certificate-chain-file PATH
-
-Dex / OIDC:
-  --dex-admin-email EMAIL            --dex-admin-password-hash HASH
-  --dex-client-id ID                 --oidc-superadmin-emails CSV
-
-Common:
-  --template-base-url URL            Default: https://cardinal-cfn.s3.us-east-2.amazonaws.com/lakerunner
-                                     Also forwarded as the TemplateBaseUrl param.
-  --deployer-role-arn ARN
-  --no-execute
+Optional (template defaults preserved when unset):
+  CERTIFICATE_ARN             ACM/IAM cert ARN.  Maestro HTTPS needs either this
+                              or the three PEM files below.
+  CERTIFICATE_BODY_FILE       PEM cert body (path).
+  CERTIFICATE_PRIVATE_KEY_FILE PEM private key (path).
+  CERTIFICATE_CHAIN_FILE      PEM chain (path).
+  DEX_ADMIN_EMAIL             (template default admin@cardinal.local).
+  DEX_ADMIN_PASSWORD_HASH     bcrypt hash; REQUIRED for Maestro UI login even
+                              though the template defaults it to ''.
+  DEX_CLIENT_ID               (template default maestro-ui).
+  OIDC_SUPERADMIN_EMAILS      (template default admin@cardinal.local).
+  SERVICE_NAMESPACE_NAME      Cloud Map namespace (template default cardinal.local).
+  PUBLIC_SUBNETS              Comma-separated public subnet ids (template default '').
+  OTEL_REPLICAS               lakerunner-tier collector replicas (default 0).
+  LAKERUNNER_IMAGE, MAESTRO_IMAGE, OTEL_IMAGE, DEX_IMAGE, DEX_INIT_IMAGE,
+  DB_INIT_IMAGE               Image overrides (template defaults otherwise).
+  TEMPLATE_BASE_URL           Default: $DEFAULT_TEMPLATE_BASE_URL.  Also
+                              forwarded as the TemplateBaseUrl param (nested
+                              children load from the matching prefix).
+  DEPLOYER_ROLE_ARN           Passed to create-change-set.
+  NO_EXECUTE                  Non-empty: change-set only, do not execute.
 EOF
 }
+
+case "${1:-}" in
+    -h|--help) usage; exit 0 ;;
+    "") : ;;
+    *) echo "[deploy-lakerunner-services] ERROR: this script takes no arguments; configure it via environment variables" >&2; usage >&2; exit 2 ;;
+esac
 
 read_file_or_die() {
     p="$1"
@@ -120,48 +84,20 @@ read_file_or_die() {
     cat "$p"
 }
 
-while [ $# -gt 0 ]; do
-    case "$1" in
-        --stack-name) stack_name="$2"; shift 2 ;;
-        --region) region="$2"; shift 2 ;;
-        --version) version="$2"; shift 2 ;;
-        --template-base-url) template_base_url="$2"; shift 2 ;;
-        --deployer-role-arn) deployer_role_arn="$2"; shift 2 ;;
-        --no-execute) no_execute="--no-execute"; shift ;;
-        --infra-base-stack) infra_base_stack="$2"; shift 2 ;;
-        --infra-rds-stack) infra_rds_stack="$2"; shift 2 ;;
-        --satellite-infra-base-stack) satellite_infra_base_stack="$2"; shift 2 ;;
-        --vpc-id) vpc_id="$2"; shift 2 ;;
-        --cluster-arn) cluster_arn="$2"; shift 2 ;;
-        --cluster-name) cluster_name="$2"; shift 2 ;;
-        --private-subnets) private_subnets="$2"; shift 2 ;;
-        --public-subnets) public_subnets="$2"; shift 2 ;;
-        --service-namespace-name) service_namespace_name="$2"; shift 2 ;;
-        --otel-replicas) otel_replicas="$2"; shift 2 ;;
-        --lakerunner-image) lakerunner_image="$2"; shift 2 ;;
-        --maestro-image) maestro_image="$2"; shift 2 ;;
-        --otel-image) otel_image="$2"; shift 2 ;;
-        --dex-image) dex_image="$2"; shift 2 ;;
-        --dex-init-image) dex_init_image="$2"; shift 2 ;;
-        --db-init-image) db_init_image="$2"; shift 2 ;;
-        --certificate-arn) certificate_arn="$2"; shift 2 ;;
-        --certificate-body-file) certificate_body_file="$2"; shift 2 ;;
-        --certificate-private-key-file) certificate_private_key_file="$2"; shift 2 ;;
-        --certificate-chain-file) certificate_chain_file="$2"; shift 2 ;;
-        --dex-admin-email) dex_admin_email="$2"; shift 2 ;;
-        --dex-admin-password-hash) dex_admin_password_hash="$2"; shift 2 ;;
-        --dex-client-id) dex_client_id="$2"; shift 2 ;;
-        --oidc-superadmin-emails) oidc_superadmin_emails="$2"; shift 2 ;;
-        -h|--help) usage; exit 0 ;;
-        *) echo "[deploy-lakerunner-services] ERROR: unknown argument: $1" >&2; usage >&2; exit 2 ;;
-    esac
-done
-
-if [ -z "$stack_name" ] || [ -z "$region" ] || [ -z "$version" ] \
-    || [ -z "$infra_base_stack" ] || [ -z "$infra_rds_stack" ] \
-    || [ -z "$satellite_infra_base_stack" ]; then
+missing=""
+[ -z "${STACK_NAME:-}" ] && missing="$missing STACK_NAME"
+[ -z "${REGION:-}" ] && missing="$missing REGION"
+[ -z "${VERSION:-}" ] && missing="$missing VERSION"
+[ -z "${INFRA_BASE_STACK:-}" ] && missing="$missing INFRA_BASE_STACK"
+[ -z "${INFRA_RDS_STACK:-}" ] && missing="$missing INFRA_RDS_STACK"
+[ -z "${SATELLITE_INFRA_BASE_STACK:-}" ] && missing="$missing SATELLITE_INFRA_BASE_STACK"
+[ -z "${CLUSTER_ARN:-}" ] && missing="$missing CLUSTER_ARN"
+[ -z "${CLUSTER_NAME:-}" ] && missing="$missing CLUSTER_NAME"
+[ -z "${VPC_ID:-}" ] && missing="$missing VPC_ID"
+[ -z "${PRIVATE_SUBNETS:-}" ] && missing="$missing PRIVATE_SUBNETS"
+if [ -n "$missing" ]; then
     usage >&2
-    echo "[deploy-lakerunner-services] ERROR: --stack-name, --region, --version, --infra-base-stack, --infra-rds-stack, and --satellite-infra-base-stack are required" >&2
+    echo "[deploy-lakerunner-services] ERROR: missing required: $(echo "$missing" | sed 's/^ //; s/ /, /g')" >&2
     exit 2
 fi
 
@@ -170,12 +106,15 @@ if ! command -v aws >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
     exit 2
 fi
 
-template_url="$template_base_url/$version/$TEMPLATE_KEY"
+template_base_url="${TEMPLATE_BASE_URL:-$DEFAULT_TEMPLATE_BASE_URL}"
+otel_replicas="${OTEL_REPLICAS:-0}"
+
+TEMPLATE_URL="$template_base_url/$VERSION/$TEMPLATE_KEY"
 
 # --- Compute PubsubSqsEnv from the satellite-infra-base stack outputs. -------
 sat_outputs=$(aws cloudformation describe-stacks \
-    --stack-name "$satellite_infra_base_stack" \
-    --region "$region" \
+    --stack-name "$SATELLITE_INFRA_BASE_STACK" \
+    --region "$REGION" \
     --query 'Stacks[0].Outputs' \
     --output json)
 
@@ -184,47 +123,64 @@ sqs_region=$(printf '%s' "$sat_outputs" | jq -r '(.[] | select(.OutputKey == "Re
 role_arn=$(printf '%s' "$sat_outputs" | jq -r '(.[] | select(.OutputKey == "LakerunnerAccessRoleArn") | .OutputValue) // ""')
 
 if [ -z "$queue_url" ] || [ -z "$sqs_region" ] || [ -z "$role_arn" ]; then
-    echo "[deploy-lakerunner-services] ERROR: satellite-infra-base stack '$satellite_infra_base_stack' is missing one of RawQueueUrl/Region/LakerunnerAccessRoleArn outputs" >&2
+    echo "[deploy-lakerunner-services] ERROR: satellite-infra-base stack '$SATELLITE_INFRA_BASE_STACK' is missing one of RawQueueUrl/Region/LakerunnerAccessRoleArn outputs" >&2
     exit 2
 fi
 
 pubsub_sqs_env="SQS_QUEUE_URL=$queue_url;SQS_REGION=$sqs_region;SQS_ROLE_ARN=$role_arn"
 
-# --- Assemble deploy-stack.sh invocation. ------------------------------------
-set -- --stack-name "$stack_name" --template-url "$template_url" --region "$region"
-set -- "$@" --from-stack "$infra_base_stack"
-set -- "$@" --from-stack "$infra_rds_stack"
-[ -n "$deployer_role_arn" ] && set -- "$@" --deployer-role-arn "$deployer_role_arn"
-[ -n "$no_execute" ] && set -- "$@" "$no_execute"
+# --- Compose the deploy-stack.sh environment. --------------------------------
+FROM_STACKS="$INFRA_BASE_STACK $INFRA_RDS_STACK"
+MAPS=""
 
-set -- "$@" --param "PubsubSqsEnv=$pubsub_sqs_env"
-# TemplateBaseUrl must track the version we deploy so nested children load from
-# the matching prefix.
-set -- "$@" --param "TemplateBaseUrl=$template_base_url/$version/cardinal-lakerunner/"
+# PubsubSqsEnv and TemplateBaseUrl are always set.  TemplateBaseUrl must track
+# the version we deploy so nested children load from the matching prefix.
+params="PubsubSqsEnv=$pubsub_sqs_env
+TemplateBaseUrl=$template_base_url/$VERSION/cardinal-lakerunner/
+ClusterArn=$CLUSTER_ARN
+ClusterName=$CLUSTER_NAME
+VpcId=$VPC_ID
+PrivateSubnets=$PRIVATE_SUBNETS
+OtelReplicas=$otel_replicas"
 
-[ -n "$vpc_id" ] && set -- "$@" --param "VpcId=$vpc_id"
-[ -n "$cluster_arn" ] && set -- "$@" --param "ClusterArn=$cluster_arn"
-[ -n "$cluster_name" ] && set -- "$@" --param "ClusterName=$cluster_name"
-[ -n "$private_subnets" ] && set -- "$@" --param "PrivateSubnets=$private_subnets"
-[ -n "$public_subnets" ] && set -- "$@" --param "PublicSubnets=$public_subnets"
-[ -n "$service_namespace_name" ] && set -- "$@" --param "ServiceNamespaceName=$service_namespace_name"
-[ -n "$otel_replicas" ] && set -- "$@" --param "OtelReplicas=$otel_replicas"
+[ -n "${PUBLIC_SUBNETS:-}" ] && params="$params
+PublicSubnets=$PUBLIC_SUBNETS"
+[ -n "${SERVICE_NAMESPACE_NAME:-}" ] && params="$params
+ServiceNamespaceName=$SERVICE_NAMESPACE_NAME"
 
-[ -n "$lakerunner_image" ] && set -- "$@" --param "LakerunnerImage=$lakerunner_image"
-[ -n "$maestro_image" ] && set -- "$@" --param "MaestroImage=$maestro_image"
-[ -n "$otel_image" ] && set -- "$@" --param "OtelImage=$otel_image"
-[ -n "$dex_image" ] && set -- "$@" --param "DexImage=$dex_image"
-[ -n "$dex_init_image" ] && set -- "$@" --param "DexInitImage=$dex_init_image"
-[ -n "$db_init_image" ] && set -- "$@" --param "DbInitImage=$db_init_image"
+[ -n "${LAKERUNNER_IMAGE:-}" ] && params="$params
+LakerunnerImage=$LAKERUNNER_IMAGE"
+[ -n "${MAESTRO_IMAGE:-}" ] && params="$params
+MaestroImage=$MAESTRO_IMAGE"
+[ -n "${OTEL_IMAGE:-}" ] && params="$params
+OtelImage=$OTEL_IMAGE"
+[ -n "${DEX_IMAGE:-}" ] && params="$params
+DexImage=$DEX_IMAGE"
+[ -n "${DEX_INIT_IMAGE:-}" ] && params="$params
+DexInitImage=$DEX_INIT_IMAGE"
+[ -n "${DB_INIT_IMAGE:-}" ] && params="$params
+DbInitImage=$DB_INIT_IMAGE"
 
-[ -n "$certificate_arn" ] && set -- "$@" --param "CertificateArn=$certificate_arn"
-[ -n "$certificate_body_file" ] && set -- "$@" --param "CertificateBody=$(read_file_or_die "$certificate_body_file")"
-[ -n "$certificate_private_key_file" ] && set -- "$@" --param "CertificatePrivateKey=$(read_file_or_die "$certificate_private_key_file")"
-[ -n "$certificate_chain_file" ] && set -- "$@" --param "CertificateChain=$(read_file_or_die "$certificate_chain_file")"
+[ -n "${CERTIFICATE_ARN:-}" ] && params="$params
+CertificateArn=$CERTIFICATE_ARN"
+[ -n "${CERTIFICATE_BODY_FILE:-}" ] && params="$params
+CertificateBody=$(read_file_or_die "$CERTIFICATE_BODY_FILE")"
+[ -n "${CERTIFICATE_PRIVATE_KEY_FILE:-}" ] && params="$params
+CertificatePrivateKey=$(read_file_or_die "$CERTIFICATE_PRIVATE_KEY_FILE")"
+[ -n "${CERTIFICATE_CHAIN_FILE:-}" ] && params="$params
+CertificateChain=$(read_file_or_die "$CERTIFICATE_CHAIN_FILE")"
 
-[ -n "$dex_admin_email" ] && set -- "$@" --param "DexAdminEmail=$dex_admin_email"
-[ -n "$dex_admin_password_hash" ] && set -- "$@" --param "DexAdminPasswordHash=$dex_admin_password_hash"
-[ -n "$dex_client_id" ] && set -- "$@" --param "DexClientId=$dex_client_id"
-[ -n "$oidc_superadmin_emails" ] && set -- "$@" --param "OidcSuperadminEmails=$oidc_superadmin_emails"
+[ -n "${DEX_ADMIN_EMAIL:-}" ] && params="$params
+DexAdminEmail=$DEX_ADMIN_EMAIL"
+[ -n "${DEX_ADMIN_PASSWORD_HASH:-}" ] && params="$params
+DexAdminPasswordHash=$DEX_ADMIN_PASSWORD_HASH"
+[ -n "${DEX_CLIENT_ID:-}" ] && params="$params
+DexClientId=$DEX_CLIENT_ID"
+[ -n "${OIDC_SUPERADMIN_EMAILS:-}" ] && params="$params
+OidcSuperadminEmails=$OIDC_SUPERADMIN_EMAILS"
 
-exec "$SCRIPT_DIR/deploy-stack.sh" "$@"
+PARAMS="$params"
+
+export TEMPLATE_URL PARAMS FROM_STACKS MAPS
+
+exec "$SCRIPT_DIR/deploy-stack.sh"

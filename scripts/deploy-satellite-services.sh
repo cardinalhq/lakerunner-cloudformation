@@ -5,11 +5,11 @@
 # Upstream:
 #   - satellite-infra-base : RawBucketName output -> RawBucketName param.
 #   - lakerunner-infra-base : LicenseSecretArn output -> LicenseSecretArn param.
-# Both output names match the parameter names, so plain --from-stack pulls wire
-# them up.  OtelReplicas defaults to 1 here (the collector config must change
+# Both output names match the parameter names, so plain FROM_STACKS pulls wire
+# them up.  OTEL_REPLICAS defaults to 1 here (the collector config must change
 # before scaling past one replica -- see docs/operations/jenkins-chained-deploy.md).
 #
-# Thin wrapper over deploy-stack.sh.
+# Thin wrapper over deploy-stack.sh.  Pure environment-variable interface.
 
 set -eu
 
@@ -17,95 +17,79 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)
 DEFAULT_TEMPLATE_BASE_URL="https://cardinal-cfn.s3.us-east-2.amazonaws.com/lakerunner"
 TEMPLATE_KEY="cardinal-satellite-services.yaml"
 
-stack_name=""
-region=""
-version=""
-template_base_url="$DEFAULT_TEMPLATE_BASE_URL"
-deployer_role_arn=""
-no_execute=""
-
-satellite_infra_base_stack=""
-infra_base_stack=""
-vpc_id=""
-alb_subnets_csv=""
-task_subnets_csv=""
-ecs_cluster_arn=""
-alb_scheme=""
-ingest_source_cidr=""
-otel_replicas="1"   # default: single replica; >1 needs a collector config change
-
 usage() {
-    cat <<'EOF'
-Usage: deploy-satellite-services.sh --stack-name NAME --region REGION --version VER \
-           --satellite-infra-base-stack NAME --infra-base-stack NAME [options]
+    cat <<EOF
+deploy-satellite-services.sh -- deploy the cardinal-satellite-services stack.
+
+All inputs come from environment variables (no flags).
 
 Required:
-  --stack-name NAME                  Stack to create/update.
-  --region REGION                    AWS region.
-  --version VERSION                  Published template tag.
-  --satellite-infra-base-stack NAME  Upstream (RawBucketName).
-  --infra-base-stack NAME            Upstream lakerunner-infra-base (LicenseSecretArn).
-  --vpc-id VPC
-  --alb-subnets-csv CSV              Subnets for the collector ALB.
-  --task-subnets-csv CSV             Subnets for the collector tasks.
-  --ecs-cluster-arn ARN              ECS cluster for the collector.
+  STACK_NAME                  Stack to create/update.
+  REGION                      AWS region (never defaulted; must be set explicitly).
+  VERSION                     Published template tag.
+  SATELLITE_INFRA_BASE_STACK  Upstream satellite-infra-base (RawBucketName).
+  INFRA_BASE_STACK            Upstream lakerunner-infra-base (LicenseSecretArn).
+  VPC_ID                      VPC for the collector.
+  ALB_SUBNETS                 Comma-separated subnets for the collector ALB.
+  TASK_SUBNETS                Comma-separated subnets for the collector tasks.
+  ECS_CLUSTER_ARN             ECS cluster for the collector.
 
-Add-ins (template defaults are fine if omitted):
-  --alb-scheme SCHEME                internet-facing | internal.
-  --ingest-source-cidr CIDR          Allowed source CIDR for the collector ALB.
-  --otel-replicas N                  Collector replica count (default 1; >1
-                                     requires a collector config change first).
-
-Common:
-  --template-base-url URL            Default: https://cardinal-cfn.s3.us-east-2.amazonaws.com/lakerunner
-  --deployer-role-arn ARN
-  --no-execute
+Optional (template defaults preserved when unset):
+  ALB_SCHEME           internet-facing | internal (default internal).
+  INGEST_SOURCE_CIDR   Allowed source CIDR for the collector ALB (template default 10.0.0.0/8).
+  OTEL_REPLICAS        Collector replica count (default 1; >1 requires a
+                       collector config change first).
+  TEMPLATE_BASE_URL    Default: $DEFAULT_TEMPLATE_BASE_URL
+  DEPLOYER_ROLE_ARN    Passed to create-change-set.
+  NO_EXECUTE           Non-empty: change-set only, do not execute.
 EOF
 }
 
-while [ $# -gt 0 ]; do
-    case "$1" in
-        --stack-name) stack_name="$2"; shift 2 ;;
-        --region) region="$2"; shift 2 ;;
-        --version) version="$2"; shift 2 ;;
-        --template-base-url) template_base_url="$2"; shift 2 ;;
-        --deployer-role-arn) deployer_role_arn="$2"; shift 2 ;;
-        --no-execute) no_execute="--no-execute"; shift ;;
-        --satellite-infra-base-stack) satellite_infra_base_stack="$2"; shift 2 ;;
-        --infra-base-stack) infra_base_stack="$2"; shift 2 ;;
-        --vpc-id) vpc_id="$2"; shift 2 ;;
-        --alb-subnets-csv) alb_subnets_csv="$2"; shift 2 ;;
-        --task-subnets-csv) task_subnets_csv="$2"; shift 2 ;;
-        --ecs-cluster-arn) ecs_cluster_arn="$2"; shift 2 ;;
-        --alb-scheme) alb_scheme="$2"; shift 2 ;;
-        --ingest-source-cidr) ingest_source_cidr="$2"; shift 2 ;;
-        --otel-replicas) otel_replicas="$2"; shift 2 ;;
-        -h|--help) usage; exit 0 ;;
-        *) echo "[deploy-satellite-services] ERROR: unknown argument: $1" >&2; usage >&2; exit 2 ;;
-    esac
-done
+case "${1:-}" in
+    -h|--help) usage; exit 0 ;;
+    "") : ;;
+    *) echo "[deploy-satellite-services] ERROR: this script takes no arguments; configure it via environment variables" >&2; usage >&2; exit 2 ;;
+esac
 
-if [ -z "$stack_name" ] || [ -z "$region" ] || [ -z "$version" ] \
-    || [ -z "$satellite_infra_base_stack" ] || [ -z "$infra_base_stack" ]; then
+missing=""
+[ -z "${STACK_NAME:-}" ] && missing="$missing STACK_NAME"
+[ -z "${REGION:-}" ] && missing="$missing REGION"
+[ -z "${VERSION:-}" ] && missing="$missing VERSION"
+[ -z "${SATELLITE_INFRA_BASE_STACK:-}" ] && missing="$missing SATELLITE_INFRA_BASE_STACK"
+[ -z "${INFRA_BASE_STACK:-}" ] && missing="$missing INFRA_BASE_STACK"
+[ -z "${VPC_ID:-}" ] && missing="$missing VPC_ID"
+[ -z "${ALB_SUBNETS:-}" ] && missing="$missing ALB_SUBNETS"
+[ -z "${TASK_SUBNETS:-}" ] && missing="$missing TASK_SUBNETS"
+[ -z "${ECS_CLUSTER_ARN:-}" ] && missing="$missing ECS_CLUSTER_ARN"
+if [ -n "$missing" ]; then
     usage >&2
-    echo "[deploy-satellite-services] ERROR: --stack-name, --region, --version, --satellite-infra-base-stack, and --infra-base-stack are required" >&2
+    echo "[deploy-satellite-services] ERROR: missing required: $(echo "$missing" | sed 's/^ //; s/ /, /g')" >&2
     exit 2
 fi
 
-template_url="$template_base_url/$version/$TEMPLATE_KEY"
+template_base_url="${TEMPLATE_BASE_URL:-$DEFAULT_TEMPLATE_BASE_URL}"
 
-set -- --stack-name "$stack_name" --template-url "$template_url" --region "$region"
-set -- "$@" --from-stack "$satellite_infra_base_stack"
-set -- "$@" --from-stack "$infra_base_stack"
-[ -n "$deployer_role_arn" ] && set -- "$@" --deployer-role-arn "$deployer_role_arn"
-[ -n "$no_execute" ] && set -- "$@" "$no_execute"
+# OTEL_REPLICAS defaults to 1 here (single replica; >1 needs a collector config
+# change first).  Always passed so the wrapper default, not the template
+# default, governs.
+otel_replicas="${OTEL_REPLICAS:-1}"
 
-[ -n "$vpc_id" ] && set -- "$@" --param "VpcId=$vpc_id"
-[ -n "$alb_subnets_csv" ] && set -- "$@" --param "AlbSubnetsCsv=$alb_subnets_csv"
-[ -n "$task_subnets_csv" ] && set -- "$@" --param "TaskSubnetsCsv=$task_subnets_csv"
-[ -n "$ecs_cluster_arn" ] && set -- "$@" --param "EcsClusterArn=$ecs_cluster_arn"
-[ -n "$alb_scheme" ] && set -- "$@" --param "AlbScheme=$alb_scheme"
-[ -n "$ingest_source_cidr" ] && set -- "$@" --param "IngestSourceCidr=$ingest_source_cidr"
-[ -n "$otel_replicas" ] && set -- "$@" --param "OtelReplicas=$otel_replicas"
+TEMPLATE_URL="$template_base_url/$VERSION/$TEMPLATE_KEY"
+FROM_STACKS="$SATELLITE_INFRA_BASE_STACK $INFRA_BASE_STACK"
+MAPS=""
 
-exec "$SCRIPT_DIR/deploy-stack.sh" "$@"
+params="VpcId=$VPC_ID
+AlbSubnetsCsv=$ALB_SUBNETS
+TaskSubnetsCsv=$TASK_SUBNETS
+EcsClusterArn=$ECS_CLUSTER_ARN
+OtelReplicas=$otel_replicas"
+[ -n "${ALB_SCHEME:-}" ] && params="$params
+AlbScheme=$ALB_SCHEME"
+[ -n "${INGEST_SOURCE_CIDR:-}" ] && params="$params
+IngestSourceCidr=$INGEST_SOURCE_CIDR"
+
+PARAMS="$params"
+
+export TEMPLATE_URL PARAMS FROM_STACKS MAPS
+
+exec "$SCRIPT_DIR/deploy-stack.sh"
