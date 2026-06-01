@@ -1,8 +1,8 @@
 """Standalone application-tier root generator: cardinal-lakerunner-services.yaml.
 
-This is a transform of ``root.py``. It stands up the same eight application-tier
-nested children (cert, alb, migration, services-query/process/control, otel,
-maestro) UNCHANGED, but is fully **parameter-driven**: it creates NO IAM roles,
+This is a transform of ``root.py``. It stands up the application-tier nested
+children (cert, alb, migration, services-query/process/control, maestro)
+UNCHANGED, but is fully **parameter-driven**: it creates NO IAM roles,
 NO security groups, NO RDS, NO buckets, NO secrets, NO SSM parameters. Every
 such value arrives as a parameter (driver-wired from ``lakerunner-infra-base``
 and ``lakerunner-infra-rds`` outputs).
@@ -65,7 +65,6 @@ DEFAULT_TEMPLATE_BASE_URL = (
 # ---------------------------------------------------------------------------
 def _sizing_param_specs(defaults: dict) -> list[dict]:
     services = defaults["services"]
-    otel_cfg = defaults["otel"]["otel-gateway"]
     maestro_cfg = defaults["maestro"]
 
     api = services["lakerunner-query-api"]
@@ -123,15 +122,6 @@ def _sizing_param_specs(defaults: dict) -> list[dict]:
          "default": "false", "allowed_values": ["true", "false"],
          "description": "When true, mcp-gateway tries to recover from a "
                         "previously failed (dirty) maestro DB migration on startup."},
-        # OTEL
-        {"name": "OtelReplicas", "type": "Number", "default": int(otel_cfg["replicas"]),
-         "min": 1, "description": "Desired replicas for the otel-gateway service."},
-        {"name": "OtelCpu", "type": "String", "default": str(otel_cfg["cpu"]),
-         "description": "Fargate CPU units for the otel-gateway service."},
-        {"name": "OtelMemory", "type": "String", "default": str(otel_cfg["memory_mib"]),
-         "description": "Fargate memory (MiB) for the otel-gateway service."},
-        {"name": "OtelConfigYaml", "type": "String", "default": "",
-         "description": "Optional inline OTEL collector config YAML override."},
     ]
 
 
@@ -194,7 +184,6 @@ _SECURITY_GROUP_PARAMS = [
     ("QuerySecurityGroupId", "Security group ID for the query tier."),
     ("ProcessSecurityGroupId", "Security group ID for the process tier."),
     ("ControlSecurityGroupId", "Security group ID for the control tier."),
-    ("OtelSecurityGroupId", "Security group ID for the otel collector."),
     ("MaestroSecurityGroupId", "Security group ID for maestro."),
 ]
 
@@ -204,7 +193,6 @@ _ROLE_PARAMS = [
     ("QueryRoleArn", "ARN of the query-tier task role."),
     ("ProcessRoleArn", "ARN of the process-tier task role."),
     ("ControlRoleArn", "ARN of the control-tier task role."),
-    ("OtelRoleArn", "ARN of the otel task role."),
     ("MaestroRoleArn", "ARN of the maestro task role."),
 ]
 
@@ -287,7 +275,7 @@ def build() -> Template:
         AllowedPattern=r"^[a-z0-9]([a-z0-9.-]{0,61}[a-z0-9])?$",
         Description=(
             "Private DNS namespace name created for in-cluster service "
-            "discovery (cardinal-otel.<name>:4318, query-api.<name>:8080, ...)."
+            "discovery (query-api.<name>:8080, ...)."
         ),
     ))
 
@@ -403,11 +391,13 @@ def build() -> Template:
     t.add_parameter(Parameter(
         "SelfTelemetry",
         Type="String",
-        Default="Yes",
-        AllowedValues=["Yes", "No"],
+        Default="No",
+        AllowedValues=["No"],
         Description=(
-            "When Yes, lakerunner tasks emit OTLP telemetry to the in-cluster "
-            "otel-collector at cardinal-otel.<namespace>:4318 (OTLP/HTTP)."
+            "Self-telemetry to an in-stack otel-collector is no longer "
+            "available -- the in-stack otel child was removed; the satellite "
+            "collector handles all ingest. This toggle is retained for the "
+            "console surface but only 'No' (disabled) is supported."
         ),
     ))
 
@@ -422,10 +412,6 @@ def build() -> Template:
         t, name="MaestroImage",
         default=defaults["images"]["maestro"],
         description="Maestro container image.")
-    otel_image = add_image_override(
-        t, name="OtelImage",
-        default=defaults["images"]["otel"],
-        description="OTEL collector container image.")
     dex_image = add_image_override(
         t, name="DexImage",
         default=defaults["images"]["dex"],
@@ -441,7 +427,6 @@ def build() -> Template:
     image_param_names = [
         "LakerunnerImage",
         "MaestroImage",
-        "OtelImage",
         "DexImage",
         "DbInitImage",
         "DexInitImage",
@@ -480,19 +465,12 @@ def build() -> Template:
     # Conditions
     # ---------------------------------------------------------------------
     t.add_condition("DeployMaestroEnabled", Equals(Ref("DeployMaestro"), "Yes"))
-    t.add_condition("SelfTelemetryEnabled", Equals(Ref("SelfTelemetry"), "Yes"))
 
-    # Endpoint resolves at deploy time. When disabled the URL is blanked so
-    # the OTel SDK has nothing to dial -- ENABLE_OTLP_TELEMETRY=false is the
-    # actual gate, the empty URL is belt + suspenders. Port 4318 is OTLP/HTTP;
-    # lakerunner's OTel SDK uses the HTTP exporter, so 4317 (gRPC) returns
-    # HTTP/2 SETTINGS frames the SDK can't parse.
-    self_telemetry_endpoint = If(
-        "SelfTelemetryEnabled",
-        Sub("http://cardinal-otel.${ServiceNamespaceName}:4318"),
-        "",
-    )
-    self_telemetry_enabled = If("SelfTelemetryEnabled", "true", "false")
+    # The in-stack otel-collector was removed; there is no self-telemetry
+    # target. Tier children always run with telemetry disabled and an empty
+    # endpoint (their own defaults match these values).
+    self_telemetry_endpoint = ""
+    self_telemetry_enabled = "false"
 
     # ---------------------------------------------------------------------
     # Install-id derivation (computed inline; not a parameter on root)
@@ -532,7 +510,6 @@ def build() -> Template:
     sec_query_sg = Ref("QuerySecurityGroupId")
     sec_process_sg = Ref("ProcessSecurityGroupId")
     sec_control_sg = Ref("ControlSecurityGroupId")
-    sec_otel_sg = Ref("OtelSecurityGroupId")
     sec_maestro_sg = Ref("MaestroSecurityGroupId")
 
     exec_role = Ref("ExecutionRoleArn")
@@ -540,7 +517,6 @@ def build() -> Template:
     query_role = Ref("QueryRoleArn")
     process_role = Ref("ProcessRoleArn")
     control_role = Ref("ControlRoleArn")
-    otel_role = Ref("OtelRoleArn")
     maestro_role = Ref("MaestroRoleArn")
 
     # ---------------------------------------------------------------------
@@ -669,28 +645,6 @@ def build() -> Template:
     _add_child(t, "Control", "services-control.yaml",
                services_control_params,
                depends_on=["Migration", "Process"])
-
-    _add_child(t, "Otel", "otel.yaml", {
-        "InstallIdShort": install_short,
-        "InstallIdLong": install_long,
-        "ClusterArn": Ref("ClusterArn"),
-        "TaskSecurityGroupId": sec_otel_sg,
-        "ExecutionRoleArn": exec_role,
-        "TaskRoleArn": otel_role,
-        "PrivateSubnetsCsv": private_subnets_csv,
-        "BucketName": Ref("CookedBucketName"),
-        "LicenseSecretArn": Ref("LicenseSecretArn"),
-        "OtelHttpListenerArn": GetAtt(alb_stack, "Outputs.OtelHttpListenerArn"),
-        "AlbDnsName": GetAtt(alb_stack, "Outputs.AlbDnsName"),
-        "VpcId": Ref("VpcId"),
-        "ServiceNamespaceId": namespace_id,
-        "ServiceNamespaceName": namespace_name,
-        "OtelImage": otel_image,
-        "OtelReplicas": Ref("OtelReplicas"),
-        "OtelCpu": Ref("OtelCpu"),
-        "OtelMemory": Ref("OtelMemory"),
-        "OtelConfigYaml": Ref("OtelConfigYaml"),
-    })
 
     maestro_stack = _add_child(t, "Maestro", "maestro.yaml", {
         "InstallIdShort": install_short,

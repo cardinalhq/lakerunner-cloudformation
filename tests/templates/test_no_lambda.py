@@ -19,7 +19,7 @@ from cardinal_cfn import (
 )
 from cardinal_cfn.children import (
     alb, cert, migration,
-    services_query, services_process, services_control, otel, maestro,
+    services_query, services_process, services_control, maestro,
 )
 
 _TEMPLATES = [
@@ -37,7 +37,6 @@ _TEMPLATES = [
     ("services-query", services_query),
     ("services-process", services_process),
     ("services-control", services_control),
-    ("otel", otel),
     ("maestro", maestro),
 ]
 

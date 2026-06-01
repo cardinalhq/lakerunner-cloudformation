@@ -48,7 +48,7 @@ echo "Generating cardinal-lakerunner-services.yaml (param-driven root)..."
 python3 -m cardinal_cfn.lakerunner_services > generated-templates/cardinal-lakerunner-services.yaml
 
 for child in alb cert migration \
-             services_query services_process services_control otel maestro; do
+             services_query services_process services_control maestro; do
   out_name=$(echo "$child" | tr '_' '-')
   echo "Generating cardinal-lakerunner/${out_name}.yaml..."
   python3 -m "cardinal_cfn.children.${child}" > "generated-templates/cardinal-lakerunner/${out_name}.yaml"

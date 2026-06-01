@@ -21,7 +21,7 @@ from cardinal_cfn import (
     satellite_services,
 )
 from cardinal_cfn.children import (
-    alb, cert, maestro, migration, otel,
+    alb, cert, maestro, migration,
     services_control, services_process, services_query,
 )
 
@@ -36,7 +36,6 @@ _MODULES = [
     ("cert", cert),
     ("maestro", maestro),
     ("migration", migration),
-    ("otel", otel),
     ("services-control", services_control),
     ("services-process", services_process),
     ("services-query", services_query),

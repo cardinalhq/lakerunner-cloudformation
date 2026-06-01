@@ -12,7 +12,6 @@ from cardinal_cfn.children import (
     services_query,
     services_control,
     maestro,
-    otel,
 )
 
 
@@ -20,7 +19,6 @@ _TIER_MODULES = {
     "services-query": services_query,
     "services-control": services_control,
     "maestro": maestro,
-    "otel": otel,
 }
 
 
