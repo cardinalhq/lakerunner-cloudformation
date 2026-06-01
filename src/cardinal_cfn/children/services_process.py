@@ -421,7 +421,12 @@ def build() -> Template:
             base_env=base_env,
             base_secrets=base_secrets,
             extra_env=spec.get("extra_env"),
-            capacity=spec.get("capacity", "spot"),
+            # Every deploy-critical service needs a guaranteed on-demand first
+            # replica (Base=1) so a rolling upgrade can place its first NEW task
+            # even in a transient FARGATE_SPOT shortage; scale-out replicas stay
+            # spot-weighted. process-{logs,metrics,traces} default to fallback;
+            # pubsub already sets it explicitly.
+            capacity=spec.get("capacity", "fallback"),
         )
         t.add_output(Output(spec["output_name"], Value=GetAtt(ecs_service, "Name")))
 

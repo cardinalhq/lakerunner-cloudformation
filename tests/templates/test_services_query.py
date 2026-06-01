@@ -320,7 +320,21 @@ def _service_strategy(td, suffix):
     return {s["CapacityProvider"] for s in res["Properties"]["CapacityProviderStrategy"]}
 
 
-def test_query_workers_are_spot_only(td):
-    # query-api and query-worker are scalable workers: pure FARGATE_SPOT.
+def _service_items(td, suffix):
+    res = next(
+        r for lid, r in td["Resources"].items()
+        if r["Type"] == "AWS::ECS::Service" and lid.endswith(suffix)
+    )
+    return res["Properties"]["CapacityProviderStrategy"]
+
+
+def test_query_workers_have_ondemand_fallback(td):
+    # query-api and query-worker scale out to spot, but a rolling upgrade must
+    # place a first NEW task before draining the old; Base=1 on FARGATE
+    # guarantees that first replica places even in a transient FARGATE_SPOT
+    # shortage. Scale-out replicas stay spot-weighted.
     for suffix in ("QueryApiService", "QueryWorkerService"):
-        assert _service_strategy(td, suffix) == {"FARGATE_SPOT"}, suffix
+        assert _service_strategy(td, suffix) == {"FARGATE_SPOT", "FARGATE"}, suffix
+        by_provider = {i["CapacityProvider"]: i for i in _service_items(td, suffix)}
+        assert by_provider["FARGATE"]["Base"] == 1, suffix
+        assert "Base" not in by_provider["FARGATE_SPOT"], suffix

@@ -296,6 +296,10 @@ def build() -> Template:
             subnets_csv_param="PrivateSubnetsCsv",
             security_group_id_param="TaskSecurityGroupId",
             container_name="query-worker",
+            # Base=1 guarantees the first NEW task of a rolling upgrade lands on
+            # on-demand even in a transient FARGATE_SPOT shortage; the remaining
+            # scale-out replicas stay spot-weighted (~85-90% spot).
+            capacity="fallback",
         )
     )
 
@@ -402,6 +406,9 @@ def build() -> Template:
             container_port=api_container_port,
             service_registry_ref=api_discovery,
             listener_rule_refs=[api_listener_rule],
+            # Base=1 on-demand first replica for reliable rolling upgrades;
+            # scale-out replicas stay spot-weighted.
+            capacity="fallback",
         )
     )
 

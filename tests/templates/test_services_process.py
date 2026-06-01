@@ -399,14 +399,34 @@ def _service_strategy(td, suffix):
     return {s["CapacityProvider"] for s in res["Properties"]["CapacityProviderStrategy"]}
 
 
+def _service_items(td, suffix):
+    res = next(
+        r for lid, r in td["Resources"].items()
+        if r["Type"] == "AWS::ECS::Service" and lid.endswith(suffix)
+    )
+    return res["Properties"]["CapacityProviderStrategy"]
+
+
+def _assert_fallback(items):
+    # On-demand FARGATE with Base=1 (the first replica always places on
+    # on-demand) plus weighted FARGATE_SPOT for scale-out.
+    by_provider = {i["CapacityProvider"]: i for i in items}
+    assert by_provider["FARGATE"]["Base"] == 1
+    assert "FARGATE_SPOT" in by_provider
+    assert "Base" not in by_provider["FARGATE_SPOT"]
+
+
 def test_pubsub_sqs_has_ondemand_fallback(td):
-    # pubsub-sqs is a non-autoscaled singleton: spot-preferred with an
-    # on-demand FARGATE fallback so a transient FARGATE_SPOT shortage can't
-    # fail a rolling deploy.
+    # pubsub-sqs is a non-autoscaled singleton: on-demand FARGATE Base=1 so a
+    # transient FARGATE_SPOT shortage can't fail a rolling deploy.
     assert _service_strategy(td, "PubsubSqsService") == {"FARGATE_SPOT", "FARGATE"}
+    _assert_fallback(_service_items(td, "PubsubSqsService"))
 
 
-def test_process_workers_are_spot_only(td):
-    # process-* are scalable workers: pure FARGATE_SPOT.
+def test_process_workers_have_ondemand_fallback(td):
+    # process-* scale out to spot, but every rolling upgrade must place a first
+    # NEW task before draining the old; Base=1 on FARGATE guarantees that
+    # first replica places even in a transient FARGATE_SPOT shortage.
     for suffix in ("ProcessLogsService", "ProcessMetricsService", "ProcessTracesService"):
-        assert _service_strategy(td, suffix) == {"FARGATE_SPOT"}, suffix
+        assert _service_strategy(td, suffix) == {"FARGATE_SPOT", "FARGATE"}, suffix
+        _assert_fallback(_service_items(td, suffix))
