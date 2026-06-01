@@ -23,4 +23,6 @@ def test_required_parameters(td):
 
 
 def test_description_mentions_pull_model(td):
-    assert "pull" in td["Description"].lower()
+    desc = td["Description"].lower()
+    assert "pull" in desc
+    assert "nothing pushes" in desc

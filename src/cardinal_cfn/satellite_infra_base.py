@@ -39,7 +39,7 @@ from troposphere.sqs import Queue, QueuePolicy
 
 APPLICATION = "cardinal-lakerunner"
 PROJECT = "cardinal"
-MANAGED_BY = "cardinal-cfn"
+MANAGED_BY = "cardinal-cfn-satellite"
 
 
 def _tags(*, component: str) -> Tags:
@@ -100,6 +100,7 @@ def build() -> Template:
                 "Name for the raw ingest bucket. Blank uses the default "
                 "cardinal-otel-raw-<account>-<region>."
             ),
+            AllowedPattern=r"^$|^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$",
         )
     )
 
