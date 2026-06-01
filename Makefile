@@ -38,13 +38,11 @@ lint:	## Run cfn-lint on every generated template
 	source $(VENV_DIR)/bin/activate && cfn-lint \
 	  generated-templates/lrdev-vpc.yaml \
 	  generated-templates/lrdev-baseinfra.yaml \
-	  generated-templates/cardinal-infrastructure.yaml \
 	  generated-templates/cardinal-cleanup.yaml \
 	  generated-templates/cardinal-satellite-infra-base.yaml \
 	  generated-templates/cardinal-satellite-services.yaml \
 	  generated-templates/cardinal-lakerunner-infra-rds.yaml \
 	  generated-templates/cardinal-lakerunner-infra-base.yaml \
-	  generated-templates/cardinal-lakerunner.yaml \
 	  generated-templates/cardinal-lakerunner-services.yaml \
 	  generated-templates/cardinal-lakerunner/*.yaml
 

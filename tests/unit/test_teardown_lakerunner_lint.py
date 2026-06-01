@@ -87,42 +87,6 @@ def test_yes_flag_required_for_destruction():
 # / secretsmanager / rds calls would fail twice over.  Guard it.
 # ---------------------------------------------------------------------------
 
-def test_nested_stack_logical_ids_match_root_template():
-    """The teardown script's retained-resource discovery references nested
-    stack logical ids under the root.  The infra-script pivot moves the
-    database/storage/config/cluster children entirely outside CFN (their
-    work now lives in scripts/data-setup.sh), so the script's references
-    to those stack ids are now legacy: they exist for installs deployed
-    before the refactor and are tolerated by the script's
-    silent-empty-on-missing path.  This test simply asserts the script's
-    referenced ids are a subset of the legacy + current set."""
-    import re
-
-    from cardinal_cfn.root import build as build_root
-
-    root = build_root()
-    current_nested_ids = {
-        name
-        for name, res in root.resources.items()
-        if res.resource_type == "AWS::CloudFormation::Stack"
-    }
-    legacy_nested_ids = {
-        "StorageStack",
-        "DatabaseStack",
-        "ConfigStack",
-        "ClusterStack",
-    }
-    allowed_ids = current_nested_ids | legacy_nested_ids
-
-    raw = SCRIPT.read_text()
-    referenced = set(re.findall(r'get_nested_stack_id\s+"\$stack_name"\s+"([^"]+)"', raw))
-    unknown = referenced - allowed_ids
-    assert not unknown, (
-        f"teardown script references nested logical ids that exist in neither "
-        f"the current root template nor the legacy retain set: {sorted(unknown)}"
-    )
-
-
 def test_role_arn_only_passed_to_cloudformation_calls():
     """Collapse backslash-continued lines first, then check that every
     `--role-arn` occurrence is either docs, a variable assignment, the arg
