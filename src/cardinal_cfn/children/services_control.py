@@ -1,17 +1,23 @@
-"""services-control.yaml nested stack: lakerunner control-plane ECS services.
+"""services-control.yaml nested stack: lakerunner control-plane ECS service.
 
-Owns four ECS Fargate services:
+Owns a SINGLE ECS Fargate service running one task with four containers:
 
 - admin-api (ALB-attached on dedicated 9443 listener; path catch-all `/*`,
   also registered in Cloud Map as `admin-api.<namespace>:9091` so peers
   inside the cluster — currently just maestro — can reach it without
   hairpinning through the ALB and tripping the self-signed cert path)
 - sweeper (internal)
-- monitoring (internal; gRPC port not exposed on the ALB)
+- monitoring (internal; gRPC port not exposed on the ALB; drives ECS
+  autoscaling of the process-* services via ecs:UpdateService)
 - alert-evaluator (internal)
 
-These services run at fixed shape; CPU, memory, and replicas all come from
-cardinal-defaults.yaml. No per-service tunables are exposed at deployment time.
+These four control-plane components are tiny (~1-3 millicores, ~20-25 MiB
+each). Four separate Fargate tasks would each pay the 0.25 vCPU / 0.5 GB
+per-task floor; co-locating them in one task cuts that ~4x and means one task
+to place instead of four (a real win under spot scarcity). The task runs at a
+small fixed shape (256 CPU / 512 MiB); their combined real usage is ~7m / ~90Mi.
+All four containers are essential. CPU/memory/replicas are not exposed as
+deployment-time tunables.
 """
 
 from troposphere import (
@@ -22,7 +28,15 @@ from troposphere import (
     Sub,
     Template,
 )
-from troposphere.ecs import Environment, Secret
+from troposphere.ecs import (
+    ContainerDefinition,
+    Environment,
+    LogConfiguration,
+    PortMapping,
+    RuntimePlatform,
+    Secret,
+    TaskDefinition,
+)
 from troposphere.servicediscovery import (
     DnsConfig,
     DnsRecord,
@@ -32,17 +46,24 @@ from troposphere.servicediscovery import (
 from cardinal_cfn.children import services_common
 from cardinal_cfn.defaults import load_defaults
 from cardinal_cfn.images import add_image_override
+from cardinal_cfn.naming import cardinal_tags
 from cardinal_cfn.parameters import (
     add_install_id_parameters,
     add_parameter_group_metadata,
 )
 
+# Task-level shape for the merged control service. Fargate's smallest valid
+# size; the four containers' combined steady-state usage is ~7m CPU / ~90Mi.
+CONTROL_TASK_CPU = "256"
+CONTROL_TASK_MEMORY = "512"
+
 
 def build() -> Template:
     t = Template()
     t.set_description(
-        "Cardinal services-control: lakerunner admin-api (ALB-attached), "
-        "sweeper, monitoring, and alert-evaluator ECS services."
+        "Cardinal services-control: a single ECS service running one task with "
+        "four containers — admin-api (ALB-attached), sweeper, monitoring, and "
+        "alert-evaluator."
     )
 
     defaults = load_defaults()
@@ -307,29 +328,11 @@ def build() -> Template:
     ]
 
     # ---------------------------------------------------------------------
-    # admin-api: ALB-attached
+    # Per-container env. Each container keeps EXACTLY the env it had when these
+    # were four separate services: base DB env + per-component OTel env +
+    # YAML-declared env + any component-specific extras.
     # ---------------------------------------------------------------------
-    admin_lg = t.add_resource(services_common.build_log_group(service_key="admin-api"))
-    admin_tg = t.add_resource(
-        services_common.build_target_group(
-            service_key="admin-api",
-            vpc_id_param="VpcId",
-            port=admin_container_port,
-            health_check_path=admin_health_path,
-        )
-    )
-    # admin-api gets a dedicated HTTPS listener (9443) so the lakerunner
-    # binary's mux sees request paths verbatim (no /admin/ prefix to strip).
-    # This is the only rule on that listener; the listener's default action
-    # is a 503 fixed response.
-    admin_listener_rule = t.add_resource(
-        services_common.build_listener_rule(
-            service_key="admin-api-https",
-            target_group_ref=admin_tg,
-            listener_arn_param="AdminHttpsListenerArn",
-            path_patterns=["/*"],
-        )
-    )
+    # admin-api: ALB-attached, owns the admin-key secret.
     admin_env = (
         list(base_env)
         + services_common.lakerunner_otel_env(service_key="admin-api")
@@ -345,21 +348,109 @@ def build() -> Template:
             ValueFrom=Sub("${AdminApiKeySecretArn}:key::"),
         ),
     ]
-    admin_task = t.add_resource(
-        services_common.build_task_definition(
+
+    sweeper_env = (
+        list(base_env)
+        + services_common.lakerunner_otel_env(service_key="sweeper")
+        + _service_specific_env(sweeper_cfg)
+    )
+
+    # alert-evaluator reaches query-api over the in-cluster Cloud Map DNS.
+    # Container port is 8080 (matches lakerunner-query-api.ingress.container_port).
+    alert_env = (
+        list(base_env)
+        + services_common.lakerunner_otel_env(service_key="alert-evaluator")
+        + _service_specific_env(alert_cfg)
+        + [
+            Environment(
+                Name="ALERT_EVALUATOR_QUERY_API_URL",
+                Value=Sub("http://query-api.${ServiceNamespaceName}:8080"),
+            ),
+        ]
+    )
+
+    # The monitoring container drives ECS autoscaling of the process-* services.
+    # Env vars match cmd/monitoring.go + config/autoscaler.go in the lakerunner
+    # repo; the shared TaskRole (ControlRole) carries the ecs:UpdateService /
+    # DescribeServices grant it needs.
+    # The lakerunner binary defaults Autoscaler.ObserveOnly=true and per-service
+    # MinReplicas=0, which would log decisions but never scale and would scale
+    # services to zero on idle. Override both: the customer set max replicas to
+    # opt into actual scaling, and 1 is the documented floor (lakerunner
+    # docs/guides/admin/autoscaling.md: "Set to 1 to prevent scale-to-zero").
+    monitoring_env = (
+        list(base_env)
+        + services_common.lakerunner_otel_env(service_key="monitoring")
+        + _service_specific_env(monitoring_cfg)
+        + [
+            Environment(Name="LAKERUNNER_AUTOSCALER_ENABLED", Value="true"),
+            Environment(Name="LAKERUNNER_AUTOSCALER_OBSERVE_ONLY", Value="false"),
+            Environment(Name="LAKERUNNER_AUTOSCALER_PLATFORM", Value="ecs"),
+            Environment(Name="ECS_CLUSTER", Value=Ref("ClusterName")),
+            Environment(
+                Name="LAKERUNNER_AUTOSCALER_SERVICES_LOGS_DEPLOYMENT",
+                Value=Ref("ProcessLogsServiceName"),
+            ),
+            Environment(Name="LAKERUNNER_AUTOSCALER_SERVICES_LOGS_MIN_REPLICAS", Value="1"),
+            Environment(
+                Name="LAKERUNNER_AUTOSCALER_SERVICES_LOGS_MAX_REPLICAS",
+                Value=Ref("ProcessLogsReplicas"),
+            ),
+            Environment(
+                Name="LAKERUNNER_AUTOSCALER_SERVICES_METRICS_DEPLOYMENT",
+                Value=Ref("ProcessMetricsServiceName"),
+            ),
+            Environment(Name="LAKERUNNER_AUTOSCALER_SERVICES_METRICS_MIN_REPLICAS", Value="1"),
+            Environment(
+                Name="LAKERUNNER_AUTOSCALER_SERVICES_METRICS_MAX_REPLICAS",
+                Value=Ref("ProcessMetricsReplicas"),
+            ),
+            Environment(
+                Name="LAKERUNNER_AUTOSCALER_SERVICES_TRACES_DEPLOYMENT",
+                Value=Ref("ProcessTracesServiceName"),
+            ),
+            Environment(Name="LAKERUNNER_AUTOSCALER_SERVICES_TRACES_MIN_REPLICAS", Value="1"),
+            Environment(
+                Name="LAKERUNNER_AUTOSCALER_SERVICES_TRACES_MAX_REPLICAS",
+                Value=Ref("ProcessTracesReplicas"),
+            ),
+        ]
+    )
+
+    # ---------------------------------------------------------------------
+    # Per-container log groups. KEEP the four familiar /cardinal/<svc> paths so
+    # operators' log queries don't change — one log group per container, four
+    # resources, one task.
+    # ---------------------------------------------------------------------
+    admin_lg = t.add_resource(services_common.build_log_group(service_key="admin-api"))
+    sweeper_lg = t.add_resource(services_common.build_log_group(service_key="sweeper"))
+    monitoring_lg = t.add_resource(services_common.build_log_group(service_key="monitoring"))
+    alert_lg = t.add_resource(services_common.build_log_group(service_key="alert-evaluator"))
+
+    # ---------------------------------------------------------------------
+    # ALB attachment for admin-api: dedicated HTTPS listener (9443) so the
+    # lakerunner binary's mux sees request paths verbatim (no /admin/ prefix to
+    # strip). This is the only rule on that listener; the listener's default
+    # action is a 503 fixed response. The ECS Service's LoadBalancers block
+    # (below) targets the admin-api CONTAINER inside the merged task.
+    # ---------------------------------------------------------------------
+    admin_tg = t.add_resource(
+        services_common.build_target_group(
             service_key="admin-api",
-            image_ref=image_ref,
-            cpu=admin_cfg["cpu"],
-            memory_mib=admin_cfg["memory_mib"],
-            command=admin_cfg.get("command"),
-            execution_role_arn_param="ExecutionRoleArn",
-            task_role_arn=Ref("TaskRoleArn"),
-            environment=admin_env,
-            secrets=admin_secrets,
-            log_group_ref=admin_lg,
-            container_port=admin_container_port,
+            vpc_id_param="VpcId",
+            port=admin_container_port,
+            health_check_path=admin_health_path,
         )
     )
+    admin_listener_rule = t.add_resource(
+        services_common.build_listener_rule(
+            service_key="admin-api-https",
+            target_group_ref=admin_tg,
+            listener_arn_param="AdminHttpsListenerArn",
+            path_patterns=["/*"],
+        )
+    )
+
     # Register admin-api in Cloud Map so peers in the cluster (maestro) can
     # reach it at http://admin-api.<namespace>:9091 without hairpinning out
     # to the ALB's 9443 HTTPS listener. The ALB attachment stays for the
@@ -376,12 +467,75 @@ def build() -> Template:
             ),
         )
     )
-    admin_service = t.add_resource(
+
+    # ---------------------------------------------------------------------
+    # One task definition, four essential containers. admin-api alone exposes a
+    # PortMapping (it's the LB target); the other three have no ports / no LB.
+    # ---------------------------------------------------------------------
+    control_task = t.add_resource(
+        TaskDefinition(
+            "ControlTaskDef",
+            RequiresCompatibilities=["FARGATE"],
+            NetworkMode="awsvpc",
+            RuntimePlatform=RuntimePlatform(
+                CpuArchitecture="ARM64",
+                OperatingSystemFamily="LINUX",
+            ),
+            Cpu=CONTROL_TASK_CPU,
+            Memory=CONTROL_TASK_MEMORY,
+            ExecutionRoleArn=Ref("ExecutionRoleArn"),
+            TaskRoleArn=Ref("TaskRoleArn"),
+            ContainerDefinitions=[
+                _container(
+                    name="admin-api",
+                    config=admin_cfg,
+                    image_ref=image_ref,
+                    environment=admin_env,
+                    secrets=admin_secrets,
+                    log_group_ref=admin_lg,
+                    container_port=admin_container_port,
+                ),
+                _container(
+                    name="sweeper",
+                    config=sweeper_cfg,
+                    image_ref=image_ref,
+                    environment=sweeper_env,
+                    secrets=base_secrets,
+                    log_group_ref=sweeper_lg,
+                ),
+                _container(
+                    name="monitoring",
+                    config=monitoring_cfg,
+                    image_ref=image_ref,
+                    environment=monitoring_env,
+                    secrets=base_secrets,
+                    log_group_ref=monitoring_lg,
+                ),
+                _container(
+                    name="alert-evaluator",
+                    config=alert_cfg,
+                    image_ref=image_ref,
+                    environment=alert_env,
+                    secrets=base_secrets,
+                    log_group_ref=alert_lg,
+                ),
+            ],
+            Tags=cardinal_tags(component="compute", role="control"),
+        )
+    )
+
+    # ---------------------------------------------------------------------
+    # The single control service. LoadBalancers targets the admin-api container;
+    # ServiceRegistries puts the task's IP in Cloud Map as admin-api.<ns>.
+    # fallback capacity: spot-preferred with an on-demand FARGATE fallback so a
+    # transient FARGATE_SPOT shortage can't fail the one task a deploy needs.
+    # ---------------------------------------------------------------------
+    control_service = t.add_resource(
         services_common.build_ecs_service(
-            service_key="admin-api",
+            service_key="control",
             cluster_arn_param="ClusterArn",
-            task_definition_ref=admin_task,
-            desired_count=int(admin_cfg["replicas"]),
+            task_definition_ref=control_task,
+            desired_count=1,
             subnets_csv_param="PrivateSubnetsCsv",
             security_group_id_param="TaskSecurityGroupId",
             target_group_ref=admin_tg,
@@ -392,141 +546,49 @@ def build() -> Template:
             capacity="fallback",
         )
     )
-    t.add_output(Output("AdminApiServiceName", Value=GetAtt(admin_service, "Name")))
-
-    # ---------------------------------------------------------------------
-    # Internal services (no ALB attachment)
-    # ---------------------------------------------------------------------
-    # alert-evaluator reaches query-api over the in-cluster Cloud Map DNS.
-    # Container port is 8080 (matches lakerunner-query-api.ingress.container_port).
-    alert_extra_env = [
-        Environment(
-            Name="ALERT_EVALUATOR_QUERY_API_URL",
-            Value=Sub("http://query-api.${ServiceNamespaceName}:8080"),
-        ),
-    ]
-
-    # The monitoring service drives ECS autoscaling of the process-* services.
-    # Env vars match cmd/monitoring.go + config/autoscaler.go in the lakerunner
-    # repo; IAM is scoped per-service to UpdateService/DescribeServices.
-    # The lakerunner binary defaults Autoscaler.ObserveOnly=true and per-service
-    # MinReplicas=0, which would log decisions but never scale and would scale
-    # services to zero on idle. Override both: the customer set max replicas to
-    # opt into actual scaling, and 1 is the documented floor (lakerunner
-    # docs/guides/admin/autoscaling.md: "Set to 1 to prevent scale-to-zero").
-    monitoring_extra_env = [
-        Environment(Name="LAKERUNNER_AUTOSCALER_ENABLED", Value="true"),
-        Environment(Name="LAKERUNNER_AUTOSCALER_OBSERVE_ONLY", Value="false"),
-        Environment(Name="LAKERUNNER_AUTOSCALER_PLATFORM", Value="ecs"),
-        Environment(Name="ECS_CLUSTER", Value=Ref("ClusterName")),
-        Environment(
-            Name="LAKERUNNER_AUTOSCALER_SERVICES_LOGS_DEPLOYMENT",
-            Value=Ref("ProcessLogsServiceName"),
-        ),
-        Environment(Name="LAKERUNNER_AUTOSCALER_SERVICES_LOGS_MIN_REPLICAS", Value="1"),
-        Environment(
-            Name="LAKERUNNER_AUTOSCALER_SERVICES_LOGS_MAX_REPLICAS",
-            Value=Ref("ProcessLogsReplicas"),
-        ),
-        Environment(
-            Name="LAKERUNNER_AUTOSCALER_SERVICES_METRICS_DEPLOYMENT",
-            Value=Ref("ProcessMetricsServiceName"),
-        ),
-        Environment(Name="LAKERUNNER_AUTOSCALER_SERVICES_METRICS_MIN_REPLICAS", Value="1"),
-        Environment(
-            Name="LAKERUNNER_AUTOSCALER_SERVICES_METRICS_MAX_REPLICAS",
-            Value=Ref("ProcessMetricsReplicas"),
-        ),
-        Environment(
-            Name="LAKERUNNER_AUTOSCALER_SERVICES_TRACES_DEPLOYMENT",
-            Value=Ref("ProcessTracesServiceName"),
-        ),
-        Environment(Name="LAKERUNNER_AUTOSCALER_SERVICES_TRACES_MIN_REPLICAS", Value="1"),
-        Environment(
-            Name="LAKERUNNER_AUTOSCALER_SERVICES_TRACES_MAX_REPLICAS",
-            Value=Ref("ProcessTracesReplicas"),
-        ),
-    ]
-    internal_services = [
-        {
-            "service_key": "sweeper",
-            "config": sweeper_cfg,
-            "output_name": "SweeperServiceName",
-            "extra_env": [],
-        },
-        {
-            "service_key": "monitoring",
-            "config": monitoring_cfg,
-            "output_name": "MonitoringServiceName",
-            "extra_env": monitoring_extra_env,
-        },
-        {
-            "service_key": "alert-evaluator",
-            "config": alert_cfg,
-            "output_name": "AlertEvaluatorServiceName",
-            "extra_env": alert_extra_env,
-        },
-    ]
-
-    for spec in internal_services:
-        ecs_service = _build_internal_service_block(
-            t,
-            service_key=spec["service_key"],
-            config=spec["config"],
-            image_ref=image_ref,
-            base_env=base_env,
-            base_secrets=base_secrets,
-            extra_env=spec["extra_env"],
-        )
-        t.add_output(Output(spec["output_name"], Value=GetAtt(ecs_service, "Name")))
+    t.add_output(Output("ControlServiceName", Value=GetAtt(control_service, "Name")))
 
     return t
 
 
-def _build_internal_service_block(
-    t: Template,
+def _container(
     *,
-    service_key: str,
+    name: str,
     config: dict,
     image_ref,
-    base_env: list,
-    base_secrets: list,
-    extra_env: list | None = None,
-):
-    """Wire up log group, task def, and ECS service for one internal service."""
-    log_group = t.add_resource(services_common.build_log_group(service_key=service_key))
-    env = (
-        list(base_env)
-        + services_common.lakerunner_otel_env(service_key=service_key)
-        + _service_specific_env(config)
-        + list(extra_env or [])
+    environment: list,
+    secrets: list,
+    log_group_ref,
+    container_port: int | None = None,
+) -> ContainerDefinition:
+    """One essential container in the merged control task.
+
+    Each container keeps its own command (from cardinal-defaults.yaml), env,
+    secrets, and a LogConfiguration pointing at its own /cardinal/<name> log
+    group. container_port is set only for admin-api (the LB target); the other
+    three expose no ports.
+    """
+    kwargs = dict(
+        Name=name,
+        Image=image_ref,
+        Essential=True,
+        Environment=environment,
+        Secrets=secrets,
+        LogConfiguration=LogConfiguration(
+            LogDriver="awslogs",
+            Options={
+                "awslogs-group": Ref(log_group_ref),
+                "awslogs-region": Ref("AWS::Region"),
+                "awslogs-stream-prefix": name,
+            },
+        ),
     )
-    task_def = t.add_resource(
-        services_common.build_task_definition(
-            service_key=service_key,
-            image_ref=image_ref,
-            cpu=config["cpu"],
-            memory_mib=config["memory_mib"],
-            command=config.get("command"),
-            execution_role_arn_param="ExecutionRoleArn",
-            task_role_arn=Ref("TaskRoleArn"),
-            environment=env,
-            secrets=base_secrets,
-            log_group_ref=log_group,
-        )
-    )
-    return t.add_resource(
-        services_common.build_ecs_service(
-            service_key=service_key,
-            cluster_arn_param="ClusterArn",
-            task_definition_ref=task_def,
-            desired_count=int(config["replicas"]),
-            subnets_csv_param="PrivateSubnetsCsv",
-            security_group_id_param="TaskSecurityGroupId",
-            container_name=service_key,
-            capacity="fallback",
-        )
-    )
+    command = config.get("command")
+    if command:
+        kwargs["Command"] = command
+    if container_port is not None:
+        kwargs["PortMappings"] = [PortMapping(ContainerPort=container_port, Protocol="tcp")]
+    return ContainerDefinition(**kwargs)
 
 
 def _service_specific_env(service_cfg: dict) -> list:
