@@ -144,6 +144,13 @@ def build() -> Template:
         t,
         groups=[
             {
+                "label": "Networking",
+                "parameters": [
+                    "VpcId",
+                    "PrivateSubnetsCsv",
+                ],
+            },
+            {
                 "label": "DB Sizing",
                 "parameters": [
                     "DBEngineVersion",
@@ -154,8 +161,6 @@ def build() -> Template:
             {
                 "label": "DB Clients",
                 "parameters": [
-                    "VpcId",
-                    "PrivateSubnetsCsv",
                     "MigrationSecurityGroupId",
                     "QuerySecurityGroupId",
                     "ProcessSecurityGroupId",

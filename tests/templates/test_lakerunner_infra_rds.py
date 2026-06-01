@@ -128,6 +128,20 @@ def test_master_secret_retained(td):
     assert secret["UpdateReplacePolicy"] == "Retain"
 
 
+def test_rds_sg_and_subnet_group_are_delete_policy(td):
+    for r in ("RdsSecurityGroup", "DBSubnetGroup"):
+        assert td["Resources"][r]["DeletionPolicy"] == "Delete"
+        assert td["Resources"][r]["UpdateReplacePolicy"] == "Delete"
+
+
+def test_master_password_resolves_from_secret(td):
+    pw = td["Resources"]["DBInstance"]["Properties"]["MasterUserPassword"]
+    sub = pw["Fn::Sub"]
+    template_str = sub[0] if isinstance(sub, list) else sub
+    assert "resolve:secretsmanager:" in template_str
+    assert "::password}}" in template_str
+
+
 # ---------------------------------------------------------------------------
 # Task 4: outputs
 # ---------------------------------------------------------------------------
