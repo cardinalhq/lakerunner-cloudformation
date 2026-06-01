@@ -58,6 +58,14 @@ Optional (template defaults preserved when unset):
   DEX_ADMIN_EMAIL             (template default admin@cardinal.local).
   DEX_CLIENT_ID               (template default maestro-ui).
   OIDC_SUPERADMIN_EMAILS      (template default admin@cardinal.local).
+  SATELLITE_SERVICES_STACK    Source of CollectorEndpoint for lakerunner self-
+                              telemetry.  When set, the wrapper reads the stack's
+                              CollectorEndpoint output and passes it as
+                              SelfTelemetryEndpoint.  When unset, self-telemetry
+                              stays disabled (SelfTelemetryEndpoint defaults '').
+  SELF_TELEMETRY_ENDPOINT     Direct OTLP/HTTP endpoint override for self-
+                              telemetry (e.g. http://<alb>:4318).  Takes
+                              precedence over the SATELLITE_SERVICES_STACK pull.
   SERVICE_NAMESPACE_NAME      Cloud Map namespace (template default cardinal.local).
   PUBLIC_SUBNETS              Comma-separated public subnet ids (template default '').
   ALB_SCHEME                  internet-facing | internal (template default:
@@ -123,6 +131,25 @@ if [ -z "$queue_url" ] || [ -z "$role_arn" ]; then
     exit 2
 fi
 
+# --- Resolve the self-telemetry OTLP/HTTP endpoint. --------------------------
+# A direct SELF_TELEMETRY_ENDPOINT override wins; otherwise, when
+# SATELLITE_SERVICES_STACK is set, pull its CollectorEndpoint output.  When
+# neither is set, leave self_telemetry_endpoint empty so the template default
+# (disabled) is preserved.
+self_telemetry_endpoint="${SELF_TELEMETRY_ENDPOINT:-}"
+if [ -z "$self_telemetry_endpoint" ] && [ -n "${SATELLITE_SERVICES_STACK:-}" ]; then
+    sat_services_outputs=$(aws cloudformation describe-stacks \
+        --stack-name "$SATELLITE_SERVICES_STACK" \
+        --region "$REGION" \
+        --query 'Stacks[0].Outputs' \
+        --output json)
+    self_telemetry_endpoint=$(printf '%s' "$sat_services_outputs" | jq -r '(.[] | select(.OutputKey == "CollectorEndpoint") | .OutputValue) // ""')
+    if [ -z "$self_telemetry_endpoint" ]; then
+        echo "[deploy-lakerunner-services] ERROR: satellite-services stack '$SATELLITE_SERVICES_STACK' is missing the CollectorEndpoint output" >&2
+        exit 2
+    fi
+fi
+
 # --- Compose the deploy-stack.sh environment. --------------------------------
 FROM_STACKS="$INFRA_BASE_STACK $INFRA_RDS_STACK"
 MAPS=""
@@ -144,6 +171,8 @@ PublicSubnets=$PUBLIC_SUBNETS"
 AlbScheme=$ALB_SCHEME"
 [ -n "${SERVICE_NAMESPACE_NAME:-}" ] && params="$params
 ServiceNamespaceName=$SERVICE_NAMESPACE_NAME"
+[ -n "$self_telemetry_endpoint" ] && params="$params
+SelfTelemetryEndpoint=$self_telemetry_endpoint"
 
 [ -n "${LAKERUNNER_IMAGE:-}" ] && params="$params
 LakerunnerImage=$LAKERUNNER_IMAGE"
