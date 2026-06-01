@@ -15,7 +15,7 @@
 
 set -eu
 
-DEFAULT_TEMPLATE_BASE_URL="https://cardinal-cfn.s3.us-east-2.amazonaws.com/lakerunner"
+DEFAULT_TEMPLATE_BASE_URL="https://cardinal-cfn-us-east-1.s3.us-east-1.amazonaws.com/lakerunner"
 CHANGE_SET_PREFIX="cardinal-deploy-"
 
 # There is no "latest" tag in the published template bucket -- only versioned
@@ -63,7 +63,7 @@ Required:
   --version   VERSION         Published template tag, e.g. v0.0.38.
 
 Optional (both modes):
-  --template-base-url URL     Default: https://cardinal-cfn.s3.us-east-2.amazonaws.com/lakerunner
+  --template-base-url URL     Default: https://cardinal-cfn-us-east-1.s3.us-east-1.amazonaws.com/lakerunner
   --deployer-role-arn ARN     Pass via --role-arn to create-change-set.
   --no-refresh-image-defaults UPDATE only: carry image params forward.
   --no-execute                Create and describe the change set, then stop.
