@@ -46,7 +46,7 @@ def test_creates_vpc_and_subnets(td):
     vpcs = [r for r in td["Resources"].values() if r["Type"] == "AWS::EC2::VPC"]
     subnets = [r for r in td["Resources"].values() if r["Type"] == "AWS::EC2::Subnet"]
     assert len(vpcs) == 1
-    assert len(subnets) == 4  # 2 public + 2 private
+    assert len(subnets) == 6  # 3 public + 3 private
 
 
 def test_creates_internet_gateway(td):
@@ -122,7 +122,26 @@ def test_public_subnets_map_public_ip(td):
         r for r in td["Resources"].values()
         if r["Type"] == "AWS::EC2::Subnet" and r["Properties"].get("MapPublicIpOnLaunch")
     ]
-    assert len(subnets) == 2
+    assert len(subnets) == 3
+
+
+def test_subnets_span_three_az_indices(td):
+    """Each AZ index 0, 1, 2 must appear among both public and private subnets."""
+    subnets = {k: v for k, v in td["Resources"].items() if v["Type"] == "AWS::EC2::Subnet"}
+    public = [s for s in subnets.values() if s["Properties"].get("MapPublicIpOnLaunch")]
+    private = [s for s in subnets.values() if not s["Properties"].get("MapPublicIpOnLaunch")]
+    assert len(public) == 3
+    assert len(private) == 3
+    for group_name, group in (("public", public), ("private", private)):
+        az_indices = {s["Properties"]["AvailabilityZone"]["Fn::Select"][0] for s in group}
+        assert az_indices == {0, 1, 2}, f"{group_name} subnets missing expected AZ indices"
+
+
+def test_outputs_list_three_subnets_each(td):
+    """PublicSubnetsCsv and PrivateSubnetsCsv must each Join 3 subnet refs."""
+    for output_name in ("PublicSubnetsCsv", "PrivateSubnetsCsv"):
+        join_values = td["Outputs"][output_name]["Value"]["Fn::Join"][1]
+        assert len(join_values) == 3, f"{output_name} should reference 3 subnets"
 
 
 def test_no_install_id_parameters(td):

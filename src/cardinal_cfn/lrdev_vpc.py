@@ -6,7 +6,7 @@ cardinal-* product stacks against it. The resulting VpcId / subnet CSVs /
 endpoint SG feed into cardinal-infrastructure and cardinal-lakerunner.
 
 Layout (minimum viable):
-- 1 VPC, 2 public + 2 private subnets across 2 AZs
+- 1 VPC, 3 public + 3 private subnets across 3 AZs
 - Internet Gateway (always)
 - NAT Gateway (optional, single AZ for cost)
 - S3 Gateway Endpoint (free)
@@ -62,7 +62,7 @@ def build() -> Template:
     t = Template()
     t.set_description(
         "lrdev VPC: standalone VPC for our internal lakerunner test environment "
-        "(public/private subnets across 2 AZs, optional NAT Gateway, S3 gateway "
+        "(public/private subnets across 3 AZs, optional NAT Gateway, S3 gateway "
         "endpoint, and optional interface endpoints). Not a customer-facing stack."
     )
 
@@ -142,13 +142,13 @@ def build() -> Template:
         )
     )
 
-    # Subnets: split VPC CIDR into 16 /20 subnets, take first 4
+    # Subnets: split VPC CIDR into 6 /24s (indices 0-2 = public a/b/c, 3-5 = private a/b/c)
     public_subnet_1 = t.add_resource(
         Subnet(
             "PublicSubnet1",
             VpcId=Ref(vpc),
             AvailabilityZone=Select(0, GetAZs()),
-            CidrBlock=Select(0, Cidr(Ref("VpcCidr"), 4, 8)),
+            CidrBlock=Select(0, Cidr(Ref("VpcCidr"), 6, 8)),
             MapPublicIpOnLaunch=True,
             Tags=_vpc_tags(role="public-1"),
         )
@@ -158,9 +158,19 @@ def build() -> Template:
             "PublicSubnet2",
             VpcId=Ref(vpc),
             AvailabilityZone=Select(1, GetAZs()),
-            CidrBlock=Select(1, Cidr(Ref("VpcCidr"), 4, 8)),
+            CidrBlock=Select(1, Cidr(Ref("VpcCidr"), 6, 8)),
             MapPublicIpOnLaunch=True,
             Tags=_vpc_tags(role="public-2"),
+        )
+    )
+    public_subnet_3 = t.add_resource(
+        Subnet(
+            "PublicSubnet3",
+            VpcId=Ref(vpc),
+            AvailabilityZone=Select(2, GetAZs()),
+            CidrBlock=Select(2, Cidr(Ref("VpcCidr"), 6, 8)),
+            MapPublicIpOnLaunch=True,
+            Tags=_vpc_tags(role="public-3"),
         )
     )
     private_subnet_1 = t.add_resource(
@@ -168,7 +178,7 @@ def build() -> Template:
             "PrivateSubnet1",
             VpcId=Ref(vpc),
             AvailabilityZone=Select(0, GetAZs()),
-            CidrBlock=Select(2, Cidr(Ref("VpcCidr"), 4, 8)),
+            CidrBlock=Select(3, Cidr(Ref("VpcCidr"), 6, 8)),
             MapPublicIpOnLaunch=False,
             Tags=_vpc_tags(role="private-1"),
         )
@@ -178,9 +188,19 @@ def build() -> Template:
             "PrivateSubnet2",
             VpcId=Ref(vpc),
             AvailabilityZone=Select(1, GetAZs()),
-            CidrBlock=Select(3, Cidr(Ref("VpcCidr"), 4, 8)),
+            CidrBlock=Select(4, Cidr(Ref("VpcCidr"), 6, 8)),
             MapPublicIpOnLaunch=False,
             Tags=_vpc_tags(role="private-2"),
+        )
+    )
+    private_subnet_3 = t.add_resource(
+        Subnet(
+            "PrivateSubnet3",
+            VpcId=Ref(vpc),
+            AvailabilityZone=Select(2, GetAZs()),
+            CidrBlock=Select(5, Cidr(Ref("VpcCidr"), 6, 8)),
+            MapPublicIpOnLaunch=False,
+            Tags=_vpc_tags(role="private-3"),
         )
     )
 
@@ -212,6 +232,13 @@ def build() -> Template:
         SubnetRouteTableAssociation(
             "PublicSubnet2RouteAssoc",
             SubnetId=Ref(public_subnet_2),
+            RouteTableId=Ref(public_rt),
+        )
+    )
+    t.add_resource(
+        SubnetRouteTableAssociation(
+            "PublicSubnet3RouteAssoc",
+            SubnetId=Ref(public_subnet_3),
             RouteTableId=Ref(public_rt),
         )
     )
@@ -262,6 +289,13 @@ def build() -> Template:
         SubnetRouteTableAssociation(
             "PrivateSubnet2RouteAssoc",
             SubnetId=Ref(private_subnet_2),
+            RouteTableId=Ref(private_rt),
+        )
+    )
+    t.add_resource(
+        SubnetRouteTableAssociation(
+            "PrivateSubnet3RouteAssoc",
+            SubnetId=Ref(private_subnet_3),
             RouteTableId=Ref(private_rt),
         )
     )
@@ -318,7 +352,7 @@ def build() -> Template:
                 VpcId=Ref(vpc),
                 ServiceName=Sub(f"com.amazonaws.${{AWS::Region}}.{service}"),
                 VpcEndpointType="Interface",
-                SubnetIds=[Ref(private_subnet_1), Ref(private_subnet_2)],
+                SubnetIds=[Ref(private_subnet_1), Ref(private_subnet_2), Ref(private_subnet_3)],
                 SecurityGroupIds=[Ref(vpce_sg)],
                 PrivateDnsEnabled=True,
                 Condition="HasInterfaceEndpoints",
@@ -331,14 +365,14 @@ def build() -> Template:
         Output(
             "PublicSubnetsCsv",
             Description="Comma-separated public subnet IDs.",
-            Value=Join(",", [Ref(public_subnet_1), Ref(public_subnet_2)]),
+            Value=Join(",", [Ref(public_subnet_1), Ref(public_subnet_2), Ref(public_subnet_3)]),
         )
     )
     t.add_output(
         Output(
             "PrivateSubnetsCsv",
             Description="Comma-separated private subnet IDs.",
-            Value=Join(",", [Ref(private_subnet_1), Ref(private_subnet_2)]),
+            Value=Join(",", [Ref(private_subnet_1), Ref(private_subnet_2), Ref(private_subnet_3)]),
         )
     )
     t.add_output(
