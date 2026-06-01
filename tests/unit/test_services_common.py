@@ -136,7 +136,7 @@ def test_build_ecs_service_default_capacity_is_on_demand():
     rendered = json.loads(json.dumps(svc, default=lambda o: o.to_dict()))
     props = rendered["Properties"]
     assert "LaunchType" not in props
-    # Default ("fallback") is pure on-demand FARGATE — no spot anywhere.
+    # Default ("ondemand") is pure on-demand FARGATE — no spot anywhere.
     assert props["CapacityProviderStrategy"] == [
         {"CapacityProvider": "FARGATE", "Weight": 1}
     ]
@@ -144,44 +144,61 @@ def test_build_ecs_service_default_capacity_is_on_demand():
 
 def test_build_ecs_service_fallback_capacity():
     svc = services_common.build_ecs_service(
-        service_key="sweeper",
+        service_key="process-logs",
         cluster_arn_param="ClusterArn",
         task_definition_ref="MyTaskDef",
         desired_count=1,
         subnets_csv_param="PrivateSubnetsCsv",
         security_group_id_param="TaskSecurityGroupId",
-        container_name="sweeper",
+        container_name="process-logs",
         capacity="fallback",
     )
     rendered = json.loads(json.dumps(svc, default=lambda o: o.to_dict()))
     strat = rendered["Properties"]["CapacityProviderStrategy"]
-    # Pure on-demand FARGATE for all replicas — the only deploy-reliable choice.
+    # Autoscaled worker: Base=1 on-demand first replica + weighted spot scale-out.
     assert strat == [
-        {"CapacityProvider": "FARGATE", "Weight": 1},
+        {"CapacityProvider": "FARGATE", "Base": 1, "Weight": 1},
+        {"CapacityProvider": "FARGATE_SPOT", "Weight": 4},
     ]
 
 
 def test_capacity_provider_strategy_modes():
-    # "spot" is the explicit, deploy-unsafe opt-in: pure FARGATE_SPOT.
+    # "ondemand": pure on-demand FARGATE, no spot, no Base.
+    ondemand = [i.to_dict() for i in services_common.capacity_provider_strategy("ondemand")]
+    assert ondemand == [{"CapacityProvider": "FARGATE", "Weight": 1}]
+    # "fallback": Base=1 on-demand FARGATE + weighted FARGATE_SPOT scale-out.
+    fallback = [i.to_dict() for i in services_common.capacity_provider_strategy("fallback")]
+    assert fallback == [
+        {"CapacityProvider": "FARGATE", "Base": 1, "Weight": 1},
+        {"CapacityProvider": "FARGATE_SPOT", "Weight": 4},
+    ]
+    # "spot": pure FARGATE_SPOT (deploy-unsafe opt-in).
     spot = [i.to_dict() for i in services_common.capacity_provider_strategy("spot")]
     assert spot == [{"CapacityProvider": "FARGATE_SPOT", "Weight": 1}]
-    # "fallback" is the default: pure on-demand FARGATE, no spot.
-    fallback = [i.to_dict() for i in services_common.capacity_provider_strategy("fallback")]
-    assert fallback == [{"CapacityProvider": "FARGATE", "Weight": 1}]
     with pytest.raises(ValueError):
         services_common.capacity_provider_strategy("nope")
 
 
-def test_fallback_is_pure_on_demand_no_spot_no_base():
-    """The default path must be pure on-demand. A weight-based strategy does not
-    give a single task failover, and FARGATE_SPOT cannot guarantee placement
-    during a rolling deploy, so the strategy is exactly one FARGATE item with
+def test_ondemand_is_pure_on_demand_no_spot_no_base():
+    """The ondemand path must be pure on-demand: exactly one FARGATE item with
     Weight=1, no FARGATE_SPOT, and no Base on any item.
     """
-    items = [i.to_dict() for i in services_common.capacity_provider_strategy("fallback")]
+    items = [i.to_dict() for i in services_common.capacity_provider_strategy("ondemand")]
     assert items == [{"CapacityProvider": "FARGATE", "Weight": 1}]
     assert len(items) == 1
-    assert items[0]["CapacityProvider"] == "FARGATE"
-    assert items[0]["Weight"] == 1
     assert all("FARGATE_SPOT" not in d.values() for d in items)
     assert all("Base" not in d for d in items)
+
+
+def test_fallback_exactly_one_provider_carries_base():
+    """fallback: Base=1 lives on the on-demand FARGATE provider only; FARGATE_SPOT
+    is present (weight 4) for scale-out and carries no Base.
+    """
+    items = services_common.capacity_provider_strategy("fallback")
+    by_provider = {i.to_dict()["CapacityProvider"]: i.to_dict() for i in items}
+    assert by_provider["FARGATE"]["Base"] == 1
+    assert "FARGATE_SPOT" in by_provider
+    assert by_provider["FARGATE_SPOT"]["Weight"] == 4
+    assert "Base" not in by_provider["FARGATE_SPOT"]
+    bases = [d.get("Base", 0) for d in by_provider.values()]
+    assert sum(1 for b in bases if b) == 1

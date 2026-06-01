@@ -213,32 +213,43 @@ def _coerce_size(value):
     return value
 
 
-def capacity_provider_strategy(capacity: str = "fallback") -> list:
+def capacity_provider_strategy(capacity: str = "ondemand") -> list:
     """Capacity-provider strategy for an ECS Service.
 
-    "fallback" (the default, used by every lakerunner service): pure on-demand
-    FARGATE for ALL replicas. This is the only deploy-reliable choice.
+    Three modes:
 
-    Why no spot in the default path. A weight-based strategy does NOT give a
-    single task failover: ECS capacity-provider weights only distribute
-    MULTIPLE tasks across providers; for any individual task ECS picks ONE
-    provider, and if that provider (FARGATE_SPOT) has no capacity right now the
-    task simply fails to place. A rolling deploy must place every NEW task
-    before draining the old, and the deployment circuit breaker rolls the whole
-    stack back the moment one of them can't place. FARGATE_SPOT cannot
-    guarantee placement at any given instant, so any spot tier — even weighted,
-    even with a Base=1 on-demand first task — makes deploys flaky and triggers
-    rollbacks. On-demand FARGATE for all replicas is required for reliable
-    deploys.
+    "ondemand" (deploy-critical singletons and fixed-size tiers): pure on-demand
+    FARGATE for ALL replicas. The only deploy-reliable choice for a service
+    where every task must place during a rolling deploy. A weight-based strategy
+    does NOT give a single task failover — ECS weights only distribute MULTIPLE
+    tasks across providers; for any individual task ECS picks ONE provider, and
+    if FARGATE_SPOT has no capacity at that instant the task fails to place,
+    tripping the deployment circuit breaker and rolling the stack back. Used by
+    the migrator, the merged control service, maestro, pubsub-sqs, query-api,
+    and the satellite collector.
 
-    "spot": pure FARGATE_SPOT, an explicit opt-in only. DEPLOY-UNSAFE for the
-    reasons above; a customer may knowingly choose it for a non-critical,
-    cost-sensitive service that tolerates failed deploys. No caller uses it by
-    default.
+    "fallback" (autoscaled scale-out workers): Base=1 on-demand FARGATE plus
+    weighted FARGATE_SPOT (4:1) for scale-out. The Base=1 guarantees the FIRST
+    replica always lands on on-demand — so a rolling deploy always has at least
+    one reliable task — while replicas beyond the first ride cheap spot. Only
+    one provider in a strategy may carry Base>0; it lives on FARGATE here. Used
+    by process-{logs,metrics,traces} and query-worker, which autoscale and can
+    tolerate a transient spot shortage on their extra replicas.
+
+    "spot": pure FARGATE_SPOT, an explicit opt-in only. DEPLOY-UNSAFE — a single
+    task can fail to place — for a customer who knowingly wants spot on a
+    non-critical, cost-sensitive service. No caller uses it.
     """
-    if capacity == "fallback":
+    if capacity == "ondemand":
         return [
             CapacityProviderStrategyItem(CapacityProvider="FARGATE", Weight=1),
+        ]
+    if capacity == "fallback":
+        return [
+            CapacityProviderStrategyItem(
+                CapacityProvider="FARGATE", Base=1, Weight=1
+            ),
+            CapacityProviderStrategyItem(CapacityProvider="FARGATE_SPOT", Weight=4),
         ]
     if capacity == "spot":
         return [
@@ -260,7 +271,7 @@ def build_ecs_service(
     container_port: int | None = None,
     service_registry_ref=None,
     listener_rule_refs: list | None = None,
-    capacity: str = "fallback",
+    capacity: str = "ondemand",
 ) -> Service:
     """ECS Fargate Service with rolling deploy + circuit breaker.
 

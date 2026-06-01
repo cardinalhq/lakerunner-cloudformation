@@ -746,10 +746,10 @@ def build() -> Template:
         Service(
             "MaestroService",
             Cluster=Ref("ClusterArn"),
-            # Singleton: spot-preferred with an on-demand FARGATE fallback so a
-            # transient FARGATE_SPOT shortage can't block its task and trip the
-            # deploy circuit breaker.
-            CapacityProviderStrategy=services_common.capacity_provider_strategy("fallback"),
+            # Singleton: pure on-demand FARGATE so its one task always places
+            # during a rolling deploy; a transient FARGATE_SPOT shortage must
+            # never block the task and trip the deploy circuit breaker.
+            CapacityProviderStrategy=services_common.capacity_provider_strategy("ondemand"),
             DesiredCount=1,
             TaskDefinition=Ref(task_def),
             NetworkConfiguration=NetworkConfiguration(
