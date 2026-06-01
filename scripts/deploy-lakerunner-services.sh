@@ -1,6 +1,6 @@
 #!/bin/sh
 # Jenkins job 5: deploy the cardinal-lakerunner-services stack (the application
-# tier: query, process, control, otel, maestro).
+# tier: query, process, control, maestro).
 #
 # Upstream:
 #   - lakerunner-infra-base : roles, security groups, secrets, SSM param names.
@@ -13,10 +13,6 @@
 # PARAMS lines (highest precedence). The pubsub-sqs container sets them as plain
 # SQS_QUEUE_URL / SQS_ROLE_ARN env vars; the region is the stack's own
 # AWS::Region, so no QueueRegion param is needed.
-#
-# OTEL_REPLICAS defaults to 0 here: in the satellite topology the same-account
-# satellite collector performs ingest, so the lakerunner-tier otel collector is
-# off by default.
 #
 # Thin wrapper over deploy-stack.sh.  Pure environment-variable interface.
 
@@ -44,6 +40,10 @@ Required:
   CLUSTER_NAME                ECS cluster name (no upstream output for it).
   VPC_ID                      VPC for the services.
   PRIVATE_SUBNETS             Comma-separated private subnet ids.
+  DEX_ADMIN_PASSWORD_HASH     bcrypt hash for the Maestro/DEX admin login.
+                              REQUIRED: DEX will not start without it ("no
+                              password hash provided") and MaestroService rolls
+                              back.
 
 Optional (template defaults preserved when unset):
   CERTIFICATE_ARN             ACM/IAM cert ARN for the Maestro HTTPS listener.
@@ -56,13 +56,15 @@ Optional (template defaults preserved when unset):
   CERTIFICATE_PRIVATE_KEY_FILE PEM private key (path).  Overrides auto-generation.
   CERTIFICATE_CHAIN_FILE      PEM chain (path).
   DEX_ADMIN_EMAIL             (template default admin@cardinal.local).
-  DEX_ADMIN_PASSWORD_HASH     bcrypt hash; REQUIRED for Maestro UI login even
-                              though the template defaults it to ''.
   DEX_CLIENT_ID               (template default maestro-ui).
   OIDC_SUPERADMIN_EMAILS      (template default admin@cardinal.local).
   SERVICE_NAMESPACE_NAME      Cloud Map namespace (template default cardinal.local).
   PUBLIC_SUBNETS              Comma-separated public subnet ids (template default '').
-  OTEL_REPLICAS               lakerunner-tier collector replicas (default 0).
+  ALB_SCHEME                  internet-facing | internal (template default:
+                              internal).  For internet-facing you must also set
+                              PUBLIC_SUBNETS, and the ALB SG internet ingress is
+                              enabled on the infra-base stack (its ALB_SCHEME /
+                              ALB_ALLOWED_CIDR* settings).
   LAKERUNNER_IMAGE, MAESTRO_IMAGE, OTEL_IMAGE, DEX_IMAGE, DEX_INIT_IMAGE,
   DB_INIT_IMAGE               Image overrides (template defaults otherwise).
   TEMPLATE_BASE_URL           Default: $DEFAULT_TEMPLATE_BASE_URL.  Also
@@ -90,6 +92,7 @@ missing=""
 [ -z "${CLUSTER_NAME:-}" ] && missing="$missing CLUSTER_NAME"
 [ -z "${VPC_ID:-}" ] && missing="$missing VPC_ID"
 [ -z "${PRIVATE_SUBNETS:-}" ] && missing="$missing PRIVATE_SUBNETS"
+[ -z "${DEX_ADMIN_PASSWORD_HASH:-}" ] && missing="$missing DEX_ADMIN_PASSWORD_HASH"
 if [ -n "$missing" ]; then
     usage >&2
     echo "[deploy-lakerunner-services] ERROR: missing required: $(echo "$missing" | sed 's/^ //; s/ /, /g')" >&2
@@ -102,7 +105,6 @@ if ! command -v aws >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
 fi
 
 template_base_url="${TEMPLATE_BASE_URL:-$DEFAULT_TEMPLATE_BASE_URL}"
-otel_replicas="${OTEL_REPLICAS:-0}"
 
 TEMPLATE_URL="$template_base_url/$VERSION/$TEMPLATE_KEY"
 
@@ -134,11 +136,12 @@ TemplateBaseUrl=$template_base_url/$VERSION/cardinal-lakerunner/
 ClusterArn=$CLUSTER_ARN
 ClusterName=$CLUSTER_NAME
 VpcId=$VPC_ID
-PrivateSubnets=$PRIVATE_SUBNETS
-OtelReplicas=$otel_replicas"
+PrivateSubnets=$PRIVATE_SUBNETS"
 
 [ -n "${PUBLIC_SUBNETS:-}" ] && params="$params
 PublicSubnets=$PUBLIC_SUBNETS"
+[ -n "${ALB_SCHEME:-}" ] && params="$params
+AlbScheme=$ALB_SCHEME"
 [ -n "${SERVICE_NAMESPACE_NAME:-}" ] && params="$params
 ServiceNamespaceName=$SERVICE_NAMESPACE_NAME"
 
@@ -172,8 +175,13 @@ DbInitImage=$DB_INIT_IMAGE"
 file_params=""
 cert_dir=""
 
+# Preserve and propagate the child's exit status: rm -rf would otherwise
+# overwrite $? with its own 0, false-greening a FAILED deploy.
 cleanup_cert() {
-    [ -n "$cert_dir" ] && [ -d "$cert_dir" ] && rm -rf "$cert_dir"
+    status=$?
+    [ -n "${cert_dir:-}" ] && rm -rf "$cert_dir"
+    trap - EXIT
+    exit "$status"
 }
 trap cleanup_cert EXIT INT TERM HUP
 
