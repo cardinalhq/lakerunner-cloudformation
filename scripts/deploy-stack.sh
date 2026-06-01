@@ -20,8 +20,8 @@
 #                        key equals a target parameter name supplies it.
 #     PARAMS             Newline-separated Key=Value parameter overrides
 #                        (highest precedence).  Newline-separated, not
-#                        semicolon-separated, because some values (e.g.
-#                        PubsubSqsEnv) contain semicolons.
+#                        semicolon-separated, so values that contain semicolons
+#                        (e.g. some ARNs/URLs) are passed intact.
 #     MAPS               Newline-separated TargetParam=SourceOutputKey entries.
 #     DEPLOYER_ROLE_ARN  Passed via --role-arn to create-change-set.
 #     NO_EXECUTE         Non-empty: create and describe the change set, then stop.

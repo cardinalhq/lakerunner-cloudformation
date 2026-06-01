@@ -8,11 +8,11 @@
 # All of those output names match the template's parameter names, so plain
 # FROM_STACKS pulls wire them up.
 #
-# Special case: PubsubSqsEnv is COMPUTED here.  It is not a single upstream
-# output -- we read three outputs from the satellite-infra-base stack and
-# assemble the env string the pubsub-sqs container expects:
-#   SQS_QUEUE_URL=<RawQueueUrl>;SQS_REGION=<Region>;SQS_ROLE_ARN=<LakerunnerAccessRoleArn>
-# then pass it via a PARAMS line (highest precedence).
+# Special case: QueueUrl and QueueRoleArn are pulled from the satellite-infra-
+# base stack outputs (RawQueueUrl / LakerunnerAccessRoleArn) and passed via
+# PARAMS lines (highest precedence). The pubsub-sqs container sets them as plain
+# SQS_QUEUE_URL / SQS_ROLE_ARN env vars; the region is the stack's own
+# AWS::Region, so no QueueRegion param is needed.
 #
 # OTEL_REPLICAS defaults to 0 here: in the satellite topology the same-account
 # satellite collector performs ingest, so the lakerunner-tier otel collector is
@@ -38,8 +38,8 @@ Required:
   VERSION                     Published template tag.
   INFRA_BASE_STACK            Upstream lakerunner-infra-base.
   INFRA_RDS_STACK             Upstream lakerunner-infra-rds.
-  SATELLITE_INFRA_BASE_STACK  Source of RawQueueUrl/Region/LakerunnerAccessRoleArn
-                              for the computed PubsubSqsEnv.
+  SATELLITE_INFRA_BASE_STACK  Source of RawQueueUrl / LakerunnerAccessRoleArn
+                              for the QueueUrl / QueueRoleArn params.
   CLUSTER_ARN                 ECS cluster ARN.
   CLUSTER_NAME                ECS cluster name (no upstream output for it).
   VPC_ID                      VPC for the services.
@@ -106,7 +106,7 @@ otel_replicas="${OTEL_REPLICAS:-0}"
 
 TEMPLATE_URL="$template_base_url/$VERSION/$TEMPLATE_KEY"
 
-# --- Compute PubsubSqsEnv from the satellite-infra-base stack outputs. -------
+# --- Read QueueUrl / QueueRoleArn from the satellite-infra-base stack. --------
 sat_outputs=$(aws cloudformation describe-stacks \
     --stack-name "$SATELLITE_INFRA_BASE_STACK" \
     --region "$REGION" \
@@ -114,23 +114,22 @@ sat_outputs=$(aws cloudformation describe-stacks \
     --output json)
 
 queue_url=$(printf '%s' "$sat_outputs" | jq -r '(.[] | select(.OutputKey == "RawQueueUrl") | .OutputValue) // ""')
-sqs_region=$(printf '%s' "$sat_outputs" | jq -r '(.[] | select(.OutputKey == "Region") | .OutputValue) // ""')
 role_arn=$(printf '%s' "$sat_outputs" | jq -r '(.[] | select(.OutputKey == "LakerunnerAccessRoleArn") | .OutputValue) // ""')
 
-if [ -z "$queue_url" ] || [ -z "$sqs_region" ] || [ -z "$role_arn" ]; then
-    echo "[deploy-lakerunner-services] ERROR: satellite-infra-base stack '$SATELLITE_INFRA_BASE_STACK' is missing one of RawQueueUrl/Region/LakerunnerAccessRoleArn outputs" >&2
+if [ -z "$queue_url" ] || [ -z "$role_arn" ]; then
+    echo "[deploy-lakerunner-services] ERROR: satellite-infra-base stack '$SATELLITE_INFRA_BASE_STACK' is missing one of RawQueueUrl/LakerunnerAccessRoleArn outputs" >&2
     exit 2
 fi
-
-pubsub_sqs_env="SQS_QUEUE_URL=$queue_url;SQS_REGION=$sqs_region;SQS_ROLE_ARN=$role_arn"
 
 # --- Compose the deploy-stack.sh environment. --------------------------------
 FROM_STACKS="$INFRA_BASE_STACK $INFRA_RDS_STACK"
 MAPS=""
 
-# PubsubSqsEnv and TemplateBaseUrl are always set.  TemplateBaseUrl must track
-# the version we deploy so nested children load from the matching prefix.
-params="PubsubSqsEnv=$pubsub_sqs_env
+# QueueUrl/QueueRoleArn and TemplateBaseUrl are always set.  TemplateBaseUrl
+# must track the version we deploy so nested children load from the matching
+# prefix.
+params="QueueUrl=$queue_url
+QueueRoleArn=$role_arn
 TemplateBaseUrl=$template_base_url/$VERSION/cardinal-lakerunner/
 ClusterArn=$CLUSTER_ARN
 ClusterName=$CLUSTER_NAME

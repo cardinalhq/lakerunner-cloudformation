@@ -17,9 +17,9 @@ is optional.
 
 - ALB minimization is deferred: query-api and admin-api still attach to the
   ALB (minimization would require child edits in services-query/control/alb).
-- The process-tier SQS is driver-supplied: the pubsub-sqs container exports
-  the ``PubsubSqsEnv`` blob (built by the Jenkins driver from adopted-account
-  queue/role/region knowledge) before starting. Empty idles the service.
+- The process-tier SQS primary queue (group 0) is driver-supplied via the
+  ``QueueUrl`` / ``QueueRoleArn`` parameters, set on the pubsub-sqs container as
+  plain ``SQS_QUEUE_URL`` / ``SQS_ROLE_ARN`` env vars. Empty idles the service.
 - The cooked bucket backs both otel-raw writes and cooked data in the
   single-account interim.
 """
@@ -154,11 +154,13 @@ _INFRA_SETUP_PARAMS = [
     ("CookedBucketName", "String", None,
      "Name of the S3 cooked bucket (base infra output). Backs both otel-raw "
      "writes and cooked data in the single-account interim."),
-    ("PubsubSqsEnv", "String", "",
-     "Driver-supplied SQS env for pubsub-sqs: a shell-evalable string of "
-     "SQS_QUEUE_URL[/REGION/ROLE_ARN] (+ numbered _N groups) the container "
-     "exports before start. The Jenkins driver builds this from adopted-account "
-     "queue/role/region knowledge. Empty idles the pubsub-sqs service."),
+    ("QueueUrl", "String", "",
+     "SQS queue URL for the pubsub-sqs primary queue (group 0). Set as the "
+     "SQS_QUEUE_URL env var on the pubsub-sqs container. Empty idles the "
+     "service."),
+    ("QueueRoleArn", "String", "",
+     "IAM role ARN the pubsub-sqs service STS-assumes for the primary queue "
+     "and its bucket (group 0). Set as the SQS_ROLE_ARN env var."),
     ("LicenseSecretArn", "String", None,
      "ARN of the cardinal-license secret (infra output)."),
     ("AdminKeySecretArn", "String", None,
@@ -609,7 +611,8 @@ def build() -> Template:
         task_sg=sec_process_sg, task_role=process_role,
     )
     services_process_params.update({
-        "PubsubSqsEnv": Ref("PubsubSqsEnv"),
+        "QueueUrl": Ref("QueueUrl"),
+        "QueueRoleArn": Ref("QueueRoleArn"),
         "ProcessLogsReplicas": Ref("ProcessLogsReplicas"),
         "ProcessLogsMemory": Ref("ProcessLogsMemory"),
         "ProcessMetricsReplicas": Ref("ProcessMetricsReplicas"),
