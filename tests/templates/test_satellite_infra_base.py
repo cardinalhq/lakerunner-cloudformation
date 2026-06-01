@@ -26,3 +26,20 @@ def test_description_mentions_pull_model(td):
     desc = td["Description"].lower()
     assert "pull" in desc
     assert "nothing pushes" in desc
+
+
+def test_queue_is_delete_policy(td):
+    q = td["Resources"]["RawIngestQueue"]
+    assert q["DeletionPolicy"] == "Delete"
+    assert q["UpdateReplacePolicy"] == "Delete"
+
+
+def test_queue_policy_allows_s3_same_account_only(td):
+    stmt = td["Resources"]["RawIngestQueuePolicy"]["Properties"][
+        "PolicyDocument"
+    ]["Statement"][0]
+    assert stmt["Principal"] == {"Service": "s3.amazonaws.com"}
+    assert "sqs:SendMessage" in stmt["Action"]
+    assert stmt["Condition"]["StringEquals"]["aws:SourceAccount"] == {
+        "Ref": "AWS::AccountId"
+    }

@@ -117,6 +117,52 @@ def build() -> Template:
         )
     )
 
+    t.add_condition("UseDefaultBucketName", Equals(Ref("RawBucketName"), ""))
+    t.add_condition("HasExternalId", Not(Equals(Ref("ExternalId"), "")))
+
+    bucket_name_value = If(
+        "UseDefaultBucketName",
+        Sub("cardinal-otel-raw-${AWS::AccountId}-${AWS::Region}"),
+        Ref("RawBucketName"),
+    )
+
+    queue = t.add_resource(
+        _delete(Queue("RawIngestQueue", Tags=_tags(component="otel-raw-queue")))
+    )
+
+    t.add_resource(
+        QueuePolicy(
+            "RawIngestQueuePolicy",
+            Queues=[Ref(queue)],
+            PolicyDocument={
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Effect": "Allow",
+                        "Principal": {"Service": "s3.amazonaws.com"},
+                        "Action": [
+                            "sqs:SendMessage",
+                            "sqs:GetQueueAttributes",
+                            "sqs:GetQueueUrl",
+                        ],
+                        "Resource": GetAtt(queue, "Arn"),
+                        "Condition": {
+                            "StringEquals": {
+                                "aws:SourceAccount": Ref("AWS::AccountId")
+                            },
+                            "ArnLike": {
+                                "aws:SourceArn": Sub(
+                                    "arn:${AWS::Partition}:s3:::${BucketName}",
+                                    BucketName=bucket_name_value,
+                                )
+                            },
+                        },
+                    }
+                ],
+            },
+        )
+    )
+
     return t
 
 
