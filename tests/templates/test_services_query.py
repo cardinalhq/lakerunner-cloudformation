@@ -33,12 +33,17 @@ def test_required_cross_stack_parameters(td):
         "DbPort",
         "DbSecretArn",
         "BucketName",
-        "QueueUrl",
-        "QueueArn",
         "LicenseSecretArn",
         "MigrationComplete",
     ):
         assert n in td["Parameters"], f"missing parameter: {n}"
+
+
+def test_no_vestigial_queue_parameters(td):
+    """query-api/query-worker do not consume SQS; the old queue plumbing
+    (only ever fed the dead LRDB_SQS_QUEUE_URL env) was purged."""
+    for n in ("QueueUrl", "QueueArn"):
+        assert n not in td["Parameters"], f"vestigial queue parameter present: {n}"
 
 
 def test_no_storage_profile_or_api_keys_params(td):
@@ -268,6 +273,18 @@ def test_all_task_definitions_set_ssl_required(td):
             env = {e["Name"]: e["Value"] for e in container.get("Environment", [])}
             assert env.get("LRDB_SSLMODE") == "require", (
                 f"{container.get('Name')} LRDB_SSLMODE must be 'require'; got {env.get('LRDB_SSLMODE')!r}"
+            )
+
+
+def test_no_dead_sqs_env(td):
+    """LRDB_SQS_QUEUE_URL is a dead env name (the binary reads SQS_QUEUE_URL),
+    and query tasks never consumed SQS -- it must not appear anywhere."""
+    task_defs = [r for r in td["Resources"].values() if r["Type"] == "AWS::ECS::TaskDefinition"]
+    for tdef in task_defs:
+        for container in tdef["Properties"]["ContainerDefinitions"]:
+            names = {e["Name"] for e in container.get("Environment", [])}
+            assert "LRDB_SQS_QUEUE_URL" not in names, (
+                f"{container.get('Name')} still has dead LRDB_SQS_QUEUE_URL env"
             )
 
 

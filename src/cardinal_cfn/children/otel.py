@@ -123,7 +123,6 @@ def build() -> Template:
     t.add_parameter(
         Parameter("BucketName", Type="String", Description="Name of the ingest S3 bucket.")
     )
-    t.add_parameter(Parameter("QueueArn", Type="String", Description="ARN of the ingest SQS queue."))
     t.add_parameter(
         Parameter(
             "LicenseSecretArn",
@@ -251,7 +250,6 @@ def build() -> Template:
                     "TaskRoleArn",
                     "PrivateSubnetsCsv",
                     "BucketName",
-                    "QueueArn",
                     "LicenseSecretArn",
                     "OtelHttpListenerArn",
                     "AlbDnsName",

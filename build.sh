@@ -24,21 +24,30 @@ python3 -m cardinal_cfn.lrdev_vpc > generated-templates/lrdev-vpc.yaml
 echo "Generating lrdev-baseinfra.yaml..."
 python3 -m cardinal_cfn.lrdev_baseinfra > generated-templates/lrdev-baseinfra.yaml
 
-echo "Generating cardinal-infrastructure.yaml..."
-python3 -m cardinal_cfn.cardinal_infrastructure > generated-templates/cardinal-infrastructure.yaml
-
 echo "Generating cardinal-cleanup.yaml..."
 python3 -m cardinal_cfn.cardinal_cleanup > generated-templates/cardinal-cleanup.yaml
 
-# ---------------------------------------------------------------------------
-# Lakerunner stack (root + 9 nested children). The Security child owns all
-# SGs and IAM roles; other children take SG IDs and role ARNs from it
-# rather than from customer-supplied parameters.
-# ---------------------------------------------------------------------------
-echo "Generating cardinal-lakerunner.yaml (root)..."
-python3 -m cardinal_cfn.root > generated-templates/cardinal-lakerunner.yaml
+echo "Generating cardinal-satellite-infra-base.yaml..."
+python3 -m cardinal_cfn.satellite_infra_base > generated-templates/cardinal-satellite-infra-base.yaml
 
-for child in security alb cert migration \
+echo "Generating cardinal-satellite-services.yaml..."
+python3 -m cardinal_cfn.satellite_services > generated-templates/cardinal-satellite-services.yaml
+
+echo "Generating cardinal-lakerunner-infra-rds.yaml..."
+python3 -m cardinal_cfn.lakerunner_infra_rds > generated-templates/cardinal-lakerunner-infra-rds.yaml
+
+echo "Generating cardinal-lakerunner-infra-base.yaml..."
+python3 -m cardinal_cfn.lakerunner_infra_base > generated-templates/cardinal-lakerunner-infra-base.yaml
+
+# ---------------------------------------------------------------------------
+# Lakerunner application-tier stack (param-driven root + 8 nested children).
+# All SGs and IAM roles arrive as parameters (driver-wired from the infra
+# stacks); there is no Security child.
+# ---------------------------------------------------------------------------
+echo "Generating cardinal-lakerunner-services.yaml (param-driven root)..."
+python3 -m cardinal_cfn.lakerunner_services > generated-templates/cardinal-lakerunner-services.yaml
+
+for child in alb cert migration \
              services_query services_process services_control otel maestro; do
   out_name=$(echo "$child" | tr '_' '-')
   echo "Generating cardinal-lakerunner/${out_name}.yaml..."
@@ -49,9 +58,12 @@ echo
 echo "Linting CFN templates..."
 cfn-lint generated-templates/lrdev-vpc.yaml \
          generated-templates/lrdev-baseinfra.yaml \
-         generated-templates/cardinal-infrastructure.yaml \
          generated-templates/cardinal-cleanup.yaml \
-         generated-templates/cardinal-lakerunner.yaml \
+         generated-templates/cardinal-satellite-infra-base.yaml \
+         generated-templates/cardinal-satellite-services.yaml \
+         generated-templates/cardinal-lakerunner-infra-rds.yaml \
+         generated-templates/cardinal-lakerunner-infra-base.yaml \
+         generated-templates/cardinal-lakerunner-services.yaml \
          generated-templates/cardinal-lakerunner/*.yaml || \
   echo "cfn-lint completed with warnings"
 

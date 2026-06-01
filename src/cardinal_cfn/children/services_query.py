@@ -91,8 +91,6 @@ def build() -> Template:
     t.add_parameter(
         Parameter("BucketName", Type="String", Description="Name of the ingest S3 bucket.")
     )
-    t.add_parameter(Parameter("QueueUrl", Type="String", Description="URL of the ingest SQS queue."))
-    t.add_parameter(Parameter("QueueArn", Type="String", Description="ARN of the ingest SQS queue."))
     t.add_parameter(
         Parameter(
             "LicenseSecretArn",
@@ -218,8 +216,6 @@ def build() -> Template:
                     "DbPort",
                     "DbSecretArn",
                     "BucketName",
-                    "QueueUrl",
-                    "QueueArn",
                     "LicenseSecretArn",
                     "MigrationComplete",
                 ],
@@ -252,7 +248,6 @@ def build() -> Template:
         Environment(Name="LRDB_DBNAME", Value="lakerunner"),
         Environment(Name="LRDB_SSLMODE", Value="require"),
         Environment(Name="LRDB_S3_BUCKET", Value=Ref("BucketName")),
-        Environment(Name="LRDB_SQS_QUEUE_URL", Value=Ref("QueueUrl")),
         Environment(Name="CONFIGDB_HOST", Value=Ref("DbEndpoint")),
         Environment(Name="CONFIGDB_PORT", Value=Ref("DbPort")),
         Environment(Name="CONFIGDB_DBNAME", Value="configdb"),

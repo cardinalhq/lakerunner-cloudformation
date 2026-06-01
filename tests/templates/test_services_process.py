@@ -30,13 +30,19 @@ def test_required_cross_stack_parameters(td):
         "DbPort",
         "DbSecretArn",
         "BucketName",
-        "QueueUrl",
-        "QueueArn",
+        "PubsubSqsEnv",
         "LicenseSecretArn",
         "MigrationComplete",
         "LakerunnerImage",
     ):
         assert n in td["Parameters"], f"missing parameter: {n}"
+
+
+def test_removed_queue_parameters_are_gone(td):
+    """The raw queue/role inputs were replaced by the driver-supplied
+    PubsubSqsEnv blob; the process tier no longer declares them."""
+    for n in ("QueueUrl", "QueueArn", "QueueRoleArn"):
+        assert n not in td["Parameters"], f"removed parameter still present: {n}"
 
 
 def test_no_alb_parameters(td):
@@ -264,6 +270,65 @@ def test_all_task_definitions_set_ssl_required(td):
             env = {e["Name"]: e["Value"] for e in container.get("Environment", [])}
             assert env.get("LRDB_SSLMODE") == "require", (
                 f"{container.get('Name')} LRDB_SSLMODE must be 'require'; got {env.get('LRDB_SSLMODE')!r}"
+            )
+
+
+# ---------------------------------------------------------------------------
+# pubsub-sqs driver-supplied SQS env blob (PUBSUB_SQS_ENV)
+# ---------------------------------------------------------------------------
+
+
+def _container(td, task_def_id):
+    task_def = td["Resources"][task_def_id]
+    return task_def["Properties"]["ContainerDefinitions"][0]
+
+
+def _env(td, task_def_id):
+    container = _container(td, task_def_id)
+    return {e["Name"]: e["Value"] for e in container.get("Environment", [])}
+
+
+def test_pubsub_sqs_takes_driver_env_blob(td):
+    """pubsub-sqs exports the driver-built PUBSUB_SQS_ENV blob; the static
+    per-group SQS_* env vars are gone."""
+    env = _env(td, "PubsubSqsTaskDef")
+    assert env["PUBSUB_SQS_ENV"] == {"Ref": "PubsubSqsEnv"}, env.get("PUBSUB_SQS_ENV")
+    for static in ("SQS_QUEUE_URL", "SQS_REGION", "SQS_ROLE_ARN"):
+        assert static not in env, f"static SQS env still present: {static}"
+
+
+def test_pubsub_sqs_command_wraps_eval_and_exec(td):
+    """The pubsub-sqs container exports the blob via `eval` before exec'ing the
+    original lakerunner command."""
+    command = _container(td, "PubsubSqsTaskDef")["Command"]
+    assert command[0] == "sh"
+    assert command[1] == "-c"
+    script = command[2]
+    assert 'eval "$PUBSUB_SQS_ENV"' in script, script
+    assert "set -a" in script and "set +a" in script, script
+    assert "exec /app/bin/lakerunner pubsub sqs" in script, script
+
+
+def test_process_services_have_no_pubsub_env_or_wrapper(td):
+    """process-logs/metrics/traces never consume SQS: no PUBSUB_SQS_ENV, and
+    their commands stay the original (unwrapped) lakerunner invocation."""
+    for task_def_id in ("ProcessLogsTaskDef", "ProcessMetricsTaskDef", "ProcessTracesTaskDef"):
+        env = _env(td, task_def_id)
+        assert "PUBSUB_SQS_ENV" not in env, f"{task_def_id} unexpectedly has PUBSUB_SQS_ENV"
+        command = _container(td, task_def_id).get("Command")
+        if command:
+            assert command[0] != "sh", f"{task_def_id} command unexpectedly wrapped: {command!r}"
+
+
+def test_no_static_sqs_env_anywhere(td):
+    """SQS_QUEUE_URL is no longer a static env entry on any container."""
+    for tdef in td["Resources"].values():
+        if tdef["Type"] != "AWS::ECS::TaskDefinition":
+            continue
+        for container in tdef["Properties"]["ContainerDefinitions"]:
+            env = {e["Name"] for e in container.get("Environment", [])}
+            assert "SQS_QUEUE_URL" not in env, (
+                f"{container.get('Name')} still has static SQS_QUEUE_URL env"
             )
 
 

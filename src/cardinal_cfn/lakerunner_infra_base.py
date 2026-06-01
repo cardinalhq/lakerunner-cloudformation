@@ -1,28 +1,36 @@
-"""security.yaml nested stack: SGs and IAM roles for the lakerunner tier.
+"""cardinal-lakerunner-infra-base: the IT/security-owned base stack.
 
-Owns every security group and IAM role the lakerunner application needs,
-so the customer no longer supplies any of them. The infra stack already
-owns its RDS security group; this child adds ingress rules to it,
-referencing the per-tier task SGs created here.
+Standalone stack deployed FIRST in the lakerunner install order
+(base -> rds -> services). It owns the security and IAM surface plus the
+durable cooked bucket and operator-managed config, but no RDS and no
+ingest queue.
 
 Resources created:
 
-- 1 ALB SG (cardinal-alb-sg). Inbound 443 / 9443 / 4318 from
-  ``AlbAllowedCidrs``; all egress.
-- 6 task SGs, one per child tier:
-    cardinal-svc-migration-sg, cardinal-svc-query-sg,
-    cardinal-svc-process-sg,  cardinal-svc-control-sg,
-    cardinal-svc-otel-sg,     cardinal-svc-maestro-sg
-  Tier-specific ingress (from ALB SG, from sibling SGs, or self);
-  all egress.
-- 6 ``AWS::EC2::SecurityGroupIngress`` adds to the infra-supplied RDS
-  SG (one per tier that needs DB access; otel does not).
-- 1 shared ECS task execution role (cardinal-task-exec-role).
-- 6 task roles, one per tier, each scoped to the exact AWS APIs the
-  tier's services call.
+- 1 ALB SG (cardinal-alb-sg). Inbound 443 / 9443 / 4318 from the
+  AlbAllowedCidr1/2/3 params; all egress.
+- 6 task SGs, one per child tier (migration/query/process/control/otel/
+  maestro) with tier-specific inter-tier ingress; all egress.
+- 1 shared ECS task execution role + 6 per-tier task roles.
+- 1 cooked bucket (durable; cooked-only output; Retain).
+- license + admin-key secrets (Retain, named cardinal-*).
+- storage-profiles + api-keys SSM params (operator-managed).
 
-Outputs all SG IDs and role ARNs so the other nested children can
-consume them.
+Because base deploys before rds/services, its roles CANNOT reference
+RDS/service ARNs. Instead they scope by NAME PATTERN:
+
+- secrets -> arn:...:secret:cardinal-* (requires the rds master secret to
+  be named cardinal-db-master and base's secrets cardinal-license /
+  cardinal-admin-key).
+- SSM -> /cardinal/* (already name-pattern in security.py).
+- S3 -> the cooked bucket this stack creates (by name).
+- process tier -> sts:AssumeRole on cardinal-satellite-access* (the poller
+  assumes each satellite's access role, which carries the real S3/SQS perms;
+  there is no local ingest queue here).
+
+Outputs all SG IDs, role ARNs, the cooked bucket name, the license/admin
+secret ARNs, and the two SSM param names so rds + services (wired by the
+deploy driver) can consume them.
 """
 
 from __future__ import annotations
@@ -30,6 +38,7 @@ from __future__ import annotations
 from troposphere import (
     Equals,
     GetAtt,
+    If,
     Not,
     Output,
     Parameter,
@@ -40,11 +49,22 @@ from troposphere import (
 )
 from troposphere.ec2 import SecurityGroup, SecurityGroupIngress, SecurityGroupRule
 from troposphere.iam import Policy, Role
+from troposphere.s3 import (
+    Bucket,
+    BucketEncryption,
+    PublicAccessBlockConfiguration,
+    ServerSideEncryptionByDefault,
+    ServerSideEncryptionRule,
+)
+from troposphere.secretsmanager import GenerateSecretString, Secret
+from troposphere.ssm import Parameter as SSMParameter
+
+from cardinal_cfn.parameters import add_no_echo_parameter, add_parameter_group_metadata
 
 
 PROJECT = "cardinal"
 APPLICATION = "cardinal-lakerunner"
-MANAGED_BY = "cardinal-cfn-security"
+MANAGED_BY = "cardinal-cfn-infra-base"
 
 
 def _tags(*, component: str) -> Tags:
@@ -57,21 +77,21 @@ def _tags(*, component: str) -> Tags:
     )
 
 
+def _retain(resource):
+    resource.DeletionPolicy = "Retain"
+    resource.UpdateReplacePolicy = "Retain"
+    return resource
+
+
 # --------------------------------------------------------------------------
-# Service port table. Each entry lists the (container-port, description)
-# pairs that the ALB connects to on a given tier. Health-check probes use
-# the target-group port (i.e. the container port) unless a child template
-# overrides HealthCheckPort, so a single rule per tier covers both.
+# Service port table (lifted from security.py). Each tier connects to the
+# ALB (or sibling tiers) on these container ports.
 # --------------------------------------------------------------------------
 _ALB_INGRESS = [443, 9443, 4318]
 _QUERY_API_PORT = 8080
-# query-worker exposes TWO ports:
-#   8081 - HTTP REST artifact fetch (query-api -> worker via
-#          GET /api/v1/artifacts/<id>; segments stream Parquet back)
-#   8082 - gRPC control stream / Discovery bridge (query-api -> worker
-#          long-lived bidi RPC for work assignment)
-# Both must be open in the QuerySG self-referential ingress or queries
-# dispatch but artifact fetches time out with "context deadline exceeded".
+# query-worker exposes 8081 (HTTP REST artifact fetch) and 8082 (gRPC
+# control stream / Discovery bridge); both must be open in the QuerySG
+# self-referential ingress.
 _QUERY_WORKER_ARTIFACT_PORT = 8081
 _QUERY_WORKER_PORT = 8082
 _ADMIN_API_PORT = 9091
@@ -84,9 +104,11 @@ _MAESTRO_DEX_PORT = 5556
 def build() -> Template:
     t = Template()
     t.set_description(
-        "Cardinal lakerunner security: ALB SG, six per-tier task SGs, six "
-        "per-tier task roles, one shared execution role, and ingress rules "
-        "into the infra-owned RDS SG."
+        "Cardinal lakerunner infra base: ALB SG, six per-tier task SGs with "
+        "inter-tier ingress, one shared ECS execution role, six per-tier task "
+        "roles (name-pattern scoped), the durable cooked bucket, license/"
+        "admin-key secrets, and the operator-managed SSM config params. "
+        "Deploy first (base -> rds -> services); owns no RDS, no ingest queue."
     )
 
     # ----------------------------------------------------------------------
@@ -98,8 +120,8 @@ def build() -> Template:
         Description="VPC ID the security groups are created in.",
     ))
     # ALB inbound CIDRs as three independent parameters so customers who
-    # only need one or two can leave the rest blank without breaking
-    # Fn::Select. Empty -> rule skipped via Condition.
+    # only need one or two can leave the rest blank; empty -> rule skipped
+    # via Condition.
     t.add_parameter(Parameter(
         "AlbAllowedCidr1",
         Type="String",
@@ -127,19 +149,9 @@ def build() -> Template:
         Default="internal",
         AllowedValues=["internal", "internet-facing"],
         Description=(
-            "ALB scheme. When 'internet-facing', the Security child "
-            "automatically adds a 0.0.0.0/0 ingress rule on each ALB port "
-            "in addition to the AlbAllowedCidr1/2/3 rules. Pure convenience "
-            "so the operator doesn't have to remember to flip the CIDRs."
-        ),
-    ))
-    t.add_parameter(Parameter(
-        "RdsSecurityGroupId",
-        Type="AWS::EC2::SecurityGroup::Id",
-        Description=(
-            "Security group ID attached to the RDS instance (output "
-            "RdsSecurityGroupId from cardinal-infrastructure). This stack "
-            "adds tier-specific 5432 ingress rules to it."
+            "ALB scheme. When 'internet-facing', this stack adds a 0.0.0.0/0 "
+            "ingress rule on each ALB port in addition to the "
+            "AlbAllowedCidr1/2/3 rules."
         ),
     ))
     t.add_parameter(Parameter(
@@ -147,41 +159,157 @@ def build() -> Template:
         Type="String",
         Description="ECS cluster ARN. Used to scope IAM ecs:* actions.",
     ))
-    t.add_parameter(Parameter(
-        "BucketName",
+    cooked_bucket_name = t.add_parameter(Parameter(
+        "CookedBucketName",
         Type="String",
-        Description="Name of the cardinal-infrastructure ingest bucket.",
+        Default="",
+        Description=(
+            "Name for the durable cooked-output bucket. Leave blank to use "
+            "the default cardinal-cooked-<account>-<region>."
+        ),
+        AllowedPattern=r"^$|^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$",
     ))
-    t.add_parameter(Parameter(
-        "QueueArn",
+    license_secret_name = t.add_parameter(Parameter(
+        "LicenseSecretName",
         Type="String",
-        Description="ARN of the cardinal-infrastructure ingest SQS queue.",
+        Default="cardinal-license",
+        Description=(
+            "Secrets Manager name for the license secret. Must match the "
+            "cardinal-* pattern the task roles grant."
+        ),
+        MinLength=1,
     ))
-    t.add_parameter(Parameter(
-        "DbMasterSecretArn",
+    admin_key_secret_name = t.add_parameter(Parameter(
+        "AdminKeySecretName",
         Type="String",
-        Description="ARN of the RDS master credentials secret.",
+        Default="cardinal-admin-key",
+        Description=(
+            "Secrets Manager name for the first-boot admin key secret. Must "
+            "match the cardinal-* pattern the task roles grant."
+        ),
+        MinLength=1,
     ))
-    t.add_parameter(Parameter(
-        "LicenseSecretArn",
-        Type="String",
-        Description="ARN of the cardinal-license secret.",
-    ))
-    t.add_parameter(Parameter(
-        "AdminKeySecretArn",
-        Type="String",
-        Description="ARN of the cardinal-admin-key secret.",
-    ))
-    t.add_parameter(Parameter(
+    storage_profiles_param_name = t.add_parameter(Parameter(
         "StorageProfilesParamName",
         Type="String",
-        Description="SSM parameter name holding storage-profiles YAML.",
+        Default="/cardinal/storage-profiles",
+        Description=(
+            "SSM parameter name for the operator-managed storage-profiles "
+            "YAML. Must match the /cardinal/* pattern the task roles grant."
+        ),
+        AllowedPattern=r"^/[A-Za-z0-9._/-]{1,1011}$",
     ))
-    t.add_parameter(Parameter(
+    api_keys_param_name = t.add_parameter(Parameter(
         "ApiKeysParamName",
         Type="String",
-        Description="SSM parameter name holding api-keys YAML.",
+        Default="/cardinal/api-keys",
+        Description=(
+            "SSM parameter name for the operator-managed external API keys "
+            "YAML. Must match the /cardinal/* pattern the task roles grant."
+        ),
+        AllowedPattern=r"^/[A-Za-z0-9._/-]{1,1011}$",
     ))
+    organization_id = t.add_parameter(Parameter(
+        "OrganizationId",
+        Type="String",
+        Default="12340000-0000-4000-8000-000000000000",
+        Description=(
+            "Canonical single-install organization UUID. Used in both the "
+            "storage-profiles and api-keys SSM seeds."
+        ),
+        AllowedPattern=(
+            r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+            r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+        ),
+    ))
+    license_data = add_no_echo_parameter(
+        t,
+        "LicenseData",
+        description=(
+            "Cardinal license token (z64:...). Stored verbatim as the string "
+            "body of the license secret."
+        ),
+    )
+    # api-keys is plaintext YAML by design (SSM cannot be SecureString in
+    # CloudFormation); NoEcho only keeps it out of the console echo.
+    initial_ingest_api_key = add_no_echo_parameter(
+        t,
+        "InitialIngestApiKey",
+        default="",
+        description=(
+            "Ingest API key seeded into the api-keys SSM parameter for "
+            "OrganizationId. Leave blank to seed an empty list (no key)."
+        ),
+    )
+
+    add_parameter_group_metadata(
+        t,
+        groups=[
+            {
+                "label": "Networking",
+                "parameters": ["VpcId"],
+            },
+            {
+                "label": "ALB ingress",
+                "parameters": [
+                    "AlbAllowedCidr1",
+                    "AlbAllowedCidr2",
+                    "AlbAllowedCidr3",
+                    "AlbScheme",
+                ],
+            },
+            {
+                "label": "ECS",
+                "parameters": ["ClusterArn"],
+            },
+            {
+                "label": "Cooked storage",
+                "parameters": ["CookedBucketName"],
+            },
+            {
+                "label": "License",
+                "parameters": ["LicenseData"],
+            },
+            {
+                "label": "Organization",
+                "parameters": ["OrganizationId", "InitialIngestApiKey"],
+            },
+            {
+                "label": "Names (advanced)",
+                "parameters": [
+                    "LicenseSecretName",
+                    "AdminKeySecretName",
+                    "StorageProfilesParamName",
+                    "ApiKeysParamName",
+                ],
+            },
+        ],
+        labels={
+            "VpcId": "VPC for the security groups",
+            "CookedBucketName": "Cooked bucket name (blank = default)",
+            "LicenseData": "License token (z64:...)",
+            "OrganizationId": "Organization UUID",
+            "InitialIngestApiKey": "Initial ingest API key (blank = none)",
+        },
+    )
+
+    # ----------------------------------------------------------------------
+    # Conditions
+    # ----------------------------------------------------------------------
+    t.add_condition(
+        "UseDefaultCookedBucketName",
+        Equals(Ref(cooked_bucket_name), ""),
+    )
+    t.add_condition(
+        "HasInitialIngestApiKey",
+        Not(Equals(Ref(initial_ingest_api_key), "")),
+    )
+
+    cooked_bucket_name_value = If(
+        "UseDefaultCookedBucketName",
+        Sub("cardinal-cooked-${AWS::AccountId}-${AWS::Region}"),
+        Ref(cooked_bucket_name),
+    )
 
     # ----------------------------------------------------------------------
     # ALB SG
@@ -189,13 +317,9 @@ def build() -> Template:
     alb_sg = t.add_resource(SecurityGroup(
         "AlbSecurityGroup",
         GroupDescription=(
-            "Cardinal ALB (internal). Inbound 443 / 9443 / 4318 from "
-            "AlbAllowedCidrs."
+            "Cardinal ALB. Inbound 443 / 9443 / 4318 from AlbAllowedCidrs."
         ),
         VpcId=Ref(vpc_id),
-        # Ingress is added via separate SecurityGroupIngress resources so
-        # we can fan out one rule per (port, cidr) pair sourced from the
-        # CommaDelimitedList parameter.
         SecurityGroupEgress=[SecurityGroupRule(
             IpProtocol="-1",
             CidrIp="0.0.0.0/0",
@@ -225,9 +349,8 @@ def build() -> Template:
             ))
 
     # When Scheme=internet-facing, layer a 0.0.0.0/0 rule on every ALB port
-    # on top of the AlbAllowedCidr1/2/3 rules above. Gated by an explicit
-    # condition so deploying with the default (internal) doesn't surprise
-    # the operator by exposing the ALB.
+    # on top of the AlbAllowedCidr rules. Gated by a condition so the default
+    # (internal) doesn't surprise the operator by exposing the ALB.
     t.add_condition(
         "AlbIsInternetFacing",
         Equals(Ref("AlbScheme"), "internet-facing"),
@@ -304,11 +427,8 @@ def build() -> Template:
         ToPort=_QUERY_API_PORT,
         Description="ALB to query-api",
     ))
-    # query-api -> query-worker (self-referential within the tier SG).
-    # Two ports: 8081 for HTTP REST artifact fetch, 8082 for gRPC control
-    # stream / Discovery bridge. Missing either one produces
-    # "context deadline exceeded" on artifact fetch (8081) or
-    # "no available workers" on dispatch (8082).
+    # query-api -> query-worker (self-referential). 8082 gRPC control stream,
+    # 8081 HTTP REST artifact fetch.
     t.add_resource(SecurityGroupIngress(
         "QueryWorkerFromQuery",
         GroupId=Ref(query_sg),
@@ -339,10 +459,7 @@ def build() -> Template:
         Description="ALB to admin-api",
     ))
 
-    # ALB -> otel on 4318 (data plane) and 13133 (health check). The OTel
-    # target group routes traffic to 4318 but health-checks 13133, so both
-    # ports must be reachable from the ALB SG or the ECS task is marked
-    # unhealthy and the deployment circuit breaker rolls the stack back.
+    # ALB -> otel on 4318 (data plane) and 13133 (health check).
     t.add_resource(SecurityGroupIngress(
         "OtelFromAlb",
         GroupId=Ref(otel_sg),
@@ -378,13 +495,8 @@ def build() -> Template:
             Description=f"{tier_title} to otel-collector self-telemetry",
         ))
 
-    # Maestro -> lakerunner cross-tier calls via Cloud Map service discovery.
-    # The Maestro and mcp-gateway containers call query-api (8080) and
-    # admin-api (9091) directly at their cardinal.local DNS names, bypassing
-    # the ALB. Without these SG rules, the "Lakerunner provisioning worker"
-    # in maestro hangs on a headers-timeout when trying to register a new org
-    # against admin-api, leaving the maestro_integrations row in 'error'
-    # status and the org disconnected from its lakerunner deployment.
+    # Maestro -> lakerunner cross-tier calls via Cloud Map service discovery
+    # (query-api 8080, admin-api 9091), bypassing the ALB.
     t.add_resource(SecurityGroupIngress(
         "QueryFromMaestro",
         GroupId=Ref(query_sg),
@@ -424,26 +536,10 @@ def build() -> Template:
         Description="ALB to maestro dex",
     ))
 
-    # ----------------------------------------------------------------------
-    # RDS ingress: each tier that talks to RDS gets 5432 into the
-    # infra-supplied RDS SG.
-    # ----------------------------------------------------------------------
-    for tier_title, tier_ref in [
-        ("Migration", migration_sg),
-        ("Query", query_sg),
-        ("Process", process_sg),
-        ("Control", control_sg),
-        ("Maestro", maestro_sg),
-    ]:
-        t.add_resource(SecurityGroupIngress(
-            f"Rds5432From{tier_title}",
-            GroupId=Ref("RdsSecurityGroupId"),
-            SourceSecurityGroupId=Ref(tier_ref),
-            IpProtocol="tcp",
-            FromPort=5432,
-            ToPort=5432,
-            Description=f"{tier_title} to RDS 5432",
-        ))
+    # NOTE: security.py's Rds5432From* ingress rules and its RdsSecurityGroupId
+    # param are intentionally DROPPED here. RDS ingress now lives in
+    # lakerunner-infra-rds (which deploys after base and threads these task SG
+    # IDs in as parameters).
 
     # ----------------------------------------------------------------------
     # Shared ECS execution role
@@ -467,14 +563,14 @@ def build() -> Template:
                                 "secretsmanager:GetSecretValue",
                                 "secretsmanager:DescribeSecret",
                             ],
-                            # The DBMaster secret is CFN-generated and does NOT match
-                            # the cardinal-* prefix, so list the actual ARNs the
-                            # infrastructure stack hands us instead of a wildcard.
-                            "Resource": [
-                                Ref("DbMasterSecretArn"),
-                                Ref("LicenseSecretArn"),
-                                Ref("AdminKeySecretArn"),
-                            ],
+                            # NAME-PATTERN DECOUPLING (diverges from security.py,
+                            # which threaded Db/License/AdminKey secret ARN Refs):
+                            # base deploys before rds, so it cannot reference the
+                            # rds master secret ARN. Scope to the cardinal-*
+                            # secret name pattern instead. Requires the rds master
+                            # secret to be named cardinal-db-master (Amendment A)
+                            # and base's secrets cardinal-license/cardinal-admin-key.
+                            "Resource": _cardinal_secret_arn_pattern(),
                         },
                         {
                             "Sid": "ResolveCardinalSsm",
@@ -507,7 +603,7 @@ def build() -> Template:
                 PolicyDocument={
                     "Version": "2012-10-17",
                     "Statement": [
-                        _stmt_secrets_read(["DbMasterSecretArn"]),
+                        _stmt_secrets_read(),
                         _stmt_ssm_read([
                             "StorageProfilesParamName",
                             "ApiKeysParamName",
@@ -529,15 +625,12 @@ def build() -> Template:
                 PolicyDocument={
                     "Version": "2012-10-17",
                     "Statement": [
-                        _stmt_secrets_read([
-                            "DbMasterSecretArn",
-                            "LicenseSecretArn",
-                        ]),
+                        _stmt_secrets_read(),
                         _stmt_ssm_read([
                             "StorageProfilesParamName",
                             "ApiKeysParamName",
                         ]),
-                        _stmt_s3_read(),
+                        _stmt_s3_read(cooked_bucket_name_value),
                         _stmt_cw_logs(),
                         {
                             "Sid": "DescribeWorkerTasks",
@@ -568,16 +661,27 @@ def build() -> Template:
                 PolicyDocument={
                     "Version": "2012-10-17",
                     "Statement": [
-                        _stmt_secrets_read([
-                            "DbMasterSecretArn",
-                            "LicenseSecretArn",
-                        ]),
+                        _stmt_secrets_read(),
                         _stmt_ssm_read([
                             "StorageProfilesParamName",
                             "ApiKeysParamName",
                         ]),
-                        _stmt_s3_readwrite(),
-                        _stmt_sqs_consume(),
+                        _stmt_s3_readwrite(cooked_bucket_name_value),
+                        # NAME-PATTERN DECOUPLING (diverges from security.py's
+                        # local _stmt_sqs_consume on a threaded QueueArn): this
+                        # stack owns no ingest queue. The lakerunner poller
+                        # instead assumes each satellite's cross-account access
+                        # role (named cardinal-satellite-access, Amendment B);
+                        # that role carries the real S3/SQS perms.
+                        {
+                            "Sid": "AssumeSatelliteAccess",
+                            "Effect": "Allow",
+                            "Action": "sts:AssumeRole",
+                            "Resource": Sub(
+                                "arn:${AWS::Partition}:iam::*:role/"
+                                "cardinal-satellite-access*"
+                            ),
+                        },
                         {
                             "Sid": "InvokeBedrockFoundationModels",
                             "Effect": "Allow",
@@ -606,11 +710,7 @@ def build() -> Template:
                 PolicyDocument={
                     "Version": "2012-10-17",
                     "Statement": [
-                        _stmt_secrets_read([
-                            "DbMasterSecretArn",
-                            "LicenseSecretArn",
-                            "AdminKeySecretArn",
-                        ]),
+                        _stmt_secrets_read(),
                         _stmt_ssm_read([
                             "StorageProfilesParamName",
                             "ApiKeysParamName",
@@ -623,9 +723,17 @@ def build() -> Template:
                                 "s3:GetObject",
                                 "s3:ListBucket",
                             ],
+                            # S3 targets the cooked bucket base creates (was the
+                            # threaded BucketName param in security.py).
                             "Resource": [
-                                Sub("arn:${AWS::Partition}:s3:::${BucketName}"),
-                                Sub("arn:${AWS::Partition}:s3:::${BucketName}/*"),
+                                Sub(
+                                    "arn:${AWS::Partition}:s3:::${BucketName}",
+                                    BucketName=cooked_bucket_name_value,
+                                ),
+                                Sub(
+                                    "arn:${AWS::Partition}:s3:::${BucketName}/*",
+                                    BucketName=cooked_bucket_name_value,
+                                ),
                             ],
                         },
                         {
@@ -657,18 +765,18 @@ def build() -> Template:
                 PolicyDocument={
                     "Version": "2012-10-17",
                     "Statement": [
-                        _stmt_secrets_read(["LicenseSecretArn"]),
+                        _stmt_secrets_read(),
                         # OTel writes raw OTLP signals under otel-raw/ in the
-                        # ingest bucket via the awss3 exporter; the
-                        # process-{logs,metrics,traces} tier reads them and
-                        # writes cooked output under db/. Restrict to the
-                        # write-side prefix only.
+                        # cooked bucket via the awss3 exporter; restrict to that
+                        # write-side prefix. (security.py used the threaded
+                        # BucketName; here it is the cooked bucket base creates.)
                         {
                             "Sid": "OtelRawWrite",
                             "Effect": "Allow",
                             "Action": ["s3:PutObject"],
                             "Resource": Sub(
-                                "arn:${AWS::Partition}:s3:::${BucketName}/otel-raw/*"
+                                "arn:${AWS::Partition}:s3:::${BucketName}/otel-raw/*",
+                                BucketName=cooked_bucket_name_value,
                             ),
                         },
                         _stmt_cw_logs(),
@@ -688,11 +796,7 @@ def build() -> Template:
                 PolicyDocument={
                     "Version": "2012-10-17",
                     "Statement": [
-                        _stmt_secrets_read([
-                            "DbMasterSecretArn",
-                            "LicenseSecretArn",
-                            "AdminKeySecretArn",
-                        ]),
+                        _stmt_secrets_read(),
                         _stmt_ssm_read([
                             "StorageProfilesParamName",
                             "ApiKeysParamName",
@@ -704,6 +808,140 @@ def build() -> Template:
         ],
         Tags=_tags(component="svc-maestro-role"),
     ))
+
+    # ----------------------------------------------------------------------
+    # Cooked bucket (durable; cooked-only output). Unlike the ingest bucket
+    # in cardinal_infrastructure.py this has NO SQS, NO notification, NO
+    # lifecycle expiry, and Retain — cooked output is the system of record.
+    # ----------------------------------------------------------------------
+    cooked_bucket = t.add_resource(
+        _retain(
+            Bucket(
+                "CookedBucket",
+                BucketName=cooked_bucket_name_value,
+                PublicAccessBlockConfiguration=PublicAccessBlockConfiguration(
+                    BlockPublicAcls=True,
+                    BlockPublicPolicy=True,
+                    IgnorePublicAcls=True,
+                    RestrictPublicBuckets=True,
+                ),
+                BucketEncryption=BucketEncryption(
+                    ServerSideEncryptionConfiguration=[
+                        ServerSideEncryptionRule(
+                            ServerSideEncryptionByDefault=(
+                                ServerSideEncryptionByDefault(
+                                    SSEAlgorithm="AES256"
+                                )
+                            )
+                        )
+                    ]
+                ),
+                Tags=_tags(component="cooked-bucket"),
+            )
+        )
+    )
+
+    # ----------------------------------------------------------------------
+    # Application secrets (license, admin-key). Named cardinal-* so the task
+    # roles' name-pattern secret access resolves them.
+    # ----------------------------------------------------------------------
+    license_secret = t.add_resource(
+        _retain(
+            Secret(
+                "LicenseSecret",
+                Name=Ref(license_secret_name),
+                Description="Cardinal lakerunner license token (z64:...).",
+                SecretString=Ref(license_data),
+                Tags=_tags(component="license"),
+            )
+        )
+    )
+
+    admin_key_secret = t.add_resource(
+        _retain(
+            Secret(
+                "AdminKeySecret",
+                Name=Ref(admin_key_secret_name),
+                Description=(
+                    "First-boot admin API key. JSON shape "
+                    '{"key": "<random>"} so the ECS secret pointer '
+                    '":key::" resolves at task launch.'
+                ),
+                GenerateSecretString=GenerateSecretString(
+                    SecretStringTemplate="{}",
+                    GenerateStringKey="key",
+                    PasswordLength=64,
+                    ExcludePunctuation=True,
+                ),
+                Tags=_tags(component="admin-key"),
+            )
+        )
+    )
+
+    # ----------------------------------------------------------------------
+    # SSM parameters (operator-managed YAML). The migrator imports these into
+    # configdb and expects YAML *lists* — a top-level map fails to unmarshal.
+    # Seed storage-profiles with the cooked bucket + region; api-keys with the
+    # initial key or an empty list.
+    # ----------------------------------------------------------------------
+    storage_profiles_param = t.add_resource(
+        _retain(
+            SSMParameter(
+                "StorageProfilesParam",
+                Name=Ref(storage_profiles_param_name),
+                Type="String",
+                Value=Sub(
+                    "- organization_id: ${OrgId}\n"
+                    "  instance_num: 1\n"
+                    "  collector_name: lakerunner\n"
+                    "  cloud_provider: aws\n"
+                    "  region: ${AWS::Region}\n"
+                    "  bucket: ${BucketName}\n"
+                    "  insecure_tls: false\n"
+                    "  use_path_style: true\n",
+                    OrgId=Ref(organization_id),
+                    BucketName=cooked_bucket_name_value,
+                ),
+                Description="Cardinal storage profiles (YAML; operator-managed).",
+                Tags={
+                    "Application": APPLICATION,
+                    "Project": PROJECT,
+                    "ManagedBy": MANAGED_BY,
+                    "Component": "ssm-storage-profiles",
+                    "Name": "cardinal-ssm-storage-profiles",
+                },
+            )
+        )
+    )
+
+    api_keys_param = t.add_resource(
+        _retain(
+            SSMParameter(
+                "ApiKeysParam",
+                Name=Ref(api_keys_param_name),
+                Type="String",
+                Value=If(
+                    "HasInitialIngestApiKey",
+                    Sub(
+                        "- organization_id: ${OrgId}\n"
+                        "  keys:\n"
+                        "    - ${Key}\n",
+                        OrgId=Ref(organization_id),
+                        Key=Ref(initial_ingest_api_key),
+                    ),
+                    "[]",
+                ),
+                Description="Cardinal external API keys (YAML; operator-managed).",
+                Tags={
+                    "Application": APPLICATION,
+                    "Project": PROJECT,
+                    "ManagedBy": MANAGED_BY,
+                    "Component": "ssm-api-keys",
+                    "Name": "cardinal-ssm-api-keys",
+                },
+            )
+        )
+    )
 
     # ----------------------------------------------------------------------
     # Outputs
@@ -734,6 +972,17 @@ def build() -> Template:
     _emit("MaestroRoleArn", "Maestro tier task role ARN.",
           GetAtt(maestro_role, "Arn"))
 
+    _emit("CookedBucketName", "Name of the durable cooked-output bucket.",
+          Ref(cooked_bucket))
+    _emit("LicenseSecretArn", "ARN of the license secret.",
+          Ref(license_secret))
+    _emit("AdminKeySecretArn", "ARN of the first-boot admin key secret.",
+          Ref(admin_key_secret))
+    _emit("StorageProfilesParamName", "Name of the storage-profiles SSM parameter.",
+          Ref(storage_profiles_param))
+    _emit("ApiKeysParamName", "Name of the external API-keys SSM parameter.",
+          Ref(api_keys_param))
+
     return t
 
 
@@ -751,7 +1000,20 @@ def _ecs_tasks_trust() -> dict:
     }
 
 
-def _stmt_secrets_read(param_names: list[str]) -> dict:
+def _cardinal_secret_arn_pattern():
+    # Secrets Manager appends a random 6-char suffix to physical ARNs, so the
+    # trailing wildcard matches cardinal-db-master, cardinal-license, and
+    # cardinal-admin-key regardless of suffix.
+    return Sub(
+        "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:"
+        "${AWS::AccountId}:secret:cardinal-*"
+    )
+
+
+def _stmt_secrets_read() -> dict:
+    # NAME-PATTERN DECOUPLING: security.py scoped this to threaded secret ARN
+    # Refs (Db/License/AdminKey). base deploys before rds and creates only two
+    # of the three secrets, so scope to the cardinal-* name pattern instead.
     return {
         "Sid": "ReadSecrets",
         "Effect": "Allow",
@@ -759,7 +1021,7 @@ def _stmt_secrets_read(param_names: list[str]) -> dict:
             "secretsmanager:GetSecretValue",
             "secretsmanager:DescribeSecret",
         ],
-        "Resource": [Ref(n) for n in param_names],
+        "Resource": _cardinal_secret_arn_pattern(),
     }
 
 
@@ -782,9 +1044,9 @@ def _stmt_ssm_read(param_names: list[str]) -> dict:
     }
 
 
-def _stmt_s3_read() -> dict:
+def _stmt_s3_read(bucket_name_value) -> dict:
     return {
-        "Sid": "IngestBucketRead",
+        "Sid": "CookedBucketRead",
         "Effect": "Allow",
         "Action": [
             "s3:GetObject",
@@ -792,15 +1054,17 @@ def _stmt_s3_read() -> dict:
             "s3:GetBucketLocation",
         ],
         "Resource": [
-            Sub("arn:${AWS::Partition}:s3:::${BucketName}"),
-            Sub("arn:${AWS::Partition}:s3:::${BucketName}/*"),
+            Sub("arn:${AWS::Partition}:s3:::${BucketName}",
+                BucketName=bucket_name_value),
+            Sub("arn:${AWS::Partition}:s3:::${BucketName}/*",
+                BucketName=bucket_name_value),
         ],
     }
 
 
-def _stmt_s3_readwrite() -> dict:
+def _stmt_s3_readwrite(bucket_name_value) -> dict:
     return {
-        "Sid": "IngestBucketReadWrite",
+        "Sid": "CookedBucketReadWrite",
         "Effect": "Allow",
         "Action": [
             "s3:GetObject",
@@ -810,24 +1074,11 @@ def _stmt_s3_readwrite() -> dict:
             "s3:GetBucketLocation",
         ],
         "Resource": [
-            Sub("arn:${AWS::Partition}:s3:::${BucketName}"),
-            Sub("arn:${AWS::Partition}:s3:::${BucketName}/*"),
+            Sub("arn:${AWS::Partition}:s3:::${BucketName}",
+                BucketName=bucket_name_value),
+            Sub("arn:${AWS::Partition}:s3:::${BucketName}/*",
+                BucketName=bucket_name_value),
         ],
-    }
-
-
-def _stmt_sqs_consume() -> dict:
-    return {
-        "Sid": "IngestQueueConsume",
-        "Effect": "Allow",
-        "Action": [
-            "sqs:ReceiveMessage",
-            "sqs:DeleteMessage",
-            "sqs:GetQueueAttributes",
-            "sqs:GetQueueUrl",
-            "sqs:ChangeMessageVisibility",
-        ],
-        "Resource": Ref("QueueArn"),
     }
 
 
@@ -848,4 +1099,4 @@ def _stmt_cw_logs() -> dict:
 
 
 if __name__ == "__main__":
-    print(build().to_yaml())
+    print(build().to_yaml(), end="")

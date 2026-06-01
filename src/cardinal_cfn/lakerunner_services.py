@@ -1,16 +1,27 @@
-"""Root template generator: cardinal-lakerunner.yaml.
+"""Standalone application-tier root generator: cardinal-lakerunner-services.yaml.
 
-The root is a thin orchestrator. It declares the customer-facing parameter
-surface and stands up the nested children with TemplateURL pointing at the
-vendor S3 bucket.
+This is a transform of ``root.py``. It stands up the same eight application-tier
+nested children (cert, alb, migration, services-query/process/control, otel,
+maestro) UNCHANGED, but is fully **parameter-driven**: it creates NO IAM roles,
+NO security groups, NO RDS, NO buckets, NO secrets, NO SSM parameters. Every
+such value arrives as a parameter (driver-wired from ``lakerunner-infra-base``
+and ``lakerunner-infra-rds`` outputs).
 
-Data resources (RDS, S3 ingest bucket, SQS, secrets, SSM parameters) are
-created by ``cardinal-infrastructure.yaml`` and threaded into this stack
-as parameters. Every security group and IAM role the lakerunner tier
-needs is created by the ``Security`` child stack here -- nothing on the
-SG/role surface is customer-supplied any more. The customer's
-contributions are: ECS cluster + VPC + private subnets + license token
-(plus the small set of feature/sizing knobs).
+The only structural change vs ``root.py`` is that the ``Security`` child is
+removed; the SG ids and role ARNs it used to emit now arrive as root
+parameters (``AlbSecurityGroupId`` ... ``MaestroRoleArn``, ``ExecutionRoleArn``
+...). The cooked bucket from base replaces the ingest bucket, and the SQS queue
+is optional.
+
+## Deferred (interim limitations)
+
+- ALB minimization is deferred: query-api and admin-api still attach to the
+  ALB (minimization would require child edits in services-query/control/alb).
+- The process-tier SQS is driver-supplied: the pubsub-sqs container exports
+  the ``PubsubSqsEnv`` blob (built by the Jenkins driver from adopted-account
+  queue/role/region knowledge) before starting. Empty idles the service.
+- The cooked bucket backs both otel-raw writes and cooked data in the
+  single-account interim.
 """
 
 import os
@@ -140,9 +151,9 @@ def _add_sizing_parameters(t: Template, specs: list[dict]) -> None:
 
 # ---------------------------------------------------------------------------
 # Infrastructure-stack outputs threaded in as parameters. These come from
-# cardinal-infrastructure.yaml outputs. Sensitive values (license/admin)
-# arrive as Secret ARNs -- the underlying secret values stay in Secrets
-# Manager and are never seen by CloudFormation.
+# lakerunner-infra-base / lakerunner-infra-rds outputs (driver-wired).
+# Sensitive values (license/admin) arrive as Secret ARNs -- the underlying
+# secret values stay in Secrets Manager and are never seen by CloudFormation.
 # ---------------------------------------------------------------------------
 _INFRA_SETUP_PARAMS = [
     ("DbEndpoint", "String", None, "RDS endpoint hostname (infra output)."),
@@ -150,15 +161,14 @@ _INFRA_SETUP_PARAMS = [
     ("DbName", "String", "lakerunner", "Lakerunner database name."),
     ("DbMasterSecretArn", "String", None,
      "ARN of the master DB credentials secret (infra output)."),
-    ("RdsSecurityGroupId", "AWS::EC2::SecurityGroup::Id", None,
-     "Security group ID attached to the RDS instance (infra output). "
-     "The Security child adds tier-specific 5432 ingress rules to it."),
-    ("IngestBucketName", "String", None,
-     "Name of the S3 ingest bucket (infra output)."),
-    ("IngestQueueUrl", "String", None,
-     "URL of the SQS ingest queue (infra output)."),
-    ("IngestQueueArn", "String", None,
-     "ARN of the SQS ingest queue (infra output)."),
+    ("CookedBucketName", "String", None,
+     "Name of the S3 cooked bucket (base infra output). Backs both otel-raw "
+     "writes and cooked data in the single-account interim."),
+    ("PubsubSqsEnv", "String", "",
+     "Driver-supplied SQS env for pubsub-sqs: a shell-evalable string of "
+     "SQS_QUEUE_URL[/REGION/ROLE_ARN] (+ numbered _N groups) the container "
+     "exports before start. The Jenkins driver builds this from adopted-account "
+     "queue/role/region knowledge. Empty idles the pubsub-sqs service."),
     ("LicenseSecretArn", "String", None,
      "ARN of the cardinal-license secret (infra output)."),
     ("AdminKeySecretArn", "String", None,
@@ -174,6 +184,31 @@ _INFRA_SETUP_PARAMS = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# Security-tier inputs: SG ids and role ARNs the (removed) Security child used
+# to output. Driver-wired from lakerunner-infra-base outputs.
+# ---------------------------------------------------------------------------
+_SECURITY_GROUP_PARAMS = [
+    ("AlbSecurityGroupId", "Security group ID for the ALB."),
+    ("MigrationSecurityGroupId", "Security group ID for the migration task."),
+    ("QuerySecurityGroupId", "Security group ID for the query tier."),
+    ("ProcessSecurityGroupId", "Security group ID for the process tier."),
+    ("ControlSecurityGroupId", "Security group ID for the control tier."),
+    ("OtelSecurityGroupId", "Security group ID for the otel collector."),
+    ("MaestroSecurityGroupId", "Security group ID for maestro."),
+]
+
+_ROLE_PARAMS = [
+    ("ExecutionRoleArn", "ARN of the shared ECS task execution role."),
+    ("MigrationRoleArn", "ARN of the migration task role."),
+    ("QueryRoleArn", "ARN of the query-tier task role."),
+    ("ProcessRoleArn", "ARN of the process-tier task role."),
+    ("ControlRoleArn", "ARN of the control-tier task role."),
+    ("OtelRoleArn", "ARN of the otel task role."),
+    ("MaestroRoleArn", "ARN of the maestro task role."),
+]
+
+
 def _add_string_params(t: Template, specs: list[tuple]) -> None:
     for name, type_, default, description in specs:
         kwargs = {"Type": type_, "Description": description}
@@ -184,7 +219,7 @@ def _add_string_params(t: Template, specs: list[tuple]) -> None:
 
 def build() -> Template:
     t = Template()
-    t.set_description(f"Cardinal Lakerunner root stack ({VERSION}).")
+    t.set_description(f"Cardinal Lakerunner services (application-tier) stack ({VERSION}).")
 
     defaults = load_defaults()
 
@@ -216,9 +251,9 @@ def build() -> Template:
             "'internet-facing' exposes the ALB to the public internet -- "
             "useful in test/dev environments where OIDC redirect URLs "
             "need to resolve from a developer's browser. When set to "
-            "'internet-facing' you MUST supply PublicSubnets and SHOULD "
-            "set AlbAllowedCidr1=0.0.0.0/0 to actually accept world "
-            "traffic."
+            "'internet-facing' you MUST supply PublicSubnets. ALB SG ingress "
+            "(including any 0.0.0.0/0 rules) is configured on the supplied "
+            "AlbSecurityGroupId by lakerunner-infra-base, not here."
         ),
     ))
     t.add_parameter(Parameter(
@@ -243,31 +278,6 @@ def build() -> Template:
     ))
 
     # ---------------------------------------------------------------------
-    # ALB inbound CIDRs. Up to three; blanks are skipped. Default RFC1918.
-    # ---------------------------------------------------------------------
-    t.add_parameter(Parameter(
-        "AlbAllowedCidr1",
-        Type="String",
-        Default="10.0.0.0/8",
-        AllowedPattern=r"^$|^\d{1,3}(\.\d{1,3}){3}/\d{1,2}$",
-        Description="First CIDR block allowed inbound to the ALB.",
-    ))
-    t.add_parameter(Parameter(
-        "AlbAllowedCidr2",
-        Type="String",
-        Default="172.16.0.0/12",
-        AllowedPattern=r"^$|^\d{1,3}(\.\d{1,3}){3}/\d{1,2}$",
-        Description="Second CIDR block allowed inbound to the ALB. Blank to skip.",
-    ))
-    t.add_parameter(Parameter(
-        "AlbAllowedCidr3",
-        Type="String",
-        Default="192.168.0.0/16",
-        AllowedPattern=r"^$|^\d{1,3}(\.\d{1,3}){3}/\d{1,2}$",
-        Description="Third CIDR block allowed inbound to the ALB. Blank to skip.",
-    ))
-
-    # ---------------------------------------------------------------------
     # Cloud Map (in-cluster service discovery) namespace name
     # ---------------------------------------------------------------------
     t.add_parameter(Parameter(
@@ -285,6 +295,15 @@ def build() -> Template:
     # Infra-stack outputs threaded in as parameters
     # ---------------------------------------------------------------------
     _add_string_params(t, _INFRA_SETUP_PARAMS)
+
+    # ---------------------------------------------------------------------
+    # Security-tier inputs (SG ids + role ARNs); replace the Security child.
+    # ---------------------------------------------------------------------
+    for name, description in _SECURITY_GROUP_PARAMS:
+        t.add_parameter(Parameter(
+            name, Type="AWS::EC2::SecurityGroup::Id", Description=description))
+    for name, description in _ROLE_PARAMS:
+        t.add_parameter(Parameter(name, Type="String", Description=description))
 
     # ---------------------------------------------------------------------
     # Sensitive / advanced parameters
@@ -437,13 +456,15 @@ def build() -> Template:
             {"label": "Networking",
              "parameters": ["VpcId", "PrivateSubnets",
                             "AlbScheme", "PublicSubnets",
-                            "AlbAllowedCidr1", "AlbAllowedCidr2", "AlbAllowedCidr3",
                             "ServiceNamespaceName",
                             "CertificateArn",
                             "CertificateBody", "CertificatePrivateKey",
                             "CertificateChain"]},
             {"label": "Infrastructure-stack outputs",
              "parameters": [name for name, *_ in _INFRA_SETUP_PARAMS]},
+            {"label": "Security-tier inputs",
+             "parameters": ([name for name, _ in _SECURITY_GROUP_PARAMS]
+                            + [name for name, _ in _ROLE_PARAMS])},
             {"label": "Sizing", "parameters": sizing_param_names},
             {"label": "Images", "parameters": image_param_names},
             {"label": "Advanced",
@@ -503,41 +524,24 @@ def build() -> Template:
     namespace_name = Ref("ServiceNamespaceName")
 
     # ---------------------------------------------------------------------
-    # Security child (SGs + IAM). Instantiated first; every other child
-    # consumes its outputs.
+    # Security-tier inputs bound from parameters (replaces the Security child).
+    # Keep the same local names as root.py so the wiring below is untouched.
     # ---------------------------------------------------------------------
-    security_stack = _add_child(t, "Security", "security.yaml", {
-        "VpcId": Ref("VpcId"),
-        "AlbAllowedCidr1": Ref("AlbAllowedCidr1"),
-        "AlbAllowedCidr2": Ref("AlbAllowedCidr2"),
-        "AlbAllowedCidr3": Ref("AlbAllowedCidr3"),
-        "AlbScheme": Ref("AlbScheme"),
-        "RdsSecurityGroupId": Ref("RdsSecurityGroupId"),
-        "ClusterArn": Ref("ClusterArn"),
-        "BucketName": Ref("IngestBucketName"),
-        "QueueArn": Ref("IngestQueueArn"),
-        "DbMasterSecretArn": Ref("DbMasterSecretArn"),
-        "LicenseSecretArn": Ref("LicenseSecretArn"),
-        "AdminKeySecretArn": Ref("AdminKeySecretArn"),
-        "StorageProfilesParamName": Ref("StorageProfilesParamName"),
-        "ApiKeysParamName": Ref("ApiKeysParamName"),
-    })
+    sec_alb_sg = Ref("AlbSecurityGroupId")
+    sec_migration_sg = Ref("MigrationSecurityGroupId")
+    sec_query_sg = Ref("QuerySecurityGroupId")
+    sec_process_sg = Ref("ProcessSecurityGroupId")
+    sec_control_sg = Ref("ControlSecurityGroupId")
+    sec_otel_sg = Ref("OtelSecurityGroupId")
+    sec_maestro_sg = Ref("MaestroSecurityGroupId")
 
-    sec_alb_sg = GetAtt(security_stack, "Outputs.AlbSecurityGroupId")
-    sec_migration_sg = GetAtt(security_stack, "Outputs.MigrationSecurityGroupId")
-    sec_query_sg = GetAtt(security_stack, "Outputs.QuerySecurityGroupId")
-    sec_process_sg = GetAtt(security_stack, "Outputs.ProcessSecurityGroupId")
-    sec_control_sg = GetAtt(security_stack, "Outputs.ControlSecurityGroupId")
-    sec_otel_sg = GetAtt(security_stack, "Outputs.OtelSecurityGroupId")
-    sec_maestro_sg = GetAtt(security_stack, "Outputs.MaestroSecurityGroupId")
-
-    exec_role = GetAtt(security_stack, "Outputs.ExecutionRoleArn")
-    migration_role = GetAtt(security_stack, "Outputs.MigrationRoleArn")
-    query_role = GetAtt(security_stack, "Outputs.QueryRoleArn")
-    process_role = GetAtt(security_stack, "Outputs.ProcessRoleArn")
-    control_role = GetAtt(security_stack, "Outputs.ControlRoleArn")
-    otel_role = GetAtt(security_stack, "Outputs.OtelRoleArn")
-    maestro_role = GetAtt(security_stack, "Outputs.MaestroRoleArn")
+    exec_role = Ref("ExecutionRoleArn")
+    migration_role = Ref("MigrationRoleArn")
+    query_role = Ref("QueryRoleArn")
+    process_role = Ref("ProcessRoleArn")
+    control_role = Ref("ControlRoleArn")
+    otel_role = Ref("OtelRoleArn")
+    maestro_role = Ref("MaestroRoleArn")
 
     # ---------------------------------------------------------------------
     # Nested children
@@ -577,7 +581,7 @@ def build() -> Template:
         "StorageProfilesParamName": Ref("StorageProfilesParamName"),
         "ApiKeysParamName": Ref("ApiKeysParamName"),
         "OrgId": Ref("OrganizationId"),
-        "IngestBucketName": Ref("IngestBucketName"),
+        "IngestBucketName": Ref("CookedBucketName"),
         "LakerunnerImage": lakerunner_image,
         "DbInitImage": db_init_image,
     })
@@ -600,9 +604,7 @@ def build() -> Template:
             "DbEndpoint": Ref("DbEndpoint"),
             "DbPort": Ref("DbPort"),
             "DbSecretArn": Ref("DbMasterSecretArn"),
-            "BucketName": Ref("IngestBucketName"),
-            "QueueUrl": Ref("IngestQueueUrl"),
-            "QueueArn": Ref("IngestQueueArn"),
+            "BucketName": Ref("CookedBucketName"),
             "LicenseSecretArn": Ref("LicenseSecretArn"),
             "MigrationComplete": migration_complete,
             "LakerunnerImage": lakerunner_image,
@@ -631,6 +633,7 @@ def build() -> Template:
         task_sg=sec_process_sg, task_role=process_role,
     )
     services_process_params.update({
+        "PubsubSqsEnv": Ref("PubsubSqsEnv"),
         "ProcessLogsReplicas": Ref("ProcessLogsReplicas"),
         "ProcessLogsMemory": Ref("ProcessLogsMemory"),
         "ProcessMetricsReplicas": Ref("ProcessMetricsReplicas"),
@@ -675,8 +678,7 @@ def build() -> Template:
         "ExecutionRoleArn": exec_role,
         "TaskRoleArn": otel_role,
         "PrivateSubnetsCsv": private_subnets_csv,
-        "BucketName": Ref("IngestBucketName"),
-        "QueueArn": Ref("IngestQueueArn"),
+        "BucketName": Ref("CookedBucketName"),
         "LicenseSecretArn": Ref("LicenseSecretArn"),
         "OtelHttpListenerArn": GetAtt(alb_stack, "Outputs.OtelHttpListenerArn"),
         "AlbDnsName": GetAtt(alb_stack, "Outputs.AlbDnsName"),
@@ -705,7 +707,7 @@ def build() -> Template:
         "DbEndpoint": Ref("DbEndpoint"),
         "DbPort": Ref("DbPort"),
         "DbSecretArn": Ref("DbMasterSecretArn"),
-        "BucketName": Ref("IngestBucketName"),
+        "BucketName": Ref("CookedBucketName"),
         "LicenseSecretArn": Ref("LicenseSecretArn"),
         "MigrationComplete": migration_complete,
         "MaestroImage": maestro_image,

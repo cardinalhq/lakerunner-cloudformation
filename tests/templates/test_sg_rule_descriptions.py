@@ -12,23 +12,31 @@ import re
 
 import pytest
 
-from cardinal_cfn import cardinal_infrastructure, lrdev_baseinfra, lrdev_vpc, root
+from cardinal_cfn import (
+    lakerunner_infra_base,
+    lakerunner_infra_rds,
+    lrdev_baseinfra,
+    lrdev_vpc,
+    satellite_infra_base,
+    satellite_services,
+)
 from cardinal_cfn.children import (
-    alb, cert, maestro, migration, otel, security,
+    alb, cert, maestro, migration, otel,
     services_control, services_process, services_query,
 )
 
 _MODULES = [
-    ("cardinal-infrastructure", cardinal_infrastructure),
     ("lrdev-vpc", lrdev_vpc),
     ("lrdev-baseinfra", lrdev_baseinfra),
-    ("cardinal-lakerunner (root)", root),
+    ("satellite-infra-base", satellite_infra_base),
+    ("satellite-services", satellite_services),
+    ("lakerunner-infra-base", lakerunner_infra_base),
+    ("lakerunner-infra-rds", lakerunner_infra_rds),
     ("alb", alb),
     ("cert", cert),
     ("maestro", maestro),
     ("migration", migration),
     ("otel", otel),
-    ("security", security),
     ("services-control", services_control),
     ("services-process", services_process),
     ("services-query", services_query),
