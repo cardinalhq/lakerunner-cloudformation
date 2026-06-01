@@ -97,6 +97,21 @@ def test_pubsub_sqs_queue_wired_to_process_child(td):
     assert "PubsubSqsEnv" not in process, "Process child should not receive PubsubSqsEnv"
 
 
+def test_process_child_params_match_declared(td):
+    """Every parameter declared by services-process.yaml is supplied by the
+    root, and no extra parameters are passed that the child doesn't declare.
+    missing [] extra [] means the invariant holds."""
+    from cardinal_cfn.children import services_process
+    child_td = json.loads(services_process.build().to_json())
+    declared = set(child_td["Parameters"].keys())
+    passed = set(td["Resources"]["Process"]["Properties"]["Parameters"].keys())
+    missing = sorted(declared - passed)
+    extra = sorted(passed - declared)
+    assert missing == [] and extra == [], (
+        f"Process child param mismatch: missing {missing}  extra {extra}"
+    )
+
+
 def test_children_present(td):
     nested = _nested_logical_ids(td)
     expected = {
@@ -137,6 +152,35 @@ def test_self_telemetry_on_condition(td):
     assert cond == {
         "Fn::Not": [{"Fn::Equals": [{"Ref": "SelfTelemetryEndpoint"}, ""]}]
     }
+
+
+def test_pubsub_autoregister_params_present_with_defaults(td):
+    """PubsubAutoRegister and PubsubAutoRegisterWritesToInstance exist on the
+    root with the correct defaults."""
+    params = td["Parameters"]
+    assert "PubsubAutoRegister" in params
+    assert params["PubsubAutoRegister"]["Default"] == "false"
+    assert params["PubsubAutoRegister"]["AllowedValues"] == ["true", "false"]
+    assert "PubsubAutoRegisterWritesToInstance" in params
+    assert params["PubsubAutoRegisterWritesToInstance"]["Default"] == "1"
+
+
+def test_pubsub_autoregister_wired_to_process_child(td):
+    """The two auto-registration params are forwarded as Refs to the Process
+    child and are absent from all other children."""
+    process = td["Resources"]["Process"]["Properties"]["Parameters"]
+    assert process.get("PubsubAutoRegister") == {"Ref": "PubsubAutoRegister"}
+    assert process.get("PubsubAutoRegisterWritesToInstance") == (
+        {"Ref": "PubsubAutoRegisterWritesToInstance"}
+    )
+    for child in ("Query", "Control", "Migration", "Maestro", "Alb", "Cert"):
+        p = td["Resources"][child]["Properties"]["Parameters"]
+        assert "PubsubAutoRegister" not in p, (
+            f"{child} unexpectedly receives PubsubAutoRegister"
+        )
+        assert "PubsubAutoRegisterWritesToInstance" not in p, (
+            f"{child} unexpectedly receives PubsubAutoRegisterWritesToInstance"
+        )
 
 
 def test_self_telemetry_wired_to_tiers_only(td):

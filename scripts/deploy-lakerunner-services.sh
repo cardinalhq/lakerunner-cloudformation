@@ -78,6 +78,15 @@ Optional (template defaults preserved when unset):
                               ALB_ALLOWED_CIDR* settings).
   LAKERUNNER_IMAGE, MAESTRO_IMAGE, OTEL_IMAGE, DEX_IMAGE, DEX_INIT_IMAGE,
   DB_INIT_IMAGE               Image overrides (template defaults otherwise).
+  PUBSUB_AUTOREGISTER         Set to "true" to enable pubsub-sqs auto-
+                              registration of satellite buckets (default false).
+                              When true, unseen satellite raw-bucket orgs are
+                              registered and cooked output is routed to the
+                              central instance.
+  PUBSUB_AUTOREGISTER_WRITES_TO_INSTANCE
+                              Central cooked-bucket instance_num that auto-
+                              registered orgs write to (default 1). Required
+                              when PUBSUB_AUTOREGISTER=true.
   TEMPLATE_BASE_URL           Default: $DEFAULT_TEMPLATE_BASE_URL.  Also
                               forwarded as the TemplateBaseUrl param (nested
                               children load from the matching prefix).
@@ -265,6 +274,11 @@ DexAdminPasswordHash=$DEX_ADMIN_PASSWORD_HASH"
 DexClientId=$DEX_CLIENT_ID"
 [ -n "${OIDC_SUPERADMIN_EMAILS:-}" ] && params="$params
 OidcSuperadminEmails=$OIDC_SUPERADMIN_EMAILS"
+
+[ -n "${PUBSUB_AUTOREGISTER:-}" ] && params="$params
+PubsubAutoRegister=$PUBSUB_AUTOREGISTER"
+[ -n "${PUBSUB_AUTOREGISTER_WRITES_TO_INSTANCE:-}" ] && params="$params
+PubsubAutoRegisterWritesToInstance=$PUBSUB_AUTOREGISTER_WRITES_TO_INSTANCE"
 
 PARAMS="$params"
 FILE_PARAMS="$file_params"
