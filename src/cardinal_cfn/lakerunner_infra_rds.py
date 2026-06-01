@@ -244,6 +244,10 @@ def build() -> Template:
         _retain(
             Secret(
                 "DBMasterSecret",
+                # Explicit name so lakerunner-infra-base's execution/task roles
+                # can scope secret access to the cardinal-* name pattern instead
+                # of threading this ARN in (base deploys before rds).
+                Name="cardinal-db-master",
                 Description=(
                     "Cardinal RDS master credentials. Connection JSON "
                     "(host/port/engine/dbname) is filled in by the "

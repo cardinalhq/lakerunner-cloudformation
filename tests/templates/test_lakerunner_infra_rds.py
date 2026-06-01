@@ -128,6 +128,11 @@ def test_master_secret_retained(td):
     assert secret["UpdateReplacePolicy"] == "Retain"
 
 
+def test_master_secret_named_cardinal_db_master(td):
+    """Explicit name lets lakerunner-infra-base scope to the cardinal-* pattern."""
+    assert td["Resources"]["DBMasterSecret"]["Properties"]["Name"] == "cardinal-db-master"
+
+
 def test_rds_sg_and_subnet_group_are_delete_policy(td):
     for r in ("RdsSecurityGroup", "DBSubnetGroup"):
         assert td["Resources"][r]["DeletionPolicy"] == "Delete"
