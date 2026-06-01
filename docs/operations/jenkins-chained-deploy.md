@@ -193,6 +193,7 @@ collector config must change before scaling past one replica.
 | `VERSION` | required | — |
 | `SATELLITE_INFRA_BASE_STACK` | required | upstream satellite-infra-base (`RawBucketName`) |
 | `INFRA_BASE_STACK` | required | upstream lakerunner-infra-base (`LicenseSecretArn`) |
+| `ORGANIZATION_ID` | required | org UUID this satellite's telemetry is attributed to |
 | `VPC_ID` | required | — |
 | `ALB_SUBNETS` | required | comma-separated subnets for the collector ALB |
 | `TASK_SUBNETS` | required | comma-separated subnets for the collector tasks |
@@ -210,6 +211,7 @@ REGION=us-east-1 \
 VERSION=v0.0.70 \
 SATELLITE_INFRA_BASE_STACK=cardinal-satellite-infra-base \
 INFRA_BASE_STACK=cardinal-lakerunner-infra-base \
+ORGANIZATION_ID=12340000-0000-0000-0000-000000000000 \
 VPC_ID=vpc-0abc \
 ALB_SUBNETS=subnet-a,subnet-b \
 TASK_SUBNETS=subnet-1,subnet-2 \
