@@ -36,6 +36,7 @@ from troposphere import (
     Sub,
     Equals,
     If,
+    Not,
 )
 from troposphere.cloudformation import Stack
 from troposphere.servicediscovery import PrivateDnsNamespace
@@ -391,15 +392,13 @@ def build() -> Template:
         ),
     ))
     t.add_parameter(Parameter(
-        "SelfTelemetry",
+        "SelfTelemetryEndpoint",
         Type="String",
-        Default="No",
-        AllowedValues=["No"],
+        Default="",
         Description=(
-            "Self-telemetry to an in-stack otel-collector is no longer "
-            "available -- the in-stack otel child was removed; the satellite "
-            "collector handles all ingest. This toggle is retained for the "
-            "console surface but only 'No' (disabled) is supported."
+            "OTLP/HTTP endpoint for lakerunner self-telemetry (e.g. the "
+            "satellite collector's CollectorEndpoint, http://<alb>:4318). "
+            "Empty disables self-telemetry."
         ),
     ))
 
@@ -448,14 +447,15 @@ def build() -> Template:
                             "CertificateBody", "CertificatePrivateKey",
                             "CertificateChain"]},
             {"label": "Infrastructure-stack outputs",
-             "parameters": [name for name, *_ in _INFRA_SETUP_PARAMS]},
+             "parameters": ([name for name, *_ in _INFRA_SETUP_PARAMS]
+                            + ["SelfTelemetryEndpoint"])},
             {"label": "Security-tier inputs",
              "parameters": ([name for name, _ in _SECURITY_GROUP_PARAMS]
                             + [name for name, _ in _ROLE_PARAMS])},
             {"label": "Sizing", "parameters": sizing_param_names},
             {"label": "Images", "parameters": image_param_names},
             {"label": "Advanced",
-             "parameters": ["DeployMaestro", "SelfTelemetry",
+             "parameters": ["DeployMaestro",
                             "DexAdminEmail", "DexAdminPasswordHash",
                             "OidcSuperadminEmails",
                             "OrganizationId", "OrgName",
@@ -468,11 +468,13 @@ def build() -> Template:
     # ---------------------------------------------------------------------
     t.add_condition("DeployMaestroEnabled", Equals(Ref("DeployMaestro"), "Yes"))
 
-    # The in-stack otel-collector was removed; there is no self-telemetry
-    # target. Tier children always run with telemetry disabled and an empty
-    # endpoint (their own defaults match these values).
-    self_telemetry_endpoint = ""
-    self_telemetry_enabled = "false"
+    # Self-telemetry exports to a driver-supplied OTLP/HTTP endpoint (typically
+    # the satellite collector's CollectorEndpoint). An empty endpoint disables
+    # it; the tier children receive the endpoint and the derived enabled flag.
+    t.add_condition(
+        "SelfTelemetryOn", Not(Equals(Ref("SelfTelemetryEndpoint"), "")))
+    self_telemetry_endpoint = Ref("SelfTelemetryEndpoint")
+    self_telemetry_enabled = If("SelfTelemetryOn", "true", "false")
 
     # ---------------------------------------------------------------------
     # Install-id derivation (computed inline; not a parameter on root)

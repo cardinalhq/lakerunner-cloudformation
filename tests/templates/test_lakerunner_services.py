@@ -118,3 +118,37 @@ def test_cooked_bucket_wired_to_children(td):
     assert migration["IngestBucketName"] == ref
     query = td["Resources"]["Query"]["Properties"]["Parameters"]
     assert query["BucketName"] == ref
+
+
+def test_self_telemetry_endpoint_param(td):
+    """The locked SelfTelemetry=[No] toggle is gone; a real configurable
+    SelfTelemetryEndpoint (String, default "") takes its place."""
+    params = td["Parameters"]
+    assert "SelfTelemetry" not in params, "vestigial SelfTelemetry toggle still present"
+    assert "SelfTelemetryEndpoint" in params
+    p = params["SelfTelemetryEndpoint"]
+    assert p["Type"] == "String"
+    assert p["Default"] == ""
+
+
+def test_self_telemetry_on_condition(td):
+    """SelfTelemetryOn is true exactly when the endpoint is non-empty."""
+    cond = td["Conditions"]["SelfTelemetryOn"]
+    assert cond == {
+        "Fn::Not": [{"Fn::Equals": [{"Ref": "SelfTelemetryEndpoint"}, ""]}]
+    }
+
+
+def test_self_telemetry_wired_to_tiers_only(td):
+    """Query/Process/Control receive the endpoint Ref and the If-derived enabled
+    flag; Maestro and the other children do not."""
+    endpoint_ref = {"Ref": "SelfTelemetryEndpoint"}
+    enabled_if = {"Fn::If": ["SelfTelemetryOn", "true", "false"]}
+    for tier in ("Query", "Process", "Control"):
+        p = td["Resources"][tier]["Properties"]["Parameters"]
+        assert p["SelfTelemetryEndpoint"] == endpoint_ref, tier
+        assert p["SelfTelemetryEnabled"] == enabled_if, tier
+    for other in ("Maestro", "Migration", "Alb", "Cert"):
+        p = td["Resources"][other]["Properties"]["Parameters"]
+        assert "SelfTelemetryEndpoint" not in p, other
+        assert "SelfTelemetryEnabled" not in p, other
