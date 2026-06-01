@@ -389,3 +389,24 @@ def test_no_shared_resources_in_services_process(td):
     }
     found = {r["Type"] for r in td["Resources"].values()} & forbidden
     assert not found, f"services-process must not own shared resources; found {found}"
+
+
+def _service_strategy(td, suffix):
+    res = next(
+        r for lid, r in td["Resources"].items()
+        if r["Type"] == "AWS::ECS::Service" and lid.endswith(suffix)
+    )
+    return {s["CapacityProvider"] for s in res["Properties"]["CapacityProviderStrategy"]}
+
+
+def test_pubsub_sqs_has_ondemand_fallback(td):
+    # pubsub-sqs is a non-autoscaled singleton: spot-preferred with an
+    # on-demand FARGATE fallback so a transient FARGATE_SPOT shortage can't
+    # fail a rolling deploy.
+    assert _service_strategy(td, "PubsubSqsService") == {"FARGATE_SPOT", "FARGATE"}
+
+
+def test_process_workers_are_spot_only(td):
+    # process-* are scalable workers: pure FARGATE_SPOT.
+    for suffix in ("ProcessLogsService", "ProcessMetricsService", "ProcessTracesService"):
+        assert _service_strategy(td, suffix) == {"FARGATE_SPOT"}, suffix

@@ -310,3 +310,17 @@ def test_no_shared_resources_in_services_query(td):
     }
     found = {r["Type"] for r in td["Resources"].values()} & forbidden
     assert not found, f"services-query must not own shared resources; found {found}"
+
+
+def _service_strategy(td, suffix):
+    res = next(
+        r for lid, r in td["Resources"].items()
+        if r["Type"] == "AWS::ECS::Service" and lid.endswith(suffix)
+    )
+    return {s["CapacityProvider"] for s in res["Properties"]["CapacityProviderStrategy"]}
+
+
+def test_query_workers_are_spot_only(td):
+    # query-api and query-worker are scalable workers: pure FARGATE_SPOT.
+    for suffix in ("QueryApiService", "QueryWorkerService"):
+        assert _service_strategy(td, suffix) == {"FARGATE_SPOT"}, suffix

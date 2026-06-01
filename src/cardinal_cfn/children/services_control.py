@@ -389,6 +389,7 @@ def build() -> Template:
             container_port=admin_container_port,
             service_registry_ref=admin_discovery,
             listener_rule_refs=[admin_listener_rule],
+            capacity="fallback",
         )
     )
     t.add_output(Output("AdminApiServiceName", Value=GetAtt(admin_service, "Name")))
@@ -523,6 +524,7 @@ def _build_internal_service_block(
             subnets_csv_param="PrivateSubnetsCsv",
             security_group_id_param="TaskSecurityGroupId",
             container_name=service_key,
+            capacity="fallback",
         )
     )
 

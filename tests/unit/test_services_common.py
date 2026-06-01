@@ -139,3 +139,36 @@ def test_build_ecs_service_uses_fargate_spot():
     assert props["CapacityProviderStrategy"] == [
         {"CapacityProvider": "FARGATE_SPOT", "Weight": 1}
     ]
+
+
+def test_build_ecs_service_fallback_capacity():
+    svc = services_common.build_ecs_service(
+        service_key="sweeper",
+        cluster_arn_param="ClusterArn",
+        task_definition_ref="MyTaskDef",
+        desired_count=1,
+        subnets_csv_param="PrivateSubnetsCsv",
+        security_group_id_param="TaskSecurityGroupId",
+        container_name="sweeper",
+        capacity="fallback",
+    )
+    rendered = json.loads(json.dumps(svc, default=lambda o: o.to_dict()))
+    strat = rendered["Properties"]["CapacityProviderStrategy"]
+    assert strat == [
+        {"CapacityProvider": "FARGATE_SPOT", "Weight": 4},
+        {"CapacityProvider": "FARGATE", "Weight": 1},
+    ]
+
+
+def test_capacity_provider_strategy_modes():
+    assert services_common.capacity_provider_strategy("spot")[0].to_dict() == {
+        "CapacityProvider": "FARGATE_SPOT",
+        "Weight": 1,
+    }
+    fallback = [i.to_dict() for i in services_common.capacity_provider_strategy("fallback")]
+    assert fallback == [
+        {"CapacityProvider": "FARGATE_SPOT", "Weight": 4},
+        {"CapacityProvider": "FARGATE", "Weight": 1},
+    ]
+    with pytest.raises(ValueError):
+        services_common.capacity_provider_strategy("nope")

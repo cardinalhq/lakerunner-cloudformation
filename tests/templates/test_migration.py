@@ -196,13 +196,18 @@ def test_creates_ecs_service(template_dict):
 def test_service_runs_one_fargate_task_no_lb(template_dict):
     svc = _service(template_dict)["Properties"]
     assert "LaunchType" not in svc
-    assert svc["CapacityProviderStrategy"] == [
-        {"CapacityProvider": "FARGATE_SPOT", "Weight": 1}
-    ]
     assert svc["DesiredCount"] == 1
     assert svc["TaskDefinition"] == {"Ref": "MigratorTaskDef"}
     assert "LoadBalancers" not in svc
     assert "ServiceRegistries" not in svc
+
+
+def test_service_has_ondemand_fallback(template_dict):
+    # Singleton: spot-preferred but with an on-demand FARGATE fallback so a
+    # transient FARGATE_SPOT shortage can't fail the deploy.
+    svc = _service(template_dict)["Properties"]
+    providers = {s["CapacityProvider"] for s in svc["CapacityProviderStrategy"]}
+    assert providers == {"FARGATE_SPOT", "FARGATE"}
 
 
 def test_service_disables_public_ip(template_dict):

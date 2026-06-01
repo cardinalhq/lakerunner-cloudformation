@@ -386,6 +386,10 @@ def build() -> Template:
             "memory_mib": pubsub_cfg["memory_mib"],
             "desired_count": Ref("PubsubSqsReplicas"),
             "output_name": "PubsubSqsServiceName",
+            # Singleton (no autoscaler): give it an on-demand FARGATE fallback
+            # so a transient FARGATE_SPOT shortage can't block its one task and
+            # trip the deploy circuit breaker. process-* stay pure spot.
+            "capacity": "fallback",
             # pubsub-sqs alone consumes SQS. The lakerunner binary reads the
             # primary queue (group 0) from three plain env vars. The image is
             # distroless (no shell), so these must be real container env vars,
@@ -417,6 +421,7 @@ def build() -> Template:
             base_env=base_env,
             base_secrets=base_secrets,
             extra_env=spec.get("extra_env"),
+            capacity=spec.get("capacity", "spot"),
         )
         t.add_output(Output(spec["output_name"], Value=GetAtt(ecs_service, "Name")))
 
@@ -435,6 +440,7 @@ def _build_service_block(
     base_env: list,
     base_secrets: list,
     extra_env: list | None = None,
+    capacity: str = "spot",
 ):
     """Wire up the three resources (log group, task def, service) for one service."""
     log_group = t.add_resource(services_common.build_log_group(service_key=service_key))
@@ -467,6 +473,7 @@ def _build_service_block(
             subnets_csv_param="PrivateSubnetsCsv",
             security_group_id_param="TaskSecurityGroupId",
             container_name=service_key,
+            capacity=capacity,
         )
     )
 
