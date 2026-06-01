@@ -87,8 +87,7 @@ def test_alb_sg_ingress_on_4318(td):
     rules_4318 = [r for r in ingress if r.get("FromPort") == 4318]
     assert rules_4318, "ALB SG must have ingress on 4318"
     for rule in rules_4318:
-        assert rule.get("CidrIp") == {"Ref": "IngestSourceCidr"} or \
-               rule.get("CidrIp") is not None
+        assert rule.get("CidrIp") == {"Ref": "IngestSourceCidr"}
 
 
 def test_task_sg_ingress_from_alb_sg(td):
@@ -187,6 +186,19 @@ def test_taskdef_writes_bucket_env(td):
     container = task_def["Properties"]["ContainerDefinitions"][0]
     env = {e["Name"]: e["Value"] for e in container.get("Environment", [])}
     assert env.get("LRDB_S3_BUCKET") == {"Ref": "RawBucketName"}
+
+
+def test_service_assigns_no_public_ip(td):
+    awsvpc = td["Resources"]["CollectorService"]["Properties"][
+        "NetworkConfiguration"
+    ]["AwsvpcConfiguration"]
+    assert awsvpc["AssignPublicIp"] == "DISABLED"
+
+
+def test_taskdef_runs_on_arm64(td):
+    rp = td["Resources"]["OtelGrpcTaskDef"]["Properties"]["RuntimePlatform"]
+    assert rp["CpuArchitecture"] == "ARM64"
+    assert rp["OperatingSystemFamily"] == "LINUX"
 
 
 # ---------------------------------------------------------------------------
