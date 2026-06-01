@@ -80,3 +80,11 @@ def test_bucket_notifies_its_own_queue(td):
 
 def test_bucket_depends_on_queue_policy(td):
     assert td["Resources"]["RawIngestBucket"]["DependsOn"] == "RawIngestQueuePolicy"
+
+
+def test_bucket_lifecycle_uses_parameter(td):
+    rule = td["Resources"]["RawIngestBucket"]["Properties"][
+        "LifecycleConfiguration"
+    ]["Rules"][0]
+    assert rule["ExpirationInDays"] == {"Ref": "RawBucketLifecycleDays"}
+    assert rule["AbortIncompleteMultipartUpload"]["DaysAfterInitiation"] == 1
