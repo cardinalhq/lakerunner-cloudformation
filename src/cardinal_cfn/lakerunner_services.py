@@ -251,9 +251,9 @@ def build() -> Template:
             "'internet-facing' exposes the ALB to the public internet -- "
             "useful in test/dev environments where OIDC redirect URLs "
             "need to resolve from a developer's browser. When set to "
-            "'internet-facing' you MUST supply PublicSubnets and SHOULD "
-            "set AlbAllowedCidr1=0.0.0.0/0 to actually accept world "
-            "traffic."
+            "'internet-facing' you MUST supply PublicSubnets. ALB SG ingress "
+            "(including any 0.0.0.0/0 rules) is configured on the supplied "
+            "AlbSecurityGroupId by lakerunner-infra-base, not here."
         ),
     ))
     t.add_parameter(Parameter(
@@ -275,31 +275,6 @@ def build() -> Template:
             "import a cert from the CertificateBody / CertificatePrivateKey "
             "parameters instead."
         ),
-    ))
-
-    # ---------------------------------------------------------------------
-    # ALB inbound CIDRs. Up to three; blanks are skipped. Default RFC1918.
-    # ---------------------------------------------------------------------
-    t.add_parameter(Parameter(
-        "AlbAllowedCidr1",
-        Type="String",
-        Default="10.0.0.0/8",
-        AllowedPattern=r"^$|^\d{1,3}(\.\d{1,3}){3}/\d{1,2}$",
-        Description="First CIDR block allowed inbound to the ALB.",
-    ))
-    t.add_parameter(Parameter(
-        "AlbAllowedCidr2",
-        Type="String",
-        Default="172.16.0.0/12",
-        AllowedPattern=r"^$|^\d{1,3}(\.\d{1,3}){3}/\d{1,2}$",
-        Description="Second CIDR block allowed inbound to the ALB. Blank to skip.",
-    ))
-    t.add_parameter(Parameter(
-        "AlbAllowedCidr3",
-        Type="String",
-        Default="192.168.0.0/16",
-        AllowedPattern=r"^$|^\d{1,3}(\.\d{1,3}){3}/\d{1,2}$",
-        Description="Third CIDR block allowed inbound to the ALB. Blank to skip.",
     ))
 
     # ---------------------------------------------------------------------
@@ -481,7 +456,6 @@ def build() -> Template:
             {"label": "Networking",
              "parameters": ["VpcId", "PrivateSubnets",
                             "AlbScheme", "PublicSubnets",
-                            "AlbAllowedCidr1", "AlbAllowedCidr2", "AlbAllowedCidr3",
                             "ServiceNamespaceName",
                             "CertificateArn",
                             "CertificateBody", "CertificatePrivateKey",

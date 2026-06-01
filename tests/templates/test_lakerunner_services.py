@@ -101,7 +101,6 @@ def test_children_present(td):
         "Maestro",
     }
     assert nested == expected
-    assert "Security" not in nested
 
 
 def test_cooked_bucket_wired_to_children(td):
