@@ -116,9 +116,13 @@ def test_role_can_read_and_delete_raw(td):
         0
     ]["PolicyDocument"]["Statement"]
     s3 = next(s for s in stmts if s["Sid"] == "RawBucketReadDelete")
-    assert {"s3:GetObject", "s3:DeleteObject", "s3:ListBucket"}.issubset(
-        set(s3["Action"])
-    )
+    assert set(s3["Action"]) == {
+        "s3:GetObject",
+        "s3:DeleteObject",
+        "s3:ListBucket",
+        "s3:GetBucketLocation",
+    }
+    assert "s3:PutObject" not in s3["Action"]
 
 
 def test_role_can_consume_only_its_queue(td):
