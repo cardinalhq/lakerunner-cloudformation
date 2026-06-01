@@ -183,10 +183,16 @@ All templates must pass cfn-lint with no errors. Warnings are tolerable when exp
 
 ## Publishing
 
-GitHub Actions on tag push (`v*`) builds, lints, tests, and publishes to a vendor-managed public S3 bucket (`cardinal-cfn`, provisioned in `terraform-deployments/aws/production/cloudformation-distribution.tf`). Customers paste the regional S3 URL into the CloudFormation console:
+GitHub Actions on tag push (`v*`) builds, lints, tests, and publishes to the vendor-managed public S3 buckets, provisioned in `terraform-deployments/aws/production/cloudformation-distribution.tf`. The buckets are region-suffixed, one per published region:
+
+- `cardinal-cfn-us-east-1` (us-east-1)
+- `cardinal-cfn-us-east-2` (us-east-2)
+
+Customers paste the regional S3 URL for their region into the CloudFormation console (substitute the matching region in both the bucket name and the host):
 
 ```
-https://cardinal-cfn.s3.<region>.amazonaws.com/lakerunner/<version>/cardinal-lakerunner.yaml
+https://cardinal-cfn-us-east-1.s3.us-east-1.amazonaws.com/lakerunner/<version>/cardinal-lakerunner.yaml
+https://cardinal-cfn-us-east-2.s3.us-east-2.amazonaws.com/lakerunner/<version>/cardinal-lakerunner.yaml
 ```
 
 Air-gapped customers override the `TemplateBaseUrl` parameter on the root stack to point at a customer-owned mirror. The `data-setup.sh` script is run by the customer's operator out-of-band and does not need to be hosted; it is committed under `scripts/`.
