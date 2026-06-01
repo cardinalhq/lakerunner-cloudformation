@@ -80,22 +80,21 @@ def test_data_plane_params(td):
     # Removed/renamed sources
     assert "IngestBucketName" not in params
     assert "RdsSecurityGroupId" not in params
-    # Queue plumbing is fully purged -- pubsub-sqs gets the driver-supplied
-    # PubsubSqsEnv blob, and query/control never consumed SQS.
-    for n in ("QueueUrl", "QueueArn", "QueueRoleArn"):
-        assert n not in params, f"vestigial queue param present: {n}"
+    # QueueArn was never plumbed; QueueUrl/QueueRoleArn are the group-0 inputs.
+    assert "QueueArn" not in params, "vestigial queue param present: QueueArn"
 
 
-def test_pubsub_sqs_env_wired_to_process_child(td):
-    """The driver-supplied SQS env blob flows into the Process child, where the
-    pubsub-sqs container exports it before exec'ing the binary."""
-    assert "PubsubSqsEnv" in td["Parameters"]
-    assert td["Parameters"]["PubsubSqsEnv"]["Default"] == ""
+def test_pubsub_sqs_queue_wired_to_process_child(td):
+    """The group-0 SQS inputs (QueueUrl/QueueRoleArn) flow into the Process
+    child, where the pubsub-sqs container sets them as plain SQS_* env vars."""
+    assert "PubsubSqsEnv" not in td["Parameters"], "old shell-blob param still present"
+    for n in ("QueueUrl", "QueueRoleArn"):
+        assert n in td["Parameters"], f"missing queue param: {n}"
+        assert td["Parameters"][n]["Default"] == "", n
     process = td["Resources"]["Process"]["Properties"]["Parameters"]
-    assert process["PubsubSqsEnv"] == {"Ref": "PubsubSqsEnv"}
-    # The Process child no longer receives the raw queue inputs.
-    for n in ("QueueUrl", "QueueArn", "QueueRoleArn"):
-        assert n not in process, f"Process child should not receive {n}"
+    assert process["QueueUrl"] == {"Ref": "QueueUrl"}
+    assert process["QueueRoleArn"] == {"Ref": "QueueRoleArn"}
+    assert "PubsubSqsEnv" not in process, "Process child should not receive PubsubSqsEnv"
 
 
 def test_children_present(td):

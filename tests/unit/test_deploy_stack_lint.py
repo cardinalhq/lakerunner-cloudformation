@@ -122,14 +122,14 @@ def test_satellite_infra_base_maps_lakerunner_principal():
     assert "LakerunnerPrincipal=ProcessRoleArn" in text
 
 
-def test_lakerunner_services_computes_pubsub_sqs_env():
-    """lakerunner-services must compute PubsubSqsEnv from the three satellite
-    outputs and pass it as an explicit --param."""
+def test_lakerunner_services_passes_queue_params():
+    """lakerunner-services must read the group-0 queue inputs from the satellite
+    outputs and pass them as plain QueueUrl/QueueRoleArn params (no shell blob)."""
     text = (SCRIPTS_DIR / "deploy-lakerunner-services.sh").read_text()
     for token in ("RawQueueUrl", "LakerunnerAccessRoleArn",
-                  "SQS_QUEUE_URL=", "SQS_REGION=", "SQS_ROLE_ARN=",
-                  "PubsubSqsEnv="):
+                  "QueueUrl=", "QueueRoleArn="):
         assert token in text, f"deploy-lakerunner-services.sh missing {token}"
+    assert "PubsubSqsEnv" not in text, "old shell-blob PubsubSqsEnv still present"
 
 
 def test_resolver_precedence_param_over_upstream(tmp_path):

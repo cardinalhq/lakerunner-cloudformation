@@ -43,7 +43,7 @@ runs it as a child so it can clean up an auto-generated cert temp dir on exit.
 | `TEMPLATE_URL` | required | S3 URL of the generated template. |
 | `REGION` | required | AWS region (never defaulted). |
 | `FROM_STACKS` | optional | Space-separated upstream stack names; an Output whose key equals a target parameter name supplies that parameter. |
-| `PARAMS` | optional | Newline-separated `Key=Value` overrides (highest precedence). Newline- (not semicolon-) separated so values like `PubsubSqsEnv` that contain semicolons are safe. |
+| `PARAMS` | optional | Newline-separated `Key=Value` overrides (highest precedence). Newline- (not semicolon-) separated so values that contain semicolons (e.g. some ARNs/URLs) are passed intact. |
 | `FILE_PARAMS` | optional | Newline-separated `ParamName=/path/to/file` entries. Each file's full content becomes that parameter's value, read via `jq --rawfile` so multi-line / PEM material is JSON-escaped correctly. Same explicit-override tier as `PARAMS`; if both set the same parameter, `PARAMS` wins. |
 | `MAPS` | optional | Newline-separated `TargetParam=SourceOutputKey` entries. |
 | `DEPLOYER_ROLE_ARN` | optional | Forwarded via `--role-arn` to `create-change-set`. |
@@ -71,7 +71,8 @@ lakerunner-infra-base
 ```
 
 `lakerunner-services` depends on both `lakerunner-infra-rds` and at least one
-`satellite-infra-base` (for the computed `PubsubSqsEnv`), so it runs last.
+`satellite-infra-base` (for the `QueueUrl` / `QueueRoleArn` params), so it runs
+last.
 
 ## Two non-automatic mappings
 
@@ -79,15 +80,11 @@ lakerunner-infra-base
   `lakerunner-infra-base` Output `ProcessRoleArn` (the satellite trusts the
   lakerunner process role to assume into the satellite access role). The
   wrapper sets `MAPS="LakerunnerPrincipal=ProcessRoleArn"`.
-- `lakerunner-services` parameter `PubsubSqsEnv` is **computed**, not a single
-  Output. The wrapper reads three Outputs from the `satellite-infra-base` stack
-  and assembles:
-
-  ```
-  SQS_QUEUE_URL=<RawQueueUrl>;SQS_REGION=<Region>;SQS_ROLE_ARN=<LakerunnerAccessRoleArn>
-  ```
-
-  then passes it as a `PARAMS` line.
+- `lakerunner-services` parameters `QueueUrl` and `QueueRoleArn` are read from
+  the `satellite-infra-base` stack Outputs `RawQueueUrl` and
+  `LakerunnerAccessRoleArn`, then passed as `PARAMS` lines. The pubsub-sqs
+  container sets them as plain `SQS_QUEUE_URL` / `SQS_ROLE_ARN` env vars
+  (`SQS_REGION` comes from the stack's own `AWS::Region`).
 
 ## Job 1: lakerunner-infra-base
 
@@ -224,8 +221,8 @@ INGEST_SOURCE_CIDR=10.0.0.0/8 \
 ## Job 5: lakerunner-services
 
 `scripts/deploy-lakerunner-services.sh` — pulls infra-base + infra-rds Outputs,
-computes `PubsubSqsEnv` from the satellite stack, and forwards `TemplateBaseUrl`
-so nested children load from the matching version prefix. `OTEL_REPLICAS`
+reads `QueueUrl` / `QueueRoleArn` from the satellite stack, and forwards
+`TemplateBaseUrl` so nested children load from the matching version prefix. `OTEL_REPLICAS`
 defaults to `0` here: the same-account satellite collector does ingest, so the
 lakerunner-tier collector is off by default.
 

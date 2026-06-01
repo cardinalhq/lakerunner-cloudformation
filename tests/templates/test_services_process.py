@@ -30,7 +30,8 @@ def test_required_cross_stack_parameters(td):
         "DbPort",
         "DbSecretArn",
         "BucketName",
-        "PubsubSqsEnv",
+        "QueueUrl",
+        "QueueRoleArn",
         "LicenseSecretArn",
         "MigrationComplete",
         "LakerunnerImage",
@@ -38,11 +39,17 @@ def test_required_cross_stack_parameters(td):
         assert n in td["Parameters"], f"missing parameter: {n}"
 
 
-def test_removed_queue_parameters_are_gone(td):
-    """The raw queue/role inputs were replaced by the driver-supplied
-    PubsubSqsEnv blob; the process tier no longer declares them."""
-    for n in ("QueueUrl", "QueueArn", "QueueRoleArn"):
-        assert n not in td["Parameters"], f"removed parameter still present: {n}"
+def test_pubsub_queue_parameters_default_empty(td):
+    """The pubsub-sqs primary queue (group 0) is supplied via plain QueueUrl /
+    QueueRoleArn params; an empty QueueUrl leaves the service idle."""
+    for n in ("QueueUrl", "QueueRoleArn"):
+        assert n in td["Parameters"], f"missing parameter: {n}"
+        assert td["Parameters"][n]["Default"] == "", n
+
+
+def test_old_pubsub_sqs_env_parameter_is_gone(td):
+    """The shell-evalable PubsubSqsEnv blob is replaced by plain env vars."""
+    assert "PubsubSqsEnv" not in td["Parameters"]
 
 
 def test_no_alb_parameters(td):
@@ -274,7 +281,7 @@ def test_all_task_definitions_set_ssl_required(td):
 
 
 # ---------------------------------------------------------------------------
-# pubsub-sqs driver-supplied SQS env blob (PUBSUB_SQS_ENV)
+# pubsub-sqs plain SQS env vars (group 0)
 # ---------------------------------------------------------------------------
 
 
@@ -288,48 +295,37 @@ def _env(td, task_def_id):
     return {e["Name"]: e["Value"] for e in container.get("Environment", [])}
 
 
-def test_pubsub_sqs_takes_driver_env_blob(td):
-    """pubsub-sqs exports the driver-built PUBSUB_SQS_ENV blob; the static
-    per-group SQS_* env vars are gone."""
+def test_pubsub_sqs_has_plain_group0_env(td):
+    """pubsub-sqs sets the group-0 SQS env as three plain container env vars
+    (the distroless image has no shell to eval a blob)."""
     env = _env(td, "PubsubSqsTaskDef")
-    assert env["PUBSUB_SQS_ENV"] == {"Ref": "PubsubSqsEnv"}, env.get("PUBSUB_SQS_ENV")
-    for static in ("SQS_QUEUE_URL", "SQS_REGION", "SQS_ROLE_ARN"):
-        assert static not in env, f"static SQS env still present: {static}"
+    assert env["SQS_QUEUE_URL"] == {"Ref": "QueueUrl"}, env.get("SQS_QUEUE_URL")
+    assert env["SQS_REGION"] == {"Ref": "AWS::Region"}, env.get("SQS_REGION")
+    assert env["SQS_ROLE_ARN"] == {"Ref": "QueueRoleArn"}, env.get("SQS_ROLE_ARN")
+    assert "PUBSUB_SQS_ENV" not in env, "shell-evalable blob still present"
 
 
-def test_pubsub_sqs_command_wraps_eval_and_exec(td):
-    """The pubsub-sqs container exports the blob via `eval` before exec'ing the
-    original lakerunner command."""
-    command = _container(td, "PubsubSqsTaskDef")["Command"]
-    assert command[0] == "sh"
-    assert command[1] == "-c"
-    script = command[2]
-    assert 'eval "$PUBSUB_SQS_ENV"' in script, script
-    assert "set -a" in script and "set +a" in script, script
-    assert "exec /app/bin/lakerunner pubsub sqs" in script, script
-
-
-def test_process_services_have_no_pubsub_env_or_wrapper(td):
-    """process-logs/metrics/traces never consume SQS: no PUBSUB_SQS_ENV, and
-    their commands stay the original (unwrapped) lakerunner invocation."""
-    for task_def_id in ("ProcessLogsTaskDef", "ProcessMetricsTaskDef", "ProcessTracesTaskDef"):
-        env = _env(td, task_def_id)
-        assert "PUBSUB_SQS_ENV" not in env, f"{task_def_id} unexpectedly has PUBSUB_SQS_ENV"
-        command = _container(td, task_def_id).get("Command")
-        if command:
-            assert command[0] != "sh", f"{task_def_id} command unexpectedly wrapped: {command!r}"
-
-
-def test_no_static_sqs_env_anywhere(td):
-    """SQS_QUEUE_URL is no longer a static env entry on any container."""
+def test_no_container_command_uses_shell_wrapper(td):
+    """No container wraps its command in a shell (`sh -c ... eval`): the image
+    is distroless. Commands stay the plain lakerunner invocation from defaults."""
     for tdef in td["Resources"].values():
         if tdef["Type"] != "AWS::ECS::TaskDefinition":
             continue
         for container in tdef["Properties"]["ContainerDefinitions"]:
-            env = {e["Name"] for e in container.get("Environment", [])}
-            assert "SQS_QUEUE_URL" not in env, (
-                f"{container.get('Name')} still has static SQS_QUEUE_URL env"
+            command = container.get("Command") or []
+            assert "sh" not in command, f"{container.get('Name')} command uses sh: {command!r}"
+            joined = " ".join(str(c) for c in command)
+            assert "sh -c" not in joined and "eval" not in joined, (
+                f"{container.get('Name')} command wrapped in a shell: {command!r}"
             )
+
+
+def test_process_services_have_no_sqs_env(td):
+    """process-logs/metrics/traces never consume SQS: no SQS_* env vars."""
+    for task_def_id in ("ProcessLogsTaskDef", "ProcessMetricsTaskDef", "ProcessTracesTaskDef"):
+        env = _env(td, task_def_id)
+        for n in ("SQS_QUEUE_URL", "SQS_REGION", "SQS_ROLE_ARN", "PUBSUB_SQS_ENV"):
+            assert n not in env, f"{task_def_id} unexpectedly has {n}"
 
 
 # ---------------------------------------------------------------------------
