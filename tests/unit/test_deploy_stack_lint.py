@@ -4,6 +4,7 @@ These tests soft-skip the shellcheck step when shellcheck is not on PATH so
 that contributors and CI runners without it installed are not blocked.
 """
 
+import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -193,3 +194,70 @@ def test_resolver_resolves_when_all_satisfied(tmp_path):
     assert result.returncode == 0, result.stderr
     assert '"ParameterValue": "aval"' in result.stdout
     assert '"ParameterValue": "bdef"' in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# FILE_PARAMS: a ParamName=/path entry resolves to the file's full (possibly
+# multi-line / PEM) content.  Exercised via the --internal-build-upstream hook
+# which builds the merged upstream-values object from the env without AWS.
+# ---------------------------------------------------------------------------
+
+PEM_CONTENT = (
+    "-----BEGIN CERTIFICATE-----\n"
+    "line-two-with-special=chars;and:more\n"
+    "line-three\n"
+    "-----END CERTIFICATE-----\n"
+)
+
+
+def _build_upstream(env_extra):
+    env = {"PATH": TEST_PATH}
+    env.update(env_extra)
+    return subprocess.run(
+        ["sh", str(SCRIPTS_DIR / "deploy-stack.sh"), "--internal-build-upstream"],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+
+def test_file_params_resolves_multiline_file_content(tmp_path):
+    pem = tmp_path / "cert.pem"
+    pem.write_text(PEM_CONTENT)
+
+    result = _build_upstream({"FILE_PARAMS": f"CertificateBody={pem}"})
+    assert result.returncode == 0, result.stderr
+
+    merged = json.loads(result.stdout)
+    assert merged["CertificateBody"] == PEM_CONTENT, (
+        f"FILE_PARAMS value should equal the file content verbatim, got:\n"
+        f"{merged.get('CertificateBody')!r}"
+    )
+
+
+def test_file_params_unreadable_file_fails(tmp_path):
+    result = _build_upstream(
+        {"FILE_PARAMS": f"CertificateBody={tmp_path / 'does-not-exist.pem'}"}
+    )
+    assert result.returncode == 2, (
+        f"expected exit 2 for unreadable FILE_PARAMS file, got "
+        f"{result.returncode}:\n{result.stdout}\n{result.stderr}"
+    )
+    assert "FILE_PARAMS" in result.stderr
+
+
+def test_params_wins_over_file_params_for_same_key(tmp_path):
+    pem = tmp_path / "cert.pem"
+    pem.write_text(PEM_CONTENT)
+
+    result = _build_upstream(
+        {
+            "FILE_PARAMS": f"CertificateBody={pem}",
+            "PARAMS": "CertificateBody=literal-wins",
+        }
+    )
+    assert result.returncode == 0, result.stderr
+    merged = json.loads(result.stdout)
+    assert merged["CertificateBody"] == "literal-wins", (
+        "PARAMS should win over FILE_PARAMS for the same key"
+    )

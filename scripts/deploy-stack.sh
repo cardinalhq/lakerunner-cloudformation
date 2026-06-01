@@ -55,6 +55,7 @@ no_execute=""
 # Repeatable collections, stored newline-delimited in shell variables.
 from_stacks=""      # one stack name per line
 param_overrides=""  # one Key=Value per line
+file_params=""      # one ParamName=/path/to/file per line
 maps=""             # one TargetParam=SourceOutputKey per line
 
 # FROM_STACKS is space-separated on input; normalize to one stack name per line.
@@ -64,8 +65,9 @@ if [ -n "${FROM_STACKS:-}" ]; then
 "
     done
 fi
-# PARAMS and MAPS are already newline-separated on input.
+# PARAMS, FILE_PARAMS, and MAPS are already newline-separated on input.
 [ -n "${PARAMS:-}" ] && param_overrides="$PARAMS"
+[ -n "${FILE_PARAMS:-}" ] && file_params="$FILE_PARAMS"
 [ -n "${MAPS:-}" ] && maps="$MAPS"
 
 # Internal test hook state: resolve parameters from local JSON fixtures and
@@ -96,6 +98,10 @@ Optional:
   PARAMS              Newline-separated Key=Value parameter overrides (highest
                       precedence).  Newline- (not semicolon-) separated so that
                       values containing semicolons are safe.
+  FILE_PARAMS         Newline-separated ParamName=/path/to/file entries.  Each
+                      file's full content (multi-line/PEM safe) becomes that
+                      parameter's value.  Same explicit-override tier as PARAMS;
+                      if both set the same parameter, PARAMS wins.
   MAPS                Newline-separated TargetParam=SourceOutputKey entries.
   DEPLOYER_ROLE_ARN   Passed via --role-arn to create-change-set.
   NO_EXECUTE          Non-empty: create and describe the change set, then stop.
@@ -254,7 +260,10 @@ cleanup() {
 }
 
 # Build the merged upstream-values JSON object into "$1", in precedence order
-# (lowest first so later assignments win):  FROM_STACKS -> MAPS -> PARAMS.
+# (lowest first so later assignments win):
+#   FROM_STACKS -> MAPS -> FILE_PARAMS -> PARAMS.
+# FILE_PARAMS and PARAMS share the explicit-override tier; PARAMS is applied
+# last so a literal PARAMS value wins over a FILE_PARAMS file for the same key.
 build_upstream_values() {
     out_file="$1"
 
@@ -291,7 +300,7 @@ build_upstream_values() {
     # 2. MAPS TargetParam=SourceOutputKey: resolve SourceOutputKey from the
     #    already-merged from-stack outputs.
     if [ -n "$maps" ]; then
-        printf '%s' "$maps" | while IFS= read -r entry; do
+        printf '%s\n' "$maps" | while IFS= read -r entry; do
             [ -n "$entry" ] || continue
             tgt=${entry%%=*}
             src=${entry#*=}
@@ -313,9 +322,36 @@ build_upstream_values() {
         rm -f "$out_file.maps"
     fi
 
+    # 1b. FILE_PARAMS ParamName=/path/to/file: read each file's full content as
+    #     the value via jq --rawfile, so multi-line / PEM material is JSON-escaped
+    #     correctly.  Applied before PARAMS so a literal PARAMS value wins.
+    if [ -n "$file_params" ]; then
+        printf '%s\n' "$file_params" | while IFS= read -r entry; do
+            [ -n "$entry" ] || continue
+            key=${entry%%=*}
+            path=${entry#*=}
+            if [ "$key" = "$entry" ] || [ -z "$key" ] || [ -z "$path" ]; then
+                fail 2 "FILE_PARAMS expects ParamName=/path/to/file, got: $entry"
+            fi
+            if [ ! -r "$path" ]; then
+                fail 2 "FILE_PARAMS file not readable for $key: $path"
+            fi
+            printf '%s\t%s\n' "$key" "$path"
+        done >"$out_file.fileparams" || exit $?
+        while IFS="$(printf '\t')" read -r key path; do
+            [ -n "$key" ] || continue
+            merged=$(
+                jq -nc --argjson m "$merged" --arg key "$key" --rawfile val "$path" '
+                    $m + {($key): $val}
+                '
+            ) || fail 2 "failed reading FILE_PARAMS file for $key: $path"
+        done <"$out_file.fileparams"
+        rm -f "$out_file.fileparams"
+    fi
+
     # 1. PARAMS Key=Value: highest precedence.
     if [ -n "$param_overrides" ]; then
-        printf '%s' "$param_overrides" | while IFS= read -r entry; do
+        printf '%s\n' "$param_overrides" | while IFS= read -r entry; do
             [ -n "$entry" ] || continue
             key=${entry%%=*}
             val=${entry#*=}
@@ -337,6 +373,23 @@ build_upstream_values() {
 }
 
 main() {
+    # Internal test hook: build the merged upstream-values object from the
+    # env (PARAMS/FILE_PARAMS/MAPS) and print it, never touching AWS.  Only
+    # valid when FROM_STACKS is empty (FROM_STACKS would require AWS).  Used to
+    # unit-test FILE_PARAMS multi-line resolution.
+    if [ "${1:-}" = "--internal-build-upstream" ]; then
+        if ! command -v jq >/dev/null 2>&1; then
+            fail 2 "jq is required for --internal-build-upstream"
+        fi
+        if [ -n "$from_stacks" ]; then
+            fail 2 "--internal-build-upstream cannot be used with FROM_STACKS set"
+        fi
+        work_dir=$(mktemp -d)
+        build_upstream_values "$work_dir/upstream.json"
+        cat "$work_dir/upstream.json"
+        return 0
+    fi
+
     # Internal test hook: resolve from fixtures only, never touch AWS.  Engaged
     # by the positional --internal-resolve-params SUMMARY UPSTREAM CURRENT form.
     if [ "${1:-}" = "--internal-resolve-params" ]; then

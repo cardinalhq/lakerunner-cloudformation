@@ -30,9 +30,10 @@ Each script collects all missing required variables up front, prints its usage
 Each Jenkins job runs one thin wrapper. The wrapper reads its friendly env vars,
 composes the published template URL from `TEMPLATE_BASE_URL` (default
 `https://cardinal-cfn.s3.us-east-2.amazonaws.com/lakerunner`) and `VERSION`
-(e.g. `v0.0.70`), sets `TEMPLATE_URL`, `FROM_STACKS`, `PARAMS`, and `MAPS`, then
-`exec`s the generic driver `scripts/deploy-stack.sh` with the environment
-inherited.
+(e.g. `v0.0.70`), sets `TEMPLATE_URL`, `FROM_STACKS`, `PARAMS`, `FILE_PARAMS`,
+and `MAPS`, then invokes the generic driver `scripts/deploy-stack.sh` with the
+environment inherited. Most wrappers `exec` the driver; `lakerunner-services`
+runs it as a child so it can clean up an auto-generated cert temp dir on exit.
 
 ### deploy-stack.sh environment
 
@@ -43,6 +44,7 @@ inherited.
 | `REGION` | required | AWS region (never defaulted). |
 | `FROM_STACKS` | optional | Space-separated upstream stack names; an Output whose key equals a target parameter name supplies that parameter. |
 | `PARAMS` | optional | Newline-separated `Key=Value` overrides (highest precedence). Newline- (not semicolon-) separated so values like `PubsubSqsEnv` that contain semicolons are safe. |
+| `FILE_PARAMS` | optional | Newline-separated `ParamName=/path/to/file` entries. Each file's full content becomes that parameter's value, read via `jq --rawfile` so multi-line / PEM material is JSON-escaped correctly. Same explicit-override tier as `PARAMS`; if both set the same parameter, `PARAMS` wins. |
 | `MAPS` | optional | Newline-separated `TargetParam=SourceOutputKey` entries. |
 | `DEPLOYER_ROLE_ARN` | optional | Forwarded via `--role-arn` to `create-change-set`. |
 | `NO_EXECUTE` | optional | Non-empty: create and describe the change set, then stop. |
@@ -52,6 +54,7 @@ inherited.
 For each parameter in the target template (from `get-template-summary`):
 
 1. `PARAMS Key=Value` explicit override (highest precedence)
+1. `FILE_PARAMS ParamName=/path` file content (same tier as `PARAMS`; `PARAMS` wins on a clash)
 1. `MAPS TargetParam=SourceOutputKey` value of the named upstream Output
 1. matching `FROM_STACKS` Output (Output key == parameter name)
 1. on UPDATE only: `UsePreviousValue: true` (carry the current stack value)
@@ -226,6 +229,18 @@ so nested children load from the matching version prefix. `OTEL_REPLICAS`
 defaults to `0` here: the same-account satellite collector does ingest, so the
 lakerunner-tier collector is off by default.
 
+Certificate: if `CERTIFICATE_ARN` is set, it is passed through unchanged (a
+stable ARN, no churn). If it is empty and no PEM files are supplied, the wrapper
+auto-generates a self-signed internal cert **only on first create** and passes
+it via `FILE_PARAMS` (the `cert.yaml` child builds an `AWS::IAM::ServerCertificate`
+from it). Browsers will warn on a self-signed cert — fine for internal/test. On
+a re-run (the stack already exists, an UPDATE), the wrapper generates nothing and
+passes no cert params, so `deploy-stack.sh` resolves `CertificateBody`/
+`CertificatePrivateKey` to `UsePreviousValue` and the existing IAM
+ServerCertificate (and the ALB listener) is left untouched. Nothing is committed
+to the repo; the PEMs are generated per run into a temp dir that is removed on
+exit. Set `CERTIFICATE_ARN` to use a real cert.
+
 | Variable | Req/Opt | Default |
 |---|---|---|
 | `STACK_NAME` | required | — |
@@ -238,10 +253,10 @@ lakerunner-tier collector is off by default.
 | `CLUSTER_NAME` | required | ECS cluster name (no upstream output for it) |
 | `VPC_ID` | required | — |
 | `PRIVATE_SUBNETS` | required | comma-separated private subnet ids |
-| `CERTIFICATE_ARN` | optional | ACM/IAM cert ARN; Maestro HTTPS needs this **or** the three PEM files |
-| `CERTIFICATE_BODY_FILE` | optional | PEM cert body path |
-| `CERTIFICATE_PRIVATE_KEY_FILE` | optional | PEM private key path |
-| `CERTIFICATE_CHAIN_FILE` | optional | PEM chain path |
+| `CERTIFICATE_ARN` | optional | ACM/IAM cert ARN for the Maestro HTTPS listener. If unset, the wrapper auto-generates a self-signed internal cert **only on first create** (re-runs keep the existing cert — no churn). Set it to use a real cert. |
+| `CERTIFICATE_BODY_FILE` | optional | PEM cert body path (overrides auto-generation; passed via `FILE_PARAMS`) |
+| `CERTIFICATE_PRIVATE_KEY_FILE` | optional | PEM private key path (overrides auto-generation; passed via `FILE_PARAMS`) |
+| `CERTIFICATE_CHAIN_FILE` | optional | PEM chain path (passed via `FILE_PARAMS`) |
 | `DEX_ADMIN_EMAIL` | optional | template: `admin@cardinal.local` |
 | `DEX_ADMIN_PASSWORD_HASH` | optional | template: empty — **needed for Maestro UI login** |
 | `DEX_CLIENT_ID` | optional | template: `maestro-ui` |

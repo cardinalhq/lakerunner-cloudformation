@@ -46,10 +46,14 @@ Required:
   PRIVATE_SUBNETS             Comma-separated private subnet ids.
 
 Optional (template defaults preserved when unset):
-  CERTIFICATE_ARN             ACM/IAM cert ARN.  Maestro HTTPS needs either this
-                              or the three PEM files below.
-  CERTIFICATE_BODY_FILE       PEM cert body (path).
-  CERTIFICATE_PRIVATE_KEY_FILE PEM private key (path).
+  CERTIFICATE_ARN             ACM/IAM cert ARN for the Maestro HTTPS listener.
+                              If unset, the script auto-generates a self-signed
+                              internal cert ON FIRST CREATE only (browsers will
+                              warn; fine for internal/test).  Re-runs (UPDATE)
+                              keep the existing cert untouched -- no churn.  Set
+                              CERTIFICATE_ARN to use a real cert.
+  CERTIFICATE_BODY_FILE       PEM cert body (path).  Overrides auto-generation.
+  CERTIFICATE_PRIVATE_KEY_FILE PEM private key (path).  Overrides auto-generation.
   CERTIFICATE_CHAIN_FILE      PEM chain (path).
   DEX_ADMIN_EMAIL             (template default admin@cardinal.local).
   DEX_ADMIN_PASSWORD_HASH     bcrypt hash; REQUIRED for Maestro UI login even
@@ -74,15 +78,6 @@ case "${1:-}" in
     "") : ;;
     *) echo "[deploy-lakerunner-services] ERROR: this script takes no arguments; configure it via environment variables" >&2; usage >&2; exit 2 ;;
 esac
-
-read_file_or_die() {
-    p="$1"
-    if [ ! -r "$p" ]; then
-        echo "[deploy-lakerunner-services] ERROR: cannot read file: $p" >&2
-        exit 2
-    fi
-    cat "$p"
-}
 
 missing=""
 [ -z "${STACK_NAME:-}" ] && missing="$missing STACK_NAME"
@@ -161,14 +156,63 @@ DexInitImage=$DEX_INIT_IMAGE"
 [ -n "${DB_INIT_IMAGE:-}" ] && params="$params
 DbInitImage=$DB_INIT_IMAGE"
 
-[ -n "${CERTIFICATE_ARN:-}" ] && params="$params
+# --- Certificate handling. ---------------------------------------------------
+# Cert PEM material is passed via FILE_PARAMS (multi-line safe), never inlined
+# into the newline-delimited PARAMS string.
+#
+# Create-only auto-generation: the cert.yaml child builds an AWS::IAM::Server-
+# Certificate from CertificateBody/CertificatePrivateKey when CertificateArn is
+# empty.  A fresh self-signed PEM on every re-run would replace that cert and
+# churn the ALB listener, so we generate it ONLY on first create:
+#   - CERTIFICATE_ARN set            -> pass it (stable ARN, no churn).
+#   - empty + PEM files supplied     -> pass the supplied PEMs.
+#   - empty + stack absent (CREATE)  -> generate a self-signed cert, pass it.
+#   - empty + stack present (UPDATE) -> pass nothing; deploy-stack.sh resolves
+#     CertificateBody/CertificatePrivateKey to UsePreviousValue, keeping the
+#     existing IAM ServerCertificate untouched.
+file_params=""
+cert_dir=""
+
+cleanup_cert() {
+    [ -n "$cert_dir" ] && [ -d "$cert_dir" ] && rm -rf "$cert_dir"
+}
+trap cleanup_cert EXIT INT TERM HUP
+
+if [ -n "${CERTIFICATE_ARN:-}" ]; then
+    params="$params
 CertificateArn=$CERTIFICATE_ARN"
-[ -n "${CERTIFICATE_BODY_FILE:-}" ] && params="$params
-CertificateBody=$(read_file_or_die "$CERTIFICATE_BODY_FILE")"
-[ -n "${CERTIFICATE_PRIVATE_KEY_FILE:-}" ] && params="$params
-CertificatePrivateKey=$(read_file_or_die "$CERTIFICATE_PRIVATE_KEY_FILE")"
-[ -n "${CERTIFICATE_CHAIN_FILE:-}" ] && params="$params
-CertificateChain=$(read_file_or_die "$CERTIFICATE_CHAIN_FILE")"
+elif [ -n "${CERTIFICATE_BODY_FILE:-}" ] || [ -n "${CERTIFICATE_PRIVATE_KEY_FILE:-}" ]; then
+    [ -r "${CERTIFICATE_BODY_FILE:-}" ] || { echo "[deploy-lakerunner-services] ERROR: cannot read CERTIFICATE_BODY_FILE: ${CERTIFICATE_BODY_FILE:-}" >&2; exit 2; }
+    [ -r "${CERTIFICATE_PRIVATE_KEY_FILE:-}" ] || { echo "[deploy-lakerunner-services] ERROR: cannot read CERTIFICATE_PRIVATE_KEY_FILE: ${CERTIFICATE_PRIVATE_KEY_FILE:-}" >&2; exit 2; }
+    file_params="CertificateBody=$CERTIFICATE_BODY_FILE
+CertificatePrivateKey=$CERTIFICATE_PRIVATE_KEY_FILE"
+    if [ -n "${CERTIFICATE_CHAIN_FILE:-}" ]; then
+        [ -r "$CERTIFICATE_CHAIN_FILE" ] || { echo "[deploy-lakerunner-services] ERROR: cannot read CERTIFICATE_CHAIN_FILE: $CERTIFICATE_CHAIN_FILE" >&2; exit 2; }
+        file_params="$file_params
+CertificateChain=$CERTIFICATE_CHAIN_FILE"
+    fi
+else
+    # No ARN, no PEM files.  Generate only on first create (stack absent).
+    if aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$REGION" >/dev/null 2>&1; then
+        echo "[deploy-lakerunner-services] stack exists; keeping the existing self-signed cert (no regeneration)" >&2
+    else
+        if ! command -v openssl >/dev/null 2>&1; then
+            echo "[deploy-lakerunner-services] ERROR: openssl is required to auto-generate a self-signed cert; install openssl or set CERTIFICATE_ARN / CERTIFICATE_*_FILE" >&2
+            exit 2
+        fi
+        echo "[deploy-lakerunner-services] no CERTIFICATE_ARN and first create; generating a self-signed internal cert" >&2
+        cert_dir=$(mktemp -d)
+        if ! openssl req -x509 -newkey rsa:2048 -nodes \
+                -keyout "$cert_dir/key.pem" -out "$cert_dir/cert.pem" \
+                -days 825 -subj "/CN=cardinal.test" \
+                -addext "subjectAltName=DNS:cardinal.test,DNS:*.cardinal.internal" 2>/dev/null; then
+            echo "[deploy-lakerunner-services] ERROR: openssl failed to generate the self-signed cert" >&2
+            exit 1
+        fi
+        file_params="CertificateBody=$cert_dir/cert.pem
+CertificatePrivateKey=$cert_dir/key.pem"
+    fi
+fi
 
 [ -n "${DEX_ADMIN_EMAIL:-}" ] && params="$params
 DexAdminEmail=$DEX_ADMIN_EMAIL"
@@ -180,7 +224,12 @@ DexClientId=$DEX_CLIENT_ID"
 OidcSuperadminEmails=$OIDC_SUPERADMIN_EMAILS"
 
 PARAMS="$params"
+FILE_PARAMS="$file_params"
 
-export TEMPLATE_URL PARAMS FROM_STACKS MAPS
+export TEMPLATE_URL PARAMS FILE_PARAMS FROM_STACKS MAPS
 
-exec "$SCRIPT_DIR/deploy-stack.sh"
+# Not exec: deploy-stack.sh must read the generated cert PEMs before the
+# cleanup_cert EXIT trap removes the temp dir, so run it as a child and forward
+# its exit code.  (When no cert was generated, cert_dir is empty and the trap
+# is a no-op.)
+"$SCRIPT_DIR/deploy-stack.sh"
