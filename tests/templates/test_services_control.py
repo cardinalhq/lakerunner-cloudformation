@@ -84,24 +84,51 @@ def test_no_per_service_tunable_parameters(td):
 # ---------------------------------------------------------------------------
 
 
-def test_creates_four_ecs_services(td):
+def test_creates_single_merged_ecs_service(td):
+    """The four control-plane singletons are co-located in ONE ECS service
+    running ONE task with four containers — cutting the per-task Fargate floor
+    ~4x and leaving one task to place instead of four."""
     services = [r for r in td["Resources"].values() if r["Type"] == "AWS::ECS::Service"]
-    assert len(services) == 4
+    assert len(services) == 1
 
 
-def test_expected_service_logical_ids_present(td):
-    expected_suffixes = {
-        "AdminApiService",
-        "SweeperService",
-        "MonitoringService",
-        "AlertEvaluatorService",
-    }
+def test_control_service_logical_id_present(td):
     found = {
         logical_id
         for logical_id, res in td["Resources"].items()
         if res["Type"] == "AWS::ECS::Service"
     }
-    assert expected_suffixes <= found, f"missing services; got: {found}"
+    assert found == {"ControlService"}, f"expected only ControlService; got: {found}"
+
+
+def test_single_task_has_four_essential_containers(td):
+    task_defs = [r for r in td["Resources"].values() if r["Type"] == "AWS::ECS::TaskDefinition"]
+    assert len(task_defs) == 1
+    containers = task_defs[0]["Properties"]["ContainerDefinitions"]
+    names = {c["Name"] for c in containers}
+    assert names == {"admin-api", "sweeper", "monitoring", "alert-evaluator"}
+    for c in containers:
+        assert c["Essential"] is True, f"{c['Name']} must be essential"
+
+
+def test_merged_task_uses_fixed_minimum_shape(td):
+    """256 CPU / 512 MiB — Fargate's floor; the four containers' combined real
+    usage is ~7m / ~90Mi. ARM64/LINUX, awsvpc, FARGATE."""
+    task = next(r for r in td["Resources"].values() if r["Type"] == "AWS::ECS::TaskDefinition")
+    props = task["Properties"]
+    assert props["Cpu"] == "256"
+    assert props["Memory"] == "512"
+    assert props["NetworkMode"] == "awsvpc"
+    assert props["RequiresCompatibilities"] == ["FARGATE"]
+    assert props["RuntimePlatform"]["CpuArchitecture"] == "ARM64"
+    assert props["RuntimePlatform"]["OperatingSystemFamily"] == "LINUX"
+
+
+def test_merged_task_uses_shared_exec_and_control_roles(td):
+    task = next(r for r in td["Resources"].values() if r["Type"] == "AWS::ECS::TaskDefinition")
+    props = task["Properties"]
+    assert props["ExecutionRoleArn"] == {"Ref": "ExecutionRoleArn"}
+    assert props["TaskRoleArn"] == {"Ref": "TaskRoleArn"}
 
 
 def test_only_one_target_group_and_one_listener_rule(td):
@@ -164,13 +191,14 @@ def test_admin_api_discovery_service_registered(td):
     assert any(r["Type"] == "A" for r in records)
 
 
-def test_admin_api_service_has_service_registries(td):
-    """The admin-api ECS service must reference the discovery service so
-    its task IPs land in DNS."""
+def test_control_service_has_service_registries(td):
+    """The merged control ECS service registers in Cloud Map (its admin-api
+    container's IP) so peers in the cluster (maestro) can reach it without
+    going through the ALB."""
     svc = next(
         res
         for logical_id, res in td["Resources"].items()
-        if res["Type"] == "AWS::ECS::Service" and logical_id.endswith("AdminApiService")
+        if res["Type"] == "AWS::ECS::Service" and logical_id == "ControlService"
     )
     assert "ServiceRegistries" in svc["Properties"]
     arn = svc["Properties"]["ServiceRegistries"][0]["RegistryArn"]
@@ -182,15 +210,15 @@ def test_admin_api_service_has_service_registries(td):
 # ---------------------------------------------------------------------------
 
 
-def _service_by_logical_id(td, suffix):
-    for logical_id, res in td["Resources"].items():
-        if res["Type"] == "AWS::ECS::Service" and logical_id.endswith(suffix):
-            return res
-    raise AssertionError(f"no ECS service with logical id ending in {suffix}")
+def _control_service(td):
+    return td["Resources"]["ControlService"]
 
 
-def test_admin_api_service_has_load_balancers(td):
-    svc = _service_by_logical_id(td, "AdminApiService")
+def test_control_service_load_balancer_targets_admin_api_container(td):
+    """The single merged service's LoadBalancers block targets the admin-api
+    CONTAINER (and only it) inside the task; the other three containers have no
+    ports and no LB attachment."""
+    svc = _control_service(td)
     assert "LoadBalancers" in svc["Properties"]
     assert len(svc["Properties"]["LoadBalancers"]) == 1
     lb = svc["Properties"]["LoadBalancers"][0]
@@ -198,12 +226,13 @@ def test_admin_api_service_has_load_balancers(td):
     assert lb["ContainerPort"] == 9091
 
 
-def test_internal_services_have_no_load_balancers(td):
-    for suffix in ("SweeperService", "MonitoringService", "AlertEvaluatorService"):
-        svc = _service_by_logical_id(td, suffix)
-        assert "LoadBalancers" not in svc["Properties"], (
-            f"{suffix} unexpectedly has LoadBalancers"
-        )
+def test_only_admin_api_container_exposes_a_port(td):
+    task = next(r for r in td["Resources"].values() if r["Type"] == "AWS::ECS::TaskDefinition")
+    for c in task["Properties"]["ContainerDefinitions"]:
+        if c["Name"] == "admin-api":
+            assert c.get("PortMappings") == [{"ContainerPort": 9091, "Protocol": "tcp"}]
+        else:
+            assert "PortMappings" not in c, f"{c['Name']} unexpectedly has a port"
 
 
 # ---------------------------------------------------------------------------
@@ -211,13 +240,33 @@ def test_internal_services_have_no_load_balancers(td):
 # ---------------------------------------------------------------------------
 
 
-def test_each_service_has_unique_log_group_with_14_day_retention(td):
+def test_each_container_has_unique_log_group_with_14_day_retention(td):
+    """Per-container log groups are KEPT (one task, four groups) so operators'
+    familiar /cardinal/<svc> log paths don't change."""
     log_groups = [r for r in td["Resources"].values() if r["Type"] == "AWS::Logs::LogGroup"]
     assert len(log_groups) == 4
     for lg in log_groups:
         assert lg["Properties"]["RetentionInDays"] == 14
-    names = {json.dumps(lg["Properties"].get("LogGroupName")) for lg in log_groups}
-    assert len(names) == 4, "log groups must have distinct names"
+    names = {lg["Properties"]["LogGroupName"] for lg in log_groups}
+    assert names == {
+        "/cardinal/admin-api",
+        "/cardinal/sweeper",
+        "/cardinal/monitoring",
+        "/cardinal/alert-evaluator",
+    }
+
+
+def test_each_container_logs_to_its_own_group(td):
+    """Each container's awslogs LogConfiguration points at its own group."""
+    task = next(r for r in td["Resources"].values() if r["Type"] == "AWS::ECS::TaskDefinition")
+    for c in task["Properties"]["ContainerDefinitions"]:
+        opts = c["LogConfiguration"]["Options"]
+        assert opts["awslogs-group"] == {"Ref": _log_group_id(c["Name"])}
+        assert opts["awslogs-stream-prefix"] == c["Name"]
+
+
+def _log_group_id(container_name):
+    return "".join(p.capitalize() for p in container_name.split("-")) + "LogGroup"
 
 
 def test_no_internally_managed_iam_roles(td):
@@ -231,19 +280,36 @@ def test_no_internally_managed_iam_roles(td):
 # ---------------------------------------------------------------------------
 
 
-def test_four_task_definitions(td):
+def test_single_task_definition(td):
     task_defs = [r for r in td["Resources"].values() if r["Type"] == "AWS::ECS::TaskDefinition"]
-    assert len(task_defs) == 4
+    assert len(task_defs) == 1
 
 
-def test_task_definition_cpu_and_memory_come_from_yaml(td):
-    """All four control-plane services use YAML-fixed Cpu and Memory."""
-    task_defs = [r for r in td["Resources"].values() if r["Type"] == "AWS::ECS::TaskDefinition"]
-    for td_res in task_defs:
-        cpu = td_res["Properties"]["Cpu"]
-        mem = td_res["Properties"]["Memory"]
-        assert not isinstance(cpu, dict), f"Cpu unexpectedly templated: {cpu!r}"
-        assert not isinstance(mem, dict), f"Memory unexpectedly templated: {mem!r}"
+def test_task_definition_cpu_and_memory_are_fixed(td):
+    """The merged control task uses a fixed minimum Cpu/Memory (not templated)."""
+    task = next(r for r in td["Resources"].values() if r["Type"] == "AWS::ECS::TaskDefinition")
+    cpu = task["Properties"]["Cpu"]
+    mem = task["Properties"]["Memory"]
+    assert not isinstance(cpu, dict), f"Cpu unexpectedly templated: {cpu!r}"
+    assert not isinstance(mem, dict), f"Memory unexpectedly templated: {mem!r}"
+
+
+def test_admin_api_container_has_admin_key_secret(td):
+    """The admin-api container keeps its ADMIN_INITIAL_API_KEY secret sourced
+    from the AdminApiKeySecretArn parameter."""
+    _, container = _task_def_for(td, "admin-api")
+    secrets = {s["Name"]: s["ValueFrom"] for s in container.get("Secrets", [])}
+    assert "ADMIN_INITIAL_API_KEY" in secrets
+    assert secrets["ADMIN_INITIAL_API_KEY"] == {
+        "Fn::Sub": "${AdminApiKeySecretArn}:key::"
+    }
+
+
+def test_only_admin_api_container_has_admin_key_secret(td):
+    for name in ("sweeper", "monitoring", "alert-evaluator"):
+        _, container = _task_def_for(td, name)
+        names = {s["Name"] for s in container.get("Secrets", [])}
+        assert "ADMIN_INITIAL_API_KEY" not in names, f"{name} unexpectedly has admin key"
 
 
 # ---------------------------------------------------------------------------
@@ -251,14 +317,17 @@ def test_task_definition_cpu_and_memory_come_from_yaml(td):
 # ---------------------------------------------------------------------------
 
 
-def test_outputs_required(td):
+def test_outputs_reduced_to_single_control_service_name(td):
+    """The four per-service-name outputs collapse to one ControlServiceName.
+    The root consumes none of the old per-service outputs, so this is safe."""
+    assert "ControlServiceName" in td["Outputs"]
     for n in (
         "AdminApiServiceName",
         "SweeperServiceName",
         "MonitoringServiceName",
         "AlertEvaluatorServiceName",
     ):
-        assert n in td["Outputs"], f"missing output: {n}"
+        assert n not in td["Outputs"], f"vestigial per-service output present: {n}"
 
 
 # ---------------------------------------------------------------------------
@@ -382,22 +451,10 @@ def test_no_shared_resources_in_services_control(td):
     assert not found, f"services-control must not own shared resources; found {found}"
 
 
-def _service_strategy(td, suffix):
-    res = next(
-        r for lid, r in td["Resources"].items()
-        if r["Type"] == "AWS::ECS::Service" and lid.endswith(suffix)
-    )
-    return {s["CapacityProvider"] for s in res["Properties"]["CapacityProviderStrategy"]}
-
-
-def test_singleton_services_have_ondemand_fallback(td):
-    # sweeper, monitoring, admin-api, alert-evaluator are deploy-critical
-    # singletons: spot-preferred with an on-demand FARGATE fallback so a
-    # transient FARGATE_SPOT shortage can't fail a rolling deploy.
-    for suffix in (
-        "SweeperService",
-        "MonitoringService",
-        "AdminApiService",
-        "AlertEvaluatorService",
-    ):
-        assert _service_strategy(td, suffix) == {"FARGATE_SPOT", "FARGATE"}, suffix
+def test_control_service_has_ondemand_fallback(td):
+    # The merged control service is a deploy-critical singleton: spot-preferred
+    # with an on-demand FARGATE fallback so a transient FARGATE_SPOT shortage
+    # can't fail the one task a rolling deploy needs.
+    svc = td["Resources"]["ControlService"]
+    strategy = {s["CapacityProvider"] for s in svc["Properties"]["CapacityProviderStrategy"]}
+    assert strategy == {"FARGATE_SPOT", "FARGATE"}
