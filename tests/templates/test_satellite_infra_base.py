@@ -90,6 +90,15 @@ def test_bucket_lifecycle_uses_parameter(td):
     assert rule["AbortIncompleteMultipartUpload"]["DaysAfterInitiation"] == 1
 
 
+def test_role_named_cardinal_satellite_access(td):
+    """Fixed name lets the lakerunner process tier scope cross-account
+    sts:AssumeRole to the cardinal-satellite-access* pattern."""
+    assert (
+        td["Resources"]["LakerunnerAccessRole"]["Properties"]["RoleName"]
+        == "cardinal-satellite-access"
+    )
+
+
 def test_role_trusts_lakerunner_principal(td):
     trust = td["Resources"]["LakerunnerAccessRole"]["Properties"][
         "AssumeRolePolicyDocument"

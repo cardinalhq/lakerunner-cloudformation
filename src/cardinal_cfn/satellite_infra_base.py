@@ -220,6 +220,10 @@ def build() -> Template:
     t.add_resource(
         Role(
             "LakerunnerAccessRole",
+            # Fixed name so the lakerunner process tier can grant
+            # sts:AssumeRole on the cardinal-satellite-access* pattern across
+            # accounts. One install per account makes a fixed name safe.
+            RoleName="cardinal-satellite-access",
             AssumeRolePolicyDocument={
                 "Version": "2012-10-17",
                 "Statement": [
