@@ -202,15 +202,13 @@ def test_service_runs_one_fargate_task_no_lb(template_dict):
     assert "ServiceRegistries" not in svc
 
 
-def test_service_has_ondemand_fallback(template_dict):
-    # Singleton: on-demand FARGATE Base=1 so the migrator's one task always
-    # places on on-demand and a transient FARGATE_SPOT shortage can't fail the
-    # deploy.
+def test_service_is_pure_on_demand(template_dict):
+    # Singleton: pure on-demand FARGATE so the migrator's one task always places
+    # during a rolling deploy. No FARGATE_SPOT (it can't guarantee placement).
     svc = _service(template_dict)["Properties"]
-    items = {s["CapacityProvider"]: s for s in svc["CapacityProviderStrategy"]}
-    assert set(items) == {"FARGATE_SPOT", "FARGATE"}
-    assert items["FARGATE"]["Base"] == 1
-    assert "Base" not in items["FARGATE_SPOT"]
+    items = svc["CapacityProviderStrategy"]
+    assert items == [{"CapacityProvider": "FARGATE", "Weight": 1}]
+    assert all("Base" not in i for i in items)
 
 
 def test_service_disables_public_ip(template_dict):

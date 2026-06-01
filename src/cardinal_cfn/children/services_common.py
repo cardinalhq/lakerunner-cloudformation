@@ -213,38 +213,32 @@ def _coerce_size(value):
     return value
 
 
-def capacity_provider_strategy(capacity: str = "spot") -> list:
+def capacity_provider_strategy(capacity: str = "fallback") -> list:
     """Capacity-provider strategy for an ECS Service.
 
-    "spot" (scalable workers): pure FARGATE_SPOT — cheapest, and a transient
-    spot shortage only delays/skips an extra replica, never a deploy-critical
-    singleton task.
+    "fallback" (the default, used by every lakerunner service): pure on-demand
+    FARGATE for ALL replicas. This is the only deploy-reliable choice.
 
-    "fallback" (singletons/critical services): on-demand FARGATE for the first
-    task, spot-preferred for any scale-out beyond it. The crux is Base=1 on
-    FARGATE, not the weights.
+    Why no spot in the default path. A weight-based strategy does NOT give a
+    single task failover: ECS capacity-provider weights only distribute
+    MULTIPLE tasks across providers; for any individual task ECS picks ONE
+    provider, and if that provider (FARGATE_SPOT) has no capacity right now the
+    task simply fails to place. A rolling deploy must place every NEW task
+    before draining the old, and the deployment circuit breaker rolls the whole
+    stack back the moment one of them can't place. FARGATE_SPOT cannot
+    guarantee placement at any given instant, so any spot tier — even weighted,
+    even with a Base=1 on-demand first task — makes deploys flaky and triggers
+    rollbacks. On-demand FARGATE for all replicas is required for reliable
+    deploys.
 
-    Weights ALONE do not fail over for a singleton. ECS capacity-provider
-    weights only distribute MULTIPLE tasks across providers; for a single task
-    (DesiredCount=1) ECS picks ONE provider by weight, and if that provider
-    (FARGATE_SPOT) has no capacity right now the task simply fails to place —
-    tripping the deployment circuit breaker and rolling the stack back. A
-    rolling deploy must place at least one NEW task before draining the old,
-    so every desired>=1 service hits this singleton-placement window on a dry
-    spot moment, regardless of steady-state replica count.
-
-    Base=1 on FARGATE guarantees the FIRST task of every service lands on
-    on-demand (reliable). For desired=1 singletons that one task is always on
-    on-demand. For scalable services (desired N>1) one task is on-demand and
-    the remaining N-1 are weighted 4:1 toward spot. Only one provider in a
-    strategy may carry Base>0; it lives on FARGATE here.
+    "spot": pure FARGATE_SPOT, an explicit opt-in only. DEPLOY-UNSAFE for the
+    reasons above; a customer may knowingly choose it for a non-critical,
+    cost-sensitive service that tolerates failed deploys. No caller uses it by
+    default.
     """
     if capacity == "fallback":
         return [
-            CapacityProviderStrategyItem(
-                CapacityProvider="FARGATE", Base=1, Weight=1
-            ),
-            CapacityProviderStrategyItem(CapacityProvider="FARGATE_SPOT", Weight=4),
+            CapacityProviderStrategyItem(CapacityProvider="FARGATE", Weight=1),
         ]
     if capacity == "spot":
         return [
@@ -266,7 +260,7 @@ def build_ecs_service(
     container_port: int | None = None,
     service_registry_ref=None,
     listener_rule_refs: list | None = None,
-    capacity: str = "spot",
+    capacity: str = "fallback",
 ) -> Service:
     """ECS Fargate Service with rolling deploy + circuit breaker.
 

@@ -445,7 +445,7 @@ def _build_service_block(
     base_env: list,
     base_secrets: list,
     extra_env: list | None = None,
-    capacity: str = "spot",
+    capacity: str = "fallback",
 ):
     """Wire up the three resources (log group, task def, service) for one service."""
     log_group = t.add_resource(services_common.build_log_group(service_key=service_key))

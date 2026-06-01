@@ -328,13 +328,12 @@ def _service_items(td, suffix):
     return res["Properties"]["CapacityProviderStrategy"]
 
 
-def test_query_workers_have_ondemand_fallback(td):
-    # query-api and query-worker scale out to spot, but a rolling upgrade must
-    # place a first NEW task before draining the old; Base=1 on FARGATE
-    # guarantees that first replica places even in a transient FARGATE_SPOT
-    # shortage. Scale-out replicas stay spot-weighted.
+def test_query_workers_are_pure_on_demand(td):
+    # query-api and query-worker run pure on-demand FARGATE. A rolling deploy
+    # must place every NEW task before draining the old, and FARGATE_SPOT can't
+    # guarantee placement, so no spot tier anywhere.
     for suffix in ("QueryApiService", "QueryWorkerService"):
-        assert _service_strategy(td, suffix) == {"FARGATE_SPOT", "FARGATE"}, suffix
-        by_provider = {i["CapacityProvider"]: i for i in _service_items(td, suffix)}
-        assert by_provider["FARGATE"]["Base"] == 1, suffix
-        assert "Base" not in by_provider["FARGATE_SPOT"], suffix
+        assert _service_strategy(td, suffix) == {"FARGATE"}, suffix
+        items = _service_items(td, suffix)
+        assert items == [{"CapacityProvider": "FARGATE", "Weight": 1}], suffix
+        assert all("Base" not in i for i in items), suffix

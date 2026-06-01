@@ -123,7 +123,7 @@ def test_build_ecs_service_has_circuit_breaker_and_rolling_deploy():
     assert dc.get("DeploymentCircuitBreaker", {}).get("Rollback") is True
 
 
-def test_build_ecs_service_uses_fargate_spot():
+def test_build_ecs_service_default_capacity_is_on_demand():
     svc = services_common.build_ecs_service(
         service_key="query-api",
         cluster_arn_param="ClusterArn",
@@ -136,8 +136,9 @@ def test_build_ecs_service_uses_fargate_spot():
     rendered = json.loads(json.dumps(svc, default=lambda o: o.to_dict()))
     props = rendered["Properties"]
     assert "LaunchType" not in props
+    # Default ("fallback") is pure on-demand FARGATE — no spot anywhere.
     assert props["CapacityProviderStrategy"] == [
-        {"CapacityProvider": "FARGATE_SPOT", "Weight": 1}
+        {"CapacityProvider": "FARGATE", "Weight": 1}
     ]
 
 
@@ -154,39 +155,33 @@ def test_build_ecs_service_fallback_capacity():
     )
     rendered = json.loads(json.dumps(svc, default=lambda o: o.to_dict()))
     strat = rendered["Properties"]["CapacityProviderStrategy"]
-    # On-demand FARGATE carries Base=1 so a desired=1 singleton's only task is
-    # always placed on on-demand (reliable); FARGATE_SPOT is weighted for any
-    # scale-out replicas beyond the first.
+    # Pure on-demand FARGATE for all replicas — the only deploy-reliable choice.
     assert strat == [
-        {"CapacityProvider": "FARGATE", "Base": 1, "Weight": 1},
-        {"CapacityProvider": "FARGATE_SPOT", "Weight": 4},
+        {"CapacityProvider": "FARGATE", "Weight": 1},
     ]
 
 
 def test_capacity_provider_strategy_modes():
-    assert services_common.capacity_provider_strategy("spot")[0].to_dict() == {
-        "CapacityProvider": "FARGATE_SPOT",
-        "Weight": 1,
-    }
+    # "spot" is the explicit, deploy-unsafe opt-in: pure FARGATE_SPOT.
+    spot = [i.to_dict() for i in services_common.capacity_provider_strategy("spot")]
+    assert spot == [{"CapacityProvider": "FARGATE_SPOT", "Weight": 1}]
+    # "fallback" is the default: pure on-demand FARGATE, no spot.
     fallback = [i.to_dict() for i in services_common.capacity_provider_strategy("fallback")]
-    assert fallback == [
-        {"CapacityProvider": "FARGATE", "Base": 1, "Weight": 1},
-        {"CapacityProvider": "FARGATE_SPOT", "Weight": 4},
-    ]
+    assert fallback == [{"CapacityProvider": "FARGATE", "Weight": 1}]
     with pytest.raises(ValueError):
         services_common.capacity_provider_strategy("nope")
 
 
-def test_fallback_fargate_carries_base_one():
-    """The crux of the singleton-placement bug: weights alone do not fail over
-    for a desired=1 service. Base=1 on the on-demand FARGATE provider is what
-    guarantees the first (and for singletons, only) task always places on
-    on-demand. Only one provider in a strategy may carry Base>0 — it's FARGATE.
+def test_fallback_is_pure_on_demand_no_spot_no_base():
+    """The default path must be pure on-demand. A weight-based strategy does not
+    give a single task failover, and FARGATE_SPOT cannot guarantee placement
+    during a rolling deploy, so the strategy is exactly one FARGATE item with
+    Weight=1, no FARGATE_SPOT, and no Base on any item.
     """
-    items = services_common.capacity_provider_strategy("fallback")
-    by_provider = {i.to_dict()["CapacityProvider"]: i.to_dict() for i in items}
-    assert by_provider["FARGATE"]["Base"] == 1
-    assert "FARGATE_SPOT" in by_provider
-    assert "Base" not in by_provider["FARGATE_SPOT"]
-    bases = [d.get("Base", 0) for d in by_provider.values()]
-    assert sum(1 for b in bases if b) == 1
+    items = [i.to_dict() for i in services_common.capacity_provider_strategy("fallback")]
+    assert items == [{"CapacityProvider": "FARGATE", "Weight": 1}]
+    assert len(items) == 1
+    assert items[0]["CapacityProvider"] == "FARGATE"
+    assert items[0]["Weight"] == 1
+    assert all("FARGATE_SPOT" not in d.values() for d in items)
+    assert all("Base" not in d for d in items)

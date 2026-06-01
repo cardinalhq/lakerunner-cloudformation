@@ -23,7 +23,7 @@ Resources created:
   - OtelGrpcListenerRule: path /v1/*, priority 300.
   - OtelGrpcLogGroup: /cardinal/otel-grpc.
   - OtelGrpcTaskDef: ARM64 Fargate, env vars, LICENSE_DATA secret.
-  - CollectorService: FARGATE_SPOT, circuit breaker, no Cloud Map.
+  - CollectorService: FARGATE on-demand, circuit breaker, no Cloud Map.
 """
 
 from troposphere import (
@@ -606,8 +606,14 @@ def build() -> Template:
         Service(
             "CollectorService",
             Cluster=Ref("EcsClusterArn"),
+            # On-demand FARGATE only. The collector is the deploy-critical
+            # ingest path, and ECS rolling deploys + the circuit breaker
+            # require every new task to place. FARGATE_SPOT cannot guarantee
+            # placement at any instant, so a spot tier (even weighted, even
+            # with Base=1 for the first task) makes deploys flaky and triggers
+            # rollbacks. Reliable deploys require on-demand.
             CapacityProviderStrategy=[
-                CapacityProviderStrategyItem(CapacityProvider="FARGATE_SPOT", Weight=1),
+                CapacityProviderStrategyItem(CapacityProvider="FARGATE", Weight=1),
             ],
             DesiredCount=Ref("OtelReplicas"),
             TaskDefinition=Ref(task_def),
