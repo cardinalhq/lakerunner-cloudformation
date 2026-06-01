@@ -217,6 +217,76 @@ def build() -> Template:
         )
     )
 
+    t.add_resource(
+        Role(
+            "LakerunnerAccessRole",
+            AssumeRolePolicyDocument={
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Effect": "Allow",
+                        "Principal": {"AWS": Ref("LakerunnerPrincipal")},
+                        "Action": "sts:AssumeRole",
+                        "Condition": If(
+                            "HasExternalId",
+                            {
+                                "StringEquals": {
+                                    "sts:ExternalId": Ref("ExternalId")
+                                }
+                            },
+                            Ref("AWS::NoValue"),
+                        ),
+                    }
+                ],
+            },
+            Policies=[
+                Policy(
+                    PolicyName="cardinal-satellite-access",
+                    PolicyDocument={
+                        "Version": "2012-10-17",
+                        "Statement": [
+                            {
+                                "Sid": "RawBucketReadDelete",
+                                "Effect": "Allow",
+                                "Action": [
+                                    "s3:GetObject",
+                                    "s3:DeleteObject",
+                                    "s3:ListBucket",
+                                    "s3:GetBucketLocation",
+                                ],
+                                "Resource": [
+                                    Sub(
+                                        "arn:${AWS::Partition}:s3:::"
+                                        "${BucketName}",
+                                        BucketName=bucket_name_value,
+                                    ),
+                                    Sub(
+                                        "arn:${AWS::Partition}:s3:::"
+                                        "${BucketName}/*",
+                                        BucketName=bucket_name_value,
+                                    ),
+                                ],
+                            },
+                            {
+                                "Sid": "RawQueueConsume",
+                                "Effect": "Allow",
+                                "Action": [
+                                    "sqs:ReceiveMessage",
+                                    "sqs:DeleteMessage",
+                                    "sqs:GetQueueAttributes",
+                                    "sqs:GetQueueUrl",
+                                    "sqs:ChangeMessageVisibility",
+                                ],
+                                "Resource": GetAtt(queue, "Arn"),
+                            },
+                        ],
+                    },
+                )
+            ],
+            Tags=_tags(component="satellite-access-role"),
+        )
+    )
+
     return t
 
 

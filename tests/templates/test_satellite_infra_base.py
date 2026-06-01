@@ -88,3 +88,44 @@ def test_bucket_lifecycle_uses_parameter(td):
     ]["Rules"][0]
     assert rule["ExpirationInDays"] == {"Ref": "RawBucketLifecycleDays"}
     assert rule["AbortIncompleteMultipartUpload"]["DaysAfterInitiation"] == 1
+
+
+def test_role_trusts_lakerunner_principal(td):
+    trust = td["Resources"]["LakerunnerAccessRole"]["Properties"][
+        "AssumeRolePolicyDocument"
+    ]["Statement"][0]
+    assert trust["Principal"] == {"AWS": {"Ref": "LakerunnerPrincipal"}}
+    assert trust["Action"] == "sts:AssumeRole"
+
+
+def test_role_external_id_is_conditional(td):
+    trust = td["Resources"]["LakerunnerAccessRole"]["Properties"][
+        "AssumeRolePolicyDocument"
+    ]["Statement"][0]
+    assert trust["Condition"] == {
+        "Fn::If": [
+            "HasExternalId",
+            {"StringEquals": {"sts:ExternalId": {"Ref": "ExternalId"}}},
+            {"Ref": "AWS::NoValue"},
+        ]
+    }
+
+
+def test_role_can_read_and_delete_raw(td):
+    stmts = td["Resources"]["LakerunnerAccessRole"]["Properties"]["Policies"][
+        0
+    ]["PolicyDocument"]["Statement"]
+    s3 = next(s for s in stmts if s["Sid"] == "RawBucketReadDelete")
+    assert {"s3:GetObject", "s3:DeleteObject", "s3:ListBucket"}.issubset(
+        set(s3["Action"])
+    )
+
+
+def test_role_can_consume_only_its_queue(td):
+    stmts = td["Resources"]["LakerunnerAccessRole"]["Properties"]["Policies"][
+        0
+    ]["PolicyDocument"]["Statement"]
+    sqs = next(s for s in stmts if s["Sid"] == "RawQueueConsume")
+    assert sqs["Resource"] == {"Fn::GetAtt": ["RawIngestQueue", "Arn"]}
+    assert "sqs:ReceiveMessage" in sqs["Action"]
+    assert "sqs:DeleteMessage" in sqs["Action"]
