@@ -73,6 +73,7 @@ from troposphere.logs import LogGroup
 
 from cardinal_cfn.defaults import load_defaults, load_otel_default_config
 from cardinal_cfn.images import add_image_override
+from cardinal_cfn.install_id import install_id_short
 from cardinal_cfn.parameters import add_parameter_group_metadata
 from cardinal_cfn.policies import apply_policy
 
@@ -138,6 +139,23 @@ def build() -> Template:
             Description=(
                 "ARN of the Cardinal license secret in this account. "
                 "The collector validates it at startup."
+            ),
+        )
+    )
+    t.add_parameter(
+        Parameter(
+            "OrganizationId",
+            Type="String",
+            AllowedPattern=(
+                r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+                r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            ),
+            Description=(
+                "UUID of the organization this satellite's telemetry is "
+                "attributed to. Known at base-install time; supplied by the "
+                "operator. Must be unique per satellite so cooked-bucket "
+                "storage-profile resolution does not collide with the "
+                "operator's write-destination seed."
             ),
         )
     )
@@ -257,6 +275,7 @@ def build() -> Template:
                 "parameters": [
                     "RawBucketName",
                     "LicenseSecretArn",
+                    "OrganizationId",
                     "EcsClusterArn",
                 ],
             },
@@ -525,17 +544,12 @@ def build() -> Template:
     # Task definition (inlined — exec/task roles are in-stack resources,
     # so we use GetAtt(..., "Arn") instead of Ref(param)).
     # ------------------------------------------------------------------
-    storage_profiles = defaults.get("storage_profiles") or []
-    default_org = (
-        storage_profiles[0].get("organization_id")
-        if storage_profiles else "default"
-    )
-    default_collector = (
-        otel_cfg.get("collector_name")
-        or (storage_profiles[0].get("collector_name") if storage_profiles else None)
-        or "lakerunner"
-    )
-
+    # ORG is the operator-supplied org id this satellite is attributed to.
+    # COLLECTOR is an auto-generated, stable, alpha-prefixed name unique to
+    # this stack (a<8-hex> from AWS::StackId). satellite-services is a
+    # standalone root stack, so Ref(AWS::StackId) is its own id. A unique
+    # (ORG, COLLECTOR) keeps the storage-profile resolver from mis-routing
+    # cooked writes into the operator's seed identity.
     env = [
         Environment(
             Name="CHQ_COLLECTOR_CONFIG_YAML",
@@ -547,8 +561,8 @@ def build() -> Template:
         ),
         Environment(Name="LRDB_S3_BUCKET", Value=Ref("RawBucketName")),
         Environment(Name="LRDB_S3_REGION", Value=Ref("AWS::Region")),
-        Environment(Name="ORG", Value=default_org),
-        Environment(Name="COLLECTOR", Value=default_collector),
+        Environment(Name="ORG", Value=Ref("OrganizationId")),
+        Environment(Name="COLLECTOR", Value=Sub("a${Short}", Short=install_id_short())),
     ]
 
     # Add service-specific env vars from defaults (e.g. OTEL_RESOURCE_ATTRIBUTES)

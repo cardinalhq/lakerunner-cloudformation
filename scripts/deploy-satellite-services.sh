@@ -29,6 +29,7 @@ Required:
   VERSION                     Published template tag.
   SATELLITE_INFRA_BASE_STACK  Upstream satellite-infra-base (RawBucketName).
   INFRA_BASE_STACK            Upstream lakerunner-infra-base (LicenseSecretArn).
+  ORGANIZATION_ID             Org UUID this satellite's telemetry is attributed to.
   VPC_ID                      VPC for the collector.
   ALB_SUBNETS                 Comma-separated subnets for the collector ALB.
   TASK_SUBNETS                Comma-separated subnets for the collector tasks.
@@ -57,6 +58,7 @@ missing=""
 [ -z "${VERSION:-}" ] && missing="$missing VERSION"
 [ -z "${SATELLITE_INFRA_BASE_STACK:-}" ] && missing="$missing SATELLITE_INFRA_BASE_STACK"
 [ -z "${INFRA_BASE_STACK:-}" ] && missing="$missing INFRA_BASE_STACK"
+[ -z "${ORGANIZATION_ID:-}" ] && missing="$missing ORGANIZATION_ID"
 [ -z "${VPC_ID:-}" ] && missing="$missing VPC_ID"
 [ -z "${ALB_SUBNETS:-}" ] && missing="$missing ALB_SUBNETS"
 [ -z "${TASK_SUBNETS:-}" ] && missing="$missing TASK_SUBNETS"
@@ -78,7 +80,8 @@ TEMPLATE_URL="$template_base_url/$VERSION/$TEMPLATE_KEY"
 FROM_STACKS="$SATELLITE_INFRA_BASE_STACK $INFRA_BASE_STACK"
 MAPS=""
 
-params="VpcId=$VPC_ID
+params="OrganizationId=$ORGANIZATION_ID
+VpcId=$VPC_ID
 AlbSubnetsCsv=$ALB_SUBNETS
 TaskSubnetsCsv=$TASK_SUBNETS
 EcsClusterArn=$ECS_CLUSTER_ARN

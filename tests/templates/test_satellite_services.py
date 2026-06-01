@@ -21,6 +21,7 @@ def test_required_parameters(td):
     for n in (
         "RawBucketName",
         "LicenseSecretArn",
+        "OrganizationId",
         "VpcId",
         "AlbSubnetsCsv",
         "TaskSubnetsCsv",
@@ -34,6 +35,17 @@ def test_alb_scheme_allowed_values(td):
     p = td["Parameters"]["AlbScheme"]
     assert p["AllowedValues"] == ["internal", "internet-facing"]
     assert p["Default"] == "internal"
+
+
+def test_organization_id_required_uuid(td):
+    """OrganizationId is required (no Default) and constrained to a UUID."""
+    p = td["Parameters"]["OrganizationId"]
+    assert p["Type"] == "String"
+    assert "Default" not in p, "OrganizationId must be required (no Default)"
+    assert p["AllowedPattern"] == (
+        r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+        r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -189,6 +201,36 @@ def test_taskdef_writes_bucket_env(td):
     container = task_def["Properties"]["ContainerDefinitions"][0]
     env = {e["Name"]: e["Value"] for e in container.get("Environment", [])}
     assert env.get("LRDB_S3_BUCKET") == {"Ref": "RawBucketName"}
+
+
+def test_org_env_is_organization_id_param(td):
+    """ORG comes from the operator-supplied OrganizationId param, not storage_profiles."""
+    task_def = next(
+        r for r in td["Resources"].values() if r["Type"] == "AWS::ECS::TaskDefinition"
+    )
+    container = task_def["Properties"]["ContainerDefinitions"][0]
+    env = {e["Name"]: e["Value"] for e in container.get("Environment", [])}
+    assert env.get("ORG") == {"Ref": "OrganizationId"}
+
+
+def test_collector_env_is_stackid_derived_sub(td):
+    """COLLECTOR is an auto-generated a${...} Sub tied to AWS::StackId, never 'lakerunner'."""
+    task_def = next(
+        r for r in td["Resources"].values() if r["Type"] == "AWS::ECS::TaskDefinition"
+    )
+    container = task_def["Properties"]["ContainerDefinitions"][0]
+    env = {e["Name"]: e["Value"] for e in container.get("Environment", [])}
+    collector = env.get("COLLECTOR")
+    assert isinstance(collector, dict) and "Fn::Sub" in collector, (
+        f"COLLECTOR must be a Fn::Sub, got: {collector!r}"
+    )
+    sub = collector["Fn::Sub"]
+    # Sub with named substitution: [template, {Short: <stackid expr>}]
+    template, subs = sub
+    assert template == "a${Short}"
+    assert collector != "lakerunner"
+    # The substitution must derive from AWS::StackId.
+    assert "AWS::StackId" in json.dumps(subs)
 
 
 def test_service_assigns_no_public_ip(td):
