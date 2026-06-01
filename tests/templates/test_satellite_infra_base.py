@@ -148,11 +148,14 @@ def test_outputs_present(td):
 
 def test_pull_model_no_remote_notification_target(td):
     """Pull invariant: the bucket notifies only its own in-stack queue;
-    no resource targets a remote/central queue, and there is no outbound
-    push to the Lakerunner account."""
-    qcfg = td["Resources"]["RawIngestBucket"]["Properties"][
+    no resource targets a remote/central queue, SNS topic, or Lambda, and
+    there is no outbound push to the Lakerunner account."""
+    notif = td["Resources"]["RawIngestBucket"]["Properties"][
         "NotificationConfiguration"
-    ]["QueueConfigurations"]
+    ]
+    assert "LambdaConfigurations" not in notif
+    assert "TopicConfigurations" not in notif
+    qcfg = notif["QueueConfigurations"]
     assert all(
         c["Queue"] == {"Fn::GetAtt": ["RawIngestQueue", "Arn"]} for c in qcfg
     )
