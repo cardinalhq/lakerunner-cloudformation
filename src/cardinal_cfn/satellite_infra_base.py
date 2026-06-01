@@ -163,6 +163,60 @@ def build() -> Template:
         )
     )
 
+    t.add_resource(
+        _delete(
+            Bucket(
+                "RawIngestBucket",
+                # S3 validates the SQS notification target when the bucket's
+                # notification config is applied and fails if the queue policy
+                # is not yet in place, so the bucket is created after it.
+                DependsOn="RawIngestQueuePolicy",
+                BucketName=bucket_name_value,
+                PublicAccessBlockConfiguration=PublicAccessBlockConfiguration(
+                    BlockPublicAcls=True,
+                    BlockPublicPolicy=True,
+                    IgnorePublicAcls=True,
+                    RestrictPublicBuckets=True,
+                ),
+                BucketEncryption=BucketEncryption(
+                    ServerSideEncryptionConfiguration=[
+                        ServerSideEncryptionRule(
+                            ServerSideEncryptionByDefault=(
+                                ServerSideEncryptionByDefault(
+                                    SSEAlgorithm="AES256"
+                                )
+                            )
+                        )
+                    ]
+                ),
+                LifecycleConfiguration=LifecycleConfiguration(
+                    Rules=[
+                        LifecycleRule(
+                            Id="cardinal-otel-raw-expire",
+                            Status="Enabled",
+                            Prefix="",
+                            ExpirationInDays=Ref("RawBucketLifecycleDays"),
+                            AbortIncompleteMultipartUpload=(
+                                AbortIncompleteMultipartUpload(
+                                    DaysAfterInitiation=1
+                                )
+                            ),
+                        )
+                    ]
+                ),
+                NotificationConfiguration=NotificationConfiguration(
+                    QueueConfigurations=[
+                        QueueConfigurations(
+                            Event="s3:ObjectCreated:*",
+                            Queue=GetAtt(queue, "Arn"),
+                        )
+                    ]
+                ),
+                Tags=_tags(component="otel-raw-bucket"),
+            )
+        )
+    )
+
     return t
 
 

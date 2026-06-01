@@ -44,3 +44,39 @@ def test_queue_policy_allows_s3_same_account_only(td):
         "Ref": "AWS::AccountId"
     }
     assert "aws:SourceArn" in stmt["Condition"]["ArnLike"]
+
+
+def test_bucket_is_delete_policy(td):
+    b = td["Resources"]["RawIngestBucket"]
+    assert b["DeletionPolicy"] == "Delete"
+    assert b["UpdateReplacePolicy"] == "Delete"
+
+
+def test_bucket_blocks_public_access(td):
+    pab = td["Resources"]["RawIngestBucket"]["Properties"][
+        "PublicAccessBlockConfiguration"
+    ]
+    assert pab == {
+        "BlockPublicAcls": True,
+        "BlockPublicPolicy": True,
+        "IgnorePublicAcls": True,
+        "RestrictPublicBuckets": True,
+    }
+
+
+def test_bucket_is_encrypted(td):
+    enc = td["Resources"]["RawIngestBucket"]["Properties"]["BucketEncryption"]
+    rule = enc["ServerSideEncryptionConfiguration"][0]
+    assert rule["ServerSideEncryptionByDefault"]["SSEAlgorithm"] == "AES256"
+
+
+def test_bucket_notifies_its_own_queue(td):
+    qcfg = td["Resources"]["RawIngestBucket"]["Properties"][
+        "NotificationConfiguration"
+    ]["QueueConfigurations"][0]
+    assert qcfg["Event"] == "s3:ObjectCreated:*"
+    assert qcfg["Queue"] == {"Fn::GetAtt": ["RawIngestQueue", "Arn"]}
+
+
+def test_bucket_depends_on_queue_policy(td):
+    assert td["Resources"]["RawIngestBucket"]["DependsOn"] == "RawIngestQueuePolicy"
