@@ -242,6 +242,31 @@ def build() -> Template:
             Description="Desired replicas for lakerunner-pubsub-sqs.",
         )
     )
+    t.add_parameter(
+        Parameter(
+            "PubsubAutoRegister",
+            Type="String",
+            Default="false",
+            AllowedValues=["true", "false"],
+            Description=(
+                "Enable pubsub-sqs auto-registration of unseen satellite raw "
+                "buckets. When true, the worker registers new orgs and routes "
+                "cooked output to PubsubAutoRegisterWritesToInstance."
+            ),
+        )
+    )
+    t.add_parameter(
+        Parameter(
+            "PubsubAutoRegisterWritesToInstance",
+            Type="String",
+            Default="1",
+            Description=(
+                "Central cooked-bucket instance_num that pubsub-sqs auto-"
+                "registered orgs write to. Required when PubsubAutoRegister "
+                "is true."
+            ),
+        )
+    )
 
     # ---------------------------------------------------------------------
     # Console parameter grouping
@@ -281,7 +306,13 @@ def build() -> Template:
             },
             {
                 "label": "Pubsub-SQS tunables",
-                "parameters": ["PubsubSqsReplicas", "QueueUrl", "QueueRoleArn"],
+                "parameters": [
+                    "PubsubSqsReplicas",
+                    "QueueUrl",
+                    "QueueRoleArn",
+                    "PubsubAutoRegister",
+                    "PubsubAutoRegisterWritesToInstance",
+                ],
             },
             {
                 "label": "Image overrides",
@@ -365,6 +396,11 @@ def build() -> Template:
                 Environment(Name="SQS_QUEUE_URL", Value=Ref("QueueUrl")),
                 Environment(Name="SQS_REGION", Value=Ref("AWS::Region")),
                 Environment(Name="SQS_ROLE_ARN", Value=Ref("QueueRoleArn")),
+                Environment(Name="LAKERUNNER_PUBSUB_AUTOREGISTER", Value=Ref("PubsubAutoRegister")),
+                Environment(
+                    Name="LAKERUNNER_PUBSUB_AUTOREGISTER_WRITES_TO_INSTANCE",
+                    Value=Ref("PubsubAutoRegisterWritesToInstance"),
+                ),
             ],
         },
     ]

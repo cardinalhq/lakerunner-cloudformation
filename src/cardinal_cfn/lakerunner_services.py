@@ -110,6 +110,14 @@ def _sizing_param_specs(defaults: dict) -> list[dict]:
          "description": "Fargate memory (MiB) for lakerunner-process-traces."},
         {"name": "PubsubSqsReplicas", "type": "Number", "default": int(pubsub["replicas"]),
          "min": 1, "description": "Desired replicas for lakerunner-pubsub-sqs."},
+        {"name": "PubsubAutoRegister", "type": "String", "default": "false",
+         "allowed_values": ["true", "false"],
+         "description": "Enable pubsub-sqs auto-registration of unseen satellite raw buckets."},
+        {"name": "PubsubAutoRegisterWritesToInstance", "type": "String", "default": "1",
+         "description": (
+             "Central cooked-bucket instance_num pubsub-sqs auto-registered orgs write to. "
+             "Required when PubsubAutoRegister is true."
+         )},
         # Maestro
         {"name": "MaestroTaskCpu", "type": "String", "default": str(maestro_cfg["task"]["cpu"]),
          "description": "Fargate CPU units for the maestro task definition."},
@@ -622,6 +630,8 @@ def build() -> Template:
         "ProcessTracesReplicas": Ref("ProcessTracesReplicas"),
         "ProcessTracesMemory": Ref("ProcessTracesMemory"),
         "PubsubSqsReplicas": Ref("PubsubSqsReplicas"),
+        "PubsubAutoRegister": Ref("PubsubAutoRegister"),
+        "PubsubAutoRegisterWritesToInstance": Ref("PubsubAutoRegisterWritesToInstance"),
     })
     services_process_stack = _add_child(
         t, "Process", "services-process.yaml",

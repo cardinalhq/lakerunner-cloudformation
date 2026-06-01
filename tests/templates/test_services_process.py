@@ -329,6 +329,46 @@ def test_process_services_have_no_sqs_env(td):
 
 
 # ---------------------------------------------------------------------------
+# pubsub-sqs auto-registration env vars
+# ---------------------------------------------------------------------------
+
+
+def test_pubsub_autoregister_params_exist_with_defaults(td):
+    """PubsubAutoRegister and PubsubAutoRegisterWritesToInstance are declared
+    with the expected defaults."""
+    params = td["Parameters"]
+    assert "PubsubAutoRegister" in params
+    assert params["PubsubAutoRegister"]["Default"] == "false"
+    assert params["PubsubAutoRegister"]["AllowedValues"] == ["true", "false"]
+    assert "PubsubAutoRegisterWritesToInstance" in params
+    assert params["PubsubAutoRegisterWritesToInstance"]["Default"] == "1"
+
+
+def test_pubsub_sqs_has_autoregister_env_vars(td):
+    """pubsub-sqs container carries the two auto-registration env vars wired
+    to their respective parameters."""
+    env = _env(td, "PubsubSqsTaskDef")
+    assert env.get("LAKERUNNER_PUBSUB_AUTOREGISTER") == {"Ref": "PubsubAutoRegister"}, (
+        env.get("LAKERUNNER_PUBSUB_AUTOREGISTER")
+    )
+    assert env.get("LAKERUNNER_PUBSUB_AUTOREGISTER_WRITES_TO_INSTANCE") == (
+        {"Ref": "PubsubAutoRegisterWritesToInstance"}
+    ), env.get("LAKERUNNER_PUBSUB_AUTOREGISTER_WRITES_TO_INSTANCE")
+
+
+def test_process_services_have_no_autoregister_env(td):
+    """process-logs/metrics/traces must NOT carry the auto-registration env vars."""
+    for task_def_id in ("ProcessLogsTaskDef", "ProcessMetricsTaskDef", "ProcessTracesTaskDef"):
+        env = _env(td, task_def_id)
+        assert "LAKERUNNER_PUBSUB_AUTOREGISTER" not in env, (
+            f"{task_def_id} unexpectedly has LAKERUNNER_PUBSUB_AUTOREGISTER"
+        )
+        assert "LAKERUNNER_PUBSUB_AUTOREGISTER_WRITES_TO_INSTANCE" not in env, (
+            f"{task_def_id} unexpectedly has LAKERUNNER_PUBSUB_AUTOREGISTER_WRITES_TO_INSTANCE"
+        )
+
+
+# ---------------------------------------------------------------------------
 # B → C boundary
 # ---------------------------------------------------------------------------
 
