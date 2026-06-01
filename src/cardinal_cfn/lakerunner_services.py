@@ -169,10 +169,11 @@ _INFRA_SETUP_PARAMS = [
      "mechanism pending); the process tier runs with no queue."),
     ("QueueArn", "String", "",
      "Optional ARN of the SQS pull-model queue. Empty for v1."),
-    ("QueueRoleArn", "String", "",
-     "Optional ARN of the cardinal-satellite-access role the pubsub-sqs binary "
-     "assumes to reach the queue and its raw bucket (satellite-infra-base "
-     "LakerunnerAccessRoleArn output). Empty uses the task role directly."),
+    ("PubsubSqsEnv", "String", "",
+     "Driver-supplied SQS env for pubsub-sqs: a shell-evalable string of "
+     "SQS_QUEUE_URL[/REGION/ROLE_ARN] (+ numbered _N groups) the container "
+     "exports before start. The Jenkins driver builds this from adopted-account "
+     "queue/role/region knowledge. Empty idles the pubsub-sqs service."),
     ("LicenseSecretArn", "String", None,
      "ARN of the cardinal-license secret (infra output)."),
     ("AdminKeySecretArn", "String", None,
@@ -638,8 +639,12 @@ def build() -> Template:
     services_process_params = _service_tier_common(
         task_sg=sec_process_sg, task_role=process_role,
     )
+    # The process tier no longer consumes the raw QueueUrl/QueueArn; pubsub-sqs
+    # gets the whole driver-built SQS env as one blob (PubsubSqsEnv) instead.
+    del services_process_params["QueueUrl"]
+    del services_process_params["QueueArn"]
     services_process_params.update({
-        "QueueRoleArn": Ref("QueueRoleArn"),
+        "PubsubSqsEnv": Ref("PubsubSqsEnv"),
         "ProcessLogsReplicas": Ref("ProcessLogsReplicas"),
         "ProcessLogsMemory": Ref("ProcessLogsMemory"),
         "ProcessMetricsReplicas": Ref("ProcessMetricsReplicas"),

@@ -82,18 +82,24 @@ def test_data_plane_params(td):
     # Removed/renamed sources
     assert "IngestBucketName" not in params
     assert "RdsSecurityGroupId" not in params
-    # SQS is optional in v1.
-    for n in ("QueueUrl", "QueueArn", "QueueRoleArn"):
+    # SQS is optional in v1; QueueUrl/QueueArn still feed query/control/otel.
+    for n in ("QueueUrl", "QueueArn"):
         assert n in params, f"missing queue param: {n}"
         assert params[n]["Default"] == ""
+    # QueueRoleArn is gone -- replaced by the driver-supplied PubsubSqsEnv blob.
+    assert "QueueRoleArn" not in params
 
 
-def test_queue_role_arn_wired_to_process_child(td):
-    """QueueRoleArn (satellite access role) flows into the Process child so the
-    pubsub-sqs binary can assume it for the SQS group-0 contract."""
-    assert "QueueRoleArn" in td["Parameters"]
+def test_pubsub_sqs_env_wired_to_process_child(td):
+    """The driver-supplied SQS env blob flows into the Process child, where the
+    pubsub-sqs container exports it before exec'ing the binary."""
+    assert "PubsubSqsEnv" in td["Parameters"]
+    assert td["Parameters"]["PubsubSqsEnv"]["Default"] == ""
     process = td["Resources"]["Process"]["Properties"]["Parameters"]
-    assert process["QueueRoleArn"] == {"Ref": "QueueRoleArn"}
+    assert process["PubsubSqsEnv"] == {"Ref": "PubsubSqsEnv"}
+    # The Process child no longer receives the raw queue inputs.
+    for n in ("QueueUrl", "QueueArn", "QueueRoleArn"):
+        assert n not in process, f"Process child should not receive {n}"
 
 
 def test_children_present(td):

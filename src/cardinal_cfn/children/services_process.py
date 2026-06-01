@@ -14,6 +14,8 @@ at the max would triple the steady-state Fargate footprint on every deploy.
 CPU values come from cardinal-defaults.yaml directly.
 """
 
+import shlex
+
 from troposphere import (
     GetAtt,
     Output,
@@ -81,17 +83,16 @@ def build() -> Template:
     t.add_parameter(
         Parameter("BucketName", Type="String", Description="Name of the ingest S3 bucket.")
     )
-    t.add_parameter(Parameter("QueueUrl", Type="String", Description="URL of the ingest SQS queue."))
-    t.add_parameter(Parameter("QueueArn", Type="String", Description="ARN of the ingest SQS queue."))
     t.add_parameter(
         Parameter(
-            "QueueRoleArn",
+            "PubsubSqsEnv",
             Type="String",
             Default="",
             Description=(
-                "ARN of the cardinal-satellite-access role the pubsub-sqs binary "
-                "assumes (via STS) to reach the queue and the raw bucket behind "
-                "it. Empty uses the task role's own credentials directly."
+                "Driver-supplied SQS env for pubsub-sqs: a shell-evalable string "
+                "of SQS_QUEUE_URL[/REGION/ROLE_ARN] (+ numbered _N groups) the "
+                "container exports before start. The Jenkins driver builds this "
+                "from adopted-account queue/role/region knowledge."
             ),
         )
     )
@@ -250,9 +251,6 @@ def build() -> Template:
                     "DbPort",
                     "DbSecretArn",
                     "BucketName",
-                    "QueueUrl",
-                    "QueueArn",
-                    "QueueRoleArn",
                     "LicenseSecretArn",
                     "MigrationComplete",
                 ],
@@ -271,7 +269,7 @@ def build() -> Template:
             },
             {
                 "label": "Pubsub-SQS tunables",
-                "parameters": ["PubsubSqsReplicas"],
+                "parameters": ["PubsubSqsReplicas", "PubsubSqsEnv"],
             },
             {
                 "label": "Image overrides",
@@ -289,13 +287,6 @@ def build() -> Template:
         Environment(Name="LRDB_DBNAME", Value="lakerunner"),
         Environment(Name="LRDB_SSLMODE", Value="require"),
         Environment(Name="LRDB_S3_BUCKET", Value=Ref("BucketName")),
-        # SQS group-0 contract read by the lakerunner binary (config/sqs.go
-        # DiscoverSQSQueues). A group is live only when SQS_QUEUE_URL is set; an
-        # empty URL idles. SQS_ROLE_ARN is the role the binary assumes (via STS)
-        # to reach the queue and the raw bucket behind it; empty uses task creds.
-        Environment(Name="SQS_QUEUE_URL", Value=Ref("QueueUrl")),
-        Environment(Name="SQS_REGION", Value=Ref("AWS::Region")),
-        Environment(Name="SQS_ROLE_ARN", Value=Ref("QueueRoleArn")),
         Environment(Name="CONFIGDB_HOST", Value=Ref("DbEndpoint")),
         Environment(Name="CONFIGDB_PORT", Value=Ref("DbPort")),
         Environment(Name="CONFIGDB_DBNAME", Value="configdb"),
@@ -352,6 +343,13 @@ def build() -> Template:
             "memory_mib": pubsub_cfg["memory_mib"],
             "desired_count": Ref("PubsubSqsReplicas"),
             "output_name": "PubsubSqsServiceName",
+            # pubsub-sqs alone consumes SQS. CFN cannot expand the driver's
+            # arbitrary-count SQS_* env groups into container env vars, so the
+            # driver hands the whole set in as one shell-evalable blob
+            # (PUBSUB_SQS_ENV) which this container exports before exec'ing the
+            # binary. The other three process-* services never read SQS.
+            "extra_env": [Environment(Name="PUBSUB_SQS_ENV", Value=Ref("PubsubSqsEnv"))],
+            "command_override": _pubsub_wrapped_command(pubsub_cfg["command"]),
         },
     ]
 
@@ -366,10 +364,22 @@ def build() -> Template:
             desired_count=spec["desired_count"],
             base_env=base_env,
             base_secrets=base_secrets,
+            extra_env=spec.get("extra_env"),
+            command_override=spec.get("command_override"),
         )
         t.add_output(Output(spec["output_name"], Value=GetAtt(ecs_service, "Name")))
 
     return t
+
+
+def _pubsub_wrapped_command(command: list) -> list:
+    """Wrap the pubsub-sqs command so the container exports the driver-supplied
+    SQS env blob before exec'ing the binary.
+
+    Produces ["sh", "-c", 'set -a; eval "$PUBSUB_SQS_ENV"; set +a; exec <cmd>'].
+    """
+    joined = shlex.join(command)
+    return ["sh", "-c", f'set -a; eval "$PUBSUB_SQS_ENV"; set +a; exec {joined}']
 
 
 def _build_service_block(
@@ -383,6 +393,8 @@ def _build_service_block(
     desired_count,
     base_env: list,
     base_secrets: list,
+    extra_env: list | None = None,
+    command_override: list | None = None,
 ):
     """Wire up the three resources (log group, task def, service) for one service."""
     log_group = t.add_resource(services_common.build_log_group(service_key=service_key))
@@ -390,14 +402,16 @@ def _build_service_block(
         list(base_env)
         + services_common.lakerunner_otel_env(service_key=service_key)
         + _service_specific_env(config)
+        + list(extra_env or [])
     )
+    command = command_override if command_override is not None else config.get("command")
     task_def = t.add_resource(
         services_common.build_task_definition(
             service_key=service_key,
             image_ref=image_ref,
             cpu=cpu,
             memory_mib=memory_mib,
-            command=config.get("command"),
+            command=command,
             execution_role_arn_param="ExecutionRoleArn",
             task_role_arn=Ref("TaskRoleArn"),
             environment=env,
