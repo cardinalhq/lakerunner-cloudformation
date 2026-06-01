@@ -28,6 +28,10 @@ processors:
   memory_limiter:
     limit_mib: 1024
     check_interval: 1s
+  # Normalize metric temporality before writing to S3: convert cumulative
+  # sums/histograms to delta so the process-metrics worker sees a single
+  # temporality. Empty config converts every cumulative metric.
+  cumulativetodelta: {}
   batch:
     timeout: 10s
     send_batch_max_size: 2000
@@ -78,7 +82,7 @@ service:
       exporters: [awss3/logs]
     metrics:
       receivers: [otlp]
-      processors: [memory_limiter, batch]
+      processors: [memory_limiter, cumulativetodelta, batch]
       exporters: [awss3/metrics]
     traces:
       receivers: [otlp]
