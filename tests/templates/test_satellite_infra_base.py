@@ -43,3 +43,4 @@ def test_queue_policy_allows_s3_same_account_only(td):
     assert stmt["Condition"]["StringEquals"]["aws:SourceAccount"] == {
         "Ref": "AWS::AccountId"
     }
+    assert "aws:SourceArn" in stmt["Condition"]["ArnLike"]
