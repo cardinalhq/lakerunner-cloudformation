@@ -35,6 +35,16 @@ cardinal-cleanup Fargate task, which drains ECS services, deletes the
 lakerunner stack, wipes the cardinal-* data layer with ownership-tag
 enforcement, then self-deletes its own stack.
 
+When a stack delete fails part-way and leaves resources in `DELETE_FAILED` /
+`DELETE_SKIPPED`, `sweep-stranded-resources.sh` mops them up. It is a single
+self-contained file (the Fargate container body is embedded in it as a quoted
+heredoc): it registers a one-shot privileged task directly via the ECS API (no
+CFN stack), the task discovers the stranded resources from the stack and
+deletes them by type (IAM roles, security groups, secrets, SSM parameters, S3
+buckets), and the driver deregisters + deletes the task definition once the
+task stops. The task runs under a caller-supplied "superadmin" role
+(`--task-role-arn`) and self-skips its own ENI security group.
+
 ## Scripts
 
 | Script | Purpose | Customer-facing? |
