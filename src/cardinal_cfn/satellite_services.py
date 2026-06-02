@@ -405,13 +405,10 @@ def build() -> Template:
                     Description="OTLP/HTTP from IngestSourceCidr",
                 )
             ],
-            SecurityGroupEgress=[
-                SecurityGroupRule(
-                    IpProtocol="-1",
-                    CidrIp="0.0.0.0/0",
-                    Description="All egress",
-                )
-            ],
+            # No inline SecurityGroupEgress: AWS auto-creates an all-allow
+            # egress rule. Specifying it would force CloudFormation to
+            # RevokeSecurityGroupEgress the default first, an action some
+            # customer SCPs explicitly deny (VPC-destructive guard).
             Tags=_tags(component="satellite-alb-sg"),
         )
     )
@@ -440,13 +437,7 @@ def build() -> Template:
                     Description="Health probe from ALB SG",
                 ),
             ],
-            SecurityGroupEgress=[
-                SecurityGroupRule(
-                    IpProtocol="-1",
-                    CidrIp="0.0.0.0/0",
-                    Description="All egress",
-                )
-            ],
+            # No inline SecurityGroupEgress: see AlbSecurityGroup above.
             Tags=_tags(component="satellite-task-sg"),
         )
     )

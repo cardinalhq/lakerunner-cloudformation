@@ -315,13 +315,10 @@ def build() -> Template:
                     Description="HTTPS from VPC",
                 )
             ],
-            SecurityGroupEgress=[
-                SecurityGroupRule(
-                    IpProtocol="-1",
-                    CidrIp="0.0.0.0/0",
-                    Description="All outbound traffic",
-                )
-            ],
+            # No inline SecurityGroupEgress: AWS auto-creates an all-allow
+            # egress rule. Specifying it would force CloudFormation to
+            # RevokeSecurityGroupEgress the default first, an action some
+            # customer SCPs explicitly deny (VPC-destructive guard).
             Tags=_vpc_tags(role="vpce-sg"),
         )
     )
