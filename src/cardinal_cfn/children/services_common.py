@@ -149,6 +149,7 @@ def build_task_definition(
     secrets: list | None = None,
     log_group_ref,
     container_port: int | None = None,
+    health_check_port: int | None = None,
 ) -> TaskDefinition:
     """ECS Fargate task definition for a service.
 
@@ -165,6 +166,11 @@ def build_task_definition(
     the container in a LoadBalancer/TargetGroup attachment — without the
     PortMapping CFN rejects the Service with "container ... did not have a
     container port N defined."
+
+    health_check_port: if provided, the container exposes an ADDITIONAL tcp
+    PortMapping at that port (lakerunner's dedicated health server, port 8090
+    as of v1.39). Needed so the ALB target group can probe the health server
+    on a port distinct from the traffic port.
     """
     container_kwargs = dict(
         Name=service_key,
@@ -184,10 +190,13 @@ def build_task_definition(
         container_kwargs["Command"] = command
     if secrets:
         container_kwargs["Secrets"] = secrets
+    port_mappings = []
     if container_port is not None:
-        container_kwargs["PortMappings"] = [
-            PortMapping(ContainerPort=container_port, Protocol="tcp")
-        ]
+        port_mappings.append(PortMapping(ContainerPort=container_port, Protocol="tcp"))
+    if health_check_port is not None:
+        port_mappings.append(PortMapping(ContainerPort=health_check_port, Protocol="tcp"))
+    if port_mappings:
+        container_kwargs["PortMappings"] = port_mappings
 
     return TaskDefinition(
         _resource_title(service_key, "TaskDef"),
@@ -272,6 +281,7 @@ def build_ecs_service(
     service_registry_ref=None,
     listener_rule_refs: list | None = None,
     capacity: str = "ondemand",
+    health_check_grace_period: int | None = None,
 ) -> Service:
     """ECS Fargate Service with rolling deploy + circuit breaker.
 
@@ -284,6 +294,11 @@ def build_ecs_service(
     already attached to a listener; without an explicit DependsOn, CFN may
     create the Service before the ListenerRule attaches the TG, producing
     "target group does not have an associated load balancer" failures.
+
+    health_check_grace_period: seconds ECS ignores ELB health-check failures
+    after a task starts. Only valid on a service with a LoadBalancers block;
+    gives the lakerunner health server (port 8090) a margin to come up before
+    the ALB starts failing the task.
     """
     kwargs: dict = dict(
         Cluster=Ref(cluster_arn_param),
@@ -316,6 +331,8 @@ def build_ecs_service(
                 TargetGroupArn=Ref(target_group_ref),
             )
         ]
+        if health_check_grace_period is not None:
+            kwargs["HealthCheckGracePeriodSeconds"] = health_check_grace_period
 
     if service_registry_ref is not None:
         kwargs["ServiceRegistries"] = [

@@ -209,6 +209,54 @@ def test_query_worker_service_has_no_load_balancers(td):
 
 
 # ---------------------------------------------------------------------------
+# lakerunner v1.39 health server (port 8090) wiring
+# ---------------------------------------------------------------------------
+
+
+def _query_api_container(td):
+    for res in td["Resources"].values():
+        if res["Type"] != "AWS::ECS::TaskDefinition":
+            continue
+        for container in res["Properties"]["ContainerDefinitions"]:
+            if container["Name"] == "query-api":
+                return container
+    raise AssertionError("no query-api container")
+
+
+def test_query_api_sets_health_check_port_env(td):
+    """v1.39 moved /healthz to a dedicated health server (port 8090, env
+    HEALTH_CHECK_PORT). Set it explicitly even though 8090 is the default."""
+    container = _query_api_container(td)
+    env = {e["Name"]: e["Value"] for e in container.get("Environment", [])}
+    assert env.get("HEALTH_CHECK_PORT") == "8090"
+
+
+def test_query_api_container_exposes_api_and_health_ports(td):
+    """query-api exposes its API/traffic port plus the 8090 health server so
+    the ALB target group can probe /healthz on 8090."""
+    container = _query_api_container(td)
+    ports = [pm["ContainerPort"] for pm in container.get("PortMappings", [])]
+    assert 8090 in ports, f"expected 8090 health port mapping; got {ports}"
+    assert len(ports) == 2, f"expected API + health port mappings; got {ports}"
+
+
+def test_query_api_target_group_probes_health_port_8090(td):
+    """The ALB target group probes /healthz on 8090, not the API/traffic port
+    where /healthz no longer lives (v1.39)."""
+    tg = next(r for r in td["Resources"].values()
+              if r["Type"] == "AWS::ElasticLoadBalancingV2::TargetGroup")
+    assert tg["Properties"]["HealthCheckPort"] == "8090"
+    assert tg["Properties"]["HealthCheckPath"] == "/healthz"
+
+
+def test_query_api_service_has_health_check_grace_period(td):
+    """60s margin for the health server (8090) to come up before the ALB
+    starts failing the task."""
+    svc = _service_by_logical_id(td, "QueryApiService")
+    assert svc["Properties"]["HealthCheckGracePeriodSeconds"] == 60
+
+
+# ---------------------------------------------------------------------------
 # Task-to-task ingress for query-worker port
 # ---------------------------------------------------------------------------
 

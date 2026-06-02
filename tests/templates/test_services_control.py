@@ -227,12 +227,57 @@ def test_control_service_load_balancer_targets_admin_api_container(td):
 
 
 def test_only_admin_api_container_exposes_a_port(td):
+    """admin-api exposes the 9091 API port plus the 8090 lakerunner v1.39 health
+    server (ALB-probed). The other three containers expose no ports — they share
+    the task namespace and would collide on the health port if it were exposed."""
     task = next(r for r in td["Resources"].values() if r["Type"] == "AWS::ECS::TaskDefinition")
     for c in task["Properties"]["ContainerDefinitions"]:
         if c["Name"] == "admin-api":
-            assert c.get("PortMappings") == [{"ContainerPort": 9091, "Protocol": "tcp"}]
+            assert c.get("PortMappings") == [
+                {"ContainerPort": 9091, "Protocol": "tcp"},
+                {"ContainerPort": 8090, "Protocol": "tcp"},
+            ]
         else:
             assert "PortMappings" not in c, f"{c['Name']} unexpectedly has a port"
+
+
+# ---------------------------------------------------------------------------
+# lakerunner v1.39 health server (port 8090) wiring
+# ---------------------------------------------------------------------------
+
+
+def test_each_container_has_distinct_health_check_port(td):
+    """All four containers share the merged task's network namespace, so they
+    cannot all bind the default health port (8090). admin-api keeps 8090 (the
+    ALB-probed one); the other three move to 8091/8092/8093 to avoid collision."""
+    expected = {
+        "admin-api": "8090",
+        "sweeper": "8091",
+        "monitoring": "8092",
+        "alert-evaluator": "8093",
+    }
+    for name, port in expected.items():
+        _, container = _task_def_for(td, name)
+        env = {e["Name"]: e["Value"] for e in container.get("Environment", [])}
+        assert env.get("HEALTH_CHECK_PORT") == port, (
+            f"{name} HEALTH_CHECK_PORT must be {port}; got {env.get('HEALTH_CHECK_PORT')!r}"
+        )
+
+
+def test_admin_api_target_group_probes_health_port_8090(td):
+    """The ALB target group probes /healthz on the dedicated health server
+    (8090), not the 9091 API port where /healthz no longer lives (v1.39)."""
+    tg = next(r for r in td["Resources"].values()
+              if r["Type"] == "AWS::ElasticLoadBalancingV2::TargetGroup")
+    assert tg["Properties"]["HealthCheckPort"] == "8090"
+    assert tg["Properties"]["HealthCheckPath"] == "/healthz"
+
+
+def test_control_service_has_health_check_grace_period(td):
+    """60s margin for admin-api's health server (8090) to come up before the
+    ALB starts failing the task."""
+    svc = td["Resources"]["ControlService"]
+    assert svc["Properties"]["HealthCheckGracePeriodSeconds"] == 60
 
 
 # ---------------------------------------------------------------------------

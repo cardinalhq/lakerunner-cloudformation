@@ -333,10 +333,15 @@ def build() -> Template:
     # YAML-declared env + any component-specific extras.
     # ---------------------------------------------------------------------
     # admin-api: ALB-attached, owns the admin-key secret.
+    # All four containers share the merged task's network namespace, so they
+    # CANNOT all bind the default health port (8090). Give each a DISTINCT
+    # HEALTH_CHECK_PORT. admin-api keeps 8090 (the ALB-probed one); the other
+    # three move to 8091/8092/8093 to avoid a port collision in the namespace.
     admin_env = (
         list(base_env)
         + services_common.lakerunner_otel_env(service_key="admin-api")
         + _service_specific_env(admin_cfg)
+        + [Environment(Name="HEALTH_CHECK_PORT", Value="8090")]
     )
     # Seed the lakerunner admin-api binary's first valid admin key. Without
     # this, every Authorization: Bearer <key> request fails validation
@@ -353,6 +358,7 @@ def build() -> Template:
         list(base_env)
         + services_common.lakerunner_otel_env(service_key="sweeper")
         + _service_specific_env(sweeper_cfg)
+        + [Environment(Name="HEALTH_CHECK_PORT", Value="8091")]
     )
 
     # alert-evaluator reaches query-api over the in-cluster Cloud Map DNS.
@@ -366,6 +372,7 @@ def build() -> Template:
                 Name="ALERT_EVALUATOR_QUERY_API_URL",
                 Value=Sub("http://query-api.${ServiceNamespaceName}:8080"),
             ),
+            Environment(Name="HEALTH_CHECK_PORT", Value="8093"),
         ]
     )
 
@@ -414,6 +421,7 @@ def build() -> Template:
                 Name="LAKERUNNER_AUTOSCALER_SERVICES_TRACES_MAX_REPLICAS",
                 Value=Ref("ProcessTracesReplicas"),
             ),
+            Environment(Name="HEALTH_CHECK_PORT", Value="8092"),
         ]
     )
 
@@ -440,6 +448,9 @@ def build() -> Template:
             vpc_id_param="VpcId",
             port=admin_container_port,
             health_check_path=admin_health_path,
+            # lakerunner v1.39: /healthz lives on the dedicated health server
+            # (port 8090), not the 9091 API port. Probe 8090.
+            health_check_port=8090,
         )
     )
     admin_listener_rule = t.add_resource(
@@ -494,6 +505,7 @@ def build() -> Template:
                     secrets=admin_secrets,
                     log_group_ref=admin_lg,
                     container_port=admin_container_port,
+                    health_check_port=8090,
                 ),
                 _container(
                     name="sweeper",
@@ -545,6 +557,9 @@ def build() -> Template:
             service_registry_ref=admin_discovery,
             listener_rule_refs=[admin_listener_rule],
             capacity="ondemand",
+            # Margin for admin-api's health server (8090) to come up before the
+            # ALB starts failing the task.
+            health_check_grace_period=60,
         )
     )
     t.add_output(Output("ControlServiceName", Value=GetAtt(control_service, "Name")))
@@ -561,13 +576,15 @@ def _container(
     secrets: list,
     log_group_ref,
     container_port: int | None = None,
+    health_check_port: int | None = None,
 ) -> ContainerDefinition:
     """One essential container in the merged control task.
 
     Each container keeps its own command (from cardinal-defaults.yaml), env,
     secrets, and a LogConfiguration pointing at its own /cardinal/<name> log
     group. container_port is set only for admin-api (the LB target); the other
-    three expose no ports.
+    three expose no ports. health_check_port adds an additional PortMapping for
+    the dedicated health server (admin-api only, port 8090, ALB-probed).
     """
     kwargs = dict(
         Name=name,
@@ -587,8 +604,13 @@ def _container(
     command = config.get("command")
     if command:
         kwargs["Command"] = command
+    port_mappings = []
     if container_port is not None:
-        kwargs["PortMappings"] = [PortMapping(ContainerPort=container_port, Protocol="tcp")]
+        port_mappings.append(PortMapping(ContainerPort=container_port, Protocol="tcp"))
+    if health_check_port is not None:
+        port_mappings.append(PortMapping(ContainerPort=health_check_port, Protocol="tcp"))
+    if port_mappings:
+        kwargs["PortMappings"] = port_mappings
     return ContainerDefinition(**kwargs)
 
 
