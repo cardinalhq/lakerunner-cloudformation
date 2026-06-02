@@ -6,9 +6,16 @@ to match the next stack's Parameter names, so the chain is mostly automatic: a
 downstream job pulls its upstream stack's Outputs and any Output whose key
 equals a target parameter name supplies that parameter.
 
-All six scripts are self-contained POSIX sh + AWS CLI v2 + jq (no Python at
-runtime). They create the stack if missing, otherwise update it in place, via a
-change set.
+All five scripts are self-contained POSIX sh + AWS CLI v2 + jq (no Python at
+runtime), one per stack. They create the stack if missing, otherwise update it
+in place, via a change set.
+
+Each script is generated: `scripts-src/build.sh` (run via `make scripts`)
+concatenates a per-stack front-half (`scripts-src/parts/<name>.sh`) with the
+shared engine (`scripts-src/parts/base.sh`) into a single committed file in
+`scripts/`. There is no separate `deploy-stack.sh` to copy alongside them — the
+engine is embedded in each driver. Edit the parts and regenerate; each driver
+carries a one-line generated-file note at the top.
 
 ## Pure environment-variable interface (no flags)
 
@@ -27,15 +34,16 @@ Each script collects all missing required variables up front, prints its usage
 
 ## Per-job model
 
-Each Jenkins job runs one thin wrapper. The wrapper reads its friendly env vars,
-composes the published template URL from `TEMPLATE_BASE_URL` (default
-`https://cardinal-cfn.s3.us-east-2.amazonaws.com/lakerunner`) and `VERSION`
-(e.g. `v0.0.70`), sets `TEMPLATE_URL`, `FROM_STACKS`, `PARAMS`, `FILE_PARAMS`,
-and `MAPS`, then invokes the generic driver `scripts/deploy-stack.sh` with the
-environment inherited. Most wrappers `exec` the driver; `lakerunner-services`
-runs it as a child so it can clean up an auto-generated cert temp dir on exit.
+Each Jenkins job runs one self-contained script. Its front-half reads the
+friendly env vars, composes the published template URL from `TEMPLATE_BASE_URL`
+(default `https://cardinal-cfn.s3.us-east-2.amazonaws.com/lakerunner`) and
+`VERSION` (e.g. `v0.0.70`), sets `TEMPLATE_URL`, `FROM_STACKS`, `PARAMS`,
+`FILE_PARAMS`, and `MAPS`, then falls straight through into the embedded engine
+in the same shell — no second file, no `exec`. The `lakerunner-services`
+front-half may create a self-signed cert temp dir on first create; the embedded
+engine's single cleanup trap removes it on exit.
 
-### deploy-stack.sh environment
+### Engine environment (embedded in every driver)
 
 | Variable | Req/Opt | Meaning |
 |---|---|---|
@@ -49,7 +57,7 @@ runs it as a child so it can clean up an auto-generated cert temp dir on exit.
 | `DEPLOYER_ROLE_ARN` | optional | Forwarded via `--role-arn` to `create-change-set`. |
 | `NO_EXECUTE` | optional | Non-empty: create and describe the change set, then stop. |
 
-### deploy-stack.sh resolution precedence
+### Resolution precedence (engine)
 
 For each parameter in the target template (from `get-template-summary`):
 
@@ -233,8 +241,8 @@ stable ARN, no churn). If it is empty and no PEM files are supplied, the wrapper
 auto-generates a self-signed internal cert **only on first create** and passes
 it via `FILE_PARAMS` (the `cert.yaml` child builds an `AWS::IAM::ServerCertificate`
 from it). Browsers will warn on a self-signed cert — fine for internal/test. On
-a re-run (the stack already exists, an UPDATE), the wrapper generates nothing and
-passes no cert params, so `deploy-stack.sh` resolves `CertificateBody`/
+a re-run (the stack already exists, an UPDATE), the front-half generates nothing
+and passes no cert params, so the embedded engine resolves `CertificateBody`/
 `CertificatePrivateKey` to `UsePreviousValue` and the existing IAM
 ServerCertificate (and the ALB listener) is left untouched. Nothing is committed
 to the repo; the PEMs are generated per run into a temp dir that is removed on

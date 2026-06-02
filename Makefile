@@ -1,6 +1,6 @@
 # Makefile for Cardinal CloudFormation project.
 
-.PHONY: help install build test test-unit test-templates test-jenkins check lint clean all
+.PHONY: help install build scripts test test-unit test-templates test-jenkins check lint clean all
 
 VENV_DIR := .venv
 PYTHON   := $(VENV_DIR)/bin/python
@@ -19,6 +19,9 @@ install:	## Install dependencies in virtual environment
 
 build:	## Generate CloudFormation templates and run cfn-lint
 	./build.sh
+
+scripts:	## Generate the single-file per-stack deploy drivers into scripts/
+	./scripts-src/build.sh
 
 test:	## Run all tests
 	$(PYTEST) tests/ -v
