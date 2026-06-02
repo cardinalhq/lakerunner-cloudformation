@@ -77,6 +77,17 @@ def build() -> Template:
         Type="String",
         Description="ECS cluster the cleanup task is launched into.",
     ))
+    p_alb_sg = t.add_parameter(Parameter(
+        "AlbSecurityGroupId",
+        Type="String",
+        Default="",
+        Description=(
+            "Optional. The customer-supplied ALB security group "
+            "(cardinal-alb-sg) to delete during the step-4 sweep. Owned by "
+            "neither stack, so neither stack-delete reaches it. Leave empty "
+            "to skip."
+        ),
+    ))
     p_deployer = t.add_parameter(Parameter(
         "DeployerRoleArn",
         Type="String",
@@ -124,6 +135,7 @@ def build() -> Template:
                 Environment(Name="INFRA_STACK_NAME",      Value=Ref(p_infra)),
                 Environment(Name="CLEANUP_STACK_NAME",    Value=Ref("AWS::StackName")),
                 Environment(Name="DEPLOYER_ROLE_ARN",     Value=Ref(p_deployer)),
+                Environment(Name="ALB_SG_ID",             Value=Ref(p_alb_sg)),
             ],
             LogConfiguration=LogConfiguration(
                 LogDriver="awslogs",

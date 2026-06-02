@@ -102,6 +102,7 @@ def test_environment_pins_required_vars(td):
         "INFRA_STACK_NAME":      {"Ref": "InfraStackName"},
         "CLEANUP_STACK_NAME":    {"Ref": "AWS::StackName"},
         "DEPLOYER_ROLE_ARN":     {"Ref": "DeployerRoleArn"},
+        "ALB_SG_ID":             {"Ref": "AlbSecurityGroupId"},
     }
 
 

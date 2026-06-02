@@ -36,6 +36,7 @@ infra_stack_name="cardinal-infrastructure"
 cleanup_stack_name="cardinal-cleanup"
 template_base_url="$DEFAULT_TEMPLATE_BASE_URL"
 wait_self_delete="false"
+alb_sg_id=""
 
 # --- internal test hooks (pure data transforms; no AWS) ---
 internal_plan_text=""
@@ -61,6 +62,10 @@ Optional:
                                         The cleanup task discovers retained
                                         resources from this stack.
   --cleanup-stack-name NAME             Default: cardinal-cleanup.
+  --alb-sg-id SG_ID                     Optional. Customer-supplied ALB
+                                        security group (cardinal-alb-sg) to
+                                        delete in the step-4 sweep. Owned by
+                                        neither stack. Skipped when omitted.
   --template-base-url URL               Default: cardinal-cfn-us-east-1 bucket.
   --wait-self-delete                    Wait for the cleanup stack's own
                                         delete-complete (off by default).
@@ -88,6 +93,7 @@ while [ $# -gt 0 ]; do
         --lakerunner-stack-name)        lakerunner_stack_name="$2";        shift 2 ;;
         --infra-stack-name)             infra_stack_name="$2";             shift 2 ;;
         --cleanup-stack-name)           cleanup_stack_name="$2";           shift 2 ;;
+        --alb-sg-id)                    alb_sg_id="$2";                    shift 2 ;;
         --template-base-url)            template_base_url="$2";            shift 2 ;;
         --wait-self-delete)             wait_self_delete="true";           shift   ;;
         --yes)                          yes_flag="true";                   shift   ;;
@@ -127,6 +133,8 @@ if [ -n "$required_missing" ]; then
 fi
 
 if [ "$yes_flag" != "true" ]; then
+    alb_sg_line="  alb sg:        (none; --alb-sg-id not set)"
+    [ -n "$alb_sg_id" ] && alb_sg_line="  alb sg:        delete $alb_sg_id (cardinal-alb-sg)"
     cat <<EOF >&2
 This will tear down a Cardinal install in the following AWS account/region:
   region:        $region
@@ -135,6 +143,7 @@ This will tear down a Cardinal install in the following AWS account/region:
   data layer:    drain + delete S3 ingest, RDS, SQS, secrets, SSM
                  (only resources tagged Application=cardinal-lakerunner,
                   ManagedBy=cardinal-data-setup-script; others are skipped)
+$alb_sg_line
   cleanup stack: $cleanup_stack_name (created and self-deleted)
 
 Re-run with --yes to proceed.
@@ -176,6 +185,7 @@ aws --region "$region" cloudformation create-stack \
         ParameterKey=CleanupExecutionRoleArn,ParameterValue="$cleanup_execution_role_arn" \
         ParameterKey=ClusterName,ParameterValue="$cluster_name" \
         ParameterKey=DeployerRoleArn,ParameterValue="$deployer_role_arn" \
+        ParameterKey=AlbSecurityGroupId,ParameterValue="$alb_sg_id" \
     >/dev/null
 aws --region "$region" cloudformation wait stack-create-complete \
     --stack-name "$cleanup_stack_name" \
