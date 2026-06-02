@@ -183,16 +183,11 @@ def build() -> Template:
                     "Cardinal lakerunner RDS; ingress added per DB-client tier"
                 ),
                 VpcId=Ref("VpcId"),
-                SecurityGroupEgress=[
-                    {
-                        "IpProtocol": "-1",
-                        "CidrIp": "0.0.0.0/0",
-                        "Description": (
-                            "All egress (RDS does not initiate connections; "
-                            "default kept for AWS::EC2::SecurityGroup parity)."
-                        ),
-                    }
-                ],
+                # No inline SecurityGroupEgress: AWS auto-creates an all-allow
+                # egress rule, which suffices (RDS does not initiate outbound
+                # connections). Specifying it would force CloudFormation to
+                # RevokeSecurityGroupEgress the default first, an action some
+                # customer SCPs explicitly deny (VPC-destructive guard).
                 Tags=_tags(component="rds-sg"),
             )
         )

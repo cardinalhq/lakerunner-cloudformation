@@ -47,7 +47,7 @@ from troposphere import (
     Tags,
     Template,
 )
-from troposphere.ec2 import SecurityGroup, SecurityGroupIngress, SecurityGroupRule
+from troposphere.ec2 import SecurityGroup, SecurityGroupIngress
 from troposphere.iam import Policy, Role
 from troposphere.s3 import (
     Bucket,
@@ -338,11 +338,10 @@ def build() -> Template:
             "Cardinal ALB. Inbound 443 / 9443 / 4318 from AlbAllowedCidrs."
         ),
         VpcId=Ref(vpc_id),
-        SecurityGroupEgress=[SecurityGroupRule(
-            IpProtocol="-1",
-            CidrIp="0.0.0.0/0",
-            Description="All egress",
-        )],
+        # No inline SecurityGroupEgress: AWS auto-creates an all-allow egress
+        # rule on the SG, which is exactly what we want. Specifying it would
+        # force CloudFormation to RevokeSecurityGroupEgress the default first,
+        # an action some customer SCPs explicitly deny (VPC-destructive guard).
         Tags=_tags(component="alb-sg"),
     ))
 
@@ -393,11 +392,7 @@ def build() -> Template:
             title,
             GroupDescription=description,
             VpcId=Ref(vpc_id),
-            SecurityGroupEgress=[SecurityGroupRule(
-                IpProtocol="-1",
-                CidrIp="0.0.0.0/0",
-                Description="All egress",
-            )],
+            # No inline SecurityGroupEgress: see AlbSecurityGroup above.
             Tags=_tags(component=component),
         ))
 
