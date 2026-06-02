@@ -32,9 +32,8 @@ Required:
   PRIVATE_SUBNETS    Comma-separated private subnet ids for the DB.
 
 Optional (template defaults preserved when unset):
-  DB_ENGINE_VERSION     (template default 18.4).
-  DB_INSTANCE_CLASS     (template default db.r7g.large).
-  DB_ALLOCATED_STORAGE  (template default 100).
+  DB_ENGINE_VERSION     Aurora PostgreSQL version (template default 17.9).
+  DB_INSTANCE_CLASS     Aurora writer instance class (template default db.r8g.large).
   TEMPLATE_BASE_URL     Default: $DEFAULT_TEMPLATE_BASE_URL
   DEPLOYER_ROLE_ARN     Passed to create-change-set.
   NO_EXECUTE            Non-empty: change-set only, do not execute.
@@ -72,8 +71,6 @@ PrivateSubnetsCsv=$PRIVATE_SUBNETS"
 DBEngineVersion=$DB_ENGINE_VERSION"
 [ -n "${DB_INSTANCE_CLASS:-}" ] && params="$params
 DBInstanceClass=$DB_INSTANCE_CLASS"
-[ -n "${DB_ALLOCATED_STORAGE:-}" ] && params="$params
-DBAllocatedStorage=$DB_ALLOCATED_STORAGE"
 
 PARAMS="$params"
 

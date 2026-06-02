@@ -23,7 +23,6 @@ def test_required_parameters(td):
         "PrivateSubnetsCsv",
         "DBEngineVersion",
         "DBInstanceClass",
-        "DBAllocatedStorage",
         "MigrationSecurityGroupId",
         "QuerySecurityGroupId",
         "ProcessSecurityGroupId",
@@ -33,10 +32,14 @@ def test_required_parameters(td):
         assert n in td["Parameters"], f"missing parameter: {n}"
 
 
+def test_storage_param_removed(td):
+    """Aurora manages storage; the AllocatedStorage knob is gone."""
+    assert "DBAllocatedStorage" not in td["Parameters"]
+
+
 def test_db_defaults(td):
-    assert td["Parameters"]["DBEngineVersion"]["Default"] == "18.4"
-    assert td["Parameters"]["DBInstanceClass"]["Default"] == "db.r7g.large"
-    assert td["Parameters"]["DBAllocatedStorage"]["Default"] == 100
+    assert td["Parameters"]["DBEngineVersion"]["Default"] == "17.9"
+    assert td["Parameters"]["DBInstanceClass"]["Default"] == "db.r8g.large"
 
 
 # ---------------------------------------------------------------------------
@@ -105,21 +108,49 @@ def test_otel_has_no_db_ingress(td):
 # ---------------------------------------------------------------------------
 
 
+def test_aurora_cluster_engine(td):
+    """The data-bearing resource is an Aurora PostgreSQL cluster."""
+    cluster = td["Resources"]["DBCluster"]
+    assert cluster["Type"] == "AWS::RDS::DBCluster"
+    assert cluster["Properties"]["Engine"] == "aurora-postgresql"
+
+
+def test_writer_instance_is_aurora_and_joins_cluster(td):
+    """The writer is a stateless Aurora instance pointed at the cluster, with a
+    Delete policy (the cluster, not the instance, owns the data)."""
+    inst = td["Resources"]["DBInstance"]
+    assert inst["Type"] == "AWS::RDS::DBInstance"
+    props = inst["Properties"]
+    assert props["Engine"] == "aurora-postgresql"
+    assert props["DBClusterIdentifier"] == {"Ref": "DBCluster"}
+    assert props["DBInstanceClass"] == {"Ref": "DBInstanceClass"}
+    assert inst["DeletionPolicy"] == "Delete"
+    assert inst["UpdateReplacePolicy"] == "Delete"
+
+
 def test_db_is_snapshot_policy(td):
-    db = td["Resources"]["DBInstance"]
+    """The cluster holds the data, so it carries the Snapshot policy."""
+    db = td["Resources"]["DBCluster"]
     assert db["DeletionPolicy"] == "Snapshot"
     assert db["UpdateReplacePolicy"] == "Snapshot"
 
 
 def test_db_deletion_protection_disabled(td):
     """Trial teardown relies on DeletionProtection=False; Snapshot preserves data."""
-    assert td["Resources"]["DBInstance"]["Properties"]["DeletionProtection"] is False
+    assert td["Resources"]["DBCluster"]["Properties"]["DeletionProtection"] is False
 
 
 def test_db_encrypted_and_private(td):
-    props = td["Resources"]["DBInstance"]["Properties"]
-    assert props["StorageEncrypted"] is True
-    assert props["PubliclyAccessible"] is False
+    """StorageEncrypted is a cluster setting; the writer stays non-public."""
+    assert td["Resources"]["DBCluster"]["Properties"]["StorageEncrypted"] is True
+    assert td["Resources"]["DBInstance"]["Properties"]["PubliclyAccessible"] is False
+
+
+def test_secret_attaches_to_cluster(td):
+    """The secret target is the cluster, so host resolves to the writer endpoint."""
+    att = td["Resources"]["DBMasterSecretAttachment"]["Properties"]
+    assert att["TargetType"] == "AWS::RDS::DBCluster"
+    assert att["TargetId"] == {"Ref": "DBCluster"}
 
 
 def test_master_secret_retained(td):
@@ -140,7 +171,7 @@ def test_rds_sg_and_subnet_group_are_delete_policy(td):
 
 
 def test_master_password_resolves_from_secret(td):
-    pw = td["Resources"]["DBInstance"]["Properties"]["MasterUserPassword"]
+    pw = td["Resources"]["DBCluster"]["Properties"]["MasterUserPassword"]
     sub = pw["Fn::Sub"]
     template_str = sub[0] if isinstance(sub, list) else sub
     assert "resolve:secretsmanager:" in template_str

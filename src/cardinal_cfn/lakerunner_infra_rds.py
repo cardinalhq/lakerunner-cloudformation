@@ -1,8 +1,9 @@
-"""cardinal-lakerunner-infra-rds: RDS Postgres instance for a Lakerunner install.
+"""cardinal-lakerunner-infra-rds: Aurora PostgreSQL cluster for a Lakerunner install.
 
 Standalone stack that creates the RDS security group (with per-tier 5432
 ingress from task SGs supplied as parameters), subnet group, master-credential
-secret, DB instance, and secret-target attachment.
+secret, an Aurora PostgreSQL cluster with a single writer instance, and the
+secret-target attachment.
 
 Deploy order: lakerunner-infra-base (task SGs) → this stack → lakerunner stack.
 The task security group IDs are outputs of lakerunner-infra-base and are
@@ -20,7 +21,7 @@ from troposphere import (
     Template,
 )
 from troposphere.ec2 import SecurityGroup, SecurityGroupIngress
-from troposphere.rds import DBInstance, DBSubnetGroup
+from troposphere.rds import DBCluster, DBInstance, DBSubnetGroup
 from troposphere.secretsmanager import (
     GenerateSecretString,
     Secret,
@@ -65,9 +66,9 @@ def _snapshot(resource):
 def build() -> Template:
     t = Template()
     t.set_description(
-        "Cardinal lakerunner infra RDS: PostgreSQL instance, security group, "
-        "subnet group, and master-credentials secret for a Lakerunner install. "
-        "Deploy after lakerunner-infra-base (task SGs are inputs)."
+        "Cardinal lakerunner infra RDS: Aurora PostgreSQL cluster, security "
+        "group, subnet group, and master-credentials secret for a Lakerunner "
+        "install. Deploy after lakerunner-infra-base (task SGs are inputs)."
     )
 
     # -----------------------------------------------------------------------
@@ -98,25 +99,16 @@ def build() -> Template:
         Parameter(
             "DBEngineVersion",
             Type="String",
-            Default="18.4",
-            Description="PostgreSQL engine version for the RDS instance.",
+            Default="17.9",
+            Description="Aurora PostgreSQL engine version for the cluster.",
         )
     )
     t.add_parameter(
         Parameter(
             "DBInstanceClass",
             Type="String",
-            Default="db.r7g.large",
-            Description="RDS instance class.",
-        )
-    )
-    t.add_parameter(
-        Parameter(
-            "DBAllocatedStorage",
-            Type="Number",
-            Default=100,
-            MinValue=20,
-            Description="Allocated storage for the RDS instance, in GiB.",
+            Default="db.r8g.large",
+            Description="Aurora instance class for the writer.",
         )
     )
 
@@ -155,7 +147,6 @@ def build() -> Template:
                 "parameters": [
                     "DBEngineVersion",
                     "DBInstanceClass",
-                    "DBAllocatedStorage",
                 ],
             },
             {
@@ -265,23 +256,21 @@ def build() -> Template:
     )
 
     # -----------------------------------------------------------------------
-    # DB instance
+    # Aurora PostgreSQL cluster + writer instance
     # -----------------------------------------------------------------------
 
-    # DeletionProtection=False is intentional: trial teardown relies on being
-    # able to delete the stack.  The Snapshot DeletionPolicy preserves data.
-    # DeletionProtection=True would block stack deletion entirely.
-    db_instance = t.add_resource(
+    # The cluster holds the data and every cluster-level setting (engine,
+    # storage, credentials, networking).  DeletionProtection=False is
+    # intentional: trial teardown relies on being able to delete the stack; the
+    # Snapshot DeletionPolicy preserves data.  DeletionProtection=True would
+    # block stack deletion entirely.
+    db_cluster = t.add_resource(
         _snapshot(
-            DBInstance(
-                "DBInstance",
-                Engine="postgres",
+            DBCluster(
+                "DBCluster",
+                Engine="aurora-postgresql",
                 EngineVersion=Ref("DBEngineVersion"),
-                DBInstanceClass=Ref("DBInstanceClass"),
-                AllocatedStorage=Ref("DBAllocatedStorage"),
-                StorageType="gp3",
-                StorageEncrypted=True,
-                DBName="lakerunner",
+                DatabaseName="lakerunner",
                 Port=5432,
                 MasterUsername="lakerunner",
                 MasterUserPassword=Sub(
@@ -289,9 +278,8 @@ def build() -> Template:
                     SecretArn=Ref(db_master_secret),
                 ),
                 DBSubnetGroupName=Ref(db_subnet_group),
-                VPCSecurityGroups=[Ref(rds_sg)],
-                PubliclyAccessible=False,
-                MultiAZ=False,
+                VpcSecurityGroupIds=[Ref(rds_sg)],
+                StorageEncrypted=True,
                 BackupRetentionPeriod=7,
                 DeletionProtection=False,
                 Tags=_tags(component="db"),
@@ -299,15 +287,32 @@ def build() -> Template:
         )
     )
 
+    # The writer is stateless compute -- it inherits the subnet group and
+    # security groups from the cluster, so they are not repeated here.  Policy
+    # Delete: the cluster (Snapshot) owns the data.
+    t.add_resource(
+        _delete(
+            DBInstance(
+                "DBInstance",
+                Engine="aurora-postgresql",
+                DBInstanceClass=Ref("DBInstanceClass"),
+                DBClusterIdentifier=Ref(db_cluster),
+                PubliclyAccessible=False,
+                Tags=_tags(component="db"),
+            )
+        )
+    )
+
     # SecretTargetAttachment rewrites the secret to embed
     # {engine, host, port, dbname} alongside username/password -- matching
-    # the connection JSON the lakerunner task containers consume.
+    # the connection JSON the lakerunner task containers consume.  Targets the
+    # cluster, so host resolves to the cluster writer endpoint.
     t.add_resource(
         SecretTargetAttachment(
             "DBMasterSecretAttachment",
             SecretId=Ref(db_master_secret),
-            TargetId=Ref(db_instance),
-            TargetType="AWS::RDS::DBInstance",
+            TargetId=Ref(db_cluster),
+            TargetType="AWS::RDS::DBCluster",
         )
     )
 
@@ -318,15 +323,15 @@ def build() -> Template:
     t.add_output(
         Output(
             "DbEndpoint",
-            Description="RDS instance endpoint address.",
-            Value=GetAtt(db_instance, "Endpoint.Address"),
+            Description="Aurora cluster writer endpoint address.",
+            Value=GetAtt(db_cluster, "Endpoint.Address"),
         )
     )
     t.add_output(
         Output(
             "DbPort",
-            Description="RDS instance endpoint port.",
-            Value=GetAtt(db_instance, "Endpoint.Port"),
+            Description="Aurora cluster endpoint port.",
+            Value=GetAtt(db_cluster, "Endpoint.Port"),
         )
     )
     t.add_output(
