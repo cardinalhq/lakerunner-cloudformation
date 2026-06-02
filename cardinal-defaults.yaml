@@ -33,8 +33,8 @@ storage_profiles:
 # so the two cannot drift; any change to LakerunnerImage retriggers migrations.
 # ---------------------------------------------------------------------------
 images:
-  lakerunner: "public.ecr.aws/cardinalhq.io/lakerunner:v1.33.0"
-  maestro:    "public.ecr.aws/cardinalhq.io/maestro:v1.46.4"
+  lakerunner: "public.ecr.aws/cardinalhq.io/lakerunner:v1.40.0"
+  maestro:    "public.ecr.aws/cardinalhq.io/maestro:v1.50.0"
   otel:       "public.ecr.aws/cardinalhq.io/cardinalhq-otel-collector:v1.8.0"
   dex:        "public.ecr.aws/cardinalhq.io/dex-customization:v0.1.0"
   dex_init:   "public.ecr.aws/docker/library/busybox:1.37"
