@@ -20,6 +20,8 @@ The script implements the four-step teardown ordered as:
      other data-layer resource has DeletionPolicy: Retain and survives)
   4. sweep the Retain'd resources (S3 bucket itself, secrets, SSM
      parameters, SQS queue, RDS subnet group, the RDS final snapshot)
+     plus, optionally, the customer-supplied ALB security group when
+     ALB_SG_ID is set
 
 Then self-deletes the cardinal-cleanup stack.
 """
@@ -42,6 +44,8 @@ fail() { log "FATAL: $*"; exit 2; }
 [ -n "${CLEANUP_STACK_NAME:-}" ]    || fail "CLEANUP_STACK_NAME is unset"
 [ -n "${DEPLOYER_ROLE_ARN:-}" ]     || fail "DEPLOYER_ROLE_ARN is unset"
 [ -n "${CLUSTER_NAME:-}" ]          || fail "CLUSTER_NAME is unset"
+# ALB_SG_ID is optional: when empty, the ALB-SG sweep (step 4h) is a no-op.
+: "${ALB_SG_ID:=}"
 
 ACCOUNT="$(aws sts get-caller-identity --query Account --output text)"
 [ -n "$ACCOUNT" ] && [ "$ACCOUNT" != "None" ] \
@@ -419,6 +423,23 @@ delete_rds_security_group() {
     aws ec2 delete-security-group --group-id "$RDS_SG_ID"
 }
 
+# 4h -- ALB security group (cardinal-alb-sg). Customer-supplied, owned by
+# neither the lakerunner nor the infra stack, so neither stack-delete reaches
+# it. Optional: only swept when ALB_SG_ID is set. The ALB itself lives in the
+# lakerunner stack and is gone by now (step 1), so this is safe to delete --
+# unless another surviving SG still references it as an ingress source (e.g.
+# the v1.39 ALB->query/control health-port rules), in which case AWS returns
+# DependencyViolation and the operator must clear those rules first.
+delete_alb_security_group() {
+    if [ -z "$ALB_SG_ID" ]; then return 0; fi
+    if ! aws ec2 describe-security-groups --group-ids "$ALB_SG_ID" >/dev/null 2>&1; then
+        log "ALB security group $ALB_SG_ID already absent"
+        return 0
+    fi
+    log "deleting ALB security group $ALB_SG_ID"
+    aws ec2 delete-security-group --group-id "$ALB_SG_ID"
+}
+
 # 4g -- RDS snapshots produced by step 3 (Snapshot DeletionPolicy)
 delete_rds_snapshots() {
     if [ -z "$DB_INSTANCE_ID" ]; then return 0; fi
@@ -439,6 +460,7 @@ delete_ssm
 delete_sqs
 delete_db_subnet_group
 delete_rds_security_group
+delete_alb_security_group
 delete_rds_snapshots
 
 # ===========================================================================

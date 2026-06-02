@@ -40,6 +40,16 @@ scripts/cleanup-lakerunner.sh \
 
 Without `--yes` the script prints the plan and exits with code 2 so Jenkins can show the operator the blast radius before confirming.
 
+### Deleting the ALB security group
+
+`cardinal-alb-sg` is customer-supplied and owned by neither the `cardinal-lakerunner` nor the `cardinal-infrastructure` stack, so neither stack-delete reaches it. Pass `--alb-sg-id sg-...` to have the step-4 sweep delete it too (omit to leave it in place):
+
+```sh
+    --alb-sg-id sg-0ffe4f191fee82022 \
+```
+
+The ALB itself lives in the lakerunner stack and is gone by the time the sweep runs (step 1), so the delete is safe — **unless** another surviving security group still references `cardinal-alb-sg` as an ingress source (e.g. the v1.39 ALB-to-query/control health-port rules on port 8090). In that case AWS returns `DependencyViolation`; clear those ingress rules first, then re-run (every step is idempotent). The cleanup task role already holds `ec2:DeleteSecurityGroup` for the RDS SG, so no IAM change is needed.
+
 ## What happens
 
 1. Driver creates `cardinal-cleanup` (`--role-arn cardinal-cfn-deployer`) from the published `cardinal-cleanup.yaml`. The stack provisions a `cardinal-cleanup` task definition and a log group.
