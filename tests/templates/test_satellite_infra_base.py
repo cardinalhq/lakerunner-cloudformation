@@ -52,16 +52,23 @@ def test_bucket_is_delete_policy(td):
     assert b["UpdateReplacePolicy"] == "Delete"
 
 
-def test_bucket_blocks_public_access(td):
+def test_bucket_public_access_block_opt_in(td):
+    # PublicAccessBlock is opt-in (default off): wrapped in an Fn::If keyed on
+    # AddRawBucketPublicAccessBlock, falling back to NoValue.
     pab = td["Resources"]["RawIngestBucket"]["Properties"][
         "PublicAccessBlockConfiguration"
-    ]
-    assert pab == {
+    ]["Fn::If"]
+    assert pab[0] == "AddRawBucketPublicAccessBlock"
+    assert pab[1] == {
         "BlockPublicAcls": True,
         "BlockPublicPolicy": True,
         "IgnorePublicAcls": True,
         "RestrictPublicBuckets": True,
     }
+    assert pab[2] == {"Ref": "AWS::NoValue"}
+    p = td["Parameters"]["ConfigureBucketPublicAccessBlock"]
+    assert p["Default"] == "false"
+    assert set(p["AllowedValues"]) == {"false", "true"}
 
 
 def test_bucket_is_encrypted(td):

@@ -33,6 +33,9 @@ Optional (template defaults preserved when unset):
   EXTERNAL_ID                Optional STS ExternalId for the assume-role trust.
   RAW_BUCKET_NAME            Optional explicit raw ingest bucket name.
   RAW_BUCKET_LIFECYCLE_DAYS  (template default 7).
+  CONFIGURE_BUCKET_PUBLIC_ACCESS_BLOCK
+                             'true' to set the raw bucket's S3 Block Public
+                             Access config (template default 'false': not set).
   TEMPLATE_BASE_URL          Default: $DEFAULT_TEMPLATE_BASE_URL
   DEPLOYER_ROLE_ARN          Passed to create-change-set.
   NO_EXECUTE                 Non-empty: change-set only, do not execute.
@@ -68,6 +71,8 @@ params=""
 [ -n "${RAW_BUCKET_NAME:-}" ] && params="${params}RawBucketName=$RAW_BUCKET_NAME
 "
 [ -n "${RAW_BUCKET_LIFECYCLE_DAYS:-}" ] && params="${params}RawBucketLifecycleDays=$RAW_BUCKET_LIFECYCLE_DAYS
+"
+[ -n "${CONFIGURE_BUCKET_PUBLIC_ACCESS_BLOCK:-}" ] && params="${params}ConfigureBucketPublicAccessBlock=$CONFIGURE_BUCKET_PUBLIC_ACCESS_BLOCK
 "
 
 PARAMS="$params"

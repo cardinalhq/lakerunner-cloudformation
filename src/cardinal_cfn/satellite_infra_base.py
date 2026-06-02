@@ -117,8 +117,28 @@ def build() -> Template:
         )
     )
 
+    t.add_parameter(
+        Parameter(
+            "ConfigureBucketPublicAccessBlock",
+            Type="String",
+            Default="false",
+            AllowedValues=["false", "true"],
+            Description=(
+                "When 'true', set the raw bucket's PublicAccessBlockConfiguration "
+                "(all four flags). Default 'false' leaves it unset: new buckets "
+                "are already covered by AWS account/bucket default Block Public "
+                "Access, and setting it explicitly requires "
+                "s3:PutBucketPublicAccessBlock."
+            ),
+        )
+    )
+
     t.add_condition("UseDefaultBucketName", Equals(Ref("RawBucketName"), ""))
     t.add_condition("HasExternalId", Not(Equals(Ref("ExternalId"), "")))
+    t.add_condition(
+        "AddRawBucketPublicAccessBlock",
+        Equals(Ref("ConfigureBucketPublicAccessBlock"), "true"),
+    )
 
     bucket_name_value = If(
         "UseDefaultBucketName",
@@ -172,11 +192,15 @@ def build() -> Template:
                 # is not yet in place, so the bucket is created after it.
                 DependsOn="RawIngestQueuePolicy",
                 BucketName=bucket_name_value,
-                PublicAccessBlockConfiguration=PublicAccessBlockConfiguration(
-                    BlockPublicAcls=True,
-                    BlockPublicPolicy=True,
-                    IgnorePublicAcls=True,
-                    RestrictPublicBuckets=True,
+                PublicAccessBlockConfiguration=If(
+                    "AddRawBucketPublicAccessBlock",
+                    PublicAccessBlockConfiguration(
+                        BlockPublicAcls=True,
+                        BlockPublicPolicy=True,
+                        IgnorePublicAcls=True,
+                        RestrictPublicBuckets=True,
+                    ),
+                    Ref("AWS::NoValue"),
                 ),
                 BucketEncryption=BucketEncryption(
                     ServerSideEncryptionConfiguration=[

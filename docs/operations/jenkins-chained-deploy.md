@@ -114,6 +114,7 @@ last.
 | `ORGANIZATION_ID` | optional | template default |
 | `INITIAL_INGEST_API_KEY` | optional | template: empty |
 | `COOKED_BUCKET_NAME` | optional | template: generated |
+| `CONFIGURE_BUCKET_PUBLIC_ACCESS_BLOCK` | optional | `true` sets the cooked bucket's S3 Block Public Access config; template default `false` (not set — relies on AWS account/bucket default BPA, avoids needing `s3:PutBucketPublicAccessBlock`) |
 | `LICENSE_SECRET_NAME` | optional | template: `cardinal-license` |
 | `ADMIN_KEY_SECRET_NAME` | optional | template: `cardinal-admin-key` |
 | `API_KEYS_PARAM_NAME` | optional | template: `/cardinal/api-keys` |
@@ -177,6 +178,7 @@ PRIVATE_SUBNETS=subnet-1,subnet-2 \
 | `EXTERNAL_ID` | optional | template: empty |
 | `RAW_BUCKET_NAME` | optional | template: generated |
 | `RAW_BUCKET_LIFECYCLE_DAYS` | optional | template: `7` |
+| `CONFIGURE_BUCKET_PUBLIC_ACCESS_BLOCK` | optional | `true` sets the raw bucket's S3 Block Public Access config; template default `false` (not set) |
 | `TEMPLATE_BASE_URL` | optional | `https://cardinal-cfn.s3.us-east-2.amazonaws.com/lakerunner` |
 | `DEPLOYER_ROLE_ARN` | optional | unset |
 | `NO_EXECUTE` | optional | unset |
