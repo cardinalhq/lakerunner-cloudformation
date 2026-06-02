@@ -325,6 +325,10 @@ def build() -> Template:
         Environment(Name="QUERY_WORKER_CLUSTER_NAME", Value=Ref("ClusterName")),
         Environment(Name="QUERY_WORKER_SERVICE_NAME", Value=GetAtt(worker_service, "Name")),
         Environment(Name="QUERY_WORKER_PORT", Value=str(worker_port)),
+        # lakerunner v1.39 serves /healthz on a dedicated health server (port
+        # 8090, env HEALTH_CHECK_PORT) — no longer on the API port. Set it
+        # explicitly (it's the default) and probe it from the ALB below.
+        Environment(Name="HEALTH_CHECK_PORT", Value="8090"),
     ]
     api_tg = t.add_resource(
         services_common.build_target_group(
@@ -332,6 +336,7 @@ def build() -> Template:
             vpc_id_param="VpcId",
             port=api_container_port,
             health_check_path=api_health_path,
+            health_check_port=8090,
         )
     )
     # The binary serves /api/v1/{logs,metrics,spans,promql,logql}/... plus
@@ -377,6 +382,7 @@ def build() -> Template:
             secrets=base_secrets,
             log_group_ref=api_lg,
             container_port=api_container_port,
+            health_check_port=8090,
         )
     )
     # Register query-api in Cloud Map so other services in the cluster can
@@ -409,6 +415,9 @@ def build() -> Template:
             # Fixed-size API tier (default 2 replicas, not autoscaled): pure
             # on-demand FARGATE so every replica places during a rolling upgrade.
             capacity="ondemand",
+            # Margin for the health server (8090) to come up before the ALB
+            # starts failing the task.
+            health_check_grace_period=60,
         )
     )
 
