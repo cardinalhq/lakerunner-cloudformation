@@ -252,12 +252,23 @@ def test_cooked_bucket_encrypted_and_pab(td):
     props = td["Resources"]["CookedBucket"]["Properties"]
     enc = props["BucketEncryption"]["ServerSideEncryptionConfiguration"][0]
     assert enc["ServerSideEncryptionByDefault"]["SSEAlgorithm"] == "AES256"
-    assert props["PublicAccessBlockConfiguration"] == {
+    # PublicAccessBlock is opt-in (default off): the property is wrapped in an
+    # Fn::If keyed on AddCookedBucketPublicAccessBlock, falling back to NoValue.
+    pab = props["PublicAccessBlockConfiguration"]["Fn::If"]
+    assert pab[0] == "AddCookedBucketPublicAccessBlock"
+    assert pab[1] == {
         "BlockPublicAcls": True,
         "BlockPublicPolicy": True,
         "IgnorePublicAcls": True,
         "RestrictPublicBuckets": True,
     }
+    assert pab[2] == {"Ref": "AWS::NoValue"}
+
+
+def test_public_access_block_param_defaults_off(td):
+    p = td["Parameters"]["ConfigureBucketPublicAccessBlock"]
+    assert p["Default"] == "false"
+    assert set(p["AllowedValues"]) == {"false", "true"}
 
 
 def test_no_sqs_resources(td):

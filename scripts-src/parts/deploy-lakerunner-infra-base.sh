@@ -41,6 +41,9 @@ Optional (template defaults preserved when unset):
   ORGANIZATION_ID              Canonical org id seeded into config.
   INITIAL_INGEST_API_KEY       Bootstrap ingest API key.
   COOKED_BUCKET_NAME           Explicit cooked bucket name.
+  CONFIGURE_BUCKET_PUBLIC_ACCESS_BLOCK
+                               'true' to set the cooked bucket's S3 Block Public
+                               Access config (template default 'false': not set).
   LICENSE_SECRET_NAME          (template default cardinal-license).
   ADMIN_KEY_SECRET_NAME        (template default cardinal-admin-key).
   API_KEYS_PARAM_NAME          (template default /cardinal/api-keys).
@@ -106,6 +109,8 @@ OrganizationId=$ORGANIZATION_ID"
 InitialIngestApiKey=$INITIAL_INGEST_API_KEY"
 [ -n "${COOKED_BUCKET_NAME:-}" ] && params="$params
 CookedBucketName=$COOKED_BUCKET_NAME"
+[ -n "${CONFIGURE_BUCKET_PUBLIC_ACCESS_BLOCK:-}" ] && params="$params
+ConfigureBucketPublicAccessBlock=$CONFIGURE_BUCKET_PUBLIC_ACCESS_BLOCK"
 [ -n "${LICENSE_SECRET_NAME:-}" ] && params="$params
 LicenseSecretName=$LICENSE_SECRET_NAME"
 [ -n "${ADMIN_KEY_SECRET_NAME:-}" ] && params="$params

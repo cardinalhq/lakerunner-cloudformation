@@ -171,6 +171,18 @@ def build() -> Template:
         ),
         AllowedPattern=r"^$|^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$",
     ))
+    t.add_parameter(Parameter(
+        "ConfigureBucketPublicAccessBlock",
+        Type="String",
+        Default="false",
+        AllowedValues=["false", "true"],
+        Description=(
+            "When 'true', set the cooked bucket's PublicAccessBlockConfiguration "
+            "(all four flags). Default 'false' leaves it unset: new buckets are "
+            "already covered by AWS account/bucket default Block Public Access, "
+            "and setting it explicitly requires s3:PutBucketPublicAccessBlock."
+        ),
+    ))
     license_secret_name = t.add_parameter(Parameter(
         "LicenseSecretName",
         Type="String",
@@ -301,6 +313,10 @@ def build() -> Template:
     t.add_condition(
         "UseDefaultCookedBucketName",
         Equals(Ref(cooked_bucket_name), ""),
+    )
+    t.add_condition(
+        "AddCookedBucketPublicAccessBlock",
+        Equals(Ref("ConfigureBucketPublicAccessBlock"), "true"),
     )
     t.add_condition(
         "HasInitialIngestApiKey",
@@ -769,11 +785,15 @@ def build() -> Template:
             Bucket(
                 "CookedBucket",
                 BucketName=cooked_bucket_name_value,
-                PublicAccessBlockConfiguration=PublicAccessBlockConfiguration(
-                    BlockPublicAcls=True,
-                    BlockPublicPolicy=True,
-                    IgnorePublicAcls=True,
-                    RestrictPublicBuckets=True,
+                PublicAccessBlockConfiguration=If(
+                    "AddCookedBucketPublicAccessBlock",
+                    PublicAccessBlockConfiguration(
+                        BlockPublicAcls=True,
+                        BlockPublicPolicy=True,
+                        IgnorePublicAcls=True,
+                        RestrictPublicBuckets=True,
+                    ),
+                    Ref("AWS::NoValue"),
                 ),
                 BucketEncryption=BucketEncryption(
                     ServerSideEncryptionConfiguration=[
