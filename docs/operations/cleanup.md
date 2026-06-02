@@ -25,7 +25,7 @@ For partial cleanup (e.g. leaving the lakerunner stack in place, or only wiping 
 ## Running
 
 ```sh
-scripts/cleanup-lakerunner.sh \
+dev-scripts/cleanup-lakerunner.sh \
     --region us-east-1 \
     --version v0.0.83 \
     --cluster-name <CLUSTER> \

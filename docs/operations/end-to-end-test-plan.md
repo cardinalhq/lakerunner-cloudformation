@@ -15,7 +15,7 @@ In scope:
 - DEX OIDC bring-up (admin login + maestro `/api/me`).
 - Self-signed TLS cert generation and PEM-based import via the Jenkinsfile credentials.
 - License acceptance.
-- `scripts/teardown-lakerunner.sh` and the retained-resource cleanup.
+- `dev-scripts/teardown-lakerunner.sh` and the retained-resource cleanup.
 
 Out of scope (one-time setup, persists across trials):
 
@@ -349,10 +349,10 @@ Send a sample log line via the OTEL collector endpoint (also fronted by the ALB)
 
 ## Trial 1 / Phase 4: tear down
 
-`scripts/teardown-lakerunner.sh` is run **without** the deployer role flag (matches the no-role constraint of this test).
+`dev-scripts/teardown-lakerunner.sh` is run **without** the deployer role flag (matches the no-role constraint of this test).
 
 ```sh
-sh scripts/teardown-lakerunner.sh \
+sh dev-scripts/teardown-lakerunner.sh \
     --stack-name cardinal-lakerunner-test \
     --region us-east-1 \
     --yes
@@ -392,7 +392,7 @@ After all trials are done and you want a truly clean account:
 
 ```sh
 # Tear down the lakerunner stack from the most recent trial (if still present).
-sh scripts/teardown-lakerunner.sh --stack-name cardinal-lakerunner-test --region us-east-1 --yes
+sh dev-scripts/teardown-lakerunner.sh --stack-name cardinal-lakerunner-test --region us-east-1 --yes
 
 # Tear down the VPC stack (only if you deployed it for this test session;
 # otherwise leave it for next time).
@@ -422,7 +422,7 @@ Discovered as the test runs; not all will hit. Track each as a separate PR.
 - **Jenkinsfile param polish** -- if the Jenkins version in the test environment does not support `text(...)` parameter type, fall back to `string()` with a JSON-on-one-line constraint and a doc note.
 - **Cert-import Lambda robustness** -- if the self-signed PEMs from the openssl one-liner trip a format check, fix the importer to accept what openssl emits or document the workaround.
 - **Healthcheck path tuning** -- if any service shows 3b green but 3c (target group health) red, the service's healthcheck path may not match what the container actually serves; service-stack PR to fix.
-- **Tear-down survivor cleanup** -- if Phase 4 leaves anything tagged `cardinal:install=<id>` behind, extend `scripts/teardown-lakerunner.sh` to clean it.
+- **Tear-down survivor cleanup** -- if Phase 4 leaves anything tagged `cardinal:install=<id>` behind, extend `dev-scripts/teardown-lakerunner.sh` to clean it.
 - **Stack output additions** -- if Phase 2 has to derive `InstallIdLong` or the ALB DNS via `Fn::Split` instead of reading a stack output, add the missing outputs to the root template.
 
 The intent of this test is to drive these out by running it. Each fix is its own PR; the test plan stays stable across them.

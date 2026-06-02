@@ -8,7 +8,7 @@ import pytest
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-SCRIPT = REPO_ROOT / "scripts" / "cleanup-lakerunner.sh"
+SCRIPT = REPO_ROOT / "dev-scripts" / "cleanup-lakerunner.sh"
 
 
 def test_script_exists_and_is_executable():
