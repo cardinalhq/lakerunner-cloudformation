@@ -1,12 +1,15 @@
-# deploy-scripts/
+# dev-scripts/
 
-Jenkins-friendly wrappers for the four product stacks plus the cleanup driver.
-Each wrapper is parameterised entirely through environment variables, with no
-customer-specific identifiers baked into the defaults; an operator points a
-Jenkins job at the script and supplies the env block.
+Internal/dev tooling: Jenkins-friendly wrappers for the product stacks, the
+`lrdev-*` test scaffolding, and the lifecycle drivers (`cleanup-lakerunner.sh`,
+`teardown-lakerunner.sh`). Not customer-facing and not published — the
+customer-facing per-stack deploy drivers live in `scripts/`. Each wrapper is
+parameterised entirely through environment variables, with no customer-specific
+identifiers baked into the defaults; an operator points a Jenkins job at the
+script and supplies the env block.
 
 These are thin wrappers. The actual deploy logic lives in
-`scripts/deploy-lakerunner.sh` and `scripts/cleanup-lakerunner.sh` (the
+`scripts/deploy-lakerunner.sh` and `dev-scripts/cleanup-lakerunner.sh` (the
 self-contained drivers), or in straight `aws cloudformation` calls for the
 infrastructure / lrdev tiers. The wrappers here exist to make the input shape
 uniform and to keep customer values out of the repo.
@@ -110,7 +113,7 @@ enforcement, then self-deletes its own stack.
 ### run-cleanup.sh
 
 Destructive. Refuses to run unless `CONFIRM=DELETE` is set. Delegates to
-`scripts/cleanup-lakerunner.sh`.
+`dev-scripts/cleanup-lakerunner.sh`.
 
 | Var | Required | Default | Notes |
 |---|---|---|---|

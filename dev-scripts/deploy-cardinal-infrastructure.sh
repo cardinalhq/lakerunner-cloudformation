@@ -5,7 +5,7 @@
 #
 # The data layer carries DeletionPolicy: Retain / Snapshot; deleting this
 # stack will leave behind the RDS snapshot, the S3 bucket, and the
-# license/admin secrets. Use deploy-scripts/run-cleanup.sh to actually wipe.
+# license/admin secrets. Use dev-scripts/run-cleanup.sh to actually wipe.
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

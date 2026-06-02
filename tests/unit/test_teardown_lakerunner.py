@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-SCRIPT = REPO_ROOT / "scripts" / "teardown-lakerunner.sh"
+SCRIPT = REPO_ROOT / "dev-scripts" / "teardown-lakerunner.sh"
 
 
 def _require_jq():

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Jenkins-friendly wrapper around scripts/cleanup-lakerunner.sh.
+# Jenkins-friendly wrapper around dev-scripts/cleanup-lakerunner.sh.
 #
 # The underlying driver deploys the cardinal-cleanup stack, runs the privileged
 # Fargate task that drains ECS services, deletes the cardinal-lakerunner stack,
@@ -10,7 +10,6 @@
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 . "$SCRIPT_DIR/lib.sh"
 LOG_TAG="run-cleanup"
 
@@ -44,8 +43,8 @@ if [ "${WAIT_SELF_DELETE:-false}" = "true" ]; then
   WAIT_FLAG+=("--wait-self-delete")
 fi
 
-log "delegating to $REPO_ROOT/scripts/cleanup-lakerunner.sh"
-exec "$REPO_ROOT/scripts/cleanup-lakerunner.sh" \
+log "delegating to $SCRIPT_DIR/cleanup-lakerunner.sh"
+exec "$SCRIPT_DIR/cleanup-lakerunner.sh" \
   --region "$REGION" \
   --version "$VERSION" \
   --cluster-name "$CLUSTER_NAME" \

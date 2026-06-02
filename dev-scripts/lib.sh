@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Shared helpers for the deploy-scripts/*.sh family.
+# Shared helpers for the dev-scripts/*.sh family.
 # Source this from a script; do not execute it directly.
 #
 # Conventions
