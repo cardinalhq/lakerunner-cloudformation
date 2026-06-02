@@ -105,7 +105,8 @@ last.
 | `VERSION` | required | — |
 | `VPC_ID` | required | — |
 | `CLUSTER_ARN` | required | — |
-| `LICENSE_DATA_FILE` | required | path to license JSON, read into the license secret |
+| `LICENSE_DATA` | required* | Cardinal license token (`z64:...`) as a direct string, seeds the license secret |
+| `LICENSE_DATA_FILE` | required* | path fallback for `LICENSE_DATA` (one of the two is required) |
 | `ALB_SCHEME` | optional | template: `internal` |
 | `ALB_ALLOWED_CIDR1` | optional | template: `10.0.0.0/8` |
 | `ALB_ALLOWED_CIDR2` | optional | template: `172.16.0.0/12` |
@@ -261,9 +262,12 @@ exit. Set `CERTIFICATE_ARN` to use a real cert.
 | `VPC_ID` | required | — |
 | `PRIVATE_SUBNETS` | required | comma-separated private subnet ids |
 | `CERTIFICATE_ARN` | optional | ACM/IAM cert ARN for the Maestro HTTPS listener. If unset, the wrapper auto-generates a self-signed internal cert **only on first create** (re-runs keep the existing cert — no churn). Set it to use a real cert. |
-| `CERTIFICATE_BODY_FILE` | optional | PEM cert body path (overrides auto-generation; passed via `FILE_PARAMS`) |
-| `CERTIFICATE_PRIVATE_KEY_FILE` | optional | PEM private key path (overrides auto-generation; passed via `FILE_PARAMS`) |
-| `CERTIFICATE_CHAIN_FILE` | optional | PEM chain path (passed via `FILE_PARAMS`) |
+| `CERTIFICATE_BODY` | optional | PEM cert body as a direct string (overrides auto-generation; body + private key together). Written to a temp file and passed via `FILE_PARAMS`. |
+| `CERTIFICATE_PRIVATE_KEY` | optional | PEM private key as a direct string |
+| `CERTIFICATE_CHAIN` | optional | PEM chain as a direct string |
+| `CERTIFICATE_BODY_FILE` | optional | path fallback for `CERTIFICATE_BODY` |
+| `CERTIFICATE_PRIVATE_KEY_FILE` | optional | path fallback for `CERTIFICATE_PRIVATE_KEY` |
+| `CERTIFICATE_CHAIN_FILE` | optional | path fallback for `CERTIFICATE_CHAIN` |
 | `DEX_ADMIN_EMAIL` | optional | template: `admin@cardinal.local` |
 | `DEX_ADMIN_PASSWORD_HASH` | optional | template: empty — **needed for Maestro UI login** |
 | `DEX_CLIENT_ID` | optional | template: `maestro-ui` |
