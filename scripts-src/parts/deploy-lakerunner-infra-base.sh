@@ -28,9 +28,12 @@ Required:
   VERSION              Published template tag, e.g. v0.0.70.
   VPC_ID               VPC for the security groups.
   CLUSTER_ARN          Customer-supplied ECS cluster ARN.
-  LICENSE_DATA_FILE    Path to license JSON (seeds the license secret).
+  LICENSE_DATA         Cardinal license token (z64:...), seeds the license
+                       secret. Or supply LICENSE_DATA_FILE instead.
 
 Optional (template defaults preserved when unset):
+  LICENSE_DATA_FILE            Path to a file holding the license token
+                               (fallback for LICENSE_DATA).
   ALB_SCHEME                   internet-facing | internal (template default: internal).
   ALB_ALLOWED_CIDR1            ALB ingress CIDR allowlist (template default 10.0.0.0/8).
   ALB_ALLOWED_CIDR2            (template default 172.16.0.0/12).
@@ -61,18 +64,23 @@ missing=""
 [ -z "${VERSION:-}" ] && missing="$missing VERSION"
 [ -z "${VPC_ID:-}" ] && missing="$missing VPC_ID"
 [ -z "${CLUSTER_ARN:-}" ] && missing="$missing CLUSTER_ARN"
-[ -z "${LICENSE_DATA_FILE:-}" ] && missing="$missing LICENSE_DATA_FILE"
+{ [ -z "${LICENSE_DATA:-}" ] && [ -z "${LICENSE_DATA_FILE:-}" ]; } && missing="$missing LICENSE_DATA"
 if [ -n "$missing" ]; then
     usage >&2
     echo "[deploy-lakerunner-infra-base] ERROR: missing required: $(echo "$missing" | sed 's/^ //; s/ /, /g')" >&2
     exit 2
 fi
 
-if [ ! -r "$LICENSE_DATA_FILE" ]; then
-    echo "[deploy-lakerunner-infra-base] ERROR: cannot read LICENSE_DATA_FILE: $LICENSE_DATA_FILE" >&2
-    exit 2
+# LICENSE_DATA (direct token) wins; LICENSE_DATA_FILE is the file fallback.
+if [ -n "${LICENSE_DATA:-}" ]; then
+    license_data="$LICENSE_DATA"
+else
+    if [ ! -r "$LICENSE_DATA_FILE" ]; then
+        echo "[deploy-lakerunner-infra-base] ERROR: cannot read LICENSE_DATA_FILE: $LICENSE_DATA_FILE" >&2
+        exit 2
+    fi
+    license_data=$(cat "$LICENSE_DATA_FILE")
 fi
-license_data=$(cat "$LICENSE_DATA_FILE")
 
 template_base_url="${TEMPLATE_BASE_URL:-$DEFAULT_TEMPLATE_BASE_URL}"
 

@@ -166,6 +166,50 @@ def test_lakerunner_services_supports_alb_scheme():
     assert "AlbScheme=$ALB_SCHEME" in text
 
 
+def test_infra_base_license_accepts_string_or_file():
+    """LICENSE_DATA (direct token string) is the primary input; LICENSE_DATA_FILE
+    is kept as a file fallback. One of the two is required."""
+    script = SCRIPTS_DIR / "deploy-lakerunner-infra-base.sh"
+    text = script.read_text()
+    assert 'license_data="$LICENSE_DATA"' in text, "no direct-string license path"
+    assert 'cat "$LICENSE_DATA_FILE"' in text, "LICENSE_DATA_FILE fallback dropped"
+
+    # Behavioral: LICENSE_DATA alone satisfies the license requirement.
+    with_str = subprocess.run(
+        ["sh", str(script)],
+        capture_output=True,
+        text=True,
+        env={"PATH": TEST_PATH, "LICENSE_DATA": "z64:test"},
+    )
+    miss = [ln for ln in (with_str.stdout + with_str.stderr).splitlines()
+            if "missing required" in ln]
+    assert miss and "LICENSE_DATA" not in miss[0], (
+        f"LICENSE_DATA should satisfy the requirement: {miss}"
+    )
+
+    # And with neither var, LICENSE_DATA is reported missing.
+    without = subprocess.run(
+        ["sh", str(script)], capture_output=True, text=True, env={"PATH": TEST_PATH}
+    )
+    miss2 = [ln for ln in (without.stdout + without.stderr).splitlines()
+             if "missing required" in ln]
+    assert miss2 and "LICENSE_DATA" in miss2[0], (
+        f"LICENSE_DATA should be required when unset: {miss2}"
+    )
+
+
+def test_services_cert_accepts_string_or_file():
+    """Cert PEMs accept a direct string env var (written to a temp dir) with the
+    *_FILE path kept as a fallback."""
+    text = (SCRIPTS_DIR / "deploy-lakerunner-services.sh").read_text()
+    # String PEM -> temp file (then FILE_PARAMS reads it, multi-line safe).
+    assert 'cert_body_path="$cert_dir/cert.pem"' in text
+    assert '"$CERTIFICATE_BODY"' in text
+    # *_FILE fallbacks kept.
+    assert 'cert_body_path="$CERTIFICATE_BODY_FILE"' in text
+    assert 'cert_key_path="$CERTIFICATE_PRIVATE_KEY_FILE"' in text
+
+
 def test_lakerunner_services_drops_otel_replicas():
     """The lakerunner-services template no longer has an OtelReplicas param;
     the wrapper must not pass it (dead plumbing)."""

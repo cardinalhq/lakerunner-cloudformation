@@ -54,9 +54,13 @@ Optional (template defaults preserved when unset):
                               warn; fine for internal/test).  Re-runs (UPDATE)
                               keep the existing cert untouched -- no churn.  Set
                               CERTIFICATE_ARN to use a real cert.
-  CERTIFICATE_BODY_FILE       PEM cert body (path).  Overrides auto-generation.
-  CERTIFICATE_PRIVATE_KEY_FILE PEM private key (path).  Overrides auto-generation.
-  CERTIFICATE_CHAIN_FILE      PEM chain (path).
+  CERTIFICATE_BODY            PEM cert body (string).  Overrides auto-generation
+                              (body + private key must be supplied together).
+  CERTIFICATE_PRIVATE_KEY     PEM private key (string).
+  CERTIFICATE_CHAIN           PEM chain (string, optional).
+  CERTIFICATE_BODY_FILE       PEM cert body (path) -- fallback for CERTIFICATE_BODY.
+  CERTIFICATE_PRIVATE_KEY_FILE PEM private key (path) -- fallback for CERTIFICATE_PRIVATE_KEY.
+  CERTIFICATE_CHAIN_FILE      PEM chain (path) -- fallback for CERTIFICATE_CHAIN.
   DEX_ADMIN_EMAIL             (template default admin@cardinal.local).
   DEX_CLIENT_ID               (template default maestro-ui).
   OIDC_SUPERADMIN_EMAILS      (template default admin@cardinal.local).
@@ -206,55 +210,90 @@ DexInitImage=$DEX_INIT_IMAGE"
 DbInitImage=$DB_INIT_IMAGE"
 
 # --- Certificate handling. ---------------------------------------------------
-# Cert PEM material is passed via FILE_PARAMS (multi-line safe), never inlined
-# into the newline-delimited PARAMS string.
+# Cert PEM material reaches the template via FILE_PARAMS (multi-line safe), never
+# inlined into the newline-delimited PARAMS string.  Operators supply each PEM as
+# a direct string env var (CERTIFICATE_BODY / CERTIFICATE_PRIVATE_KEY /
+# CERTIFICATE_CHAIN) -- written into a temp dir here -- or as a *_FILE path
+# fallback.  The string form wins when both are set.
 #
 # Create-only auto-generation: the cert.yaml child builds an AWS::IAM::Server-
 # Certificate from CertificateBody/CertificatePrivateKey when CertificateArn is
 # empty.  A fresh self-signed PEM on every re-run would replace that cert and
 # churn the ALB listener, so we generate it ONLY on first create:
 #   - CERTIFICATE_ARN set            -> pass it (stable ARN, no churn).
-#   - empty + PEM files supplied     -> pass the supplied PEMs.
+#   - empty + PEM supplied           -> pass the supplied PEMs.
 #   - empty + stack absent (CREATE)  -> generate a self-signed cert, pass it.
-#   - empty + stack present (UPDATE) -> pass nothing; deploy-stack.sh resolves
+#   - empty + stack present (UPDATE) -> pass nothing; the engine resolves
 #     CertificateBody/CertificatePrivateKey to UsePreviousValue, keeping the
 #     existing IAM ServerCertificate untouched.
 file_params=""
 cert_dir=""
+cert_body_path=""
+cert_key_path=""
+cert_chain_path=""
 
 if [ -n "${CERTIFICATE_ARN:-}" ]; then
     params="$params
 CertificateArn=$CERTIFICATE_ARN"
-elif [ -n "${CERTIFICATE_BODY_FILE:-}" ] || [ -n "${CERTIFICATE_PRIVATE_KEY_FILE:-}" ]; then
-    [ -r "${CERTIFICATE_BODY_FILE:-}" ] || { echo "[deploy-lakerunner-services] ERROR: cannot read CERTIFICATE_BODY_FILE: ${CERTIFICATE_BODY_FILE:-}" >&2; exit 2; }
-    [ -r "${CERTIFICATE_PRIVATE_KEY_FILE:-}" ] || { echo "[deploy-lakerunner-services] ERROR: cannot read CERTIFICATE_PRIVATE_KEY_FILE: ${CERTIFICATE_PRIVATE_KEY_FILE:-}" >&2; exit 2; }
-    file_params="CertificateBody=$CERTIFICATE_BODY_FILE
-CertificatePrivateKey=$CERTIFICATE_PRIVATE_KEY_FILE"
-    if [ -n "${CERTIFICATE_CHAIN_FILE:-}" ]; then
-        [ -r "$CERTIFICATE_CHAIN_FILE" ] || { echo "[deploy-lakerunner-services] ERROR: cannot read CERTIFICATE_CHAIN_FILE: $CERTIFICATE_CHAIN_FILE" >&2; exit 2; }
-        file_params="$file_params
-CertificateChain=$CERTIFICATE_CHAIN_FILE"
-    fi
 else
-    # No ARN, no PEM files.  Generate only on first create (stack absent).
-    if aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$REGION" >/dev/null 2>&1; then
-        echo "[deploy-lakerunner-services] stack exists; keeping the existing self-signed cert (no regeneration)" >&2
+    # Resolve each PEM to a file path: the direct string env var (written into a
+    # temp dir) wins; the matching *_FILE path is the fallback.
+    if [ -n "${CERTIFICATE_BODY:-}" ]; then
+        [ -n "$cert_dir" ] || cert_dir=$(mktemp -d)
+        printf '%s\n' "$CERTIFICATE_BODY" > "$cert_dir/cert.pem"
+        cert_body_path="$cert_dir/cert.pem"
+    elif [ -n "${CERTIFICATE_BODY_FILE:-}" ]; then
+        [ -r "$CERTIFICATE_BODY_FILE" ] || { echo "[deploy-lakerunner-services] ERROR: cannot read CERTIFICATE_BODY_FILE: $CERTIFICATE_BODY_FILE" >&2; exit 2; }
+        cert_body_path="$CERTIFICATE_BODY_FILE"
+    fi
+    if [ -n "${CERTIFICATE_PRIVATE_KEY:-}" ]; then
+        [ -n "$cert_dir" ] || cert_dir=$(mktemp -d)
+        printf '%s\n' "$CERTIFICATE_PRIVATE_KEY" > "$cert_dir/key.pem"
+        cert_key_path="$cert_dir/key.pem"
+    elif [ -n "${CERTIFICATE_PRIVATE_KEY_FILE:-}" ]; then
+        [ -r "$CERTIFICATE_PRIVATE_KEY_FILE" ] || { echo "[deploy-lakerunner-services] ERROR: cannot read CERTIFICATE_PRIVATE_KEY_FILE: $CERTIFICATE_PRIVATE_KEY_FILE" >&2; exit 2; }
+        cert_key_path="$CERTIFICATE_PRIVATE_KEY_FILE"
+    fi
+    if [ -n "${CERTIFICATE_CHAIN:-}" ]; then
+        [ -n "$cert_dir" ] || cert_dir=$(mktemp -d)
+        printf '%s\n' "$CERTIFICATE_CHAIN" > "$cert_dir/chain.pem"
+        cert_chain_path="$cert_dir/chain.pem"
+    elif [ -n "${CERTIFICATE_CHAIN_FILE:-}" ]; then
+        [ -r "$CERTIFICATE_CHAIN_FILE" ] || { echo "[deploy-lakerunner-services] ERROR: cannot read CERTIFICATE_CHAIN_FILE: $CERTIFICATE_CHAIN_FILE" >&2; exit 2; }
+        cert_chain_path="$CERTIFICATE_CHAIN_FILE"
+    fi
+
+    if [ -n "$cert_body_path" ] || [ -n "$cert_key_path" ]; then
+        # Supplied PEM: body and key must come together.
+        [ -n "$cert_body_path" ] || { echo "[deploy-lakerunner-services] ERROR: private key supplied without a certificate body (set CERTIFICATE_BODY or CERTIFICATE_BODY_FILE)" >&2; exit 2; }
+        [ -n "$cert_key_path" ] || { echo "[deploy-lakerunner-services] ERROR: certificate body supplied without a private key (set CERTIFICATE_PRIVATE_KEY or CERTIFICATE_PRIVATE_KEY_FILE)" >&2; exit 2; }
+        file_params="CertificateBody=$cert_body_path
+CertificatePrivateKey=$cert_key_path"
+        if [ -n "$cert_chain_path" ]; then
+            file_params="$file_params
+CertificateChain=$cert_chain_path"
+        fi
     else
-        if ! command -v openssl >/dev/null 2>&1; then
-            echo "[deploy-lakerunner-services] ERROR: openssl is required to auto-generate a self-signed cert; install openssl or set CERTIFICATE_ARN / CERTIFICATE_*_FILE" >&2
-            exit 2
-        fi
-        echo "[deploy-lakerunner-services] no CERTIFICATE_ARN and first create; generating a self-signed internal cert" >&2
-        cert_dir=$(mktemp -d)
-        if ! openssl req -x509 -newkey rsa:2048 -nodes \
-                -keyout "$cert_dir/key.pem" -out "$cert_dir/cert.pem" \
-                -days 825 -subj "/CN=cardinal.test" \
-                -addext "subjectAltName=DNS:cardinal.test,DNS:*.cardinal.internal" 2>/dev/null; then
-            echo "[deploy-lakerunner-services] ERROR: openssl failed to generate the self-signed cert" >&2
-            exit 1
-        fi
-        file_params="CertificateBody=$cert_dir/cert.pem
+        # No ARN, no PEM.  Generate only on first create (stack absent).
+        if aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$REGION" >/dev/null 2>&1; then
+            echo "[deploy-lakerunner-services] stack exists; keeping the existing self-signed cert (no regeneration)" >&2
+        else
+            if ! command -v openssl >/dev/null 2>&1; then
+                echo "[deploy-lakerunner-services] ERROR: openssl is required to auto-generate a self-signed cert; install openssl or set CERTIFICATE_ARN / CERTIFICATE_BODY+CERTIFICATE_PRIVATE_KEY (or their *_FILE variants)" >&2
+                exit 2
+            fi
+            echo "[deploy-lakerunner-services] no CERTIFICATE_ARN and first create; generating a self-signed internal cert" >&2
+            cert_dir=$(mktemp -d)
+            if ! openssl req -x509 -newkey rsa:2048 -nodes \
+                    -keyout "$cert_dir/key.pem" -out "$cert_dir/cert.pem" \
+                    -days 825 -subj "/CN=cardinal.test" \
+                    -addext "subjectAltName=DNS:cardinal.test,DNS:*.cardinal.internal" 2>/dev/null; then
+                echo "[deploy-lakerunner-services] ERROR: openssl failed to generate the self-signed cert" >&2
+                exit 1
+            fi
+            file_params="CertificateBody=$cert_dir/cert.pem
 CertificatePrivateKey=$cert_dir/key.pem"
+        fi
     fi
 fi
 
