@@ -145,8 +145,9 @@ ids from the infra-base stack via `FROM_STACKS`.
 | `INFRA_BASE_STACK` | required | upstream lakerunner-infra-base stack name |
 | `VPC_ID` | required | — |
 | `PRIVATE_SUBNETS` | required | comma-separated private subnet ids |
-| `DB_ENGINE_VERSION` | optional | Aurora PostgreSQL version, template: `17.9` |
-| `DB_INSTANCE_CLASS` | optional | Aurora writer class, template: `db.r8g.large` |
+| `DB_ENGINE_VERSION` | optional | template: `18.4` |
+| `DB_INSTANCE_CLASS` | optional | template: `db.r7g.large` |
+| `DB_ALLOCATED_STORAGE` | optional | template: `100` |
 | `TEMPLATE_BASE_URL` | optional | `https://cardinal-cfn.s3.us-east-2.amazonaws.com/lakerunner` |
 | `DEPLOYER_ROLE_ARN` | optional | unset |
 | `NO_EXECUTE` | optional | unset |
