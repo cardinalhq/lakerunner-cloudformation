@@ -95,6 +95,10 @@ _QUERY_API_PORT = 8080
 _QUERY_WORKER_ARTIFACT_PORT = 8081
 _QUERY_WORKER_PORT = 8082
 _ADMIN_API_PORT = 9091
+# lakerunner v1.39+ serves /healthz on a dedicated health-check port (env
+# HEALTH_CHECK_PORT, default 8090) separate from the traffic port, so the ALB
+# health probe for the LB-fronted services (admin-api, query-api) targets it.
+_HEALTH_CHECK_PORT = 8090
 _MAESTRO_PORT = 4200
 _MAESTRO_DEX_PORT = 5556
 
@@ -420,6 +424,16 @@ def build() -> Template:
         ToPort=_QUERY_API_PORT,
         Description="ALB to query-api",
     ))
+    # ALB -> query-api health server on 8090 (/healthz)
+    t.add_resource(SecurityGroupIngress(
+        "QueryHealthFromAlb",
+        GroupId=Ref(query_sg),
+        SourceSecurityGroupId=Ref(alb_sg),
+        IpProtocol="tcp",
+        FromPort=_HEALTH_CHECK_PORT,
+        ToPort=_HEALTH_CHECK_PORT,
+        Description="ALB to query-api health check",
+    ))
     # query-api -> query-worker (self-referential). 8082 gRPC control stream,
     # 8081 HTTP REST artifact fetch.
     t.add_resource(SecurityGroupIngress(
@@ -450,6 +464,16 @@ def build() -> Template:
         FromPort=_ADMIN_API_PORT,
         ToPort=_ADMIN_API_PORT,
         Description="ALB to admin-api",
+    ))
+    # ALB -> admin-api health server on 8090 (/healthz)
+    t.add_resource(SecurityGroupIngress(
+        "ControlHealthFromAlb",
+        GroupId=Ref(control_sg),
+        SourceSecurityGroupId=Ref(alb_sg),
+        IpProtocol="tcp",
+        FromPort=_HEALTH_CHECK_PORT,
+        ToPort=_HEALTH_CHECK_PORT,
+        Description="ALB to admin-api health check",
     ))
 
     # Maestro -> lakerunner cross-tier calls via Cloud Map service discovery
