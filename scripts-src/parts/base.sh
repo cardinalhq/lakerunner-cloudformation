@@ -256,6 +256,13 @@ cleanup() {
     if [ -n "$work_dir" ] && [ -d "$work_dir" ]; then
         rm -rf "$work_dir"
     fi
+    # cert_dir: optional temp dir created by a generated front-half (the
+    # services driver's create-time self-signed cert).  Cleaned here so the
+    # single combined script has exactly one trap.  Unset in a standalone
+    # engine run -> no-op.
+    if [ -n "${cert_dir:-}" ] && [ -d "${cert_dir:-}" ]; then
+        rm -rf "$cert_dir"
+    fi
     exit "$rc"
 }
 

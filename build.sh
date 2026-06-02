@@ -55,6 +55,10 @@ for child in alb cert migration \
 done
 
 echo
+echo "Generating single-file deploy drivers..."
+sh scripts-src/build.sh
+
+echo
 echo "Linting CFN templates..."
 cfn-lint generated-templates/lrdev-vpc.yaml \
          generated-templates/lrdev-baseinfra.yaml \
