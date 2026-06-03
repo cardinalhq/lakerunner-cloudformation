@@ -39,30 +39,35 @@ def test_required_parameters(template_dict):
     for n in ("InstallIdShort", "InstallIdLong", "ClusterArn", "ClusterName",
               "TaskSecurityGroupId", "ExecutionRoleArn", "TaskRoleArn",
               "PrivateSubnetsCsv", "DbEndpoint", "DbSecretArn",
-              "LakerunnerImage", "DbInitImage",
-              "StorageProfilesParamName", "ApiKeysParamName",
-              "OrgId", "IngestBucketName"):
+              "LakerunnerImage", "DbInitImage"):
         assert n in template_dict["Parameters"], f"missing parameter: {n}"
 
 
-def test_migrator_seeds_configdb_from_ssm(template_dict):
-    """The migrator must read storage-profiles + api-keys YAML from the
-    SSM parameters so initializeIfNeededFunc seeds configdb on first install
-    (issue #109). YAML is injected as env vars via ECS Secrets resolution
-    against the SSM parameter ARN; STORAGE_PROFILE_FILE / API_KEYS_FILE use
-    the binary's `env:VAR` indirection."""
+def test_no_org_content_params(template_dict):
+    """Org content is Maestro-owned; the migration child takes no SSM-seed or
+    org/bucket params."""
+    params = template_dict["Parameters"]
+    for gone in ("StorageProfilesParamName", "ApiKeysParamName",
+                 "OrgId", "IngestBucketName"):
+        assert gone not in params, f"{gone} should be removed from migration child"
+
+
+def test_migrator_does_not_import_ssm(template_dict):
+    """The migrator seeds nothing from SSM; Maestro provisions org content via
+    /api/v1/provision. With empty configdb the binary's initializeIfNeededFunc
+    is a no-op."""
     migrator = _containers(template_dict)["migrator"]
     env = {e["Name"]: e["Value"] for e in migrator["Environment"]}
-    assert env.get("STORAGE_PROFILE_FILE") == "env:STORAGE_PROFILES_YAML"
-    assert env.get("API_KEYS_FILE") == "env:API_KEYS_YAML"
+    assert "STORAGE_PROFILE_FILE" not in env
+    assert "API_KEYS_FILE" not in env
+    secrets = {s["Name"] for s in migrator.get("Secrets", [])}
+    assert "STORAGE_PROFILES_YAML" not in secrets
+    assert "API_KEYS_YAML" not in secrets
 
-    secrets = {s["Name"]: s["ValueFrom"] for s in migrator["Secrets"]}
-    sp_arn = secrets.get("STORAGE_PROFILES_YAML")
-    ak_arn = secrets.get("API_KEYS_YAML")
-    assert sp_arn is not None and "StorageProfilesParamName" in str(sp_arn), \
-        f"STORAGE_PROFILES_YAML secret must reference StorageProfilesParamName: {sp_arn}"
-    assert ak_arn is not None and "ApiKeysParamName" in str(ak_arn), \
-        f"API_KEYS_YAML secret must reference ApiKeysParamName: {ak_arn}"
+
+def test_no_ensure_storage_profile_container(template_dict):
+    """The canonical-profile upsert sidecar is gone; Maestro owns the row."""
+    assert "ensure-storage-profile" not in _containers(template_dict)
 
 
 def test_migration_image_params_are_unified(template_dict):
@@ -99,9 +104,9 @@ def test_creates_task_definition(template_dict):
     assert "AWS::ECS::TaskDefinition" in _types(template_dict)
 
 
-def test_four_containers_present(template_dict):
+def test_three_containers_present(template_dict):
     assert set(_containers(template_dict)) == {
-        "configdb-init", "migrator", "ensure-storage-profile", "keepalive",
+        "configdb-init", "migrator", "keepalive",
     }
 
 
@@ -112,54 +117,17 @@ def test_exactly_one_essential_container(template_dict):
 
 
 def test_container_ordering_chain(template_dict):
-    """configdb-init -> migrator -> ensure-storage-profile -> keepalive. The
-    canonical-profile upsert sits on the keepalive critical path so any
-    failure surfaces as a stack rollback, not silent log noise."""
+    """configdb-init -> migrator -> keepalive. keepalive (the only essential
+    container) waits on migrator=SUCCESS, so the task -- and thus the nested
+    stack -- only stabilizes after migrations succeed."""
     cs = _containers(template_dict)
     assert "DependsOn" not in cs["configdb-init"]
     assert cs["migrator"]["DependsOn"] == [
         {"ContainerName": "configdb-init", "Condition": "COMPLETE"}
     ]
-    assert cs["ensure-storage-profile"]["DependsOn"] == [
+    assert cs["keepalive"]["DependsOn"] == [
         {"ContainerName": "migrator", "Condition": "SUCCESS"}
     ]
-    assert cs["keepalive"]["DependsOn"] == [
-        {"ContainerName": "ensure-storage-profile", "Condition": "SUCCESS"}
-    ]
-
-
-def test_ensure_storage_profile_is_non_essential(template_dict):
-    """It runs the upsert once and exits; keepalive's DependsOn=SUCCESS is
-    what gates task stability on a clean exit."""
-    assert _containers(template_dict)["ensure-storage-profile"].get("Essential") is False
-
-
-def test_ensure_storage_profile_upsert_is_idempotent(template_dict):
-    """SQL must use ON CONFLICT DO NOTHING on both inserts so re-runs after
-    operator edits never clobber existing rows."""
-    cmd = " ".join(_containers(template_dict)["ensure-storage-profile"]["Command"])
-    cmd_oneline = " ".join(cmd.split())  # collapse all whitespace
-    assert "ON CONFLICT (bucket_name) DO NOTHING" in cmd_oneline
-    assert (
-        "ON CONFLICT (organization_id, bucket_id, instance_num, collector_name) DO NOTHING"
-        in cmd_oneline
-    )
-    # collector_name must match the SSM-driven seed in cardinal_infrastructure
-    assert "'lakerunner'" in cmd_oneline
-
-
-def test_ensure_storage_profile_uses_configdb_credentials(template_dict):
-    """Sidecar reads CONFIGDB_* env + secrets and connects with sslmode=require."""
-    c = _containers(template_dict)["ensure-storage-profile"]
-    env = {e["Name"]: e["Value"] for e in c["Environment"]}
-    assert env["CONFIGDB_DBNAME"] == "configdb"
-    assert {"Ref": "DbEndpoint"} == env["CONFIGDB_HOST"]
-    assert {"Ref": "IngestBucketName"} == env["BUCKET_NAME"]
-    assert {"Ref": "OrgId"} == env["ORG_ID"]
-    secrets = {s["Name"] for s in c["Secrets"]}
-    assert {"CONFIGDB_USER", "CONFIGDB_PASSWORD"} <= secrets
-    cmd = " ".join(c["Command"])
-    assert "PGSSLMODE=require" in cmd
 
 
 def test_migrator_container_uses_lakerunner_image(template_dict):
