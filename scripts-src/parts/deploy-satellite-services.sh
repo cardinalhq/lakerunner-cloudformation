@@ -53,6 +53,19 @@ case "${1:-}" in
     *) echo "[deploy-satellite-services] ERROR: this script takes no arguments; configure it via environment variables" >&2; usage >&2; exit 2 ;;
 esac
 
+# Echo the inputs this script can actually see before validating, so a
+# "missing required" failure is easy to diagnose.  The usual cause is a value
+# set as a plain shell variable but not exported -- this child process then
+# never receives it, and it shows as <unset> below.
+echo "[deploy-satellite-services] inputs visible to this process:" >&2
+for _v in STACK_NAME REGION VERSION SATELLITE_INFRA_BASE_STACK ORGANIZATION_ID \
+          VPC_ID ALB_SUBNETS TASK_SUBNETS ECS_CLUSTER_ARN \
+          ALB_SCHEME INGEST_SOURCE_CIDR OTEL_REPLICAS TEMPLATE_BASE_URL \
+          DEPLOYER_ROLE_ARN NO_EXECUTE; do
+    eval "_val=\${$_v:-}"
+    printf '[deploy-satellite-services]   %-27s = %s\n' "$_v" "${_val:-<unset>}" >&2
+done
+
 missing=""
 [ -z "${STACK_NAME:-}" ] && missing="$missing STACK_NAME"
 [ -z "${REGION:-}" ] && missing="$missing REGION"

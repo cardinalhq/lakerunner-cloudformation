@@ -11,6 +11,16 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v0.0.122
+
+- **`deploy-satellite-services.sh` now echoes the inputs it can see.** Before
+  validating, the driver prints every required and optional input visible to the
+  process (value, or `<unset>`) to stderr, so a `missing required: ...` failure
+  is easy to diagnose. The usual cause is a value set as a plain shell variable
+  but not exported, so the driver — a separate process — never receives it and
+  it shows as `<unset>`. No behavior or parameter change.
+  - Upgrade action: none.
+
 ## v0.0.121
 
 - **`PubsubAutoRegister` now defaults to `true`.** New `lakerunner-services`
