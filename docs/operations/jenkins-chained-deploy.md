@@ -166,15 +166,17 @@ PRIVATE_SUBNETS=subnet-1,subnet-2 \
 
 ## Job 3: satellite-infra-base (per ingest account/region)
 
-`scripts/deploy-satellite-infra-base.sh` — pulls infra-base Outputs and maps
-`LakerunnerPrincipal=ProcessRoleArn`.
+`scripts/deploy-satellite-infra-base.sh` — no upstream-stack pull. The central
+principal arrives directly as `LAKERUNNER_PRINCIPAL` (the lakerunner
+`ProcessRoleArn`, read once out of band), so a satellite works in the same or a
+different account.
 
 | Variable | Req/Opt | Default |
 |---|---|---|
 | `STACK_NAME` | required | — |
 | `REGION` | required | — |
 | `VERSION` | required | — |
-| `INFRA_BASE_STACK` | required | upstream lakerunner-infra-base stack name |
+| `LAKERUNNER_PRINCIPAL` | required | ARN of the central lakerunner process role (its `ProcessRoleArn` output) allowed to assume the satellite access role |
 | `EXTERNAL_ID` | optional | template: empty |
 | `RAW_BUCKET_NAME` | optional | template: generated |
 | `RAW_BUCKET_LIFECYCLE_DAYS` | optional | template: `7` |
@@ -187,7 +189,7 @@ PRIVATE_SUBNETS=subnet-1,subnet-2 \
 STACK_NAME=cardinal-satellite-infra-base \
 REGION=us-east-1 \
 VERSION=v0.0.70 \
-INFRA_BASE_STACK=cardinal-lakerunner-infra-base \
+LAKERUNNER_PRINCIPAL=arn:aws:iam::111122223333:role/cardinal-lakerunner-infra-base-ProcessRole-ABC123 \
 EXTERNAL_ID=myExternalId \
 ./scripts/deploy-satellite-infra-base.sh
 ```
@@ -202,8 +204,7 @@ collector config must change before scaling past one replica.
 | `STACK_NAME` | required | — |
 | `REGION` | required | — |
 | `VERSION` | required | — |
-| `SATELLITE_INFRA_BASE_STACK` | required | upstream satellite-infra-base (`RawBucketName`) |
-| `INFRA_BASE_STACK` | required | upstream lakerunner-infra-base (`LicenseSecretArn`) |
+| `SATELLITE_INFRA_BASE_STACK` | required | upstream satellite-infra-base (`RawBucketName`), same account/region |
 | `ORGANIZATION_ID` | required | org UUID this satellite's telemetry is attributed to |
 | `VPC_ID` | required | — |
 | `ALB_SUBNETS` | required | comma-separated subnets for the collector ALB |
@@ -221,7 +222,6 @@ STACK_NAME=cardinal-satellite-services \
 REGION=us-east-1 \
 VERSION=v0.0.70 \
 SATELLITE_INFRA_BASE_STACK=cardinal-satellite-infra-base \
-INFRA_BASE_STACK=cardinal-lakerunner-infra-base \
 ORGANIZATION_ID=12340000-0000-0000-0000-000000000000 \
 VPC_ID=vpc-0abc \
 ALB_SUBNETS=subnet-a,subnet-b \

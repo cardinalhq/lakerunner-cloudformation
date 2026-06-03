@@ -3,10 +3,12 @@
 # Jenkins job 3: deploy the cardinal-satellite-infra-base stack (one per
 # satellite ingest account/region).
 #
-# Upstream: the lakerunner-infra-base stack.  This stack's LakerunnerPrincipal
-# parameter does NOT match any infra-base output name, so it is wired via an
-# explicit MAPS LakerunnerPrincipal=ProcessRoleArn: the satellite trusts the
-# lakerunner process role to assume into the satellite ingest access role.
+# No upstream stack pull: a satellite may live in a DIFFERENT account than the
+# central lakerunner install, where describe-stacks cannot reach the
+# lakerunner-infra-base stack.  The central principal the satellite trusts is
+# supplied directly as LAKERUNNER_PRINCIPAL (the lakerunner process role ARN,
+# read once out of band) -> LakerunnerPrincipal param.  The satellite then
+# trusts that role to assume into the satellite ingest access role.
 #
 # Self-contained single-file driver: this front-half sets the engine env, then
 # falls through into the engine embedded below by scripts-src/build.sh (do not
@@ -24,11 +26,12 @@ deploy-satellite-infra-base.sh -- deploy the cardinal-satellite-infra-base stack
 All inputs come from environment variables (no flags).
 
 Required:
-  STACK_NAME         Stack to create/update.
-  REGION             AWS region (never defaulted; must be set explicitly).
-  VERSION            Published template tag.
-  INFRA_BASE_STACK   Upstream lakerunner-infra-base stack.  Its ProcessRoleArn
-                     output is mapped to this stack's LakerunnerPrincipal param.
+  STACK_NAME          Stack to create/update.
+  REGION              AWS region (never defaulted; must be set explicitly).
+  VERSION             Published template tag.
+  LAKERUNNER_PRINCIPAL  ARN of the central lakerunner process role (its
+                      ProcessRoleArn output) allowed to assume the satellite
+                      access role.  Read once out of band; works cross-account.
 
 Optional (template defaults preserved when unset):
   EXTERNAL_ID                Optional STS ExternalId for the assume-role trust.
@@ -53,7 +56,7 @@ missing=""
 [ -z "${STACK_NAME:-}" ] && missing="$missing STACK_NAME"
 [ -z "${REGION:-}" ] && missing="$missing REGION"
 [ -z "${VERSION:-}" ] && missing="$missing VERSION"
-[ -z "${INFRA_BASE_STACK:-}" ] && missing="$missing INFRA_BASE_STACK"
+[ -z "${LAKERUNNER_PRINCIPAL:-}" ] && missing="$missing LAKERUNNER_PRINCIPAL"
 if [ -n "$missing" ]; then
     usage >&2
     echo "[deploy-satellite-infra-base] ERROR: missing required: $(echo "$missing" | sed 's/^ //; s/ /, /g')" >&2
@@ -63,10 +66,13 @@ fi
 template_base_url="${TEMPLATE_BASE_URL:-$DEFAULT_TEMPLATE_BASE_URL}"
 
 TEMPLATE_URL="$template_base_url/$VERSION/$TEMPLATE_KEY"
-FROM_STACKS="$INFRA_BASE_STACK"
-MAPS="LakerunnerPrincipal=ProcessRoleArn"
+# No upstream-stack pull (cross-account safe): the central principal arrives
+# directly, never mapped from a stack output.
+FROM_STACKS=""
+MAPS=""
 
-params=""
+params="LakerunnerPrincipal=$LAKERUNNER_PRINCIPAL
+"
 [ -n "${EXTERNAL_ID:-}" ] && params="${params}ExternalId=$EXTERNAL_ID
 "
 [ -n "${RAW_BUCKET_NAME:-}" ] && params="${params}RawBucketName=$RAW_BUCKET_NAME

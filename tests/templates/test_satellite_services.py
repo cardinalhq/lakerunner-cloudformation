@@ -20,7 +20,6 @@ def td():
 def test_required_parameters(td):
     for n in (
         "RawBucketName",
-        "LicenseSecretArn",
         "OrganizationId",
         "VpcId",
         "AlbSubnetsCsv",
@@ -72,19 +71,26 @@ def test_task_role_writes_only_raw_bucket(td):
     assert "s3:DeleteObject" not in all_actions
 
 
-def test_exec_role_reads_license_secret(td):
-    """Exec role allows secretsmanager:GetSecretValue on LicenseSecretArn."""
+def test_no_license_anywhere(td):
+    """The collector image needs no license: no LicenseSecretArn param, no
+    secretsmanager:GetSecretValue on the exec role, and no LICENSE_DATA secret
+    on the container. A satellite may live in a different account than the
+    central license secret, so nothing here may depend on it."""
+    assert "LicenseSecretArn" not in td["Parameters"]
+
     exec_role = td["Resources"]["CollectorExecutionRole"]
     stmts = exec_role["Properties"]["Policies"][0]["PolicyDocument"]["Statement"]
-    sm_stmt = next(
-        s for s in stmts
-        if "secretsmanager:GetSecretValue" in (
-            s["Action"] if isinstance(s["Action"], list) else [s["Action"]]
-        )
+    for s in stmts:
+        actions = s["Action"] if isinstance(s["Action"], list) else [s["Action"]]
+        assert "secretsmanager:GetSecretValue" not in actions
+
+    task_def = next(
+        r for r in td["Resources"].values() if r["Type"] == "AWS::ECS::TaskDefinition"
     )
-    resource = sm_stmt["Resource"]
-    resources = resource if isinstance(resource, list) else [resource]
-    assert {"Ref": "LicenseSecretArn"} in resources
+    container = task_def["Properties"]["ContainerDefinitions"][0]
+    secret_names = [s["Name"] for s in container.get("Secrets", [])]
+    assert "LICENSE_DATA" not in secret_names
+    assert "LicenseSecretArn" not in json.dumps(td)
 
 
 # ---------------------------------------------------------------------------

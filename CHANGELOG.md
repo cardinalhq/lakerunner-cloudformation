@@ -11,6 +11,30 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v0.0.120
+
+- **Satellite installs are fully decoupled from the central account.** A
+  satellite (`satellite-infra-base` + `satellite-services`, deployed as a
+  same-account/region pair) may now live in the **same or a different AWS
+  account** than the central lakerunner install — no satellite driver reads the
+  central `lakerunner-infra-base` stack (a cross-account `describe-stacks` that
+  could never have worked). (#185)
+  - **Collector no longer uses a license.** `satellite-services` drops the
+    `LicenseSecretArn` parameter, the collector exec-role
+    `secretsmanager:GetSecretValue`, and the `LICENSE_DATA` container secret —
+    the otel-collector image needs no license.
+  - **Central principal is supplied directly.** `deploy-satellite-infra-base.sh`
+    now takes `LAKERUNNER_PRINCIPAL` (the central `ProcessRoleArn`, read once out
+    of band) instead of mapping it from the `lakerunner-infra-base` stack, and no
+    longer requires `INFRA_BASE_STACK`.
+  - `deploy-satellite-services.sh` no longer requires `INFRA_BASE_STACK` (it only
+    needed it for the license); it still pulls `RawBucketName` from the
+    satellite's own paired `satellite-infra-base` in the same account.
+  - Upgrade action: when redeploying a satellite, set `LAKERUNNER_PRINCIPAL` on
+    the infra-base driver and drop `INFRA_BASE_STACK` from both satellite drivers.
+    The collector's own task/exec roles are unchanged (always self-contained). No
+    data-bearing resource is replaced.
+
 ## v0.0.119
 
 - **Satellite self-telemetry traces now process (IAM widening).** The
