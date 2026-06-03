@@ -28,24 +28,28 @@ def test_required_parameters(td):
         "CookedBucketName",
         "LicenseSecretName",
         "AdminKeySecretName",
-        "StorageProfilesParamName",
-        "ApiKeysParamName",
-        "OrganizationId",
         "LicenseData",
-        "InitialIngestApiKey",
     ):
         assert n in td["Parameters"], f"missing parameter: {n}"
 
 
-def test_organization_id_required_no_default(td):
-    """OrganizationId is operator-chosen: required (no default) and UUID-shaped,
-    so the bootstrap org is predictable and matches the satellites."""
-    p = td["Parameters"]["OrganizationId"]
-    assert "Default" not in p, "OrganizationId must have no default"
-    assert p["AllowedPattern"] == (
-        r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
-        r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
-    )
+def test_no_org_content_params_or_resources(td):
+    """infra-base seeds NO org content; Maestro owns it via /api/v1/provision.
+
+    Lakerunner installs admin-key-only (ADMIN_INITIAL_API_KEY, already wired on
+    admin-api); the org, its storage line, and its ingest key are provisioned by
+    Maestro, not seeded here.
+    """
+    params = td["Parameters"]
+    for gone in ("OrganizationId", "InitialIngestApiKey",
+                 "StorageProfilesParamName", "ApiKeysParamName"):
+        assert gone not in params, f"{gone} should be removed from infra-base"
+    resources = td["Resources"]
+    assert "StorageProfilesParam" not in resources
+    assert "ApiKeysParam" not in resources
+    outputs = td.get("Outputs", {})
+    assert "StorageProfilesParamName" not in outputs
+    assert "ApiKeysParamName" not in outputs
 
 
 def test_dropped_rds_param(td):
@@ -62,7 +66,6 @@ def test_no_threaded_arn_params(td):
 
 def test_license_data_is_no_echo(td):
     assert td["Parameters"]["LicenseData"].get("NoEcho") is True
-    assert td["Parameters"]["InitialIngestApiKey"].get("NoEcho") is True
 
 
 def test_cooked_bucket_default_name(td):
@@ -175,9 +178,16 @@ def test_exec_role_secrets_scoped_to_cardinal_pattern(td):
     assert res["Fn::Sub"].endswith(":secret:cardinal-*")
 
 
-def test_exec_role_ssm_scoped_to_cardinal(td):
-    s = next(s for s in _exec_statements(td) if s["Sid"] == "ResolveCardinalSsm")
-    assert s["Resource"]["Fn::Sub"].endswith("parameter/cardinal/*")
+def test_no_ssm_read_iam(td):
+    """No SSM parameters remain, so no role grants ssm:GetParameter*."""
+    assert not any(
+        s.get("Sid") == "ResolveCardinalSsm" for s in _exec_statements(td)
+    )
+    for role in ("MigrationRole", "QueryRole", "ProcessRole", "ControlRole",
+                 "MaestroRole"):
+        assert not any(
+            s.get("Sid") == "ReadSsmParams" for s in _role_statements(td, role)
+        ), f"{role} still grants ssm:GetParameter*"
 
 
 def test_all_task_roles_use_name_pattern_secrets(td):
@@ -301,17 +311,6 @@ def test_admin_key_secret_named_and_retained(td):
     assert td["Parameters"]["AdminKeySecretName"]["Default"] == "cardinal-admin-key"
 
 
-def test_ssm_params_seeded_and_retained(td):
-    sp = td["Resources"]["StorageProfilesParam"]
-    assert sp["DeletionPolicy"] == "Retain"
-    # storage-profiles seeded with the cooked bucket + region
-    assert "bucket: ${BucketName}" in sp["Properties"]["Value"]["Fn::Sub"][0]
-    ak = td["Resources"]["ApiKeysParam"]
-    assert ak["DeletionPolicy"] == "Retain"
-    # api-keys conditional on HasInitialIngestApiKey, else "[]"
-    assert ak["Properties"]["Value"]["Fn::If"][2] == "[]"
-
-
 # ---------------------------------------------------------------------------
 # Task 6: outputs
 # ---------------------------------------------------------------------------
@@ -334,7 +333,5 @@ def test_all_outputs_present(td):
         "CookedBucketName",
         "LicenseSecretArn",
         "AdminKeySecretArn",
-        "StorageProfilesParamName",
-        "ApiKeysParamName",
     ):
         assert o in td["Outputs"], f"missing output: {o}"
