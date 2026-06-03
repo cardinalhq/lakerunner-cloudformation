@@ -73,13 +73,14 @@ def test_data_plane_params(td):
         "DbMasterSecretArn",
         "LicenseSecretArn",
         "AdminKeySecretArn",
-        "StorageProfilesParamName",
-        "ApiKeysParamName",
     ):
         assert n in params, f"missing data-plane param: {n}"
     # Removed/renamed sources
     assert "IngestBucketName" not in params
     assert "RdsSecurityGroupId" not in params
+    # Org content is Maestro-owned: the SSM-seed param names are gone.
+    assert "StorageProfilesParamName" not in params
+    assert "ApiKeysParamName" not in params
     # QueueArn was never plumbed; QueueUrl/QueueRoleArn are the group-0 inputs.
     assert "QueueArn" not in params, "vestigial queue param present: QueueArn"
 
@@ -140,10 +141,17 @@ def test_children_present(td):
 def test_cooked_bucket_wired_to_children(td):
     """At least one child receives Ref CookedBucketName for its bucket param."""
     ref = {"Ref": "CookedBucketName"}
-    migration = td["Resources"]["Migration"]["Properties"]["Parameters"]
-    assert migration["IngestBucketName"] == ref
     query = td["Resources"]["Query"]["Properties"]["Parameters"]
     assert query["BucketName"] == ref
+
+
+def test_migration_child_gets_no_org_content_params(td):
+    """Org content is Maestro-owned: the Migration child no longer receives the
+    SSM-seed param names, the org id, or the ingest bucket."""
+    migration = td["Resources"]["Migration"]["Properties"]["Parameters"]
+    for gone in ("StorageProfilesParamName", "ApiKeysParamName",
+                 "OrgId", "IngestBucketName"):
+        assert gone not in migration, f"Migration child still gets {gone}"
 
 
 def test_self_telemetry_endpoint_param(td):

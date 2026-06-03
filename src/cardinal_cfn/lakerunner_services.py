@@ -175,10 +175,6 @@ _INFRA_SETUP_PARAMS = [
      "ARN of the cardinal-license secret (infra output)."),
     ("AdminKeySecretArn", "String", None,
      "ARN of the cardinal-admin-key secret (infra output)."),
-    ("StorageProfilesParamName", "String", None,
-     "Name of the SSM parameter holding storage_profiles YAML (infra output)."),
-    ("ApiKeysParamName", "String", None,
-     "Name of the SSM parameter holding api_keys YAML (infra output)."),
     ("ClusterName", "String", None,
      "Name of the ECS cluster (customer-supplied)."),
     ("ClusterArn", "String", None,
@@ -375,9 +371,10 @@ def build() -> Template:
         ),
         Description=(
             "Organization UUID for this install (operator-chosen, no default). "
-            "Must match the value the infrastructure stack seeded into "
-            "storage-profiles / api-keys and every satellite's OrganizationId; "
-            "Maestro pre-populates this org and wires it to the local lakerunner."
+            "Must match every satellite's OrganizationId. Maestro pre-populates "
+            "this org and provisions it into the local lakerunner (org, storage "
+            "line, and ingest key) via the /api/v1/provision admin API; nothing "
+            "else seeds org content."
         ),
     ))
     t.add_parameter(Parameter(
@@ -587,10 +584,6 @@ def build() -> Template:
         "DbPort": Ref("DbPort"),
         "DbName": Ref("DbName"),
         "DbSecretArn": Ref("DbMasterSecretArn"),
-        "StorageProfilesParamName": Ref("StorageProfilesParamName"),
-        "ApiKeysParamName": Ref("ApiKeysParamName"),
-        "OrgId": Ref("OrganizationId"),
-        "IngestBucketName": Ref("CookedBucketName"),
         "LakerunnerImage": lakerunner_image,
         "DbInitImage": db_init_image,
     })
