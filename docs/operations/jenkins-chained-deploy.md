@@ -116,7 +116,7 @@ last.
 | `ALB_ALLOWED_CIDR1` | optional | template: `10.0.0.0/8` |
 | `ALB_ALLOWED_CIDR2` | optional | template: `172.16.0.0/12` |
 | `ALB_ALLOWED_CIDR3` | optional | template: `192.168.0.0/16` |
-| `ORGANIZATION_ID` | optional | template default |
+| `ORGANIZATION_ID` | required | org UUID for this install (no default); use the SAME value on Job 5 and every satellite |
 | `INITIAL_INGEST_API_KEY` | optional | template: empty |
 | `COOKED_BUCKET_NAME` | optional | template: generated |
 | `CONFIGURE_BUCKET_PUBLIC_ACCESS_BLOCK` | optional | `true` sets the cooked bucket's S3 Block Public Access config; template default `false` (not set — relies on AWS account/bucket default BPA, avoids needing `s3:PutBucketPublicAccessBlock`) |
@@ -135,6 +135,7 @@ VERSION=v0.0.70 \
 VPC_ID=vpc-0abc \
 CLUSTER_ARN=arn:aws:ecs:us-east-1:111122223333:cluster/cardinal \
 LICENSE_DATA_FILE=./license.json \
+ORGANIZATION_ID=12340000-0000-4000-8000-000000000000 \
 ALB_ALLOWED_CIDR1=10.0.0.0/8 \
 ./scripts/deploy-lakerunner-infra-base.sh
 ```
@@ -268,6 +269,7 @@ exit. Set `CERTIFICATE_ARN` to use a real cert.
 | `CLUSTER_NAME` | required | ECS cluster name (no upstream output for it) |
 | `VPC_ID` | required | — |
 | `PRIVATE_SUBNETS` | required | comma-separated private subnet ids |
+| `ORGANIZATION_ID` | required | org UUID (no default); MUST match Job 1 (`lakerunner-infra-base`) and every satellite |
 | `CERTIFICATE_ARN` | optional | ACM/IAM cert ARN for the Maestro HTTPS listener. If unset, the wrapper auto-generates a self-signed internal cert **only on first create** (re-runs keep the existing cert — no churn). Set it to use a real cert. |
 | `CERTIFICATE_BODY` | optional | PEM cert body as a direct string (overrides auto-generation; body + private key together). Written to a temp file and passed via `FILE_PARAMS`. |
 | `CERTIFICATE_PRIVATE_KEY` | optional | PEM private key as a direct string |
@@ -301,6 +303,7 @@ CLUSTER_ARN=arn:aws:ecs:us-east-1:111122223333:cluster/cardinal \
 CLUSTER_NAME=cardinal \
 VPC_ID=vpc-0abc \
 PRIVATE_SUBNETS=subnet-1,subnet-2 \
+ORGANIZATION_ID=12340000-0000-4000-8000-000000000000 \
 DEX_ADMIN_PASSWORD_HASH='$2y$10$...' \
 ./scripts/deploy-lakerunner-services.sh
 ```

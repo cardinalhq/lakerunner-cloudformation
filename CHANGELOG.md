@@ -11,6 +11,27 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v0.0.122
+
+- **`OrganizationId` is now a required, operator-chosen parameter (no default).**
+  The canonical `12340000-...` default is removed from `lakerunner-infra-base`,
+  `lakerunner-services`, and the nested `maestro`/`migration` children; each now
+  requires a UUID (validated by `AllowedPattern`). This makes the bootstrap org
+  predictable by choice so it can match a satellite deployed before the central
+  install. (#188)
+  - The org-onboarding flow: pick a UUID up front; deploy the satellite with it
+    (`ORGANIZATION_ID` on `satellite-services`); install lakerunner with the
+    **same** UUID. More orgs can be added later via the DB / Maestro.
+  - **Upgrade action (required):** set `ORGANIZATION_ID` on the
+    `deploy-lakerunner-infra-base.sh` (Job 1) and `deploy-lakerunner-services.sh`
+    (Job 5) drivers — both now require it. Existing installs that used the
+    canonical org must pass `ORGANIZATION_ID=12340000-0000-4000-8000-000000000000`
+    explicitly to keep the same value (a different value would re-seed the
+    config-source storage profile for a different org).
+  - The org stays on **both** infra-base (seeds the authoritative config-source
+    `storage_profiles` + `api_keys` SSM) and services (migration sidecar +
+    Maestro). Use the same UUID in both.
+
 ## v0.0.121
 
 - **`PubsubAutoRegister` now defaults to `true`.** New `lakerunner-services`

@@ -158,6 +158,19 @@ def test_satellite_drivers_never_pull_central_stack():
         assert "LicenseSecretArn" not in text, f"{name} still references LicenseSecretArn"
 
 
+def test_central_drivers_require_organization_id():
+    """ORGANIZATION_ID is operator-chosen with no template default, so both
+    central drivers must require it and pass it through as OrganizationId."""
+    for name in ("deploy-lakerunner-infra-base.sh", "deploy-lakerunner-services.sh"):
+        text = (SCRIPTS_DIR / name).read_text()
+        assert 'missing="$missing ORGANIZATION_ID"' in text, (
+            f"{name} must require ORGANIZATION_ID"
+        )
+        assert "OrganizationId=$ORGANIZATION_ID" in text, (
+            f"{name} must pass OrganizationId=$ORGANIZATION_ID"
+        )
+
+
 def test_lakerunner_services_passes_queue_params():
     """lakerunner-services must read the group-0 queue inputs from the satellite
     outputs and pass them as plain QueueUrl/QueueRoleArn params (no shell blob)."""

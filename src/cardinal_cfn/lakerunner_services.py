@@ -369,10 +369,14 @@ def build() -> Template:
     t.add_parameter(Parameter(
         "OrganizationId",
         Type="String",
-        Default="12340000-0000-4000-8000-000000000000",
+        AllowedPattern=(
+            r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+            r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+        ),
         Description=(
-            "Canonical single-install organization UUID. Must match the value "
-            "the infrastructure stack seeded into storage-profiles / api-keys; "
+            "Organization UUID for this install (operator-chosen, no default). "
+            "Must match the value the infrastructure stack seeded into "
+            "storage-profiles / api-keys and every satellite's OrganizationId; "
             "Maestro pre-populates this org and wires it to the local lakerunner."
         ),
     ))
