@@ -197,6 +197,12 @@ https://cardinal-cfn-us-east-2.s3.us-east-2.amazonaws.com/lakerunner/<version>/c
 
 Air-gapped customers override the `TemplateBaseUrl` parameter on the root stack to point at a customer-owned mirror. The `data-setup.sh` script is run by the customer's operator out-of-band and does not need to be hosted; it is committed under `scripts/`.
 
+### Changelog (required before every tag)
+
+`CHANGELOG.md` (repo root) records the operational and system-level changes an operator needs when updating an existing install — new/changed parameters, changed defaults, image bumps, IAM and security-group changes, resource replacements, and new manual steps. It is the upgrade guide, not an exhaustive code log.
+
+Before pushing a `v*` release tag, add a `## v0.0.NNN` section for the new version (newest first) and commit it. Because the tag is cut from that commit, tagging and pushing the release automatically carries the changelog — so the rule is simply: **no release tag without its changelog entry.** Keep entries operator-facing: state the upgrade action (or "no upgrade action"), and flag anything that replaces a data-bearing resource.
+
 ## Security considerations
 
 - Never hardcode secrets — Secrets Manager only.
