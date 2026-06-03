@@ -21,7 +21,7 @@ Two customer-facing CloudFormation root templates:
 
 Plus a single shell driver:
 
-- `scripts/data-setup.sh` — raw-AWS-CLI data provisioner. Creates RDS, S3 ingest, SQS, the three `cardinal-*` Secrets Manager secrets (`-db-master`, `-license`, `-admin-key`), and the two SSM parameters. Idempotent; emits a JSON document on stdout whose keys map 1:1 to the lakerunner stack's infra-setup parameters. The customer supplies all IAM roles, security groups, the ECS cluster, and the Cloud Map private DNS namespace out-of-band; they are inputs to the script, which forwards their identifiers into the JSON output.
+- `scripts/data-setup.sh` — raw-AWS-CLI data provisioner. Creates RDS, S3 ingest, SQS, and the three `cardinal-*` Secrets Manager secrets (`-db-master`, `-license`, `-admin-key`). It seeds **no** org content: Lakerunner installs admin-key-only (admin-api seeds its first key from `cardinal-admin-key` via `ADMIN_INITIAL_API_KEY`), and Maestro is the sole owner of the org, its storage line, and its ingest key — provisioned at runtime through Lakerunner's `/api/v1/provision` admin API. Idempotent; emits a JSON document on stdout whose keys map 1:1 to the lakerunner stack's infra-setup parameters. The customer supplies all IAM roles, security groups, the ECS cluster, and the Cloud Map private DNS namespace out-of-band; they are inputs to the script, which forwards their identifiers into the JSON output.
 
 The lakerunner root nests these children — application-tier resources only:
 
@@ -95,12 +95,12 @@ generated-templates/
 
 - Default to **CloudFormation-generated physical names** with a `Name` tag.
 - Prefix is `cardinal-`. Use `chq-` only when an AWS resource name length cap forces it.
-- Explicit physical names *only* where externally referenced — SSM Parameter names (AWS-required), the S3 ingest bucket name (predictability), license/admin secrets (referenced from outside the stack).
+- Explicit physical names *only* where externally referenced — the S3 ingest bucket name (predictability), license/admin secrets (referenced from outside the stack).
 - Never name RDS, ECS clusters/services, listener rules, log groups, target groups — explicit names block in-place updates.
 
 ### Single-install assumption
 
-The fixed `cardinal-*` resource names the script creates (RDS instance, S3 bucket, SQS queue, secrets, SSM params) imply one Cardinal install per AWS account/region. The ECS cluster + Cloud Map namespace names are customer-chosen but should be picked with the same constraint in mind. Customers running multiple installs should use separate accounts (or separate regions).
+The fixed `cardinal-*` resource names the script creates (RDS instance, S3 bucket, SQS queue, secrets) imply one Cardinal install per AWS account/region. The ECS cluster + Cloud Map namespace names are customer-chosen but should be picked with the same constraint in mind. Customers running multiple installs should use separate accounts (or separate regions).
 
 ### Multi-install isolation (lakerunner-internal)
 

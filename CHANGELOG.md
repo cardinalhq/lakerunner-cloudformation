@@ -11,6 +11,37 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v0.0.124
+
+- **Lakerunner now installs admin-key-only; Maestro is the sole owner of org
+  content.** CloudFormation no longer seeds the organization, its storage line,
+  or its ingest key into `configdb`. Three writers were removed: the
+  `lakerunner-infra-base` `StorageProfilesParam` / `ApiKeysParam` SSM parameters
+  (and the migrator import that consumed them), and the `migration` child's
+  `ensure-storage-profile` sidecar. The org, its storage line (the central
+  bucket, `otel-raw/`), and its ingest key are now provisioned at runtime by
+  Maestro through Lakerunner's `/api/v1/provision` admin API. Admin-api auth is
+  unchanged — it already seeds its first key from `cardinal-admin-key` via
+  `ADMIN_INITIAL_API_KEY`.
+  - **Parameters removed:** `lakerunner-infra-base` drops `OrganizationId`,
+    `InitialIngestApiKey`, `StorageProfilesParamName`, `ApiKeysParamName` (and
+    its `StorageProfilesParamName` / `ApiKeysParamName` outputs). The
+    `migration` child drops `StorageProfilesParamName`, `ApiKeysParamName`,
+    `OrgId`, `IngestBucketName`. `lakerunner-services` no longer threads the
+    `*ParamName` outputs. `OrganizationId` now lives **only** on
+    `lakerunner-services` (it feeds Maestro's `MAESTRO_BOOTSTRAP_ORG_ID`).
+  - **Driver change:** `deploy-lakerunner-infra-base.sh` no longer requires
+    `ORGANIZATION_ID` and no longer accepts `INITIAL_INGEST_API_KEY`,
+    `API_KEYS_PARAM_NAME`, or `STORAGE_PROFILES_PARAM_NAME`.
+    `deploy-lakerunner-services.sh` still requires `ORGANIZATION_ID`.
+  - **Upgrade action:** none for existing installs — `configdb` is already
+    populated and the migrator only seeds empty tables, so this is
+    non-destructive to running stacks (it changes the fresh-install contract).
+    On the infra-base driver, stop passing `ORGANIZATION_ID` /
+    `INITIAL_INGEST_API_KEY` / `*_PARAM_NAME`. Operators who relied on a
+    deterministic ingest key now create it in the Maestro UI rather than via
+    `InitialIngestApiKey`.
+
 ## v0.0.123
 
 - **`OrganizationId` is now a required, operator-chosen parameter (no default).**

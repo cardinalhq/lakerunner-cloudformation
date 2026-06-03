@@ -14,7 +14,12 @@ Resources created:
 - 1 shared ECS task execution role + 5 per-tier task roles.
 - 1 cooked bucket (durable; cooked-only output; Retain).
 - license + admin-key secrets (Retain, named cardinal-*).
-- storage-profiles + api-keys SSM params (operator-managed).
+
+No org-content SSM params: Lakerunner installs admin-key-only (the admin-api
+binary seeds its first key from the cardinal-admin-key secret via
+ADMIN_INITIAL_API_KEY), and Maestro is the sole owner of the org, its storage
+line, and its ingest key -- provisioned at runtime through Lakerunner's
+/api/v1/provision admin API.
 
 Because base deploys before rds/services, its roles CANNOT reference
 RDS/service ARNs. Instead they scope by NAME PATTERN:
@@ -22,15 +27,13 @@ RDS/service ARNs. Instead they scope by NAME PATTERN:
 - secrets -> arn:...:secret:cardinal-* (requires the rds master secret to
   be named cardinal-db-master and base's secrets cardinal-license /
   cardinal-admin-key).
-- SSM -> /cardinal/* (already name-pattern in security.py).
 - S3 -> the cooked bucket this stack creates (by name).
 - process tier -> sts:AssumeRole on cardinal-satellite-access* (the poller
   assumes each satellite's access role, which carries the real S3/SQS perms;
   there is no local ingest queue here).
 
-Outputs all SG IDs, role ARNs, the cooked bucket name, the license/admin
-secret ARNs, and the two SSM param names so rds + services (wired by the
-deploy driver) can consume them.
+Outputs all SG IDs, role ARNs, the cooked bucket name, and the license/admin
+secret ARNs so rds + services (wired by the deploy driver) can consume them.
 """
 
 from __future__ import annotations
@@ -57,7 +60,6 @@ from troposphere.s3 import (
     ServerSideEncryptionRule,
 )
 from troposphere.secretsmanager import GenerateSecretString, Secret
-from troposphere.ssm import Parameter as SSMParameter
 
 from cardinal_cfn.parameters import add_no_echo_parameter, add_parameter_group_metadata
 
@@ -108,8 +110,9 @@ def build() -> Template:
     t.set_description(
         "Cardinal lakerunner infra base: ALB SG, six per-tier task SGs with "
         "inter-tier ingress, one shared ECS execution role, six per-tier task "
-        "roles (name-pattern scoped), the durable cooked bucket, license/"
-        "admin-key secrets, and the operator-managed SSM config params. "
+        "roles (name-pattern scoped), the durable cooked bucket, and the "
+        "license/admin-key secrets. Lakerunner installs admin-key-only; Maestro "
+        "owns org content via /api/v1/provision. "
         "Deploy first (base -> rds -> services); owns no RDS, no ingest queue."
     )
 
@@ -203,57 +206,12 @@ def build() -> Template:
         ),
         MinLength=1,
     ))
-    storage_profiles_param_name = t.add_parameter(Parameter(
-        "StorageProfilesParamName",
-        Type="String",
-        Default="/cardinal/storage-profiles",
-        Description=(
-            "SSM parameter name for the operator-managed storage-profiles "
-            "YAML. Must match the /cardinal/* pattern the task roles grant."
-        ),
-        AllowedPattern=r"^/[A-Za-z0-9._/-]{1,1011}$",
-    ))
-    api_keys_param_name = t.add_parameter(Parameter(
-        "ApiKeysParamName",
-        Type="String",
-        Default="/cardinal/api-keys",
-        Description=(
-            "SSM parameter name for the operator-managed external API keys "
-            "YAML. Must match the /cardinal/* pattern the task roles grant."
-        ),
-        AllowedPattern=r"^/[A-Za-z0-9._/-]{1,1011}$",
-    ))
-    organization_id = t.add_parameter(Parameter(
-        "OrganizationId",
-        Type="String",
-        AllowedPattern=(
-            r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
-            r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
-        ),
-        Description=(
-            "Organization UUID for this install (operator-chosen, no default). "
-            "Must match the OrganizationId used on lakerunner-services and on "
-            "every satellite attributed to it. Used in both the "
-            "storage-profiles and api-keys SSM seeds."
-        ),
-    ))
     license_data = add_no_echo_parameter(
         t,
         "LicenseData",
         description=(
             "Cardinal license token (z64:...). Stored verbatim as the string "
             "body of the license secret."
-        ),
-    )
-    # api-keys is plaintext YAML by design (SSM cannot be SecureString in
-    # CloudFormation); NoEcho only keeps it out of the console echo.
-    initial_ingest_api_key = add_no_echo_parameter(
-        t,
-        "InitialIngestApiKey",
-        default="",
-        description=(
-            "Ingest API key seeded into the api-keys SSM parameter for "
-            "OrganizationId. Leave blank to seed an empty list (no key)."
         ),
     )
 
@@ -286,16 +244,10 @@ def build() -> Template:
                 "parameters": ["LicenseData"],
             },
             {
-                "label": "Organization",
-                "parameters": ["OrganizationId", "InitialIngestApiKey"],
-            },
-            {
                 "label": "Names (advanced)",
                 "parameters": [
                     "LicenseSecretName",
                     "AdminKeySecretName",
-                    "StorageProfilesParamName",
-                    "ApiKeysParamName",
                 ],
             },
         ],
@@ -303,8 +255,6 @@ def build() -> Template:
             "VpcId": "VPC for the security groups",
             "CookedBucketName": "Cooked bucket name (blank = default)",
             "LicenseData": "License token (z64:...)",
-            "OrganizationId": "Organization UUID",
-            "InitialIngestApiKey": "Initial ingest API key (blank = none)",
         },
     )
 
@@ -318,10 +268,6 @@ def build() -> Template:
     t.add_condition(
         "AddCookedBucketPublicAccessBlock",
         Equals(Ref("ConfigureBucketPublicAccessBlock"), "true"),
-    )
-    t.add_condition(
-        "HasInitialIngestApiKey",
-        Not(Equals(Ref(initial_ingest_api_key), "")),
     )
 
     cooked_bucket_name_value = If(
@@ -565,18 +511,6 @@ def build() -> Template:
                             # and base's secrets cardinal-license/cardinal-admin-key.
                             "Resource": _cardinal_secret_arn_pattern(),
                         },
-                        {
-                            "Sid": "ResolveCardinalSsm",
-                            "Effect": "Allow",
-                            "Action": [
-                                "ssm:GetParameter",
-                                "ssm:GetParameters",
-                            ],
-                            "Resource": Sub(
-                                "arn:${AWS::Partition}:ssm:${AWS::Region}:"
-                                "${AWS::AccountId}:parameter/cardinal/*"
-                            ),
-                        },
                     ],
                 },
             ),
@@ -597,10 +531,6 @@ def build() -> Template:
                     "Version": "2012-10-17",
                     "Statement": [
                         _stmt_secrets_read(),
-                        _stmt_ssm_read([
-                            "StorageProfilesParamName",
-                            "ApiKeysParamName",
-                        ]),
                         _stmt_cw_logs(),
                     ],
                 },
@@ -619,10 +549,6 @@ def build() -> Template:
                     "Version": "2012-10-17",
                     "Statement": [
                         _stmt_secrets_read(),
-                        _stmt_ssm_read([
-                            "StorageProfilesParamName",
-                            "ApiKeysParamName",
-                        ]),
                         _stmt_s3_read(cooked_bucket_name_value),
                         _stmt_cw_logs(),
                         {
@@ -655,10 +581,6 @@ def build() -> Template:
                     "Version": "2012-10-17",
                     "Statement": [
                         _stmt_secrets_read(),
-                        _stmt_ssm_read([
-                            "StorageProfilesParamName",
-                            "ApiKeysParamName",
-                        ]),
                         _stmt_s3_readwrite(cooked_bucket_name_value),
                         # NAME-PATTERN DECOUPLING (diverges from security.py's
                         # local _stmt_sqs_consume on a threaded QueueArn): this
@@ -704,10 +626,6 @@ def build() -> Template:
                     "Version": "2012-10-17",
                     "Statement": [
                         _stmt_secrets_read(),
-                        _stmt_ssm_read([
-                            "StorageProfilesParamName",
-                            "ApiKeysParamName",
-                        ]),
                         {
                             "Sid": "SweeperS3Cleanup",
                             "Effect": "Allow",
@@ -759,10 +677,6 @@ def build() -> Template:
                     "Version": "2012-10-17",
                     "Statement": [
                         _stmt_secrets_read(),
-                        _stmt_ssm_read([
-                            "StorageProfilesParamName",
-                            "ApiKeysParamName",
-                        ]),
                         _stmt_cw_logs(),
                     ],
                 },
@@ -845,71 +759,6 @@ def build() -> Template:
     )
 
     # ----------------------------------------------------------------------
-    # SSM parameters (operator-managed YAML). The migrator imports these into
-    # configdb and expects YAML *lists* — a top-level map fails to unmarshal.
-    # Seed storage-profiles with the cooked bucket + region; api-keys with the
-    # initial key or an empty list.
-    # ----------------------------------------------------------------------
-    storage_profiles_param = t.add_resource(
-        _retain(
-            SSMParameter(
-                "StorageProfilesParam",
-                Name=Ref(storage_profiles_param_name),
-                Type="String",
-                Value=Sub(
-                    "- organization_id: ${OrgId}\n"
-                    "  instance_num: 1\n"
-                    "  collector_name: lakerunner\n"
-                    "  cloud_provider: aws\n"
-                    "  region: ${AWS::Region}\n"
-                    "  bucket: ${BucketName}\n"
-                    "  insecure_tls: false\n"
-                    "  use_path_style: true\n",
-                    OrgId=Ref(organization_id),
-                    BucketName=cooked_bucket_name_value,
-                ),
-                Description="Cardinal storage profiles (YAML; operator-managed).",
-                Tags={
-                    "Application": APPLICATION,
-                    "Project": PROJECT,
-                    "ManagedBy": MANAGED_BY,
-                    "Component": "ssm-storage-profiles",
-                    "Name": "cardinal-ssm-storage-profiles",
-                },
-            )
-        )
-    )
-
-    api_keys_param = t.add_resource(
-        _retain(
-            SSMParameter(
-                "ApiKeysParam",
-                Name=Ref(api_keys_param_name),
-                Type="String",
-                Value=If(
-                    "HasInitialIngestApiKey",
-                    Sub(
-                        "- organization_id: ${OrgId}\n"
-                        "  keys:\n"
-                        "    - ${Key}\n",
-                        OrgId=Ref(organization_id),
-                        Key=Ref(initial_ingest_api_key),
-                    ),
-                    "[]",
-                ),
-                Description="Cardinal external API keys (YAML; operator-managed).",
-                Tags={
-                    "Application": APPLICATION,
-                    "Project": PROJECT,
-                    "ManagedBy": MANAGED_BY,
-                    "Component": "ssm-api-keys",
-                    "Name": "cardinal-ssm-api-keys",
-                },
-            )
-        )
-    )
-
-    # ----------------------------------------------------------------------
     # Outputs
     # ----------------------------------------------------------------------
     def _emit(name: str, description: str, value):
@@ -941,10 +790,6 @@ def build() -> Template:
           Ref(license_secret))
     _emit("AdminKeySecretArn", "ARN of the first-boot admin key secret.",
           Ref(admin_key_secret))
-    _emit("StorageProfilesParamName", "Name of the storage-profiles SSM parameter.",
-          Ref(storage_profiles_param))
-    _emit("ApiKeysParamName", "Name of the external API-keys SSM parameter.",
-          Ref(api_keys_param))
 
     return t
 
@@ -985,25 +830,6 @@ def _stmt_secrets_read() -> dict:
             "secretsmanager:DescribeSecret",
         ],
         "Resource": _cardinal_secret_arn_pattern(),
-    }
-
-
-def _stmt_ssm_read(param_names: list[str]) -> dict:
-    return {
-        "Sid": "ReadSsmParams",
-        "Effect": "Allow",
-        "Action": [
-            "ssm:GetParameter",
-            "ssm:GetParameters",
-        ],
-        "Resource": [
-            Sub(
-                "arn:${AWS::Partition}:ssm:${AWS::Region}:"
-                "${AWS::AccountId}:parameter${ParamName}",
-                ParamName=Ref(n),
-            )
-            for n in param_names
-        ],
     }
 
 
