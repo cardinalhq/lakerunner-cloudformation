@@ -143,13 +143,13 @@ def build() -> Template:
         "BucketName",
         Type="String",
         Description=(
-            "Ingest S3 bucket name (the cardinal-infrastructure stack's "
-            "IngestBucketName output). Maestro consumes this only to seed "
-            "the MAESTRO_BOOTSTRAP_BUCKET_* env vars so its in-process "
-            "Lakerunner provisioning worker can recreate the "
-            "organization_buckets join row that it currently wipes on "
-            "every provision_org cycle. No S3 IAM is granted to the "
-            "maestro task role -- the bucket name is metadata only."
+            "Central S3 bucket name (the infra stack's cooked/ingest bucket "
+            "output). Maestro consumes this only to seed the "
+            "MAESTRO_BOOTSTRAP_BUCKET_* env vars so its in-process Lakerunner "
+            "provisioning worker writes the organization_buckets storage line "
+            "via /api/v1/provision -- the sole writer of that row, since CFN "
+            "seeds no org content. No S3 IAM is granted to the maestro task "
+            "role -- the bucket name is metadata only."
         ),
     ))
     t.add_parameter(Parameter("DbEndpoint", Type="String", Description="RDS endpoint hostname."))
@@ -542,11 +542,10 @@ def build() -> Template:
             Environment(Name="MAESTRO_BOOTSTRAP_ORG_ID", Value=Ref("OrganizationId")),
             Environment(Name="MAESTRO_BOOTSTRAP_ORG_NAME", Value=Ref("OrgName")),
             Environment(Name="MAESTRO_BOOTSTRAP_OWNER_EMAIL", Value=Ref("DexAdminEmail")),
-            # Bucket coordinates so a maestro version newer than the broken
-            # v1.45.9 can re-populate organization_buckets after
-            # provision_org instead of leaving the join row absent (which
-            # broke every Explore query until the migration task force-ran
-            # ensure-storage-profile).
+            # Bucket coordinates so maestro's provision_org writes the
+            # organization_buckets join row (the central bucket's storage line).
+            # This is now the ONLY writer of that row -- CFN seeds no org
+            # content -- so it must always be populated here.
             Environment(Name="MAESTRO_BOOTSTRAP_BUCKET_NAME", Value=Ref("BucketName")),
             Environment(Name="MAESTRO_BOOTSTRAP_BUCKET_REGION", Value=Ref("AWS::Region")),
             Environment(Name="MAESTRO_BOOTSTRAP_BUCKET_CLOUD_PROVIDER", Value="aws"),
