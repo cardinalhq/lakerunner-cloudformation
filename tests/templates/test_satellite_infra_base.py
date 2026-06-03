@@ -127,18 +127,22 @@ def test_role_external_id_is_conditional(td):
     }
 
 
-def test_role_can_read_and_delete_raw(td):
+def test_role_can_read_write_and_delete_raw(td):
+    # PutObject is present because the lakerunner trace ingest worklane writes
+    # cooked trace segments back to this source bucket (it does not yet split
+    # read vs write storage profiles the way logs/metrics do). See the role
+    # comment in satellite_infra_base.py.
     stmts = td["Resources"]["LakerunnerAccessRole"]["Properties"]["Policies"][
         0
     ]["PolicyDocument"]["Statement"]
-    s3 = next(s for s in stmts if s["Sid"] == "RawBucketReadDelete")
+    s3 = next(s for s in stmts if s["Sid"] == "RawBucketReadWriteDelete")
     assert set(s3["Action"]) == {
         "s3:GetObject",
+        "s3:PutObject",
         "s3:DeleteObject",
         "s3:ListBucket",
         "s3:GetBucketLocation",
     }
-    assert "s3:PutObject" not in s3["Action"]
 
 
 def test_role_can_consume_only_its_queue(td):

@@ -274,10 +274,19 @@ def build() -> Template:
                         "Version": "2012-10-17",
                         "Statement": [
                             {
-                                "Sid": "RawBucketReadDelete",
+                                # PutObject is required because the lakerunner
+                                # trace ingest worklane does not yet split read
+                                # vs write storage profiles (logs/metrics do),
+                                # so it writes cooked trace segments back to
+                                # this source bucket rather than redirecting to
+                                # the cooked bucket via writes_to_instance_num.
+                                # Remove once trace_ingest_worklane.go mirrors
+                                # the logs/metric read/write split.
+                                "Sid": "RawBucketReadWriteDelete",
                                 "Effect": "Allow",
                                 "Action": [
                                     "s3:GetObject",
+                                    "s3:PutObject",
                                     "s3:DeleteObject",
                                     "s3:ListBucket",
                                     "s3:GetBucketLocation",
