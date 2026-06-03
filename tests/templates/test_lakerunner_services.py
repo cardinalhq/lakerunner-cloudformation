@@ -84,6 +84,17 @@ def test_data_plane_params(td):
     assert "QueueArn" not in params, "vestigial queue param present: QueueArn"
 
 
+def test_organization_id_required_no_default(td):
+    """OrganizationId is required (no default) on the services root, matching
+    infra-base so the bootstrap org is operator-chosen and consistent."""
+    p = td["Parameters"]["OrganizationId"]
+    assert "Default" not in p, "OrganizationId must have no default"
+    assert p["AllowedPattern"] == (
+        r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+        r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    )
+
+
 def test_pubsub_sqs_queue_wired_to_process_child(td):
     """The group-0 SQS inputs (QueueUrl/QueueRoleArn) flow into the Process
     child, where the pubsub-sqs container sets them as plain SQS_* env vars."""

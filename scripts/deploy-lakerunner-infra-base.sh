@@ -31,6 +31,10 @@ Required:
   CLUSTER_ARN          Customer-supplied ECS cluster ARN.
   LICENSE_DATA         Cardinal license token (z64:...), seeds the license
                        secret. Or supply LICENSE_DATA_FILE instead.
+  ORGANIZATION_ID      Organization UUID for this install (operator-chosen, no
+                       default). Use the SAME value on lakerunner-services and on
+                       every satellite attributed to it. Seeded into the
+                       storage-profiles / api-keys SSM params.
 
 Optional (template defaults preserved when unset):
   LICENSE_DATA_FILE            Path to a file holding the license token
@@ -39,7 +43,6 @@ Optional (template defaults preserved when unset):
   ALB_ALLOWED_CIDR1            ALB ingress CIDR allowlist (template default 10.0.0.0/8).
   ALB_ALLOWED_CIDR2            (template default 172.16.0.0/12).
   ALB_ALLOWED_CIDR3            (template default 192.168.0.0/16).
-  ORGANIZATION_ID              Canonical org id seeded into config.
   INITIAL_INGEST_API_KEY       Bootstrap ingest API key.
   COOKED_BUCKET_NAME           Explicit cooked bucket name.
   CONFIGURE_BUCKET_PUBLIC_ACCESS_BLOCK
@@ -68,6 +71,7 @@ missing=""
 [ -z "${VERSION:-}" ] && missing="$missing VERSION"
 [ -z "${VPC_ID:-}" ] && missing="$missing VPC_ID"
 [ -z "${CLUSTER_ARN:-}" ] && missing="$missing CLUSTER_ARN"
+[ -z "${ORGANIZATION_ID:-}" ] && missing="$missing ORGANIZATION_ID"
 { [ -z "${LICENSE_DATA:-}" ] && [ -z "${LICENSE_DATA_FILE:-}" ]; } && missing="$missing LICENSE_DATA"
 if [ -n "$missing" ]; then
     usage >&2
@@ -95,7 +99,8 @@ TEMPLATE_URL="$template_base_url/$VERSION/$TEMPLATE_KEY"
 # optional ones added only when set so the template default applies otherwise.
 params="VpcId=$VPC_ID
 ClusterArn=$CLUSTER_ARN
-LicenseData=$license_data"
+LicenseData=$license_data
+OrganizationId=$ORGANIZATION_ID"
 [ -n "${ALB_SCHEME:-}" ] && params="$params
 AlbScheme=$ALB_SCHEME"
 [ -n "${ALB_ALLOWED_CIDR1:-}" ] && params="$params
@@ -104,8 +109,6 @@ AlbAllowedCidr1=$ALB_ALLOWED_CIDR1"
 AlbAllowedCidr2=$ALB_ALLOWED_CIDR2"
 [ -n "${ALB_ALLOWED_CIDR3:-}" ] && params="$params
 AlbAllowedCidr3=$ALB_ALLOWED_CIDR3"
-[ -n "${ORGANIZATION_ID:-}" ] && params="$params
-OrganizationId=$ORGANIZATION_ID"
 [ -n "${INITIAL_INGEST_API_KEY:-}" ] && params="$params
 InitialIngestApiKey=$INITIAL_INGEST_API_KEY"
 [ -n "${COOKED_BUCKET_NAME:-}" ] && params="$params

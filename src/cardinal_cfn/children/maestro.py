@@ -277,11 +277,14 @@ def build() -> Template:
         Parameter(
             "OrganizationId",
             Type="String",
-            Default="12340000-0000-4000-8000-000000000000",
+            AllowedPattern=(
+                r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+                r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            ),
             Description=(
-                "Canonical single-install organization UUID. Seeded as the org "
-                "Maestro pre-populates; matches the lakerunner storage-profiles / "
-                "api-keys org so both sides own the same data feed."
+                "Organization UUID for this install (operator-chosen, no default). "
+                "Seeded as the org Maestro pre-populates; matches the lakerunner "
+                "storage-profiles / api-keys org so both sides own the same data feed."
             ),
         )
     )

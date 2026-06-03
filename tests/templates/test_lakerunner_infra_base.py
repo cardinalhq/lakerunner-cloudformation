@@ -37,6 +37,17 @@ def test_required_parameters(td):
         assert n in td["Parameters"], f"missing parameter: {n}"
 
 
+def test_organization_id_required_no_default(td):
+    """OrganizationId is operator-chosen: required (no default) and UUID-shaped,
+    so the bootstrap org is predictable and matches the satellites."""
+    p = td["Parameters"]["OrganizationId"]
+    assert "Default" not in p, "OrganizationId must have no default"
+    assert p["AllowedPattern"] == (
+        r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+        r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    )
+
+
 def test_dropped_rds_param(td):
     """security.py's RdsSecurityGroupId param is gone (RDS ingress lives in rds)."""
     assert "RdsSecurityGroupId" not in td["Parameters"]

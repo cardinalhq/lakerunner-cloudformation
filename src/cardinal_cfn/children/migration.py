@@ -111,10 +111,13 @@ def build() -> Template:
         Parameter(
             "OrgId",
             Type="String",
-            Default="12340000-0000-4000-8000-000000000000",
+            AllowedPattern=(
+                r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+                r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            ),
             Description=(
-                "Canonical single-install organization UUID. Must match the "
-                "infrastructure stack's storage-profiles/api-keys seed."
+                "Organization UUID for this install (operator-chosen, no default). "
+                "Must match the infrastructure stack's storage-profiles/api-keys seed."
             ),
         )
     )

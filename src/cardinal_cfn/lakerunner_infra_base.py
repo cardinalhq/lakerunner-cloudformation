@@ -226,14 +226,15 @@ def build() -> Template:
     organization_id = t.add_parameter(Parameter(
         "OrganizationId",
         Type="String",
-        Default="12340000-0000-4000-8000-000000000000",
-        Description=(
-            "Canonical single-install organization UUID. Used in both the "
-            "storage-profiles and api-keys SSM seeds."
-        ),
         AllowedPattern=(
             r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
             r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+        ),
+        Description=(
+            "Organization UUID for this install (operator-chosen, no default). "
+            "Must match the OrganizationId used on lakerunner-services and on "
+            "every satellite attributed to it. Used in both the "
+            "storage-profiles and api-keys SSM seeds."
         ),
     ))
     license_data = add_no_echo_parameter(

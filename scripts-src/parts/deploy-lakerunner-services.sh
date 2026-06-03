@@ -41,6 +41,9 @@ Required:
   CLUSTER_NAME                ECS cluster name (no upstream output for it).
   VPC_ID                      VPC for the services.
   PRIVATE_SUBNETS             Comma-separated private subnet ids.
+  ORGANIZATION_ID             Organization UUID for this install (operator-chosen,
+                              no default). MUST match the value used on
+                              lakerunner-infra-base and on every satellite.
   DEX_ADMIN_PASSWORD_HASH     bcrypt hash for the Maestro/DEX admin login.
                               REQUIRED: DEX will not start without it ("no
                               password hash provided") and MaestroService rolls
@@ -118,6 +121,7 @@ missing=""
 [ -z "${INFRA_BASE_STACK:-}" ] && missing="$missing INFRA_BASE_STACK"
 [ -z "${INFRA_RDS_STACK:-}" ] && missing="$missing INFRA_RDS_STACK"
 [ -z "${SATELLITE_INFRA_BASE_STACK:-}" ] && missing="$missing SATELLITE_INFRA_BASE_STACK"
+[ -z "${ORGANIZATION_ID:-}" ] && missing="$missing ORGANIZATION_ID"
 [ -z "${CLUSTER_ARN:-}" ] && missing="$missing CLUSTER_ARN"
 [ -z "${CLUSTER_NAME:-}" ] && missing="$missing CLUSTER_NAME"
 [ -z "${VPC_ID:-}" ] && missing="$missing VPC_ID"
@@ -185,6 +189,7 @@ MAPS=""
 # prefix.
 params="QueueUrl=$queue_url
 QueueRoleArn=$role_arn
+OrganizationId=$ORGANIZATION_ID
 TemplateBaseUrl=$template_base_url/$VERSION/cardinal-lakerunner/
 ClusterArn=$CLUSTER_ARN
 ClusterName=$CLUSTER_NAME
