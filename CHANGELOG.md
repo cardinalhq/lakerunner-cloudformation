@@ -11,6 +11,27 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v0.0.121
+
+- **`PubsubAutoRegister` now defaults to `true`.** New `lakerunner-services`
+  deploys auto-register unseen satellite raw-bucket orgs and route their cooked
+  output to `PubsubAutoRegisterWritesToInstance` (default `1`) without an extra
+  flag. (#186)
+  - Upgrade action: none to keep it on. To preserve the old off-by-default
+    behavior, pass `PUBSUB_AUTOREGISTER=false` (driver) / set
+    `PubsubAutoRegister=false`. Existing stacks keep whatever value they were
+    deployed with until you re-apply.
+- **pubsub-sqs can now consume multiple satellite SQS queues.** Beyond the
+  primary (group-0) `QueueUrl`/`QueueRoleArn`, `lakerunner-services` adds
+  numbered queue groups 1..10: `QueueUrl<n>` / `QueueRegion<n>` / `QueueRoleArn<n>`
+  params, emitted as `SQS_QUEUE_URL_<n>` / `SQS_REGION_<n>` / `SQS_ROLE_ARN_<n>`
+  on the pubsub-sqs container only when set. Each group carries its own region
+  and assume-role, so the central poller reaches satellite queues in other
+  accounts/regions. Driver env: `QUEUE_URL_<n>` / `QUEUE_REGION_<n>` /
+  `QUEUE_ROLE_ARN_<n>` (`QUEUE_REGION_<n>` defaults to `REGION`).
+  - Upgrade action: none. Set the numbered env vars to add satellites; the
+    ceiling is 10 (bump `MAX_ADDITIONAL_QUEUES` to raise it).
+
 ## v0.0.120
 
 - **Satellite installs are fully decoupled from the central account.** A

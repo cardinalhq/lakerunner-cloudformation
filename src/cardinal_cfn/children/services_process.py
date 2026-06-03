@@ -15,7 +15,10 @@ CPU values come from cardinal-defaults.yaml directly.
 """
 
 from troposphere import (
+    Equals,
     GetAtt,
+    If,
+    Not,
     Output,
     Parameter,
     Ref,
@@ -31,6 +34,12 @@ from cardinal_cfn.parameters import (
     add_install_id_parameters,
     add_parameter_group_metadata,
 )
+
+# pubsub-sqs reads additional satellite queues from numbered env-var groups
+# (SQS_QUEUE_URL_<n> / SQS_REGION_<n> / SQS_ROLE_ARN_<n>). The binary itself has
+# no cap; the stack exposes a fixed set of optional numbered queue parameters.
+# Bump this to raise the ceiling (each adds three parameters + two conditions).
+MAX_ADDITIONAL_QUEUES = 10
 
 
 def build() -> Template:
@@ -108,6 +117,41 @@ def build() -> Template:
             ),
         )
     )
+    # Additional satellite queues (groups 1..MAX_ADDITIONAL_QUEUES). Each set,
+    # when QueueUrl<n> is non-empty, is emitted as SQS_QUEUE_URL_<n> /
+    # SQS_REGION_<n> / SQS_ROLE_ARN_<n> on the pubsub-sqs container so the poller
+    # consumes that satellite's queue (cross-account/region) via its own role.
+    # QueueRegion<n> defaults to the stack region when left empty.
+    for n in range(1, MAX_ADDITIONAL_QUEUES + 1):
+        t.add_parameter(
+            Parameter(
+                f"QueueUrl{n}",
+                Type="String",
+                Default="",
+                Description=f"SQS queue URL for additional satellite queue group {n}. "
+                "Empty skips this group.",
+            )
+        )
+        t.add_parameter(
+            Parameter(
+                f"QueueRegion{n}",
+                Type="String",
+                Default="",
+                Description=f"AWS region for additional satellite queue group {n}. "
+                "Empty uses the stack region.",
+            )
+        )
+        t.add_parameter(
+            Parameter(
+                f"QueueRoleArn{n}",
+                Type="String",
+                Default="",
+                Description=f"IAM role ARN the pubsub-sqs service STS-assumes for "
+                f"additional satellite queue group {n}.",
+            )
+        )
+        t.add_condition(f"HasQueue{n}", Not(Equals(Ref(f"QueueUrl{n}"), "")))
+        t.add_condition(f"HasQueueRegion{n}", Not(Equals(Ref(f"QueueRegion{n}"), "")))
     t.add_parameter(
         Parameter(
             "LicenseSecretArn",
@@ -246,7 +290,7 @@ def build() -> Template:
         Parameter(
             "PubsubAutoRegister",
             Type="String",
-            Default="false",
+            Default="true",
             AllowedValues=["true", "false"],
             Description=(
                 "Enable pubsub-sqs auto-registration of unseen satellite raw "
@@ -406,6 +450,7 @@ def build() -> Template:
                     Name="LAKERUNNER_PUBSUB_AUTOREGISTER_WRITES_TO_INSTANCE",
                     Value=Ref("PubsubAutoRegisterWritesToInstance"),
                 ),
+                *_additional_queue_env(),
             ],
         },
     ]
@@ -514,6 +559,49 @@ def _service_specific_env(service_cfg: dict) -> list:
     """Convert the YAML environment dict into a list of ECS Environment objects."""
     env = service_cfg.get("environment") or {}
     return [Environment(Name=k, Value=str(v)) for k, v in env.items()]
+
+
+def _additional_queue_env() -> list:
+    """Numbered SQS env groups for additional satellite queues.
+
+    For each group n in 1..MAX_ADDITIONAL_QUEUES emit SQS_QUEUE_URL_<n> /
+    SQS_REGION_<n> / SQS_ROLE_ARN_<n>, but only when QueueUrl<n> is set --
+    Fn::If with AWS::NoValue drops the entry from the Environment list
+    otherwise. SQS_REGION_<n> falls back to the stack region when QueueRegion<n>
+    is left empty.
+    """
+    no_value = Ref("AWS::NoValue")
+    entries: list = []
+    for n in range(1, MAX_ADDITIONAL_QUEUES + 1):
+        entries.append(
+            If(
+                f"HasQueue{n}",
+                Environment(Name=f"SQS_QUEUE_URL_{n}", Value=Ref(f"QueueUrl{n}")),
+                no_value,
+            )
+        )
+        entries.append(
+            If(
+                f"HasQueue{n}",
+                Environment(
+                    Name=f"SQS_REGION_{n}",
+                    Value=If(
+                        f"HasQueueRegion{n}",
+                        Ref(f"QueueRegion{n}"),
+                        Ref("AWS::Region"),
+                    ),
+                ),
+                no_value,
+            )
+        )
+        entries.append(
+            If(
+                f"HasQueue{n}",
+                Environment(Name=f"SQS_ROLE_ARN_{n}", Value=Ref(f"QueueRoleArn{n}")),
+                no_value,
+            )
+        )
+    return entries
 
 
 if __name__ == "__main__":

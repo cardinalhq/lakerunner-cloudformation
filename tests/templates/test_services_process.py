@@ -274,7 +274,11 @@ def test_all_task_definitions_set_ssl_required(td):
     task_defs = [r for r in td["Resources"].values() if r["Type"] == "AWS::ECS::TaskDefinition"]
     for tdef in task_defs:
         for container in tdef["Properties"]["ContainerDefinitions"]:
-            env = {e["Name"]: e["Value"] for e in container.get("Environment", [])}
+            env = {
+                e["Name"]: e["Value"]
+                for e in container.get("Environment", [])
+                if isinstance(e, dict) and "Name" in e
+            }
             assert env.get("LRDB_SSLMODE") == "require", (
                 f"{container.get('Name')} LRDB_SSLMODE must be 'require'; got {env.get('LRDB_SSLMODE')!r}"
             )
@@ -292,7 +296,13 @@ def _container(td, task_def_id):
 
 def _env(td, task_def_id):
     container = _container(td, task_def_id)
-    return {e["Name"]: e["Value"] for e in container.get("Environment", [])}
+    # Skip conditional entries (Fn::If with AWS::NoValue) -- only plain
+    # Name/Value env vars have a "Name" key.
+    return {
+        e["Name"]: e["Value"]
+        for e in container.get("Environment", [])
+        if isinstance(e, dict) and "Name" in e
+    }
 
 
 def test_pubsub_sqs_has_plain_group0_env(td):
@@ -338,10 +348,31 @@ def test_pubsub_autoregister_params_exist_with_defaults(td):
     with the expected defaults."""
     params = td["Parameters"]
     assert "PubsubAutoRegister" in params
-    assert params["PubsubAutoRegister"]["Default"] == "false"
+    assert params["PubsubAutoRegister"]["Default"] == "true"
     assert params["PubsubAutoRegister"]["AllowedValues"] == ["true", "false"]
     assert "PubsubAutoRegisterWritesToInstance" in params
     assert params["PubsubAutoRegisterWritesToInstance"]["Default"] == "1"
+
+
+def test_additional_queue_groups_are_conditional(td):
+    """Each additional queue group N declares QueueUrl/Region/RoleArn params, a
+    HasQueue<N> condition, and emits SQS_*_<N> on pubsub-sqs only when set."""
+    params = td["Parameters"]
+    conditions = td.get("Conditions", {})
+    for n in (1, 2, 10):
+        for p in (f"QueueUrl{n}", f"QueueRegion{n}", f"QueueRoleArn{n}"):
+            assert p in params, f"missing param {p}"
+            assert params[p]["Default"] == "", f"{p} must default empty"
+        assert f"HasQueue{n}" in conditions
+        assert f"HasQueueRegion{n}" in conditions
+
+    # The SQS_*_N entries are Fn::If-gated on HasQueue<N> (dropped via NoValue).
+    env_raw = _container(td, "PubsubSqsTaskDef")["Environment"]
+    conds_used = {
+        e["Fn::If"][0] for e in env_raw if isinstance(e, dict) and "Fn::If" in e
+    }
+    assert "HasQueue1" in conds_used
+    assert "HasQueue10" in conds_used
 
 
 def test_pubsub_sqs_has_autoregister_env_vars(td):
