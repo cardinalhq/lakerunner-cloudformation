@@ -134,10 +134,28 @@ def test_cfntool_wrapper_only_wraps_role_capable_subcommands():
     )
 
 
-def test_satellite_infra_base_maps_lakerunner_principal():
-    """The one non-automatic --map: LakerunnerPrincipal <- ProcessRoleArn."""
+def test_satellite_infra_base_takes_principal_directly():
+    """The satellite trust principal arrives as a direct LAKERUNNER_PRINCIPAL env
+    var, never mapped from the central lakerunner-infra-base stack -- a satellite
+    may live in a different account where describe-stacks cannot reach it."""
     text = (SCRIPTS_DIR / "deploy-satellite-infra-base.sh").read_text()
-    assert "LakerunnerPrincipal=ProcessRoleArn" in text
+    assert "LakerunnerPrincipal=$LAKERUNNER_PRINCIPAL" in text
+    assert "LakerunnerPrincipal=ProcessRoleArn" not in text
+    assert "INFRA_BASE_STACK" not in text
+
+
+def test_satellite_drivers_never_pull_central_stack():
+    """Neither satellite driver may pull from the central lakerunner-infra-base
+    stack (cross-account safe): no central INFRA_BASE_STACK, no LicenseSecretArn.
+    The satellite's OWN SATELLITE_INFRA_BASE_STACK (same account) stays."""
+    for name in ("deploy-satellite-infra-base.sh", "deploy-satellite-services.sh"):
+        text = (SCRIPTS_DIR / name).read_text()
+        # Strip the allowed same-account token before checking for the central one.
+        without_satellite = text.replace("SATELLITE_INFRA_BASE_STACK", "")
+        assert "INFRA_BASE_STACK" not in without_satellite, (
+            f"{name} still references the central INFRA_BASE_STACK"
+        )
+        assert "LicenseSecretArn" not in text, f"{name} still references LicenseSecretArn"
 
 
 def test_lakerunner_services_passes_queue_params():

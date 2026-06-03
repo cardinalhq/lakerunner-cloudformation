@@ -12,7 +12,7 @@ from the queue cross-account. Nothing here pushes to the Lakerunner account.
 
 Resources created:
   - CollectorExecutionRole (IAM): managed AmazonECSTaskExecutionRolePolicy +
-    inline secretsmanager:GetSecretValue on LicenseSecretArn.
+    inline log-stream perms. The collector image needs no license.
   - CollectorTaskRole (IAM): inline s3:PutObject/GetObject/ListBucket/
     GetBucketLocation on RawBucketName. No DeleteObject (poller deletes).
   - AlbSecurityGroup (EC2): ingress tcp 4318 from IngestSourceCidr.
@@ -22,7 +22,7 @@ Resources created:
   - OtelGrpcTargetGroup: port 4318, health-check on 13133.
   - OtelGrpcListenerRule: path /v1/*, priority 300.
   - OtelGrpcLogGroup: /cardinal/otel-grpc.
-  - OtelGrpcTaskDef: ARM64 Fargate, env vars, LICENSE_DATA secret.
+  - OtelGrpcTaskDef: ARM64 Fargate, env vars. No license secret.
   - CollectorService: FARGATE on-demand, circuit breaker, no Cloud Map.
 """
 
@@ -52,7 +52,6 @@ from troposphere.ecs import (
     NetworkConfiguration,
     PortMapping,
     RuntimePlatform,
-    Secret,
     Service,
     TaskDefinition,
 )
@@ -130,16 +129,6 @@ def build() -> Template:
                 "cardinal-satellite-infra-base)."
             ),
             AllowedPattern=r"^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$",
-        )
-    )
-    t.add_parameter(
-        Parameter(
-            "LicenseSecretArn",
-            Type="String",
-            Description=(
-                "ARN of the Cardinal license secret in this account. "
-                "The collector validates it at startup."
-            ),
         )
     )
     t.add_parameter(
@@ -274,7 +263,6 @@ def build() -> Template:
                 "label": "Inputs",
                 "parameters": [
                     "RawBucketName",
-                    "LicenseSecretArn",
                     "OrganizationId",
                     "EcsClusterArn",
                 ],
@@ -321,14 +309,6 @@ def build() -> Template:
                     PolicyDocument={
                         "Version": "2012-10-17",
                         "Statement": [
-                            {
-                                "Sid": "LicenseSecretPull",
-                                "Effect": "Allow",
-                                "Action": [
-                                    "secretsmanager:GetSecretValue",
-                                ],
-                                "Resource": [Ref("LicenseSecretArn")],
-                            },
                             {
                                 "Sid": "CollectorLogStreams",
                                 "Effect": "Allow",
@@ -560,17 +540,12 @@ def build() -> Template:
     svc_env = otel_cfg.get("environment") or {}
     env += [Environment(Name=k, Value=str(v)) for k, v in svc_env.items()]
 
-    secrets = [
-        Secret(Name="LICENSE_DATA", ValueFrom=Ref("LicenseSecretArn")),
-    ]
-
     command = otel_cfg.get("command")
     container_kwargs = dict(
         Name=_SERVICE_KEY,
         Image=image_ref,
         Essential=True,
         Environment=env,
-        Secrets=secrets,
         PortMappings=[
             PortMapping(ContainerPort=_OTLP_HTTP_PORT, Protocol="tcp")
         ],

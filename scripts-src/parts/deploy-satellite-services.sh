@@ -2,12 +2,13 @@
 # Jenkins job 4: deploy the cardinal-satellite-services stack (the same-account
 # otel collector that performs ingest into the satellite raw bucket/queue).
 #
-# Upstream:
+# Upstream: only the satellite's OWN paired stack (same account/region):
 #   - satellite-infra-base : RawBucketName output -> RawBucketName param.
-#   - lakerunner-infra-base : LicenseSecretArn output -> LicenseSecretArn param.
-# Both output names match the parameter names, so plain FROM_STACKS pulls wire
-# them up.  OTEL_REPLICAS defaults to 1 here (the collector config must change
-# before scaling past one replica -- see docs/operations/jenkins-chained-deploy.md).
+# The output name matches the parameter name, so a plain FROM_STACKS pull wires
+# it up.  No pull from the central lakerunner-infra-base stack -- the collector
+# needs no license and a satellite may live in a different account.
+# OTEL_REPLICAS defaults to 1 here (the collector config must change before
+# scaling past one replica -- see docs/operations/jenkins-chained-deploy.md).
 #
 # Self-contained single-file driver: this front-half sets the engine env, then
 # falls through into the engine embedded below by scripts-src/build.sh (do not
@@ -29,7 +30,6 @@ Required:
   REGION                      AWS region (never defaulted; must be set explicitly).
   VERSION                     Published template tag.
   SATELLITE_INFRA_BASE_STACK  Upstream satellite-infra-base (RawBucketName).
-  INFRA_BASE_STACK            Upstream lakerunner-infra-base (LicenseSecretArn).
   ORGANIZATION_ID             Org UUID this satellite's telemetry is attributed to.
   VPC_ID                      VPC for the collector.
   ALB_SUBNETS                 Comma-separated subnets for the collector ALB.
@@ -58,7 +58,6 @@ missing=""
 [ -z "${REGION:-}" ] && missing="$missing REGION"
 [ -z "${VERSION:-}" ] && missing="$missing VERSION"
 [ -z "${SATELLITE_INFRA_BASE_STACK:-}" ] && missing="$missing SATELLITE_INFRA_BASE_STACK"
-[ -z "${INFRA_BASE_STACK:-}" ] && missing="$missing INFRA_BASE_STACK"
 [ -z "${ORGANIZATION_ID:-}" ] && missing="$missing ORGANIZATION_ID"
 [ -z "${VPC_ID:-}" ] && missing="$missing VPC_ID"
 [ -z "${ALB_SUBNETS:-}" ] && missing="$missing ALB_SUBNETS"
@@ -78,7 +77,7 @@ template_base_url="${TEMPLATE_BASE_URL:-$DEFAULT_TEMPLATE_BASE_URL}"
 otel_replicas="${OTEL_REPLICAS:-1}"
 
 TEMPLATE_URL="$template_base_url/$VERSION/$TEMPLATE_KEY"
-FROM_STACKS="$SATELLITE_INFRA_BASE_STACK $INFRA_BASE_STACK"
+FROM_STACKS="$SATELLITE_INFRA_BASE_STACK"
 MAPS=""
 
 params="OrganizationId=$ORGANIZATION_ID
