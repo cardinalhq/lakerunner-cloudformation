@@ -88,11 +88,16 @@ last.
   `lakerunner-infra-base` Output `ProcessRoleArn` (the satellite trusts the
   lakerunner process role to assume into the satellite access role). The
   wrapper sets `MAPS="LakerunnerPrincipal=ProcessRoleArn"`.
-- `lakerunner-services` parameters `QueueUrl` and `QueueRoleArn` are read from
-  the `satellite-infra-base` stack Outputs `RawQueueUrl` and
-  `LakerunnerAccessRoleArn`, then passed as `PARAMS` lines. The pubsub-sqs
-  container sets them as plain `SQS_QUEUE_URL` / `SQS_ROLE_ARN` env vars
-  (`SQS_REGION` comes from the stack's own `AWS::Region`).
+- `lakerunner-services` parameters `QueueUrl` and `QueueRoleArn` (the primary,
+  group-0 queue) are read from the `satellite-infra-base` stack Outputs
+  `RawQueueUrl` and `LakerunnerAccessRoleArn`, then passed as `PARAMS` lines. The
+  pubsub-sqs container sets them as plain `SQS_QUEUE_URL` / `SQS_ROLE_ARN` env
+  vars (`SQS_REGION` comes from the stack's own `AWS::Region`).
+- Additional satellite queues (a satellite per account/region) are added via
+  `QUEUE_URL_<n>` / `QUEUE_REGION_<n>` / `QUEUE_ROLE_ARN_<n>` (n=1..10), which
+  become `SQS_QUEUE_URL_<n>` / `SQS_REGION_<n>` / `SQS_ROLE_ARN_<n>` on pubsub-sqs.
+  Each carries its own region and assume-role, so the poller reaches queues in
+  other accounts/regions. `QUEUE_REGION_<n>` defaults to `REGION` when unset.
 
 ## Job 1: lakerunner-infra-base
 
@@ -277,6 +282,9 @@ exit. Set `CERTIFICATE_ARN` to use a real cert.
 | `SERVICE_NAMESPACE_NAME` | optional | template: `cardinal.local` |
 | `PUBLIC_SUBNETS` | optional | template: empty |
 | `OTEL_REPLICAS` | optional | `0` |
+| `PUBSUB_AUTOREGISTER` | optional | template default `true` (set `false` to disable) |
+| `PUBSUB_AUTOREGISTER_WRITES_TO_INSTANCE` | optional | `1` |
+| `QUEUE_URL_<n>` `QUEUE_REGION_<n>` `QUEUE_ROLE_ARN_<n>` (n=1..10) | optional | additional satellite queues for pubsub-sqs; `QUEUE_REGION_<n>` defaults to `REGION` |
 | `LAKERUNNER_IMAGE` `MAESTRO_IMAGE` `OTEL_IMAGE` `DEX_IMAGE` `DEX_INIT_IMAGE` `DB_INIT_IMAGE` | optional | template defaults |
 | `TEMPLATE_BASE_URL` | optional | `https://cardinal-cfn.s3.us-east-2.amazonaws.com/lakerunner` (also forwarded as `TemplateBaseUrl`) |
 | `DEPLOYER_ROLE_ARN` | optional | unset |

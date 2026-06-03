@@ -41,6 +41,7 @@ from troposphere import (
 from troposphere.cloudformation import Stack
 from troposphere.servicediscovery import PrivateDnsNamespace
 
+from cardinal_cfn.children.services_process import MAX_ADDITIONAL_QUEUES
 from cardinal_cfn.install_id import install_id_short, install_id_long
 from cardinal_cfn.parameters import add_parameter_group_metadata, add_no_echo_parameter
 from cardinal_cfn.images import add_image_override
@@ -110,7 +111,7 @@ def _sizing_param_specs(defaults: dict) -> list[dict]:
          "description": "Fargate memory (MiB) for lakerunner-process-traces."},
         {"name": "PubsubSqsReplicas", "type": "Number", "default": int(pubsub["replicas"]),
          "min": 1, "description": "Desired replicas for lakerunner-pubsub-sqs."},
-        {"name": "PubsubAutoRegister", "type": "String", "default": "false",
+        {"name": "PubsubAutoRegister", "type": "String", "default": "true",
          "allowed_values": ["true", "false"],
          "description": "Enable pubsub-sqs auto-registration of unseen satellite raw buckets."},
         {"name": "PubsubAutoRegisterWritesToInstance", "type": "String", "default": "1",
@@ -294,6 +295,22 @@ def build() -> Template:
     # Infra-stack outputs threaded in as parameters
     # ---------------------------------------------------------------------
     _add_string_params(t, _INFRA_SETUP_PARAMS)
+
+    # Additional satellite queue groups (1..MAX_ADDITIONAL_QUEUES), forwarded to
+    # the process child where they become SQS_QUEUE_URL_<n>/_REGION_<n>/_ROLE_ARN_<n>
+    # on the pubsub-sqs container.
+    for n in range(1, MAX_ADDITIONAL_QUEUES + 1):
+        _add_string_params(t, [
+            (f"QueueUrl{n}", "String", "",
+             f"SQS queue URL for additional satellite queue group {n} "
+             "(empty skips it)."),
+            (f"QueueRegion{n}", "String", "",
+             f"AWS region for additional satellite queue group {n} "
+             "(empty uses the stack region)."),
+            (f"QueueRoleArn{n}", "String", "",
+             f"IAM role ARN pubsub-sqs STS-assumes for additional satellite "
+             f"queue group {n}."),
+        ])
 
     # ---------------------------------------------------------------------
     # Security-tier inputs (SG ids + role ARNs); replace the Security child.
@@ -633,6 +650,10 @@ def build() -> Template:
         "PubsubAutoRegister": Ref("PubsubAutoRegister"),
         "PubsubAutoRegisterWritesToInstance": Ref("PubsubAutoRegisterWritesToInstance"),
     })
+    for n in range(1, MAX_ADDITIONAL_QUEUES + 1):
+        services_process_params[f"QueueUrl{n}"] = Ref(f"QueueUrl{n}")
+        services_process_params[f"QueueRegion{n}"] = Ref(f"QueueRegion{n}")
+        services_process_params[f"QueueRoleArn{n}"] = Ref(f"QueueRoleArn{n}")
     services_process_stack = _add_child(
         t, "Process", "services-process.yaml",
         services_process_params, depends_on=["Migration"])

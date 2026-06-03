@@ -159,10 +159,23 @@ def test_pubsub_autoregister_params_present_with_defaults(td):
     root with the correct defaults."""
     params = td["Parameters"]
     assert "PubsubAutoRegister" in params
-    assert params["PubsubAutoRegister"]["Default"] == "false"
+    assert params["PubsubAutoRegister"]["Default"] == "true"
     assert params["PubsubAutoRegister"]["AllowedValues"] == ["true", "false"]
     assert "PubsubAutoRegisterWritesToInstance" in params
     assert params["PubsubAutoRegisterWritesToInstance"]["Default"] == "1"
+
+
+def test_additional_queue_groups_forwarded_to_process_child(td):
+    """The root declares numbered queue params and forwards them to the process
+    child so pubsub-sqs can consume multiple satellite queues."""
+    params = td["Parameters"]
+    for n in (1, 10):
+        for p in (f"QueueUrl{n}", f"QueueRegion{n}", f"QueueRoleArn{n}"):
+            assert p in params, f"root missing {p}"
+            assert params[p]["Default"] == ""
+    process = td["Resources"]["Process"]["Properties"]["Parameters"]
+    assert process["QueueUrl1"] == {"Ref": "QueueUrl1"}
+    assert process["QueueRoleArn10"] == {"Ref": "QueueRoleArn10"}
 
 
 def test_pubsub_autoregister_wired_to_process_child(td):

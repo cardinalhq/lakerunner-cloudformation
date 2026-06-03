@@ -84,8 +84,8 @@ Optional (template defaults preserved when unset):
                               ALB_ALLOWED_CIDR* settings).
   LAKERUNNER_IMAGE, MAESTRO_IMAGE, OTEL_IMAGE, DEX_IMAGE, DEX_INIT_IMAGE,
   DB_INIT_IMAGE               Image overrides (template defaults otherwise).
-  PUBSUB_AUTOREGISTER         Set to "true" to enable pubsub-sqs auto-
-                              registration of satellite buckets (default false).
+  PUBSUB_AUTOREGISTER         pubsub-sqs auto-registration of satellite buckets
+                              (template default "true").  Set "false" to disable.
                               When true, unseen satellite raw-bucket orgs are
                               registered and cooked output is routed to the
                               central instance.
@@ -93,6 +93,11 @@ Optional (template defaults preserved when unset):
                               Central cooked-bucket instance_num that auto-
                               registered orgs write to (default 1). Required
                               when PUBSUB_AUTOREGISTER=true.
+  QUEUE_URL_<n>, QUEUE_REGION_<n>, QUEUE_ROLE_ARN_<n>
+                              Additional satellite queues for pubsub-sqs, n=1..10.
+                              Set QUEUE_URL_<n> (and optionally the matching
+                              region / assume-role ARN) to add a queue beyond the
+                              primary one.  QUEUE_REGION_<n> defaults to REGION.
   TEMPLATE_BASE_URL           Default: $DEFAULT_TEMPLATE_BASE_URL.  Also
                               forwarded as the TemplateBaseUrl param (nested
                               children load from the matching prefix).
@@ -208,6 +213,26 @@ DexImage=$DEX_IMAGE"
 DexInitImage=$DEX_INIT_IMAGE"
 [ -n "${DB_INIT_IMAGE:-}" ] && params="$params
 DbInitImage=$DB_INIT_IMAGE"
+
+# --- Additional satellite queues (groups 1..10). -----------------------------
+# pubsub-sqs consumes extra satellite queues from numbered env groups.  For each
+# n, set QUEUE_URL_<n> (and optionally QUEUE_REGION_<n> / QUEUE_ROLE_ARN_<n>) to
+# add one.  The ceiling mirrors MAX_ADDITIONAL_QUEUES in services_process.py.
+n=1
+while [ "$n" -le 10 ]; do
+    eval "q_url=\${QUEUE_URL_$n:-}"
+    if [ -n "$q_url" ]; then
+        eval "q_region=\${QUEUE_REGION_$n:-}"
+        eval "q_role=\${QUEUE_ROLE_ARN_$n:-}"
+        params="$params
+QueueUrl$n=$q_url"
+        [ -n "$q_region" ] && params="$params
+QueueRegion$n=$q_region"
+        [ -n "$q_role" ] && params="$params
+QueueRoleArn$n=$q_role"
+    fi
+    n=$((n + 1))
+done
 
 # --- Certificate handling. ---------------------------------------------------
 # Cert PEM material reaches the template via FILE_PARAMS (multi-line safe), never
