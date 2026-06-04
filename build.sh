@@ -34,7 +34,7 @@ echo "Generating cardinal-satellite-services.yaml..."
 python3 -m cardinal_cfn.satellite_services > generated-templates/cardinal-satellite-services.yaml
 
 echo "Generating satellite-images.txt..."
-python3 -m cardinal_cfn.image_manifest satellite > generated-templates/satellite-images.txt
+python3 -m cardinal_cfn.image_manifest manifest satellite > generated-templates/satellite-images.txt
 
 echo "Generating cardinal-lakerunner-infra-rds.yaml..."
 python3 -m cardinal_cfn.lakerunner_infra_rds > generated-templates/cardinal-lakerunner-infra-rds.yaml

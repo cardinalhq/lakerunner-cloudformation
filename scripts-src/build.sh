@@ -12,12 +12,27 @@ set -eu
 
 src_dir=$(cd -- "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)
 parts_dir="$src_dir/parts"
+repo_root=$(cd -- "$src_dir/.." >/dev/null 2>&1 && pwd)
 # OUT_DIR overrides the destination (the drift test builds into a temp dir);
 # default is the customer-facing scripts/ at the repo root.
-out_dir="${OUT_DIR:-$(cd -- "$src_dir/.." >/dev/null 2>&1 && pwd)/scripts}"
+out_dir="${OUT_DIR:-$repo_root/scripts}"
 
 base="$parts_dir/base.sh"
 [ -r "$base" ] || { echo "build.sh: missing engine part: $base" >&2; exit 1; }
+
+# Values baked into the generated drivers so each published driver is a
+# self-contained, version-locked unit.  Single-sourced from
+# cardinal-defaults.yaml and the build's release version:
+#   @@STACK_VERSION@@      the published version this driver defaults to
+#                          (CARDINAL_VERSION at release time; "dev" locally).
+#   @@OTEL_IMAGE_SUFFIX@@  the otel collector's registry-relative path
+#                          (repo + pinned tag/digest); only the registry prefix
+#                          is operator-supplied at deploy time.
+stack_version="${CARDINAL_VERSION:-dev}"
+py="python3"
+[ -x "$repo_root/.venv/bin/python3" ] && py="$repo_root/.venv/bin/python3"
+otel_image_suffix=$(PYTHONPATH="$repo_root/src" "$py" -m cardinal_cfn.image_manifest suffix otel)
+[ -n "$otel_image_suffix" ] || { echo "build.sh: failed to resolve otel image suffix" >&2; exit 1; }
 
 for fragment in "$parts_dir"/*.sh; do
     name=$(basename "$fragment")
@@ -29,7 +44,10 @@ for fragment in "$parts_dir"/*.sh; do
         tail -n +2 "$fragment"
         printf '\n# --- embedded engine (scripts-src/parts/base.sh) ---\n'
         tail -n +2 "$base"
-    } >"$out"
+    } | sed \
+        -e "s|@@STACK_VERSION@@|$stack_version|g" \
+        -e "s|@@OTEL_IMAGE_SUFFIX@@|$otel_image_suffix|g" \
+        >"$out"
     chmod +x "$out"
     echo "wrote $out"
 done

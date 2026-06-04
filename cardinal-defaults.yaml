@@ -35,7 +35,7 @@ storage_profiles:
 images:
   lakerunner: "public.ecr.aws/cardinalhq.io/lakerunner:v1.40.4"
   maestro:    "public.ecr.aws/cardinalhq.io/maestro:v1.50.0"
-  otel:       "public.ecr.aws/cardinalhq.io/cardinalhq-otel-collector:v1.8.0"
+  otel:       "public.ecr.aws/cardinalhq.io/cardinalhq-otel-collector:v1.8.0@sha256:9906eea2b38f1614047ada60ce7887704652484bb5b01a7f8a1d932277e1f151"
   dex:        "public.ecr.aws/cardinalhq.io/dex-customization:v0.1.0"
   dex_init:   "public.ecr.aws/docker/library/busybox:1.37"
   db_init:    "ghcr.io/cardinalhq/initcontainer-grafana:latest"
