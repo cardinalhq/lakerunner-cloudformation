@@ -265,3 +265,22 @@ def test_outputs_present(td):
         "CollectorTaskRoleArn",
     ):
         assert o in td["Outputs"], f"missing output: {o}"
+
+
+# ---------------------------------------------------------------------------
+# Execution-role extra managed policies (air-gapped ECR / pull-through)
+# ---------------------------------------------------------------------------
+
+
+def test_exec_role_extra_policy_param_and_condition(td):
+    p = td["Parameters"]["ExecutionRoleExtraPolicyArns"]
+    assert p["Type"] == "String"
+    assert p["Default"] == ""
+    assert "HasExecutionRoleExtraPolicies" in td["Conditions"]
+
+
+def test_exec_role_managed_policy_arns_conditional(td):
+    arns = td["Resources"]["CollectorExecutionRole"]["Properties"]["ManagedPolicyArns"]
+    blob = json.dumps(arns)
+    assert "AmazonECSTaskExecutionRolePolicy" in blob
+    assert "ExecutionRoleExtraPolicyArns" in blob
