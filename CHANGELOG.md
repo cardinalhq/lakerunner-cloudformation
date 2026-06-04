@@ -41,6 +41,22 @@ v0.0.114.
     `INITIAL_INGEST_API_KEY` / `*_PARAM_NAME`. Operators who relied on a
     deterministic ingest key now create it in the Maestro UI rather than via
     `InitialIngestApiKey`.
+- **Traces route to the cooked bucket; satellite raw-bucket grant narrowed.**
+  Default `LakerunnerImage` bumped to `v1.40.4` (was `v1.40.0`): v1.40.4 fixes the
+  trace ingest worklane to honor the read/write storage-profile split, so cooked
+  traces redirect to the cooked bucket via `writes_to_instance_num` (like logs and
+  metrics) instead of being written back to the satellite source bucket. The
+  migrator shares this image, so the bump retriggers migrations on update.
+  Accordingly the `cardinal-satellite-access` role (in `satellite-infra-base`) no
+  longer grants `s3:PutObject` on the raw bucket — its statement Sid changes from
+  `RawBucketReadWriteDelete` to `RawBucketReadDelete` (`s3:DeleteObject` stays for
+  the poller's `delete_sources` cleanup). This also removes the prior risk of
+  cooked trace segments aging out under the raw bucket's lifecycle expiry.
+  - **Upgrade action:** redeploy `satellite-infra-base` (each satellite
+    account/region) and `lakerunner-services`. The narrowed grant requires
+    lakerunner **>= v1.40.4**; if you override `LakerunnerImage` below v1.40.4,
+    trace ingest fails with `AccessDenied` on `s3:PutObject` against the raw
+    bucket — stay on v1.40.4+.
 
 ## v0.0.123
 
