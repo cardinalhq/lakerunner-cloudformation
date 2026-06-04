@@ -23,6 +23,15 @@ set -eu
 
 DEFAULT_TEMPLATE_BASE_URL="https://cardinal-cfn-us-east-1.s3.us-east-1.amazonaws.com/lakerunner"
 TEMPLATE_KEY="cardinal-lakerunner-services.yaml"
+# Baked at publish time (scripts-src/build.sh).  STACK_VERSION defaults to this.
+DEFAULT_STACK_VERSION="dev"
+DEFAULT_IMAGE_REGISTRY="public.ecr.aws"
+# Baked, locked registry-relative paths (repo + pinned tag/digest) for the
+# first-party public-ECR images.  Only the registry prefix is operator-supplied;
+# external images (busybox, the ghcr db-init) keep their own full-URI overrides.
+LAKERUNNER_IMAGE_SUFFIX="cardinalhq.io/lakerunner:v1.40.4@sha256:532abeafcd7fb3ad7be49704239f6147a9a6ac19ed5a71976005542d72066b89"
+MAESTRO_IMAGE_SUFFIX="cardinalhq.io/maestro:v1.50.0@sha256:642e93afbbf846535923fc4ad59ea790fd0aff85cc6889355e866ab883da5001"
+DEX_IMAGE_SUFFIX="cardinalhq.io/dex-customization:v0.1.0@sha256:a1d0af5a99068516df067af803312c03b62b1bd07eefb16e914bd1d55deacf9c"
 
 usage() {
     cat <<EOF
@@ -33,7 +42,6 @@ All inputs come from environment variables (no flags).
 Required:
   STACK_NAME                  Stack to create/update.
   REGION                      AWS region (never defaulted; must be set explicitly).
-  VERSION                     Published template tag.
   INFRA_BASE_STACK            Upstream lakerunner-infra-base.
   INFRA_RDS_STACK             Upstream lakerunner-infra-rds.
   SATELLITE_INFRA_BASE_STACK  Source of RawQueueUrl / LakerunnerAccessRoleArn
@@ -51,6 +59,15 @@ Required:
                               back.
 
 Optional (template defaults preserved when unset):
+  STACK_VERSION               Published template version to deploy. Default: the
+                              version baked into this driver ($DEFAULT_STACK_VERSION).
+                              (VERSION is accepted as a legacy alias.)
+  IMAGE_REGISTRY              Registry (and optional namespace/prefix) the first-
+                              party images are pulled from -- e.g. an ECR pull-
+                              through cache root. The image paths and pinned
+                              tags/digests for lakerunner, maestro and dex are
+                              locked into this driver; only this prefix is
+                              operator-supplied. Default: $DEFAULT_IMAGE_REGISTRY.
   CERTIFICATE_ARN             ACM/IAM cert ARN for the Maestro HTTPS listener.
                               If unset, the script auto-generates a self-signed
                               internal cert ON FIRST CREATE only (browsers will
@@ -85,8 +102,12 @@ Optional (template defaults preserved when unset):
                               PUBLIC_SUBNETS, and the ALB SG internet ingress is
                               enabled on the infra-base stack (its ALB_SCHEME /
                               ALB_ALLOWED_CIDR* settings).
-  LAKERUNNER_IMAGE, MAESTRO_IMAGE, OTEL_IMAGE, DEX_IMAGE, DEX_INIT_IMAGE,
-  DB_INIT_IMAGE               Image overrides (template defaults otherwise).
+  DEX_INIT_IMAGE              Full image URI override for the dex-init busybox
+                              (a non-public-ECR/utility image, not covered by
+                              IMAGE_REGISTRY). Default: the template default.
+  DB_INIT_IMAGE               Full image URI override for the db-init image
+                              (ghcr, not covered by IMAGE_REGISTRY). Default:
+                              the template default.
   PUBSUB_AUTOREGISTER         pubsub-sqs auto-registration of satellite buckets
                               (template default "true").  Set "false" to disable.
                               When true, unseen satellite raw-bucket orgs are
@@ -118,7 +139,6 @@ esac
 missing=""
 [ -z "${STACK_NAME:-}" ] && missing="$missing STACK_NAME"
 [ -z "${REGION:-}" ] && missing="$missing REGION"
-[ -z "${VERSION:-}" ] && missing="$missing VERSION"
 [ -z "${INFRA_BASE_STACK:-}" ] && missing="$missing INFRA_BASE_STACK"
 [ -z "${INFRA_RDS_STACK:-}" ] && missing="$missing INFRA_RDS_STACK"
 [ -z "${SATELLITE_INFRA_BASE_STACK:-}" ] && missing="$missing SATELLITE_INFRA_BASE_STACK"
@@ -141,7 +161,19 @@ fi
 
 template_base_url="${TEMPLATE_BASE_URL:-$DEFAULT_TEMPLATE_BASE_URL}"
 
-TEMPLATE_URL="$template_base_url/$VERSION/$TEMPLATE_KEY"
+# STACK_VERSION (preferred) or the legacy VERSION alias, else the baked default.
+stack_version="${STACK_VERSION:-${VERSION:-$DEFAULT_STACK_VERSION}}"
+# IMAGE_REGISTRY prefix + the baked, locked image paths -> literal image params.
+image_registry="${IMAGE_REGISTRY:-$DEFAULT_IMAGE_REGISTRY}"
+lakerunner_image="$image_registry/$LAKERUNNER_IMAGE_SUFFIX"
+maestro_image="$image_registry/$MAESTRO_IMAGE_SUFFIX"
+dex_image="$image_registry/$DEX_IMAGE_SUFFIX"
+echo "[deploy-lakerunner-services] resolved STACK_VERSION = $stack_version" >&2
+echo "[deploy-lakerunner-services] resolved LakerunnerImage = $lakerunner_image" >&2
+echo "[deploy-lakerunner-services] resolved MaestroImage    = $maestro_image" >&2
+echo "[deploy-lakerunner-services] resolved DexImage        = $dex_image" >&2
+
+TEMPLATE_URL="$template_base_url/$stack_version/$TEMPLATE_KEY"
 
 # --- Read QueueUrl / QueueRoleArn from the satellite-infra-base stack. --------
 sat_outputs=$(aws cloudformation describe-stacks \
@@ -191,7 +223,7 @@ MAPS=""
 params="QueueUrl=$queue_url
 QueueRoleArn=$role_arn
 OrganizationId=$ORGANIZATION_ID
-TemplateBaseUrl=$template_base_url/$VERSION/cardinal-lakerunner/
+TemplateBaseUrl=$template_base_url/$stack_version/cardinal-lakerunner/
 ClusterArn=$CLUSTER_ARN
 ClusterName=$CLUSTER_NAME
 VpcId=$VPC_ID
@@ -206,14 +238,14 @@ ServiceNamespaceName=$SERVICE_NAMESPACE_NAME"
 [ -n "$self_telemetry_endpoint" ] && params="$params
 SelfTelemetryEndpoint=$self_telemetry_endpoint"
 
-[ -n "${LAKERUNNER_IMAGE:-}" ] && params="$params
-LakerunnerImage=$LAKERUNNER_IMAGE"
-[ -n "${MAESTRO_IMAGE:-}" ] && params="$params
-MaestroImage=$MAESTRO_IMAGE"
-[ -n "${OTEL_IMAGE:-}" ] && params="$params
-OtelImage=$OTEL_IMAGE"
-[ -n "${DEX_IMAGE:-}" ] && params="$params
-DexImage=$DEX_IMAGE"
+# First-party public-ECR images: composed from IMAGE_REGISTRY + the baked,
+# locked suffixes, always passed as literal params.
+params="$params
+LakerunnerImage=$lakerunner_image
+MaestroImage=$maestro_image
+DexImage=$dex_image"
+# External/utility images: full-URI overrides, not driven by IMAGE_REGISTRY.
+# Unset -> the template default governs.
 [ -n "${DEX_INIT_IMAGE:-}" ] && params="$params
 DexInitImage=$DEX_INIT_IMAGE"
 [ -n "${DB_INIT_IMAGE:-}" ] && params="$params

@@ -15,6 +15,8 @@ set -eu
 
 DEFAULT_TEMPLATE_BASE_URL="https://cardinal-cfn-us-east-1.s3.us-east-1.amazonaws.com/lakerunner"
 TEMPLATE_KEY="cardinal-lakerunner-infra-rds.yaml"
+# Baked at publish time (scripts-src/build.sh).  STACK_VERSION defaults to this.
+DEFAULT_STACK_VERSION="dev"
 
 usage() {
     cat <<EOF
@@ -25,13 +27,15 @@ All inputs come from environment variables (no flags).
 Required:
   STACK_NAME         Stack to create/update.
   REGION             AWS region (never defaulted; must be set explicitly).
-  VERSION            Published template tag.
   INFRA_BASE_STACK   Upstream lakerunner-infra-base stack (supplies the service
                      security-group ids via FROM_STACKS).
   VPC_ID             VPC for the DB.
   PRIVATE_SUBNETS    Comma-separated private subnet ids for the DB.
 
 Optional (template defaults preserved when unset):
+  STACK_VERSION         Published template version to deploy. Default: the
+                        version baked into this driver ($DEFAULT_STACK_VERSION).
+                        (VERSION is accepted as a legacy alias.)
   DB_ENGINE_VERSION     (template default 18.4).
   DB_INSTANCE_CLASS     (template default db.r7g.large).
   DB_ALLOCATED_STORAGE  (template default 100).
@@ -50,7 +54,6 @@ esac
 missing=""
 [ -z "${STACK_NAME:-}" ] && missing="$missing STACK_NAME"
 [ -z "${REGION:-}" ] && missing="$missing REGION"
-[ -z "${VERSION:-}" ] && missing="$missing VERSION"
 [ -z "${INFRA_BASE_STACK:-}" ] && missing="$missing INFRA_BASE_STACK"
 [ -z "${VPC_ID:-}" ] && missing="$missing VPC_ID"
 [ -z "${PRIVATE_SUBNETS:-}" ] && missing="$missing PRIVATE_SUBNETS"
@@ -61,8 +64,10 @@ if [ -n "$missing" ]; then
 fi
 
 template_base_url="${TEMPLATE_BASE_URL:-$DEFAULT_TEMPLATE_BASE_URL}"
+# STACK_VERSION (preferred) or the legacy VERSION alias, else the baked default.
+stack_version="${STACK_VERSION:-${VERSION:-$DEFAULT_STACK_VERSION}}"
 
-TEMPLATE_URL="$template_base_url/$VERSION/$TEMPLATE_KEY"
+TEMPLATE_URL="$template_base_url/$stack_version/$TEMPLATE_KEY"
 FROM_STACKS="$INFRA_BASE_STACK"
 MAPS=""
 

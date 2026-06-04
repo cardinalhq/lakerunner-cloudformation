@@ -17,6 +17,14 @@ def test_unknown_stack_raises():
         image_manifest.manifest_lines("nope")
 
 
+def test_lakerunner_manifest_lists_all_stack_images():
+    images = load_defaults()["images"]
+    expected = sorted(
+        {images[k] for k in ("lakerunner", "maestro", "dex", "dex_init", "db_init")}
+    )
+    assert image_manifest.manifest_lines("lakerunner") == expected
+
+
 def test_image_ref_returns_pinned_default():
     assert image_manifest.image_ref("otel") == load_defaults()["images"]["otel"]
 
