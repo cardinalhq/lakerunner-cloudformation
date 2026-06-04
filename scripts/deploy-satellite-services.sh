@@ -42,6 +42,10 @@ Optional (template defaults preserved when unset):
   INGEST_SOURCE_CIDR   Allowed source CIDR for the collector ALB (template default 10.0.0.0/8).
   OTEL_REPLICAS        Collector replica count (default 1; >1 requires a
                        collector config change first).
+  OTEL_IMAGE           Full image URI for the otel collector (e.g. an
+                       air-gapped private mirror). Unset: the template's public
+                       default. The public image to mirror is listed in
+                       satellite-images.txt (see docs/air-gapped-images.md).
   TEMPLATE_BASE_URL    Default: $DEFAULT_TEMPLATE_BASE_URL
   DEPLOYER_ROLE_ARN    Passed to create-change-set.
   NO_EXECUTE           Non-empty: change-set only, do not execute.
@@ -61,7 +65,7 @@ esac
 echo "[deploy-satellite-services] inputs visible to this process:" >&2
 for _v in STACK_NAME REGION VERSION SATELLITE_INFRA_BASE_STACK ORGANIZATION_ID \
           VPC_ID ALB_SUBNETS TASK_SUBNETS ECS_CLUSTER_ARN \
-          ALB_SCHEME INGEST_SOURCE_CIDR OTEL_REPLICAS TEMPLATE_BASE_URL \
+          ALB_SCHEME INGEST_SOURCE_CIDR OTEL_REPLICAS OTEL_IMAGE TEMPLATE_BASE_URL \
           DEPLOYER_ROLE_ARN NO_EXECUTE; do
     eval "_val=\${$_v:-}"
     printf '[deploy-satellite-services]   %-27s = %s\n' "$_v" "${_val:-<unset>}" >&2
@@ -104,6 +108,10 @@ OtelReplicas=$otel_replicas"
 AlbScheme=$ALB_SCHEME"
 [ -n "${INGEST_SOURCE_CIDR:-}" ] && params="$params
 IngestSourceCidr=$INGEST_SOURCE_CIDR"
+# OTEL_IMAGE: full image URI override passed as the literal OtelImage param.
+# Unset -> omitted, so the template's public default governs.
+[ -n "${OTEL_IMAGE:-}" ] && params="$params
+OtelImage=$OTEL_IMAGE"
 
 PARAMS="$params"
 
