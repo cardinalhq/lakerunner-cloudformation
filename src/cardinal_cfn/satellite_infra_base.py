@@ -274,19 +274,23 @@ def build() -> Template:
                         "Version": "2012-10-17",
                         "Statement": [
                             {
-                                # PutObject is required because the lakerunner
-                                # trace ingest worklane does not yet split read
-                                # vs write storage profiles (logs/metrics do),
-                                # so it writes cooked trace segments back to
-                                # this source bucket rather than redirecting to
-                                # the cooked bucket via writes_to_instance_num.
-                                # Remove once trace_ingest_worklane.go mirrors
-                                # the logs/metric read/write split.
-                                "Sid": "RawBucketReadWriteDelete",
+                                # The lakerunner poller (assuming this role
+                                # cross-account) reads raw objects for ingest
+                                # and deletes processed sources (delete_sources
+                                # cleanup) -- it does not write here. No
+                                # s3:PutObject: as of lakerunner v1.40.4 the
+                                # trace ingest worklane honors the read/write
+                                # storage-profile split (like logs/metrics) and
+                                # writes cooked trace segments to the cooked
+                                # bucket via writes_to_instance_num, not back to
+                                # this source bucket. Requires LakerunnerImage
+                                # >= v1.40.4 (the default); pinning an older
+                                # image will fail trace ingest with AccessDenied
+                                # on PutObject.
+                                "Sid": "RawBucketReadDelete",
                                 "Effect": "Allow",
                                 "Action": [
                                     "s3:GetObject",
-                                    "s3:PutObject",
                                     "s3:DeleteObject",
                                     "s3:ListBucket",
                                     "s3:GetBucketLocation",
