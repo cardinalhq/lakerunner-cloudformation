@@ -11,6 +11,17 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v0.0.125
+
+- **Air-gapped image mirroring for the satellite collector.** A generated
+  `satellite-images.txt` (in `generated-templates/`) lists the upstream
+  image(s) the `cardinal-satellite-services` stack runs, so they can be
+  mirrored and scanned. To deploy from a private mirror, set `OTEL_IMAGE` to
+  the full mirrored image URI when running `deploy-satellite-services.sh`; the
+  script passes it as the literal `OtelImage` parameter. Unset preserves the
+  template's public default. See `docs/air-gapped-images.md`. No upgrade action
+  unless mirroring; no resource replacement.
+
 ## v0.0.124
 
 - **Lakerunner now installs admin-key-only; Maestro is the sole owner of org
