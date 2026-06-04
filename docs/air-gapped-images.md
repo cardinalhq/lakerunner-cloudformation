@@ -2,54 +2,86 @@
 
 Air-gapped installs cannot pull container images from the public registries.
 This page lists the images each Cardinal stack runs and shows how to point the
-stack at a private mirror.
+deploy driver at a private mirror.
 
-> Scope: this covers the **satellite** stack (`cardinal-satellite-services`).
-> The central Lakerunner stack's images are covered in a later release.
+> Scope: this covers the **satellite** stack (`cardinal-satellite-services`),
+> deployed via `deploy-satellite-services.sh`. The central Lakerunner stack's
+> images are covered in a later release.
+
+## How image selection works
+
+The deploy driver, not the operator, owns the image identity. The collector's
+repository path and pinned tag/digest are **baked into the published driver**
+(single-sourced from `cardinal-defaults.yaml`); the operator supplies only the
+registry/prefix to pull from. This keeps the driver + stack the supported,
+version-locked deploy path — there is no per-image URL to hand-edit and no
+console deploy.
+
+The image the driver deploys is:
+
+```
+${IMAGE_REGISTRY}/cardinalhq.io/cardinalhq-otel-collector:v1.8.0@sha256:9906…
+```
+
+- `IMAGE_REGISTRY` — operator-supplied registry/prefix. Default: `public.ecr.aws`.
+- the rest (repo path + pinned tag + digest) — locked in the driver.
 
 ## Images the satellite stack runs
 
 The satellite collector runs a single container image. The canonical,
-machine-readable list is generated at build time:
+digest-pinned, machine-readable list is generated at build time:
 
 `generated-templates/satellite-images.txt`
 
-For the current release that is:
+For the current release:
 
-- `public.ecr.aws/cardinalhq.io/cardinalhq-otel-collector:v1.8.0` — the otel
-  collector that receives telemetry and writes to the satellite raw bucket.
+- `public.ecr.aws/cardinalhq.io/cardinalhq-otel-collector:v1.8.0@sha256:9906eea2b38f1614047ada60ce7887704652484bb5b01a7f8a1d932277e1f151`
+  — the otel collector that receives telemetry and writes to the satellite raw
+  bucket. (Multi-arch index digest; the collector task runs ARM64.)
 
-This file always lists the upstream public references — the images to pull,
-scan, and mirror *from* — regardless of which image you actually deploy.
+This file always lists the upstream public reference — the image to pull, scan,
+and mirror *from* — regardless of `IMAGE_REGISTRY`.
 
 ## Mirroring
 
-Pull the image listed in `satellite-images.txt`, scan it, and push it into
-your private registry. For example, with
-[skopeo](https://github.com/containers/skopeo) and a mirror prefix of
-`mirror.corp/cardinal`:
+### Option A — ECR pull-through cache (recommended)
+
+Create a pull-through cache rule for ECR Public, then point `IMAGE_REGISTRY` at
+the cache root. ECR preserves the full upstream path and digest, so the locked
+suffix resolves unchanged:
 
 ```sh
-PREFIX=mirror.corp/cardinal
-while read -r img; do
-  name=${img##*/}                     # cardinalhq-otel-collector:v1.8.0
-  skopeo copy "docker://${img}" "docker://${PREFIX}/${name}"
-done < generated-templates/satellite-images.txt
+aws ecr create-pull-through-cache-rule \
+  --ecr-repository-prefix aws-public \
+  --upstream-registry-url public.ecr.aws
+
+IMAGE_REGISTRY=<acct>.dkr.ecr.<region>.amazonaws.com/aws-public
+# -> <acct>.dkr.ecr.<region>.amazonaws.com/aws-public/cardinalhq.io/cardinalhq-otel-collector:v1.8.0@sha256:9906…
 ```
 
-## Pointing the stack at your mirror
+Note: on the *first* pull of a not-yet-cached image, the ECS task **execution
+role** needs `ecr:BatchImportUpstreamImage` (and repository auto-creation:
+`ecr:CreateRepository` on the principal or a registry repository-creation
+template) in addition to the usual pull permissions. Once cached, standard pull
+permissions suffice.
 
-Image selection lives in the deploy script, not the CloudFormation template:
-the template takes a literal `OtelImage` parameter, and
-`deploy-satellite-services.sh` passes whatever you choose.
+### Option B — manual mirror
 
-Set `OTEL_IMAGE` to the full URI of your mirrored image when running the
-deploy script:
+Pull each image in `satellite-images.txt`, scan it, and push it into your
+registry preserving the repo path and digest (e.g. with skopeo). Then set
+`IMAGE_REGISTRY` to your registry root.
+
+## Deploying from the mirror
 
 ```sh
-OTEL_IMAGE=mirror.corp/cardinal/cardinalhq-otel-collector:v1.8.0 \
-  STACK_NAME=... REGION=... VERSION=... \
+IMAGE_REGISTRY=<acct>.dkr.ecr.<region>.amazonaws.com/aws-public \
+  STACK_NAME=... REGION=... \
   ./scripts/deploy-satellite-services.sh
 ```
 
-Leave `OTEL_IMAGE` unset to pull the template's public default.
+Leave `IMAGE_REGISTRY` unset to pull from the public default.
+
+`STACK_VERSION` is optional and defaults to the version baked into the driver at
+publish time, so a published driver deploys its own matching templates. Set
+`STACK_VERSION` to deploy a different published version. (`VERSION` is accepted
+as a legacy alias.)

@@ -73,10 +73,33 @@ pytest, shellcheck, cfn-lint.
 
 ---
 
+## v0.0.126 rework (locked image + STACK_VERSION) — DONE
+
+Superseded the v0.0.125 `OTEL_IMAGE` full-URI passthrough with a driver-locked
+image and an optional baked `STACK_VERSION`.
+
+- [x] **Pin the otel digest** in `cardinal-defaults.yaml`
+  (`...:v1.8.0@sha256:9906…`, multi-arch index digest). Flows into the template
+  default + manifest (single source).
+- [x] **`image_manifest.py`**: subcommands `manifest <stack>` / `suffix <key>`;
+  `image_ref` + `registry_relative` helpers; tests updated. `build.sh` uses
+  `manifest satellite`.
+- [x] **`scripts-src/build.sh`**: bake `@@STACK_VERSION@@` (`${CARDINAL_VERSION:-dev}`)
+  and `@@OTEL_IMAGE_SUFFIX@@` (`image_manifest suffix otel`) into generated
+  drivers via `sed`.
+- [x] **`deploy-satellite-services.sh` front-half**: replace `OTEL_IMAGE` with
+  `IMAGE_REGISTRY` (default `public.ecr.aws`) composing the baked suffix into a
+  literal `OtelImage`; `VERSION` -> optional `STACK_VERSION` (baked default,
+  `VERSION` legacy alias). Regenerated; drift + shellcheck green.
+- [x] **Docs/changelog**: `docs/air-gapped-images.md` (IMAGE_REGISTRY + ECR
+  pull-through + first-pull IAM note), `CHANGELOG.md` `v0.0.126`.
+- [x] **Verify**: `make build` (digest-pinned manifest, cfn-lint clean),
+  `make test` (487 passed, 1 skipped), behavioral front-half check.
+
 ## Phase 2 (later PR, not built here)
 
-Extend the script-driven override + manifest to the main lakerunner stack
-(`lakerunner`, `maestro`, `dex`), handle the two utility images
+Extend the locked-suffix + `IMAGE_REGISTRY` baking + manifest to the main
+lakerunner stack (`lakerunner`, `maestro`, `dex`), handle the two utility images
 (`busybox`/`dex_init`, `initcontainer-grafana`/`db_init` — the psql step can't
 be dropped without a binary change), and extend the manifest/doc to all six
 images.

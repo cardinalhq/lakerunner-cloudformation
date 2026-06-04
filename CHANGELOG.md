@@ -11,6 +11,28 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v0.0.126
+
+- **Satellite collector image is now locked in the deploy driver; operators
+  supply only a registry prefix.** `deploy-satellite-services.sh` no longer
+  takes a full `OTEL_IMAGE` URI (the v0.0.125 input). Instead set `IMAGE_REGISTRY`
+  to your registry/pull-through-cache root (default `public.ecr.aws`); the
+  collector repo path and pinned tag/digest are baked into the published driver
+  and only the prefix is operator-supplied. Example:
+  `IMAGE_REGISTRY=<acct>.dkr.ecr.<region>.amazonaws.com/aws-public`. See
+  `docs/air-gapped-images.md` (includes the first-pull IAM note for ECR
+  pull-through). **Upgrade action:** anyone who set `OTEL_IMAGE` (only available
+  in v0.0.125) must switch to `IMAGE_REGISTRY`.
+- **`VERSION` is now optional, renamed `STACK_VERSION`.** The published driver
+  defaults to the version baked into it at publish time, so it deploys its own
+  matching templates. Set `STACK_VERSION` to target a different published
+  version. `VERSION` is still accepted as a legacy alias, so existing automation
+  keeps working. **Upgrade action:** none required.
+- **otel collector image is digest-pinned.** `cardinal-defaults.yaml` now pins
+  `cardinalhq-otel-collector:v1.8.0@sha256:9906…` (multi-arch index digest),
+  which flows into the template default and `satellite-images.txt`. No resource
+  replacement.
+
 ## v0.0.125
 
 - **Air-gapped image mirroring for the satellite collector.** A generated
