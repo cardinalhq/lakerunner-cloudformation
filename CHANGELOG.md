@@ -11,6 +11,26 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v0.0.128
+
+- **Execution roles can take customer-supplied extra permissions.** The
+  execution role in `lakerunner-infra-base` and the collector execution role in
+  `satellite-services` gain an `ExecutionRoleExtraPolicyArns` parameter (CSV of
+  managed-policy ARNs) appended to `ManagedPolicyArns` alongside
+  `AmazonECSTaskExecutionRolePolicy`. Use this for air-gapped ECR pull-through
+  first-pull (`ecr:BatchImportUpstreamImage` + repo auto-create), cross-account
+  ECR, or KMS-encrypted repos (standard private-ECR pulls are already covered by
+  the base policy).
+- **Two driver inputs feed it** on `deploy-lakerunner-infra-base.sh` and
+  `deploy-satellite-services.sh`: `EXECUTION_ROLE_POLICY_ARNS` (ready-made
+  managed-policy ARNs) and `EXECUTION_ROLE_POLICY_JSON` / `_FILE` (a pasted IAM
+  policy the driver flattens and turns into a customer-managed policy named
+  `<STACK_NAME>-exec-extra`, then attaches by ARN — CFN can't inline a string
+  policy without Lambda). The JSON path needs `jq` and IAM write permissions for
+  the deployer. See `docs/air-gapped-images.md`.
+- **Upgrade action:** none — both inputs are optional and default to today's
+  behavior (base policy only). No resource replacement.
+
 ## v0.0.127
 
 - **The locked-image + registry-prefix model now covers all stacks.** Following

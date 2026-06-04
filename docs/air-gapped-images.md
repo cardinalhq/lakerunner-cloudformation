@@ -73,7 +73,46 @@ First-pull IAM note: on the first pull of a not-yet-cached image, the ECS task
 **execution role** needs `ecr:BatchImportUpstreamImage` plus repository
 auto-creation (`ecr:CreateRepository` on the principal, or a registry
 repository-creation template) in addition to the usual pull permissions. Once
-cached, standard pull permissions suffice.
+cached, standard pull permissions suffice. The base
+`AmazonECSTaskExecutionRolePolicy` already grants standard private-ECR pulls, so
+you only need extras for pull-through import, cross-account ECR, or KMS-encrypted
+repos — see "Granting the execution role extra permissions" below.
+
+## Granting the execution role extra permissions
+
+The execution role created by `lakerunner-infra-base` (the app stack) and by
+`satellite-services` (the collector) carries `AmazonECSTaskExecutionRolePolicy`,
+which already covers standard private-ECR pulls. For the cases that aren't
+covered (pull-through-cache first pull, cross-account ECR, KMS decrypt), attach
+additional permissions via the deploy driver — two ways, on
+`deploy-lakerunner-infra-base.sh` and `deploy-satellite-services.sh`:
+
+1. **Ready-made managed policies (the "proper ops" path):** set
+   `EXECUTION_ROLE_POLICY_ARNS` to a comma-separated list of managed-policy ARNs.
+   The stack appends them to the execution role's `ManagedPolicyArns`.
+
+2. **A pasted JSON policy (for getting started):** set
+   `EXECUTION_ROLE_POLICY_JSON` to an IAM policy document (multi-line is fine),
+   or `EXECUTION_ROLE_POLICY_JSON_FILE` to a path. CloudFormation cannot attach a
+   string policy without Lambda (which this product does not use), so the driver
+   flattens the JSON, creates/updates a customer-managed policy named
+   `<STACK_NAME>-exec-extra`, and attaches its ARN. This needs `jq` and IAM
+   permissions for the deployer (`iam:CreatePolicy`, `iam:CreatePolicyVersion`,
+   `iam:GetPolicy`, `iam:ListPolicyVersions`, `iam:DeletePolicyVersion`).
+
+Both inputs may be combined; both are optional. Example (pull-through import):
+
+```sh
+EXECUTION_ROLE_POLICY_JSON='{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": ["ecr:BatchImportUpstreamImage", "ecr:CreateRepository"],
+    "Resource": "*"
+  }]
+}' \
+  STACK_NAME=... REGION=... ./scripts/deploy-lakerunner-infra-base.sh
+```
 
 ## Deploying from the mirror
 

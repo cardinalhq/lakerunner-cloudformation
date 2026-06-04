@@ -296,13 +296,35 @@ def build() -> Template:
     # ------------------------------------------------------------------
     # IAM: execution role
     # ------------------------------------------------------------------
+    # Optional customer-supplied managed policies appended to the execution role
+    # (e.g. ECR pull-through-cache import, cross-account ECR, KMS decrypt). The
+    # deploy driver can build one from a pasted JSON policy, or the operator can
+    # pass ready-made managed-policy ARNs directly (CSV) as they grow into ops.
+    t.add_parameter(Parameter(
+        "ExecutionRoleExtraPolicyArns",
+        Type="String",
+        Default="",
+        Description=(
+            "Optional comma-separated managed-policy ARNs to attach to the ECS "
+            "task execution role, in addition to AmazonECSTaskExecutionRolePolicy."
+        ),
+    ))
+    t.add_condition(
+        "HasExecutionRoleExtraPolicies",
+        Not(Equals(Ref("ExecutionRoleExtraPolicyArns"), "")),
+    )
     exec_role = t.add_resource(
         Role(
             "CollectorExecutionRole",
             AssumeRolePolicyDocument=_ecs_tasks_trust(),
-            ManagedPolicyArns=[
-                "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy",
-            ],
+            ManagedPolicyArns=If(
+                "HasExecutionRoleExtraPolicies",
+                Split(",", Sub(
+                    "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy,"
+                    "${ExecutionRoleExtraPolicyArns}"
+                )),
+                ["arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"],
+            ),
             Policies=[
                 Policy(
                     PolicyName="cardinal-collector-exec-extras",

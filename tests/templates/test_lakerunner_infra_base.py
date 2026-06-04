@@ -248,8 +248,19 @@ def test_process_role_s3_readwrite_targets_cooked_bucket(td):
 
 
 def test_exec_role_has_managed_execution_policy(td):
+    # ManagedPolicyArns is an Fn::If: base-only when no extras are supplied,
+    # base + the operator CSV (split) when ExecutionRoleExtraPolicyArns is set.
     arns = td["Resources"]["ExecutionRole"]["Properties"]["ManagedPolicyArns"]
-    assert any("AmazonECSTaskExecutionRolePolicy" in a for a in arns)
+    blob = json.dumps(arns)
+    assert "AmazonECSTaskExecutionRolePolicy" in blob
+    assert "ExecutionRoleExtraPolicyArns" in blob
+
+
+def test_exec_role_extra_policy_param_and_condition(td):
+    p = td["Parameters"]["ExecutionRoleExtraPolicyArns"]
+    assert p["Type"] == "String"
+    assert p["Default"] == ""
+    assert "HasExecutionRoleExtraPolicies" in td["Conditions"]
 
 
 # ---------------------------------------------------------------------------
