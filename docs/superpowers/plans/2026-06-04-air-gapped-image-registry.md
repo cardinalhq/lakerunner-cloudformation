@@ -96,10 +96,22 @@ image and an optional baked `STACK_VERSION`.
 - [x] **Verify**: `make build` (digest-pinned manifest, cfn-lint clean),
   `make test` (487 passed, 1 skipped), behavioral front-half check.
 
-## Phase 2 (later PR, not built here)
+## v0.0.127 — Phase 2 (all remaining stacks) — DONE
 
-Extend the locked-suffix + `IMAGE_REGISTRY` baking + manifest to the main
-lakerunner stack (`lakerunner`, `maestro`, `dex`), handle the two utility images
-(`busybox`/`dex_init`, `initcontainer-grafana`/`db_init` — the psql step can't
-be dropped without a binary change), and extend the manifest/doc to all six
-images.
+- [x] **Pin digests** for lakerunner/maestro/dex in `cardinal-defaults.yaml`
+  (multi-arch index digests; otel already pinned in v0.0.126).
+- [x] **`scripts-src/build.sh`**: bake `@@LAKERUNNER_IMAGE_SUFFIX@@`,
+  `@@MAESTRO_IMAGE_SUFFIX@@`, `@@DEX_IMAGE_SUFFIX@@` (via `image_manifest suffix
+  <key>`) in addition to otel + `@@STACK_VERSION@@`.
+- [x] **`deploy-lakerunner-services.sh`**: `IMAGE_REGISTRY` composes literal
+  LakerunnerImage/MaestroImage/DexImage from baked suffixes; dropped the
+  per-image full-URI overrides and the dead `OTEL_IMAGE`; kept `DEX_INIT_IMAGE`
+  / `DB_INIT_IMAGE` as external overrides; `VERSION` -> optional `STACK_VERSION`.
+- [x] **`STACK_VERSION`** rolled to `infra-base`, `infra-rds`,
+  `satellite-infra-base` (version change only; no images).
+- [x] **`image_manifest`**: `lakerunner` stack key (5 images) + `build.sh` emits
+  `lakerunner-images.txt`; test added.
+- [x] **Docs/changelog**: `docs/air-gapped-images.md` covers both stacks + the
+  external-image split + ECR pull-through; `CHANGELOG.md` `v0.0.127`.
+- [x] **Verify**: `make build` (pinned manifests, cfn-lint clean), `make test`
+  (487 passed, 1 skipped; drift + shellcheck), behavioral checks on both drivers.

@@ -7,12 +7,16 @@ This design evolved across two releases:
 
 - **v0.0.125** introduced a generated image manifest and a full-URI `OTEL_IMAGE`
   passthrough on the deploy driver (template stays a literal `OtelImage` param).
-- **v0.0.126** (current) locked the image identity into the driver: the
+- **v0.0.126** locked the image identity into the satellite driver: the
   collector repo path + pinned tag/digest are baked at publish time, and the
   operator supplies only `IMAGE_REGISTRY` (a registry/pull-through prefix). The
   driver also made the stack version optional (`STACK_VERSION`, baked default).
+- **v0.0.127** (current) rolled the same model across all stacks: the lakerunner
+  application driver bakes lakerunner/maestro/dex (digest-pinned) behind
+  `IMAGE_REGISTRY`; the external busybox/db-init images keep full-URI overrides;
+  and `STACK_VERSION` is now optional on every deploy driver.
 
-The sections below describe the v0.0.126 end state.
+The sections below describe the v0.0.127 end state.
 
 ## Problem
 
@@ -25,11 +29,14 @@ version selection live.
 
 ## Scope
 
-- **Phase 1 (done): satellite.** `satellite_services.py` runs one image (the
-  otel collector); `satellite_infra_base.py` runs none. The driver
+- **Phase 1 (done, v0.0.125–126): satellite.** `satellite_services.py` runs one
+  image (the otel collector); `satellite_infra_base.py` runs none. The driver
   `deploy-satellite-services.sh` owns selection.
-- **Phase 2 (later PR): the main lakerunner stack** (lakerunner/maestro/dex +
-  the busybox/grafana utility images). Notes preserved at the end.
+- **Phase 2 (done, v0.0.127): all remaining stacks.** The lakerunner application
+  driver bakes lakerunner/maestro/dex behind `IMAGE_REGISTRY`; the
+  busybox/grafana utility images stay as full-URI overrides; and `STACK_VERSION`
+  is optional on every deploy driver (the infra drivers run no images, so they
+  get only the version change).
 
 ## Decisions
 
@@ -109,13 +116,25 @@ pull-through example (with the first-pull IAM note), and `IMAGE_REGISTRY` /
   arguments, so the engine's internal hooks can't be reached through it —
   matching the repo's lint-the-front-half approach.
 
-## Phase 2 notes (not built in this PR)
+## Phase 2 implementation (v0.0.127)
 
-Extend the locked-suffix + `IMAGE_REGISTRY` baking and the manifest to the main
-lakerunner stack's first-party images (`lakerunner`, `maestro`, `dex`). Utility
-images: `dex_init` (busybox, a shell to render the dex config) and `db_init`
-(`initcontainer-grafana`, a psql client for two `CREATE DATABASE` calls + a
-keepalive sleeper). The lakerunner `migrate` command connects to an existing
-database and does not create it, so the psql step can't be dropped without a
-binary change. `db_init` is left as-is for now (`:latest` + the grafana
-misnomer/registry mismatch are known and will be revisited).
+- `cardinal-defaults.yaml` pins lakerunner/maestro/dex to their multi-arch index
+  digests (alongside otel). `scripts-src/build.sh` bakes the registry-relative
+  suffix for each first-party image (`image_manifest suffix <key>`) and
+  `@@STACK_VERSION@@` into every driver.
+- `deploy-lakerunner-services.sh` composes `${IMAGE_REGISTRY}/<suffix>` for
+  lakerunner/maestro/dex (always passed as literal params) and drops the old
+  per-image full-URI overrides + the dead `OTEL_IMAGE` passthrough (the
+  lakerunner root has no `OtelImage` param).
+- The external/utility images stay as full-URI overrides: `DEX_INIT_IMAGE`
+  (busybox, a shell to render the dex config) and `DB_INIT_IMAGE`
+  (`initcontainer-grafana`, a psql client for two `CREATE DATABASE` calls + a
+  keepalive sleeper). They are not on our public ECR and are not driven by
+  `IMAGE_REGISTRY`. The lakerunner `migrate` command connects to an existing
+  database and does not create it, so the psql step can't be dropped without a
+  binary change; `db_init` stays `:latest` (the grafana misnomer/registry
+  mismatch are known and out of scope).
+- The infra drivers (`infra-base`, `infra-rds`, `satellite-infra-base`) run no
+  images, so they receive only the `STACK_VERSION` change.
+- `image_manifest` gains a `lakerunner` stack key (all five images) and
+  `build.sh` emits `lakerunner-images.txt`.

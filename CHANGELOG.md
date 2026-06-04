@@ -11,6 +11,30 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v0.0.127
+
+- **The locked-image + registry-prefix model now covers all stacks.** Following
+  the satellite work in v0.0.126, `deploy-lakerunner-services.sh` no longer takes
+  per-image `LAKERUNNER_IMAGE` / `MAESTRO_IMAGE` / `DEX_IMAGE` / `OTEL_IMAGE`
+  overrides. The lakerunner, maestro, and dex images (our public ECR) are now
+  baked (repo path + pinned digest) into the driver; set `IMAGE_REGISTRY` to
+  your registry/pull-through-cache root to redirect all three with one knob
+  (default `public.ecr.aws`). **Upgrade action:** anyone setting those per-image
+  vars switches to `IMAGE_REGISTRY`.
+- **External/utility images stay as explicit overrides.** busybox (dex-init) and
+  the ghcr `initcontainer-grafana` (db-init) are not on our public ECR and are
+  not governed by `IMAGE_REGISTRY`; mirror them via `DEX_INIT_IMAGE` /
+  `DB_INIT_IMAGE` as before.
+- **`VERSION` is now optional (`STACK_VERSION`) on every deploy driver**
+  (`infra-base`, `infra-rds`, `services`, `satellite-infra-base`,
+  `satellite-services`). Each published driver defaults to the version baked
+  into it at publish time, so it deploys its own matching templates. `VERSION`
+  remains a legacy alias. **Upgrade action:** none required.
+- **lakerunner, maestro, dex are digest-pinned** in `cardinal-defaults.yaml`
+  (multi-arch index digests), flowing into the template defaults. A new
+  `lakerunner-images.txt` (in `generated-templates/`) lists the full
+  mirror/scan surface for the application stack. No resource replacement.
+
 ## v0.0.126
 
 - **Satellite collector image is now locked in the deploy driver; operators

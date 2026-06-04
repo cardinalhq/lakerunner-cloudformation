@@ -17,6 +17,8 @@ set -eu
 
 DEFAULT_TEMPLATE_BASE_URL="https://cardinal-cfn-us-east-1.s3.us-east-1.amazonaws.com/lakerunner"
 TEMPLATE_KEY="cardinal-lakerunner-infra-base.yaml"
+# Baked at publish time (scripts-src/build.sh).  STACK_VERSION defaults to this.
+DEFAULT_STACK_VERSION="@@STACK_VERSION@@"
 
 usage() {
     cat <<EOF
@@ -27,13 +29,15 @@ All inputs come from environment variables (no flags).
 Required:
   STACK_NAME           Stack to create/update.
   REGION               AWS region (never defaulted; must be set explicitly).
-  VERSION              Published template tag, e.g. v0.0.70.
   VPC_ID               VPC for the security groups.
   CLUSTER_ARN          Customer-supplied ECS cluster ARN.
   LICENSE_DATA         Cardinal license token (z64:...), seeds the license
                        secret. Or supply LICENSE_DATA_FILE instead.
 
 Optional (template defaults preserved when unset):
+  STACK_VERSION                Published template version to deploy. Default: the
+                               version baked into this driver ($DEFAULT_STACK_VERSION).
+                               (VERSION is accepted as a legacy alias.)
   LICENSE_DATA_FILE            Path to a file holding the license token
                                (fallback for LICENSE_DATA).
   ALB_SCHEME                   internet-facing | internal (template default: internal).
@@ -62,7 +66,6 @@ esac
 missing=""
 [ -z "${STACK_NAME:-}" ] && missing="$missing STACK_NAME"
 [ -z "${REGION:-}" ] && missing="$missing REGION"
-[ -z "${VERSION:-}" ] && missing="$missing VERSION"
 [ -z "${VPC_ID:-}" ] && missing="$missing VPC_ID"
 [ -z "${CLUSTER_ARN:-}" ] && missing="$missing CLUSTER_ARN"
 { [ -z "${LICENSE_DATA:-}" ] && [ -z "${LICENSE_DATA_FILE:-}" ]; } && missing="$missing LICENSE_DATA"
@@ -84,9 +87,11 @@ else
 fi
 
 template_base_url="${TEMPLATE_BASE_URL:-$DEFAULT_TEMPLATE_BASE_URL}"
+# STACK_VERSION (preferred) or the legacy VERSION alias, else the baked default.
+stack_version="${STACK_VERSION:-${VERSION:-$DEFAULT_STACK_VERSION}}"
 
 # --- Compose the deploy-stack.sh environment. --------------------------------
-TEMPLATE_URL="$template_base_url/$VERSION/$TEMPLATE_KEY"
+TEMPLATE_URL="$template_base_url/$stack_version/$TEMPLATE_KEY"
 
 # Build PARAMS (newline-separated Key=Value).  Required values always present;
 # optional ones added only when set so the template default applies otherwise.

@@ -50,6 +50,9 @@ python3 -m cardinal_cfn.lakerunner_infra_base > generated-templates/cardinal-lak
 echo "Generating cardinal-lakerunner-services.yaml (param-driven root)..."
 python3 -m cardinal_cfn.lakerunner_services > generated-templates/cardinal-lakerunner-services.yaml
 
+echo "Generating lakerunner-images.txt..."
+python3 -m cardinal_cfn.image_manifest manifest lakerunner > generated-templates/lakerunner-images.txt
+
 for child in alb cert migration \
              services_query services_process services_control maestro; do
   out_name=$(echo "$child" | tr '_' '-')

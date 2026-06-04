@@ -31,8 +31,18 @@ base="$parts_dir/base.sh"
 stack_version="${CARDINAL_VERSION:-dev}"
 py="python3"
 [ -x "$repo_root/.venv/bin/python3" ] && py="$repo_root/.venv/bin/python3"
-otel_image_suffix=$(PYTHONPATH="$repo_root/src" "$py" -m cardinal_cfn.image_manifest suffix otel)
-[ -n "$otel_image_suffix" ] || { echo "build.sh: failed to resolve otel image suffix" >&2; exit 1; }
+# Registry-relative suffixes for the first-party public-ECR images that respect
+# the IMAGE_REGISTRY prefix.  External images (busybox, the ghcr db-init) are
+# not baked here -- the drivers keep full-URI overrides for those.
+image_suffix() {
+    s=$(PYTHONPATH="$repo_root/src" "$py" -m cardinal_cfn.image_manifest suffix "$1")
+    [ -n "$s" ] || { echo "build.sh: failed to resolve $1 image suffix" >&2; exit 1; }
+    printf '%s' "$s"
+}
+otel_image_suffix=$(image_suffix otel)
+lakerunner_image_suffix=$(image_suffix lakerunner)
+maestro_image_suffix=$(image_suffix maestro)
+dex_image_suffix=$(image_suffix dex)
 
 for fragment in "$parts_dir"/*.sh; do
     name=$(basename "$fragment")
@@ -47,6 +57,9 @@ for fragment in "$parts_dir"/*.sh; do
     } | sed \
         -e "s|@@STACK_VERSION@@|$stack_version|g" \
         -e "s|@@OTEL_IMAGE_SUFFIX@@|$otel_image_suffix|g" \
+        -e "s|@@LAKERUNNER_IMAGE_SUFFIX@@|$lakerunner_image_suffix|g" \
+        -e "s|@@MAESTRO_IMAGE_SUFFIX@@|$maestro_image_suffix|g" \
+        -e "s|@@DEX_IMAGE_SUFFIX@@|$dex_image_suffix|g" \
         >"$out"
     chmod +x "$out"
     echo "wrote $out"
