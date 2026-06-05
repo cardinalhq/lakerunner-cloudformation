@@ -335,26 +335,41 @@ CertificatePrivateKey=$cert_key_path"
 CertificateChain=$cert_chain_path"
         fi
     else
-        # No ARN, no PEM.  Generate only on first create (stack absent).
-        if aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$REGION" >/dev/null 2>&1; then
-            echo "[deploy-lakerunner-services] stack exists; keeping the existing self-signed cert (no regeneration)" >&2
-        else
-            if ! command -v openssl >/dev/null 2>&1; then
-                echo "[deploy-lakerunner-services] ERROR: openssl is required to auto-generate a self-signed cert; install openssl or set CERTIFICATE_ARN / CERTIFICATE_BODY+CERTIFICATE_PRIVATE_KEY (or their *_FILE variants)" >&2
-                exit 2
-            fi
-            echo "[deploy-lakerunner-services] no CERTIFICATE_ARN and first create; generating a self-signed internal cert" >&2
-            cert_dir=$(mktemp -d)
-            if ! openssl req -x509 -newkey rsa:2048 -nodes \
-                    -keyout "$cert_dir/key.pem" -out "$cert_dir/cert.pem" \
-                    -days 825 -subj "/CN=cardinal.test" \
-                    -addext "subjectAltName=DNS:cardinal.test,DNS:*.cardinal.internal" 2>/dev/null; then
-                echo "[deploy-lakerunner-services] ERROR: openssl failed to generate the self-signed cert" >&2
-                exit 1
-            fi
-            file_params="CertificateBody=$cert_dir/cert.pem
+        # No ARN, no PEM.  Generate a self-signed cert whenever the engine will
+        # do a fresh CREATE: when the stack is absent, or when it is in a state
+        # the engine deletes and recreates (REVIEW_IN_PROGRESS / ROLLBACK_COMPLETE
+        # -- kept in sync with the recreate states in base.sh).  On an in-place
+        # UPDATE the existing cert is left untouched (the engine resolves it to
+        # UsePreviousValue) so the ALB HTTPS listener does not churn.
+        #
+        # A bare "does the stack exist?" check is wrong here: it skips generation
+        # for a ROLLBACK_COMPLETE stack that the engine then recreates, leaving
+        # CertificateArn empty and failing the listener with
+        # "Certificate ARN '' is not valid".
+        cert_stack_status=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$REGION" \
+            --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo "")
+        case "$cert_stack_status" in
+            ""|REVIEW_IN_PROGRESS|ROLLBACK_COMPLETE)
+                if ! command -v openssl >/dev/null 2>&1; then
+                    echo "[deploy-lakerunner-services] ERROR: openssl is required to auto-generate a self-signed cert; install openssl or set CERTIFICATE_ARN / CERTIFICATE_BODY+CERTIFICATE_PRIVATE_KEY (or their *_FILE variants)" >&2
+                    exit 2
+                fi
+                echo "[deploy-lakerunner-services] no CERTIFICATE_ARN and stack will be created (${cert_stack_status:-absent}); generating a self-signed internal cert" >&2
+                cert_dir=$(mktemp -d)
+                if ! openssl req -x509 -newkey rsa:2048 -nodes \
+                        -keyout "$cert_dir/key.pem" -out "$cert_dir/cert.pem" \
+                        -days 825 -subj "/CN=cardinal.test" \
+                        -addext "subjectAltName=DNS:cardinal.test,DNS:*.cardinal.internal" 2>/dev/null; then
+                    echo "[deploy-lakerunner-services] ERROR: openssl failed to generate the self-signed cert" >&2
+                    exit 1
+                fi
+                file_params="CertificateBody=$cert_dir/cert.pem
 CertificatePrivateKey=$cert_dir/key.pem"
-        fi
+                ;;
+            *)
+                echo "[deploy-lakerunner-services] stack is $cert_stack_status (in-place update); keeping the existing self-signed cert (no regeneration)" >&2
+                ;;
+        esac
     fi
 fi
 
