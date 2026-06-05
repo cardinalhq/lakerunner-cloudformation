@@ -36,7 +36,7 @@ images:
   lakerunner: "public.ecr.aws/cardinalhq.io/lakerunner:v1.40.4@sha256:532abeafcd7fb3ad7be49704239f6147a9a6ac19ed5a71976005542d72066b89"
   maestro:    "public.ecr.aws/cardinalhq.io/maestro:v1.50.0@sha256:642e93afbbf846535923fc4ad59ea790fd0aff85cc6889355e866ab883da5001"
   otel:       "public.ecr.aws/cardinalhq.io/cardinalhq-otel-collector:v1.8.0@sha256:9906eea2b38f1614047ada60ce7887704652484bb5b01a7f8a1d932277e1f151"
-  dex:        "public.ecr.aws/cardinalhq.io/dex-customization:v0.1.0@sha256:a1d0af5a99068516df067af803312c03b62b1bd07eefb16e914bd1d55deacf9c"
+  dex:        "public.ecr.aws/cardinalhq.io/dex-customization:v0.2.0@sha256:4a3aed43c7c800a19d840c2cf5a483d614c11aea6dcbff6661df9cf28aa4c707"
   dex_init:   "public.ecr.aws/docker/library/busybox:1.37"
   db_init:    "ghcr.io/cardinalhq/initcontainer-grafana:latest"
 

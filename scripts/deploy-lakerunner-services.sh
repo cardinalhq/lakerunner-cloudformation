@@ -31,7 +31,7 @@ DEFAULT_IMAGE_REGISTRY="public.ecr.aws"
 # external images (busybox, the ghcr db-init) keep their own full-URI overrides.
 LAKERUNNER_IMAGE_SUFFIX="cardinalhq.io/lakerunner:v1.40.4@sha256:532abeafcd7fb3ad7be49704239f6147a9a6ac19ed5a71976005542d72066b89"
 MAESTRO_IMAGE_SUFFIX="cardinalhq.io/maestro:v1.50.0@sha256:642e93afbbf846535923fc4ad59ea790fd0aff85cc6889355e866ab883da5001"
-DEX_IMAGE_SUFFIX="cardinalhq.io/dex-customization:v0.1.0@sha256:a1d0af5a99068516df067af803312c03b62b1bd07eefb16e914bd1d55deacf9c"
+DEX_IMAGE_SUFFIX="cardinalhq.io/dex-customization:v0.2.0@sha256:4a3aed43c7c800a19d840c2cf5a483d614c11aea6dcbff6661df9cf28aa4c707"
 
 usage() {
     cat <<EOF
