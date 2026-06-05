@@ -68,6 +68,33 @@ exporters:
       compression: gzip
     marshaler: otlp_proto
 
+connectors:
+  # Span-derived service-graph metrics (traces_service_graph_request_total,
+  # _request_failed_total, latency histograms, ...). The Maestro trace /
+  # service-map view queries these metrics; without this connector spans are
+  # still written to S3 but the service graph is empty (numSegments=0). The
+  # connector consumes traces and emits metrics into the metrics write path.
+  # Single-collector deployment, so no traceID load-balancing is needed;
+  # scaling the collector past one replica would require span-pair affinity
+  # (traceID-balanced fan-in) for complete graphs.
+  #
+  # NOTE: the cardinalhq-otel-collector build registers this connector as
+  # `service_graph` (underscore), not the upstream `servicegraph` id.
+  service_graph:
+    metrics_flush_interval: 10s
+    store:
+      ttl: 10s
+    virtual_node_peer_attributes:
+      - peer.service
+      - server.address
+      - http.url
+      - url.full
+      - net.peer.name
+      - rpc.service
+      - db.system
+      - db.name
+      - db.instance.id
+
 extensions:
   health_check:
     endpoint: 0.0.0.0:13133
@@ -84,7 +111,14 @@ service:
       receivers: [otlp]
       processors: [memory_limiter, cumulativetodelta, batch]
       exporters: [awss3/metrics]
+    # Span-derived service-graph metrics: the servicegraph connector receives
+    # traces (fanned out below) and emits metrics through the same S3 metrics
+    # write path, so they ingest as ordinary metrics and the trace view renders.
+    metrics/servicegraph:
+      receivers: [service_graph]
+      processors: [memory_limiter, cumulativetodelta, batch]
+      exporters: [awss3/metrics]
     traces:
       receivers: [otlp]
       processors: [memory_limiter, batch]
-      exporters: [awss3/traces]
+      exporters: [awss3/traces, service_graph]
