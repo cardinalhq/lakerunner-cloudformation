@@ -39,7 +39,7 @@ from troposphere import (
     Tags,
     Template,
 )
-from troposphere.ec2 import SecurityGroup, SecurityGroupRule
+from troposphere.ec2 import SecurityGroup, SecurityGroupIngress, SecurityGroupRule
 from troposphere.ecs import (
     AwsvpcConfiguration,
     CapacityProviderStrategyItem,
@@ -412,6 +412,30 @@ def build() -> Template:
             # RevokeSecurityGroupEgress the default first, an action some
             # customer SCPs explicitly deny (VPC-destructive guard).
             Tags=_tags(component="satellite-alb-sg"),
+        )
+    )
+
+    # When AlbScheme=internet-facing the collector ALB lives in public subnets,
+    # so its intended senders -- including the lakerunner tier's own
+    # self-telemetry -- reach it from outside the VPC. In-VPC senders egress via
+    # the VPC's NAT gateway and so arrive with a *public* source IP that the
+    # RFC1918 IngestSourceCidr default does not cover, which silently blackholes
+    # OTLP and leaves the pipeline empty. Layer a 0.0.0.0/0 ingress on the OTLP
+    # port when internet-facing, matching the app ALB in lakerunner-infra-base.
+    # Internal ALBs are unaffected: their only ingress remains IngestSourceCidr.
+    t.add_condition(
+        "AlbIsInternetFacing", Equals(Ref("AlbScheme"), "internet-facing")
+    )
+    t.add_resource(
+        SecurityGroupIngress(
+            "AlbIngressInternetFacing",
+            Condition="AlbIsInternetFacing",
+            GroupId=Ref(alb_sg),
+            IpProtocol="tcp",
+            FromPort=_OTLP_HTTP_PORT,
+            ToPort=_OTLP_HTTP_PORT,
+            CidrIp="0.0.0.0/0",
+            Description="OTLP/HTTP from 0.0.0.0/0 (internet-facing)",
         )
     )
 
