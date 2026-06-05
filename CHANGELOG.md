@@ -11,6 +11,29 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v0.0.129
+
+- **Maestro UI now boots (dex theme fix).** The bundled DEX image moves to
+  `dex-customization:v0.2.0`, which embeds the Cardinal login theme in the
+  binary; the dex-init config drops the now-removed `frontend.dir:
+  /srv/dex-cardinal/web` (a stale `frontend.dir` makes v0.2.0 fail to boot:
+  `failed to load web static: open robots.txt: no such file or directory`).
+  This is what made the Maestro service trip its deployment circuit breaker on
+  fresh installs. **Upgrade action:** redeploy `lakerunner-services`; the dex
+  container is replaced (new image + new config). No parameter changes.
+- **`lakerunner-services` driver auto-generates its self-signed cert on a
+  rolled-back recreate, not just when the stack is absent.** When no
+  `CERTIFICATE_ARN`/PEM is supplied, the driver decides whether to generate a
+  cert by stack status, mirroring the engine's recreate states: it generates
+  when the stack is absent, `REVIEW_IN_PROGRESS`, or `ROLLBACK_COMPLETE` (all of
+  which the engine creates fresh), and keeps the existing cert on a true
+  in-place update (no ALB listener churn). Previously a bare existence check
+  skipped generation for a `ROLLBACK_COMPLETE` stack the engine then recreated,
+  leaving `CertificateArn` empty and failing the ALB HTTPS listeners with
+  `Certificate ARN '' is not valid` — wedging any re-run after a failed first
+  deploy. **Upgrade action:** none — driver-only behavior; no template or
+  parameter changes.
+
 ## v0.0.128
 
 - **Execution roles can take customer-supplied extra permissions.** The
