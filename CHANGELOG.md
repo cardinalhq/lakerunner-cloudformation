@@ -11,6 +11,25 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v0.0.130
+
+- **Internet-facing collector ALB is now actually reachable (ingest pipeline
+  fix).** When `satellite-services` is deployed with `AlbScheme=internet-facing`,
+  the collector ALB security group now adds a `0.0.0.0/0` ingress on the OTLP
+  port (4318), mirroring the app ALB in `lakerunner-infra-base`. Previously the
+  collector ALB only ever allowed `IngestSourceCidr` (default `10.0.0.0/8`)
+  regardless of scheme, so an internet-facing collector sat in public subnets
+  but its SG rejected everything outside RFC1918. This silently broke ingest on
+  internet-facing installs: the lakerunner tier's self-telemetry (and any
+  in-VPC sender) egresses via the VPC NAT gateway and arrives with a public
+  source IP, so OTLP POSTs were dropped, nothing reached the raw bucket/queue,
+  and the UI stayed empty even though every ECS service was healthy. **Upgrade
+  action:** redeploy `satellite-services`; if it is internet-facing, the ALB SG
+  gains a `0.0.0.0/0` rule on 4318 (it now accepts unauthenticated OTLP from any
+  host — restrict at the network edge if that is a concern, or keep the ALB
+  internal). Internal ALBs are unchanged (`IngestSourceCidr` only). No resource
+  replacement.
+
 ## v0.0.129
 
 - **Maestro UI now boots (dex theme fix).** The bundled DEX image moves to
