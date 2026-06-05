@@ -597,8 +597,10 @@ def build() -> Template:
         "  type: memory\n"
         "web:\n"
         "  http: 0.0.0.0:${DEX_PORT}\n"
+        # The Cardinal theme is embedded in the dex binary as of
+        # dex-customization v0.2.0 — no frontend.dir needed. (issuer names the
+        # login page; it is unrelated to asset loading.)
         "frontend:\n"
-        "  dir: /srv/dex-cardinal/web\n"
         "  issuer: Cardinal\n"
         "oauth2:\n"
         "  skipApprovalScreen: true\n"
