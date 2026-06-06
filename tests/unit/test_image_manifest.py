@@ -20,7 +20,7 @@ def test_unknown_stack_raises():
 def test_lakerunner_manifest_lists_all_stack_images():
     images = load_defaults()["images"]
     expected = sorted(
-        {images[k] for k in ("lakerunner", "maestro", "dex", "dex_init", "db_init")}
+        {images[k] for k in ("lakerunner", "maestro", "dex", "db_init")}
     )
     assert image_manifest.manifest_lines("lakerunner") == expected
 

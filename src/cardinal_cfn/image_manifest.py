@@ -17,7 +17,7 @@ from cardinal_cfn.defaults import load_defaults
 # the drivers handle via per-image overrides (busybox, the ghcr db-init).
 STACK_IMAGE_KEYS = {
     "satellite": ["otel"],
-    "lakerunner": ["lakerunner", "maestro", "dex", "dex_init", "db_init"],
+    "lakerunner": ["lakerunner", "maestro", "dex", "db_init"],
 }
 
 

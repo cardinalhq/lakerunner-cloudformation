@@ -101,9 +101,6 @@ Optional (template defaults preserved when unset):
                               PUBLIC_SUBNETS, and the ALB SG internet ingress is
                               enabled on the infra-base stack (its ALB_SCHEME /
                               ALB_ALLOWED_CIDR* settings).
-  DEX_INIT_IMAGE              Full image URI override for the dex-init busybox
-                              (a non-public-ECR/utility image, not covered by
-                              IMAGE_REGISTRY). Default: the template default.
   DB_INIT_IMAGE               Full image URI override for the db-init image
                               (ghcr, not covered by IMAGE_REGISTRY). Default:
                               the template default.
@@ -245,8 +242,6 @@ MaestroImage=$maestro_image
 DexImage=$dex_image"
 # External/utility images: full-URI overrides, not driven by IMAGE_REGISTRY.
 # Unset -> the template default governs.
-[ -n "${DEX_INIT_IMAGE:-}" ] && params="$params
-DexInitImage=$DEX_INIT_IMAGE"
 [ -n "${DB_INIT_IMAGE:-}" ] && params="$params
 DbInitImage=$DB_INIT_IMAGE"
 

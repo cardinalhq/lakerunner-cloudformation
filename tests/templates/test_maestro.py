@@ -81,7 +81,7 @@ def test_task_definition_has_expected_containers(td):
     )
     containers = task_def["Properties"]["ContainerDefinitions"]
     names = {c["Name"] for c in containers}
-    assert names == {"db-init", "mcp-gateway", "wait-for-mcp", "maestro", "dex-init", "dex"}
+    assert names == {"db-init", "mcp-gateway", "wait-for-mcp", "maestro", "dex"}
 
 
 def test_db_init_is_not_essential(td):
@@ -116,13 +116,13 @@ def test_maestro_depends_on_db_init(td):
     assert {"ContainerName": "db-init", "Condition": "SUCCESS"} in deps
 
 
-def test_four_log_groups(td):
+def test_three_log_groups(td):
     log_groups = [r for r in td["Resources"].values() if r["Type"] == "AWS::Logs::LogGroup"]
-    assert len(log_groups) == 4
+    assert len(log_groups) == 3
     for lg in log_groups:
         assert lg["Properties"]["RetentionInDays"] == 14
     names = {json.dumps(lg["Properties"].get("LogGroupName")) for lg in log_groups}
-    assert len(names) == 4, "log groups must have distinct names"
+    assert len(names) == 3, "log groups must have distinct names"
 
 
 def test_no_internally_managed_iam_task_role(td):
@@ -313,16 +313,34 @@ def test_maestro_container_has_license_data(td):
     assert "LICENSE_DATA" in secret_names
 
 
-def test_dex_init_container_env_has_issuer_url(td):
-    dex_init_c = _container(td, "dex-init")
-    env_names = {e["Name"] for e in dex_init_c.get("Environment", [])}
-    assert "DEX_ISSUER_URL" in env_names
-
-
-def test_dex_depends_on_dex_init(td):
+def test_dex_container_env_has_oidc_inputs(td):
+    # dex v0.3.0 renders its own config from these env vars (no dex-init).
     dex_c = _container(td, "dex")
-    deps = dex_c.get("DependsOn", [])
-    assert {"ContainerName": "dex-init", "Condition": "SUCCESS"} in deps
+    env_names = {e["Name"] for e in dex_c.get("Environment", [])}
+    assert {
+        "DEX_ISSUER_URL",
+        "DEX_REDIRECT_URI",
+        "DEX_CLIENT_ID",
+        "DEX_PORT",
+        "DEX_ADMIN_EMAIL",
+        "DEX_ADMIN_HASH",
+    } <= env_names
+
+
+def test_dex_renders_config_in_image(td):
+    # No dex-init sidecar: nothing mounts /etc/dex (a mount shadows the baked
+    # template) and the dex container keeps the image's gomplate entrypoint/CMD.
+    dex_c = _container(td, "dex")
+    assert "Command" not in dex_c
+    mount_paths = {m["ContainerPath"] for m in dex_c.get("MountPoints", [])}
+    assert "/etc/dex" not in mount_paths
+
+
+def test_task_definition_has_no_volumes(td):
+    task_def = next(
+        r for r in td["Resources"].values() if r["Type"] == "AWS::ECS::TaskDefinition"
+    )
+    assert not task_def["Properties"].get("Volumes")
 
 
 # ---------------------------------------------------------------------------

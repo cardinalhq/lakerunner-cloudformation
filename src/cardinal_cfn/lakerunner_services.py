@@ -447,16 +447,11 @@ def build() -> Template:
         t, name="DbInitImage",
         default=defaults["images"]["db_init"],
         description="psql-capable bootstrapper container image (maestro db-init).")
-    dex_init_image = add_image_override(
-        t, name="DexInitImage",
-        default=defaults["images"]["dex_init"],
-        description="BusyBox-style image used to render the dex config.yaml.")
     image_param_names = [
         "LakerunnerImage",
         "MaestroImage",
         "DexImage",
         "DbInitImage",
-        "DexInitImage",
     ]
 
     # ---------------------------------------------------------------------
@@ -700,7 +695,6 @@ def build() -> Template:
         "MaestroImage": maestro_image,
         "DexImage": dex_image,
         "DbInitImage": db_init_image,
-        "DexInitImage": dex_init_image,
         "MaestroTaskCpu": Ref("MaestroTaskCpu"),
         "MaestroTaskMemory": Ref("MaestroTaskMemory"),
         "McpMigrateRecoverFromDirty": Ref("McpMigrateRecoverFromDirty"),
