@@ -70,8 +70,17 @@ def test_single_container(td):
     assert len(containers) == 1
     c = containers[0]
     assert c["Name"] == "cleanup"
-    assert c["Image"] == "public.ecr.aws/aws-cli/aws-cli:latest"
+    assert c["Image"] == {"Ref": "AwsCliImage"}
     assert c["Essential"] is True
+
+
+def test_aws_cli_image_param_defaults_to_pinned_default(td):
+    from cardinal_cfn.defaults import load_defaults
+
+    p = td["Parameters"]["AwsCliImage"]
+    assert p["Default"] == load_defaults()["images"]["aws_cli"]
+    # Pinned by digest, like the rest.
+    assert "@sha256:" in p["Default"]
 
 
 def test_script_in_entrypoint_not_command(td):

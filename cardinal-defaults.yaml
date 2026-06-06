@@ -38,6 +38,9 @@ images:
   otel:       "public.ecr.aws/cardinalhq.io/cardinalhq-otel-collector:v1.8.0@sha256:9906eea2b38f1614047ada60ce7887704652484bb5b01a7f8a1d932277e1f151"
   dex:        "public.ecr.aws/cardinalhq.io/dex-customization:v0.3.0@sha256:7d5504390f799577d31c3bde21c816e1c3674de30f31bf755e0633886b4bbf77"
   db_init:    "public.ecr.aws/docker/library/postgres:18-alpine@sha256:96d56f7f57c6aacd1fcb908bc83b345ec5f83231ee486dd66a1baadce274db88"
+  # aws-cli: used only by the cardinal-cleanup teardown task (sh + aws + jq);
+  # never part of a running install. Official AWS image on public ECR.
+  aws_cli:    "public.ecr.aws/aws-cli/aws-cli:2.34.63@sha256:c95ab0642137f55a12b95b6956dd03cefdbd73e760e0e7b870afc9b47f9c8150"
 
 # ---------------------------------------------------------------------------
 # Lakerunner microservices. Each entry's tier (query / process / control) is

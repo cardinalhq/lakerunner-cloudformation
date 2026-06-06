@@ -28,6 +28,8 @@ from troposphere.ecs import (
 from troposphere.logs import LogGroup
 
 from cardinal_cfn.cleanup_script import SCRIPT
+from cardinal_cfn.defaults import load_defaults
+from cardinal_cfn.images import add_image_override
 
 
 def build() -> Template:
@@ -98,6 +100,13 @@ def build() -> Template:
         ),
     ))
 
+    aws_cli_image = add_image_override(
+        t,
+        name="AwsCliImage",
+        default=load_defaults()["images"]["aws_cli"],
+        description="Image for the cleanup task (sh + aws CLI). Official AWS image.",
+    )
+
     log_group = t.add_resource(LogGroup(
         "CleanupLogGroup",
         LogGroupName=Sub("/aws/ecs/cardinal-cleanup/${AWS::StackName}"),
@@ -121,7 +130,7 @@ def build() -> Template:
         ExecutionRoleArn=Ref(p_exec_role),
         ContainerDefinitions=[ContainerDefinition(
             Name="cleanup",
-            Image="public.ecr.aws/aws-cli/aws-cli:latest",
+            Image=aws_cli_image,
             Essential=True,
             # Script is in EntryPoint so ecs:RunTask containerOverrides.command
             # cannot bypass it (containerOverrides has no entryPoint override).

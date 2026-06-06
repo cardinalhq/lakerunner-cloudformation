@@ -19,7 +19,8 @@
 
 set -eu
 
-DEFAULT_IMAGE="public.ecr.aws/aws-cli/aws-cli:latest"
+# Pinned to match cardinal-defaults.yaml images.aws_cli (digest-locked).
+DEFAULT_IMAGE="public.ecr.aws/aws-cli/aws-cli:2.34.63@sha256:c95ab0642137f55a12b95b6956dd03cefdbd73e760e0e7b870afc9b47f9c8150"
 DEFAULT_FAMILY="cardinal-sweep-stranded"
 
 # --- required ---
@@ -68,7 +69,8 @@ Optional:
   --execution-role-arn ARN     Fargate execution role (ECR pull + logs +
                                logs:CreateLogGroup). Default: same as
                                --task-role-arn.
-  --image URI                  Default: public.ecr.aws/aws-cli/aws-cli:latest.
+  --image URI                  Default: the digest-pinned aws-cli from
+                               cardinal-defaults.yaml (images.aws_cli).
   --family NAME                 Task-definition family. Default: cardinal-sweep-stranded.
   --retry-stack-delete         After a successful sweep, re-issue delete-stack
                                on --stack-name and wait for it to complete.
