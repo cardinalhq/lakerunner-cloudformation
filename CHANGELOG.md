@@ -11,6 +11,19 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v0.0.134
+
+- **Deploy driver now always sets `DbInitImage` from the baked, pinned default**
+  (like `LakerunnerImage`/`MaestroImage`/`DexImage`), composed from
+  `IMAGE_REGISTRY` + the locked `db_init` suffix. Previously `DbInitImage` was
+  only passed when `DB_INIT_IMAGE` was set, so on a stack **update** it carried
+  `UsePreviousValue` — meaning the v0.0.133 db-init image change (and any future
+  bump) did **not** take effect on a plain redeploy. **Upgrade action:** redeploy
+  `lakerunner-services` with the v0.0.134 driver; db-init moves to the pinned
+  `postgres:18-alpine` automatically (no `DB_INIT_IMAGE` needed). `DB_INIT_IMAGE`
+  remains a full-URI escape hatch. This stack is always on `public.ecr.aws`, so
+  db-init follows `IMAGE_REGISTRY` like the other images.
+
 ## v0.0.133
 
 - **db-init image: `ghcr.io/cardinalhq/initcontainer-grafana:latest` ->

@@ -26,11 +26,14 @@ TEMPLATE_KEY="cardinal-lakerunner-services.yaml"
 DEFAULT_STACK_VERSION="@@STACK_VERSION@@"
 DEFAULT_IMAGE_REGISTRY="public.ecr.aws"
 # Baked, locked registry-relative paths (repo + pinned tag/digest) for the
-# first-party public-ECR images.  Only the registry prefix is operator-supplied;
-# the external db-init image (official postgres) keeps its own full-URI override.
+# public-ECR images.  Only the registry prefix is operator-supplied.  db-init
+# (official postgres psql client) is baked too -- this stack is always on
+# public.ecr.aws -- so a redeploy always carries the pinned default;
+# DB_INIT_IMAGE remains a full-URI escape hatch.
 LAKERUNNER_IMAGE_SUFFIX="@@LAKERUNNER_IMAGE_SUFFIX@@"
 MAESTRO_IMAGE_SUFFIX="@@MAESTRO_IMAGE_SUFFIX@@"
 DEX_IMAGE_SUFFIX="@@DEX_IMAGE_SUFFIX@@"
+DB_INIT_IMAGE_SUFFIX="@@DB_INIT_IMAGE_SUFFIX@@"
 
 usage() {
     cat <<EOF
@@ -102,8 +105,9 @@ Optional (template defaults preserved when unset):
                               enabled on the infra-base stack (its ALB_SCHEME /
                               ALB_ALLOWED_CIDR* settings).
   DB_INIT_IMAGE               Full image URI override for the db-init image
-                              (official postgres psql client, not covered by
-                              IMAGE_REGISTRY). Default: the template default.
+                              (official postgres psql client). Bypasses
+                              IMAGE_REGISTRY. Default: the baked, pinned suffix
+                              under IMAGE_REGISTRY (always passed to the stack).
   PUBSUB_AUTOREGISTER         pubsub-sqs auto-registration of satellite buckets
                               (template default "true").  Set "false" to disable.
                               When true, unseen satellite raw-bucket orgs are
@@ -164,10 +168,14 @@ image_registry="${IMAGE_REGISTRY:-$DEFAULT_IMAGE_REGISTRY}"
 lakerunner_image="$image_registry/$LAKERUNNER_IMAGE_SUFFIX"
 maestro_image="$image_registry/$MAESTRO_IMAGE_SUFFIX"
 dex_image="$image_registry/$DEX_IMAGE_SUFFIX"
+# db-init: the baked default tracks the registry prefix like the others; a
+# full-URI DB_INIT_IMAGE wins when set (e.g. an unusual mirror layout).
+db_init_image="${DB_INIT_IMAGE:-$image_registry/$DB_INIT_IMAGE_SUFFIX}"
 echo "[deploy-lakerunner-services] resolved STACK_VERSION = $stack_version" >&2
 echo "[deploy-lakerunner-services] resolved LakerunnerImage = $lakerunner_image" >&2
 echo "[deploy-lakerunner-services] resolved MaestroImage    = $maestro_image" >&2
 echo "[deploy-lakerunner-services] resolved DexImage        = $dex_image" >&2
+echo "[deploy-lakerunner-services] resolved DbInitImage     = $db_init_image" >&2
 
 TEMPLATE_URL="$template_base_url/$stack_version/$TEMPLATE_KEY"
 
@@ -234,16 +242,14 @@ ServiceNamespaceName=$SERVICE_NAMESPACE_NAME"
 [ -n "$self_telemetry_endpoint" ] && params="$params
 SelfTelemetryEndpoint=$self_telemetry_endpoint"
 
-# First-party public-ECR images: composed from IMAGE_REGISTRY + the baked,
-# locked suffixes, always passed as literal params.
+# Public-ECR images: composed from IMAGE_REGISTRY + the baked, locked suffixes,
+# always passed as literal params so a redeploy carries the pinned defaults
+# (a stuck UsePreviousValue would never pick up a bumped default otherwise).
 params="$params
 LakerunnerImage=$lakerunner_image
 MaestroImage=$maestro_image
-DexImage=$dex_image"
-# External/utility images: full-URI overrides, not driven by IMAGE_REGISTRY.
-# Unset -> the template default governs.
-[ -n "${DB_INIT_IMAGE:-}" ] && params="$params
-DbInitImage=$DB_INIT_IMAGE"
+DexImage=$dex_image
+DbInitImage=$db_init_image"
 
 # --- Additional satellite queues (groups 1..10). -----------------------------
 # pubsub-sqs consumes extra satellite queues from numbered env groups.  For each
