@@ -11,7 +11,7 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
-## v0.0.131
+## v0.0.132
 
 - **Image bumps: maestro `v1.50.0` -> `v1.53.0`, dex-customization `v0.2.0` ->
   `v0.3.0`.** Redeploy `lakerunner-services` to pick them up. The maestro task
@@ -33,6 +33,13 @@ v0.0.114.
   can't write them. Rather than run dex as root or add an init container, the
   dex container leaves `ReadOnlyRootFilesystem` unset and uses the image's
   `1777` `/tmp` on the task's ephemeral storage. No upgrade action.
+
+## v0.0.131
+
+- **otel collector: added the `service_graph` connector** to
+  `cardinal-otel-config.yaml` (generates service-graph metrics from spans).
+  **Upgrade action:** redeploy `satellite-services` so the collector picks up
+  the new config. No parameter or resource changes.
 
 ## v0.0.130
 
