@@ -28,7 +28,7 @@ DEFAULT_STACK_VERSION="dev"
 DEFAULT_IMAGE_REGISTRY="public.ecr.aws"
 # Baked, locked registry-relative paths (repo + pinned tag/digest) for the
 # first-party public-ECR images.  Only the registry prefix is operator-supplied;
-# external images (busybox, the ghcr db-init) keep their own full-URI overrides.
+# the external db-init image (official postgres) keeps its own full-URI override.
 LAKERUNNER_IMAGE_SUFFIX="cardinalhq.io/lakerunner:v1.40.4@sha256:532abeafcd7fb3ad7be49704239f6147a9a6ac19ed5a71976005542d72066b89"
 MAESTRO_IMAGE_SUFFIX="cardinalhq.io/maestro:v1.53.0@sha256:9cd5267640aced6dbfa794f940bba356ae71b8404768ebcbbbdc27bef0d9b1d2"
 DEX_IMAGE_SUFFIX="cardinalhq.io/dex-customization:v0.3.0@sha256:7d5504390f799577d31c3bde21c816e1c3674de30f31bf755e0633886b4bbf77"
@@ -103,8 +103,8 @@ Optional (template defaults preserved when unset):
                               enabled on the infra-base stack (its ALB_SCHEME /
                               ALB_ALLOWED_CIDR* settings).
   DB_INIT_IMAGE               Full image URI override for the db-init image
-                              (ghcr, not covered by IMAGE_REGISTRY). Default:
-                              the template default.
+                              (official postgres psql client, not covered by
+                              IMAGE_REGISTRY). Default: the template default.
   PUBSUB_AUTOREGISTER         pubsub-sqs auto-registration of satellite buckets
                               (template default "true").  Set "false" to disable.
                               When true, unseen satellite raw-bucket orgs are
