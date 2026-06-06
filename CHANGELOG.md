@@ -11,6 +11,29 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v0.0.131
+
+- **Image bumps: maestro `v1.50.0` -> `v1.53.0`, dex-customization `v0.2.0` ->
+  `v0.3.0`.** Redeploy `lakerunner-services` to pick them up. The maestro task
+  redeploys (brief blip on the singleton maestro/dex service); no data-bearing
+  resource is replaced.
+- **`dex-init` sidecar removed; `DexInitImage` parameter removed.** dex
+  v0.3.0 renders its own `/etc/dex/config.yaml` at startup (gomplate over a
+  baked template, from the same `DexClientId` / `DexAdminEmail` /
+  `DexAdminPasswordHash` inputs as before), so the busybox `dex-init` init
+  container is gone. The maestro task drops from six containers to five, and
+  the `busybox` image is no longer pulled. **Upgrade action:** redeploy
+  `lakerunner-services`. If you set the `DexInitImage` stack parameter or the
+  `DEX_INIT_IMAGE` deploy-driver env var in a saved config, remove it — both
+  no longer exist. No change to the DEX admin login or OIDC behavior.
+- **dex container now runs with a writable root filesystem (was read-only),
+  still as nonroot.** dex v0.3.0's entrypoint writes the rendered config to
+  `/tmp`; on Fargate a read-only rootfs would require a writable `/tmp` volume,
+  but empty Fargate volumes mount `0755 root:root` and the nonroot dex user
+  can't write them. Rather than run dex as root or add an init container, the
+  dex container leaves `ReadOnlyRootFilesystem` unset and uses the image's
+  `1777` `/tmp` on the task's ephemeral storage. No upgrade action.
+
 ## v0.0.130
 
 - **Internet-facing collector ALB is now actually reachable (ingest pipeline

@@ -1,6 +1,6 @@
 """maestro.yaml nested stack: maestro + DEX ECS Fargate service.
 
-Owns a SINGLE ECS Fargate service running a six-container task definition:
+Owns a SINGLE ECS Fargate service running a five-container task definition:
 
   1. db-init       (Essential=False, runs psql to create the maestro database)
   2. mcp-gateway   (Essential=True, runs maestro DB schema migrations on
@@ -9,14 +9,14 @@ Owns a SINGLE ECS Fargate service running a six-container task definition:
   3. wait-for-mcp  (Essential=False, blocks until mcp-gateway has finished
                     its on-startup migrations so maestro doesn't race them)
   4. maestro      (Essential=True, listens on the maestro HTTPS port)
-  5. dex-init      (Essential=False, renders the DEX config from CFN-supplied
-                    OIDC params: DexAdminEmail, DexAdminPasswordHash,
-                    OidcSuperadminEmails)
-  6. dex          (Essential=True, listens on the DEX OIDC port)
+  5. dex          (Essential=True, listens on the DEX OIDC port; renders its
+                    own config from CFN-supplied OIDC params -- DexAdminEmail,
+                    DexAdminPasswordHash, OidcSuperadminEmails -- via the dex
+                    image's gomplate entrypoint, so no dex-init sidecar)
 
-Container dependsOn graph: db-init -> mcp-gateway -> wait-for-mcp -> maestro;
-dex-init -> dex. Both maestro and dex attach to the shared cardinal HTTPS
-listener via two ListenerRules:
+Container dependsOn graph: db-init -> mcp-gateway -> wait-for-mcp -> maestro.
+Both maestro and dex attach to the shared cardinal HTTPS listener via two
+ListenerRules:
 
   /*          -> maestro container, priority 49999 (catch-all default app)
   /dex/*      -> dex container,     priority 210
@@ -41,14 +41,12 @@ from troposphere.ecs import (
     Environment,
     LoadBalancer as EcsLoadBalancer,
     LogConfiguration,
-    MountPoint,
     NetworkConfiguration,
     PortMapping,
     RuntimePlatform,
     Secret,
     Service,
     TaskDefinition,
-    Volume,
 )
 from cardinal_cfn.children import services_common
 from cardinal_cfn.defaults import load_defaults
@@ -68,7 +66,6 @@ _SERVICE_KEY = "maestro"
 _DB_INIT_KEY = "maestro-db-init"
 _MAESTRO_KEY = "maestro"
 _DEX_KEY = "maestro-dex"
-_DEX_INIT_KEY = "maestro-dex-init"
 
 # Listener-rule registration keys (see listener_priorities.py).
 _MAESTRO_LISTENER_KEY = "maestro-https"
@@ -219,12 +216,6 @@ def build() -> Template:
         default=defaults["images"]["db_init"],
         description="Container image for the psql-capable db-init bootstrapper.",
     )
-    dex_init_image_ref = add_image_override(
-        t,
-        name="DexInitImage",
-        default=defaults["images"]["dex_init"],
-        description="BusyBox-style image used by the dex-init container to render config.yaml.",
-    )
 
     # ---------------------------------------------------------------------
     # Customer-tunable parameters
@@ -360,7 +351,7 @@ def build() -> Template:
             },
             {
                 "label": "Image overrides",
-                "parameters": ["MaestroImage", "DexImage", "DbInitImage", "DexInitImage"],
+                "parameters": ["MaestroImage", "DexImage", "DbInitImage"],
             },
             {
                 "label": "DEX configuration",
@@ -380,7 +371,6 @@ def build() -> Template:
     db_init_lg = t.add_resource(services_common.build_log_group(service_key=_DB_INIT_KEY))
     maestro_lg = t.add_resource(services_common.build_log_group(service_key=_MAESTRO_KEY))
     dex_lg = t.add_resource(services_common.build_log_group(service_key=_DEX_KEY))
-    dex_init_lg = t.add_resource(services_common.build_log_group(service_key=_DEX_INIT_KEY))
 
     # ---------------------------------------------------------------------
     # Container definitions (inlined: services_common.build_task_definition
@@ -580,53 +570,22 @@ def build() -> Template:
         ),
     )
 
-    # dex-init renders /etc/dex/config.yaml from env vars (BusyBox sh + heredoc).
-    # The unquoted heredoc expands ${DEX_*} once (no re-scan), so a bcrypt hash
-    # containing '$' survives intact. ALB DNS comes back mixed-case but
-    # browsers lower-case Host before sending; Dex's redirect_uri match is
-    # exact-string, so we register both the original and lowercased URI.
-    # 1777 on /dex-tmp because Fargate mounts empty volumes 0755 root:root and
-    # the nonroot dex container can't otherwise write its config-expansion
-    # tempfile on startup.
-    dex_config_render_script = (
-        "set -eu; "
-        "DEX_REDIRECT_URI_LC=$(echo \"$DEX_REDIRECT_URI\" | tr 'A-Z' 'a-z'); "
-        "cat > /etc/dex/config.yaml <<EOF\n"
-        "issuer: ${DEX_ISSUER_URL}\n"
-        "storage:\n"
-        "  type: memory\n"
-        "web:\n"
-        "  http: 0.0.0.0:${DEX_PORT}\n"
-        # The Cardinal theme is embedded in the dex binary as of
-        # dex-customization v0.2.0 — no frontend.dir needed. (issuer names the
-        # login page; it is unrelated to asset loading.)
-        "frontend:\n"
-        "  issuer: Cardinal\n"
-        "oauth2:\n"
-        "  skipApprovalScreen: true\n"
-        "enablePasswordDB: true\n"
-        "staticClients:\n"
-        "  - id: \"${DEX_CLIENT_ID}\"\n"
-        "    name: \"Maestro UI\"\n"
-        "    public: true\n"
-        "    redirectURIs:\n"
-        "      - \"${DEX_REDIRECT_URI}\"\n"
-        "      - \"${DEX_REDIRECT_URI_LC}\"\n"
-        "staticPasswords:\n"
-        "  - email: \"${DEX_ADMIN_EMAIL}\"\n"
-        "    hash: \"${DEX_ADMIN_HASH}\"\n"
-        "    username: \"admin\"\n"
-        "    userID: \"00000000-0000-0000-0000-000000000001\"\n"
-        "EOF\n"
-        "chmod 1777 /dex-tmp\n"
-    )
-
-    dex_init_container = ContainerDefinition(
-        Name="dex-init",
-        Image=dex_init_image_ref,
-        Essential=False,
-        EntryPoint=["/bin/sh", "-c"],
-        Command=[dex_config_render_script],
+    # dex-customization v0.3.0 renders its own config at startup: the inherited
+    # docker-entrypoint runs gomplate over the baked /etc/dex/config.docker.yaml
+    # (the image's default CMD) from the DEX_* env vars below and writes the
+    # result under /tmp before exec'ing dex -- so there is no dex-init sidecar.
+    # gomplate uses {{ }} delimiters (not '$'), so the bcrypt hash survives, and
+    # the template registers a lowercased copy of the redirect URI itself. We do
+    # NOT mount /etc/dex (a mount there shadows the baked template) and do NOT
+    # set ReadonlyRootFilesystem: the image's /tmp is a 1777 dir on the task's
+    # free ephemeral storage, writable by the nonroot dex user (uid 1001), so no
+    # writable volume or root chmod is needed.
+    dex_container = ContainerDefinition(
+        Name="dex",
+        Image=dex_image_ref,
+        Essential=True,
+        User="1001",
+        PortMappings=[PortMapping(ContainerPort=dex_port, Protocol="tcp")],
         Environment=[
             Environment(Name="DEX_ISSUER_URL", Value=Sub("https://${AlbDnsName}/dex")),
             Environment(Name="DEX_REDIRECT_URI", Value=Sub("https://${AlbDnsName}/")),
@@ -634,33 +593,6 @@ def build() -> Template:
             Environment(Name="DEX_PORT", Value=str(dex_port)),
             Environment(Name="DEX_ADMIN_EMAIL", Value=Ref("DexAdminEmail")),
             Environment(Name="DEX_ADMIN_HASH", Value=Ref("DexAdminPasswordHash")),
-        ],
-        MountPoints=[
-            MountPoint(ContainerPath="/etc/dex", SourceVolume="dex-config", ReadOnly=False),
-            MountPoint(ContainerPath="/dex-tmp", SourceVolume="dex-tmp", ReadOnly=False),
-        ],
-        LogConfiguration=LogConfiguration(
-            LogDriver="awslogs",
-            Options={
-                "awslogs-group": Ref(dex_init_lg),
-                "awslogs-region": Ref("AWS::Region"),
-                "awslogs-stream-prefix": "dex-init",
-            },
-        ),
-    )
-
-    dex_container = ContainerDefinition(
-        Name="dex",
-        Image=dex_image_ref,
-        Essential=True,
-        User="65532",
-        ReadonlyRootFilesystem=True,
-        Command=["dex", "serve", "/etc/dex/config.yaml"],
-        PortMappings=[PortMapping(ContainerPort=dex_port, Protocol="tcp")],
-        DependsOn=[{"ContainerName": "dex-init", "Condition": "SUCCESS"}],
-        MountPoints=[
-            MountPoint(ContainerPath="/etc/dex", SourceVolume="dex-config", ReadOnly=True),
-            MountPoint(ContainerPath="/tmp", SourceVolume="dex-tmp", ReadOnly=False),
         ],
         LogConfiguration=LogConfiguration(
             LogDriver="awslogs",
@@ -690,12 +622,7 @@ def build() -> Template:
                 mcp_gateway_container,
                 wait_for_mcp_container,
                 maestro_container,
-                dex_init_container,
                 dex_container,
-            ],
-            Volumes=[
-                Volume(Name="dex-config"),
-                Volume(Name="dex-tmp"),
             ],
             Tags=cardinal_tags(component="compute", role=_SERVICE_KEY),
         )

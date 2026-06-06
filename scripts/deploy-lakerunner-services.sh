@@ -30,8 +30,8 @@ DEFAULT_IMAGE_REGISTRY="public.ecr.aws"
 # first-party public-ECR images.  Only the registry prefix is operator-supplied;
 # external images (busybox, the ghcr db-init) keep their own full-URI overrides.
 LAKERUNNER_IMAGE_SUFFIX="cardinalhq.io/lakerunner:v1.40.4@sha256:532abeafcd7fb3ad7be49704239f6147a9a6ac19ed5a71976005542d72066b89"
-MAESTRO_IMAGE_SUFFIX="cardinalhq.io/maestro:v1.50.0@sha256:642e93afbbf846535923fc4ad59ea790fd0aff85cc6889355e866ab883da5001"
-DEX_IMAGE_SUFFIX="cardinalhq.io/dex-customization:v0.2.0@sha256:4a3aed43c7c800a19d840c2cf5a483d614c11aea6dcbff6661df9cf28aa4c707"
+MAESTRO_IMAGE_SUFFIX="cardinalhq.io/maestro:v1.53.0@sha256:9cd5267640aced6dbfa794f940bba356ae71b8404768ebcbbbdc27bef0d9b1d2"
+DEX_IMAGE_SUFFIX="cardinalhq.io/dex-customization:v0.3.0@sha256:7d5504390f799577d31c3bde21c816e1c3674de30f31bf755e0633886b4bbf77"
 
 usage() {
     cat <<EOF
@@ -102,9 +102,6 @@ Optional (template defaults preserved when unset):
                               PUBLIC_SUBNETS, and the ALB SG internet ingress is
                               enabled on the infra-base stack (its ALB_SCHEME /
                               ALB_ALLOWED_CIDR* settings).
-  DEX_INIT_IMAGE              Full image URI override for the dex-init busybox
-                              (a non-public-ECR/utility image, not covered by
-                              IMAGE_REGISTRY). Default: the template default.
   DB_INIT_IMAGE               Full image URI override for the db-init image
                               (ghcr, not covered by IMAGE_REGISTRY). Default:
                               the template default.
@@ -246,8 +243,6 @@ MaestroImage=$maestro_image
 DexImage=$dex_image"
 # External/utility images: full-URI overrides, not driven by IMAGE_REGISTRY.
 # Unset -> the template default governs.
-[ -n "${DEX_INIT_IMAGE:-}" ] && params="$params
-DexInitImage=$DEX_INIT_IMAGE"
 [ -n "${DB_INIT_IMAGE:-}" ] && params="$params
 DbInitImage=$DB_INIT_IMAGE"
 
