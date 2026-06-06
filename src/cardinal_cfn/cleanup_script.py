@@ -6,10 +6,10 @@ embedded verbatim into the AWS::ECS::TaskDefinition's EntryPoint by
 ``cardinal_cleanup.py``. Keep this module dependency-free (no
 troposphere) so tests can import and lint the shell directly.
 
-The script is POSIX (``sh``), not bash. The container image
-(``public.ecr.aws/aws-cli/aws-cli:latest``) provides ``sh``, ``aws``,
-and ``python3`` -- and crucially NOT ``jq`` -- so JSON parsing uses
-inline ``python3 -c`` snippets.
+The script is POSIX (``sh``), not bash. The container image (the official
+aws-cli image, pinned via ``images.aws_cli`` in cardinal-defaults.yaml and
+the ``AwsCliImage`` parameter) provides ``sh``, ``aws``, and ``python3`` --
+and crucially NOT ``jq`` -- so JSON parsing uses inline ``python3 -c`` snippets.
 
 The script implements the four-step teardown ordered as:
 

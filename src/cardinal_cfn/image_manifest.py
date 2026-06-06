@@ -18,6 +18,7 @@ from cardinal_cfn.defaults import load_defaults
 STACK_IMAGE_KEYS = {
     "satellite": ["otel"],
     "lakerunner": ["lakerunner", "maestro", "dex", "db_init"],
+    "cleanup": ["aws_cli"],
 }
 
 

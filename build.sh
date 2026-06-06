@@ -27,6 +27,9 @@ python3 -m cardinal_cfn.lrdev_baseinfra > generated-templates/lrdev-baseinfra.ya
 echo "Generating cardinal-cleanup.yaml..."
 python3 -m cardinal_cfn.cardinal_cleanup > generated-templates/cardinal-cleanup.yaml
 
+echo "Generating cleanup-images.txt..."
+python3 -m cardinal_cfn.image_manifest manifest cleanup > generated-templates/cleanup-images.txt
+
 echo "Generating cardinal-satellite-infra-base.yaml..."
 python3 -m cardinal_cfn.satellite_infra_base > generated-templates/cardinal-satellite-infra-base.yaml
 

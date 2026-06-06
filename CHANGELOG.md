@@ -11,6 +11,18 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v0.0.135
+
+- **cleanup task aws-cli image pinned + plumbed through defaults.** The
+  `cardinal-cleanup` teardown task used a hardcoded
+  `public.ecr.aws/aws-cli/aws-cli:latest`. It is now sourced from
+  `cardinal-defaults.yaml` (`images.aws_cli`), pinned by digest
+  (`2.34.63@sha256:c95a…`), and exposed as an `AwsCliImage` parameter on the
+  cleanup stack (like the other image overrides). `dev-scripts/sweep-stranded-
+  resources.sh` default and a new `cleanup-images.txt` manifest track the same
+  pin. No upgrade action — affects only teardown, never a running install. Every
+  image the project references is now a digest-pinned `public.ecr.aws` image.
+
 ## v0.0.134
 
 - **Deploy driver now always sets `DbInitImage` from the baked, pinned default**
