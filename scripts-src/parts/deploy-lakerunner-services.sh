@@ -27,7 +27,7 @@ DEFAULT_STACK_VERSION="@@STACK_VERSION@@"
 DEFAULT_IMAGE_REGISTRY="public.ecr.aws"
 # Baked, locked registry-relative paths (repo + pinned tag/digest) for the
 # first-party public-ECR images.  Only the registry prefix is operator-supplied;
-# external images (busybox, the ghcr db-init) keep their own full-URI overrides.
+# the external db-init image (official postgres) keeps its own full-URI override.
 LAKERUNNER_IMAGE_SUFFIX="@@LAKERUNNER_IMAGE_SUFFIX@@"
 MAESTRO_IMAGE_SUFFIX="@@MAESTRO_IMAGE_SUFFIX@@"
 DEX_IMAGE_SUFFIX="@@DEX_IMAGE_SUFFIX@@"
@@ -102,8 +102,8 @@ Optional (template defaults preserved when unset):
                               enabled on the infra-base stack (its ALB_SCHEME /
                               ALB_ALLOWED_CIDR* settings).
   DB_INIT_IMAGE               Full image URI override for the db-init image
-                              (ghcr, not covered by IMAGE_REGISTRY). Default:
-                              the template default.
+                              (official postgres psql client, not covered by
+                              IMAGE_REGISTRY). Default: the template default.
   PUBSUB_AUTOREGISTER         pubsub-sqs auto-registration of satellite buckets
                               (template default "true").  Set "false" to disable.
                               When true, unseen satellite raw-bucket orgs are

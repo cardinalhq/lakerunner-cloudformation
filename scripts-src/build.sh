@@ -32,8 +32,8 @@ stack_version="${CARDINAL_VERSION:-dev}"
 py="python3"
 [ -x "$repo_root/.venv/bin/python3" ] && py="$repo_root/.venv/bin/python3"
 # Registry-relative suffixes for the first-party public-ECR images that respect
-# the IMAGE_REGISTRY prefix.  External images (busybox, the ghcr db-init) are
-# not baked here -- the drivers keep full-URI overrides for those.
+# the IMAGE_REGISTRY prefix.  The external db-init image (the official postgres
+# psql client) is not baked here -- the driver keeps a full-URI override for it.
 image_suffix() {
     s=$(PYTHONPATH="$repo_root/src" "$py" -m cardinal_cfn.image_manifest suffix "$1")
     [ -n "$s" ] || { echo "build.sh: failed to resolve $1 image suffix" >&2; exit 1; }

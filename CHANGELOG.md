@@ -11,6 +11,20 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v0.0.133
+
+- **db-init image: `ghcr.io/cardinalhq/initcontainer-grafana:latest` ->
+  `public.ecr.aws/docker/library/postgres:18-alpine` (digest-pinned).** The
+  maestro `db-init` container only ever used the image to run a one-line
+  `psql ... CREATE DATABASE maestro`; it overrode the entrypoint and used none
+  of the grafana tooling. Switch it to the official Postgres image (Docker
+  Official Images, AWS-mirrored on public ECR; psql 18 matches the RDS major
+  version), which is leaner, from a trusted publisher, digest-pinned (no more
+  mutable `:latest`), and removes the only `ghcr.io` pull. **Upgrade action:**
+  redeploy `lakerunner-services`. The `DbInitImage` default changes; if you
+  pinned `DB_INIT_IMAGE` in a saved config, update it. No DB/data change
+  (db-init is idempotent: `CREATE DATABASE ... || true`).
+
 ## v0.0.132
 
 - **Image bumps: maestro `v1.50.0` -> `v1.53.0`, dex-customization `v0.2.0` ->
