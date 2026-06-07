@@ -6,7 +6,7 @@ Every IAM role and security group is created by the `Security` nested
 stack in `cardinal-lakerunner`. The customer no longer supplies any of
 them. (The one exception is the `cardinal-cleanup` stack, which uses a
 customer-supplied teardown role -- documented in
-[`cleanup.md`](cleanup.md).)
+[`dev-environment.md`](dev-environment.md).)
 
 This doc is the "what does the running software actually do?" half of
 the permissions story. Install-time permissions for the deployer
