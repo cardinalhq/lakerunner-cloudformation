@@ -33,7 +33,7 @@ storage_profiles:
 # so the two cannot drift; any change to LakerunnerImage retriggers migrations.
 # ---------------------------------------------------------------------------
 images:
-  lakerunner: "public.ecr.aws/cardinalhq.io/lakerunner:v1.40.4@sha256:532abeafcd7fb3ad7be49704239f6147a9a6ac19ed5a71976005542d72066b89"
+  lakerunner: "public.ecr.aws/cardinalhq.io/lakerunner:v1.41.6@sha256:b19a07106bd21658e7e1f833e4fa79e633418f810126c710907f436beab964a9"
   maestro:    "public.ecr.aws/cardinalhq.io/maestro:v1.53.1@sha256:ac533a492623b5df7c4176f8fc887145a2de3662417388e5fc0fb678c49ba698"
   otel:       "public.ecr.aws/cardinalhq.io/cardinalhq-otel-collector:v1.8.0@sha256:9906eea2b38f1614047ada60ce7887704652484bb5b01a7f8a1d932277e1f151"
   dex:        "public.ecr.aws/cardinalhq.io/dex-customization:v0.3.0@sha256:7d5504390f799577d31c3bde21c816e1c3674de30f31bf755e0633886b4bbf77"
