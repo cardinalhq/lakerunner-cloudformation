@@ -9,9 +9,7 @@
 # Mode is auto-detected from describe-stacks: missing stack -> CREATE,
 # existing stack -> UPDATE.  Install-only flags are ignored on UPDATE.
 #
-# See docs/operations/jenkins-deploy.md for operator documentation and
-# docs/superpowers/specs/2026-05-01-jenkins-stack-upgrade-design.md for the
-# original upgrade-only design (this script is the create-or-update successor).
+# See docs/operations/production-deploy.md for operator documentation.
 
 set -eu
 

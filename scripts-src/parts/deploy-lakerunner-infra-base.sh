@@ -1,5 +1,5 @@
 #!/bin/sh
-# Jenkins job 1: deploy the cardinal-lakerunner-infra-base stack.
+# Stack 1 of the deploy chain: the cardinal-lakerunner-infra-base stack.
 #
 # This is the head of the chain -- it has no upstream stacks.  It owns the IAM
 # roles, security groups, cooked bucket, and license/admin secrets that every

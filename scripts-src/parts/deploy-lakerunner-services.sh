@@ -1,5 +1,5 @@
 #!/bin/sh
-# Jenkins job 5: deploy the cardinal-lakerunner-services stack (the application
+# Stack 5 of the deploy chain: the cardinal-lakerunner-services stack (the application
 # tier: query, process, control, maestro).
 #
 # Upstream:

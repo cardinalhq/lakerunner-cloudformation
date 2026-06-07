@@ -1,5 +1,5 @@
 #!/bin/sh
-# Jenkins job 3: deploy the cardinal-satellite-infra-base stack (one per
+# Stack 3 of the deploy chain: the cardinal-satellite-infra-base stack (one per
 # satellite ingest account/region).
 #
 # No upstream stack pull: a satellite may live in a DIFFERENT account than the

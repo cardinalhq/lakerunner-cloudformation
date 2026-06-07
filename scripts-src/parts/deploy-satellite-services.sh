@@ -1,5 +1,5 @@
 #!/bin/sh
-# Jenkins job 4: deploy the cardinal-satellite-services stack (the same-account
+# Stack 4 of the deploy chain: the cardinal-satellite-services stack (the same-account
 # otel collector that performs ingest into the satellite raw bucket/queue).
 #
 # Upstream: only the satellite's OWN paired stack (same account/region):
@@ -8,7 +8,7 @@
 # it up.  No pull from the central lakerunner-infra-base stack -- the collector
 # needs no license and a satellite may live in a different account.
 # OTEL_REPLICAS defaults to 1 here (the collector config must change before
-# scaling past one replica -- see docs/operations/jenkins-chained-deploy.md).
+# scaling past one replica -- see docs/operations/production-deploy.md).
 #
 # This driver is version-locked: the published template version and the otel
 # collector image (repo + pinned tag/digest) are baked in at publish time, so
