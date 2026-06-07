@@ -116,14 +116,19 @@ delete_stack() {
     log "$s deleted"
 }
 
-# Empty the data buckets first so their owning stacks (which may use a Delete
-# policy) don't fail deletion on a non-empty bucket.
-if [ "${KEEP_BUCKETS:-}" != "true" ]; then
-    empty_bucket "$RAW_BUCKET"
-    empty_bucket "$COOKED_BUCKET"
-fi
-
 for s in $STACKS; do
+    # Empty an owning stack's bucket immediately BEFORE deleting that stack —
+    # not all upfront. By delete time the writer stack ahead of it is already
+    # gone (collector before its raw bucket; app tier before the cooked bucket),
+    # so a Delete-policy bucket isn't re-filled mid-teardown and blocked from
+    # deletion. The raw bucket is owned by the satellite-infra-base stack; the
+    # cooked bucket by the lakerunner-infra-base stack.
+    if [ "${KEEP_BUCKETS:-}" != "true" ]; then
+        case "$s" in
+            "$SAT_INFRA_STACK")  empty_bucket "$RAW_BUCKET" ;;
+            "$INFRA_BASE_STACK") empty_bucket "$COOKED_BUCKET" ;;
+        esac
+    fi
     delete_stack "$s"
 done
 
