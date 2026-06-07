@@ -81,9 +81,19 @@ jobs:
           if [[ "${PRERELEASE}" == "true" ]]; then
             PRERELEASE_FLAG=(--prerelease)
           fi
+          # Attach the version-baked deploy drivers (same scripts/ that build.sh
+          # regenerated with CARDINAL_VERSION and that were synced to S3 above)
+          # as release assets, so a script downloaded from the GitHub release has
+          # this version baked in (STACK_VERSION="$VERSION"), not "dev". The repo
+          # copies under scripts/ stay "dev" by design (they pre-date the tag).
           gh release create "$VERSION" \
+            scripts/*.sh \
             --title "$VERSION" \
             "${PRERELEASE_FLAG[@]}" \
             --notes "**Lakerunner root template:** $ROOT_URL
 
-          Paste the root URL into the CloudFormation console to deploy."
+          Paste the root URL into the CloudFormation console to deploy.
+
+          The attached \`deploy-*.sh\` drivers have this version baked in
+          (\`STACK_VERSION=$VERSION\`); the same set is published under
+          \`s3://${CARDINAL_BUCKET_NAME}/lakerunner/${VERSION}/scripts/\`."
