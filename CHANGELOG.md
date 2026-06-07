@@ -11,6 +11,15 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v0.0.136
+
+- **maestro `v1.53.0` -> `v1.53.1`.** Picks up the fix for the fresh-install
+  provisioning cold-start race (conductor #998): the Lakerunner provisioning
+  worker now retries transient admin-api failures for ~29 min (capped backoff)
+  instead of giving up after ~31s, so on a fresh install the org reliably lands
+  in configdb without a manual maestro restart. **Upgrade action:** redeploy
+  `lakerunner-services`.
+
 ## v0.0.135
 
 - **cleanup task aws-cli image pinned + plumbed through defaults.** The
