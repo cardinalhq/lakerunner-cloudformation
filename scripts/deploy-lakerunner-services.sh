@@ -32,7 +32,7 @@ DEFAULT_IMAGE_REGISTRY="public.ecr.aws"
 # public.ecr.aws -- so a redeploy always carries the pinned default;
 # DB_INIT_IMAGE remains a full-URI escape hatch.
 LAKERUNNER_IMAGE_SUFFIX="cardinalhq.io/lakerunner:v1.40.4@sha256:532abeafcd7fb3ad7be49704239f6147a9a6ac19ed5a71976005542d72066b89"
-MAESTRO_IMAGE_SUFFIX="cardinalhq.io/maestro:v1.53.0@sha256:9cd5267640aced6dbfa794f940bba356ae71b8404768ebcbbbdc27bef0d9b1d2"
+MAESTRO_IMAGE_SUFFIX="cardinalhq.io/maestro:v1.53.1@sha256:ac533a492623b5df7c4176f8fc887145a2de3662417388e5fc0fb678c49ba698"
 DEX_IMAGE_SUFFIX="cardinalhq.io/dex-customization:v0.3.0@sha256:7d5504390f799577d31c3bde21c816e1c3674de30f31bf755e0633886b4bbf77"
 DB_INIT_IMAGE_SUFFIX="docker/library/postgres:18-alpine@sha256:96d56f7f57c6aacd1fcb908bc83b345ec5f83231ee486dd66a1baadce274db88"
 
