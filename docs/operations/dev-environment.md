@@ -121,34 +121,25 @@ shows `... 0 failed`, the cooked bucket is non-empty, and logging into Maestro
 
 ## 5. Burn it down
 
-Delete the five stacks in **reverse** dependency order, then remove the
-retained/fixed-name survivors that would block a future re-create. (The legacy
-`dev-scripts/cleanup-lakerunner.sh` / `teardown-lakerunner.sh` target the old
-monolithic stack names and do **not** fit the per-stack model — use this manual
-sequence; a per-stack teardown script is a future follow-up.)
+Use `dev-scripts/teardown-cardinal.sh`. It deletes the five stacks in
+**reverse** dependency order, empties + removes the data buckets, and
+force-deletes the retained fixed-name secrets (`cardinal-license` /
+`cardinal-admin-key` / `cardinal-db-master`) that would otherwise block a fresh
+re-create. The VPC and ECS cluster are left untouched. It is idempotent (safe to
+re-run if interrupted) and gated behind `CONFIRM=DELETE`.
 
 ```sh
-for s in cardinal-lakerunner-services cardinal-satellite-services \
-         cardinal-satellite-infra-base cardinal-lakerunner-infra-rds \
-         cardinal-lakerunner-infra-base; do
-  aws cloudformation delete-stack --stack-name "$s" --region "$REGION"
-  aws cloudformation wait stack-delete-complete --stack-name "$s" --region "$REGION"
-done
+# Plan only (prints what would be deleted; no changes):
+REGION=us-east-1 dev-scripts/teardown-cardinal.sh
 
-ACCT=$(aws sts get-caller-identity --query Account --output text)
-# A non-empty bucket blocks its stack delete — empty first if a delete failed:
-#   aws s3 rm s3://cardinal-otel-raw-$ACCT-$REGION --recursive
-#   aws s3 rm s3://cardinal-cooked-$ACCT-$REGION  --recursive  (then retry the delete)
-
-# Wipe survivors (fixed cardinal-* names) so a fresh install can re-create them:
-for sec in cardinal-license cardinal-admin-key cardinal-db-master; do
-  aws secretsmanager delete-secret --secret-id "$sec" --force-delete-without-recovery --region "$REGION"
-done
-for b in cardinal-cooked-$ACCT-$REGION cardinal-otel-raw-$ACCT-$REGION; do
-  aws s3 rb s3://$b --force
-done
-# Optional (cost only; no re-create collision): delete the RDS final snapshot.
+# Execute:
+REGION=us-east-1 CONFIRM=DELETE dev-scripts/teardown-cardinal.sh
 ```
+
+Useful env: `KEEP_SECRETS=true` / `KEEP_BUCKETS=true` to preserve those;
+`DELETE_SNAPSHOTS=true` to also delete the RDS final snapshot (kept by default —
+cost only, never blocks a re-create); `DEPLOYER_ROLE_ARN` if a CloudFormation
+service role is in use. See `--help`.
 
 `lrdev-vpc` and `lrdev-baseinfra` are intentionally left standing (BYO
 scaffolding) for the next iteration.

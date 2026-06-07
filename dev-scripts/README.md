@@ -42,6 +42,23 @@ Outputs: `VpcId`, `PublicSubnetsCsv`, `PrivateSubnetsCsv`.
 
 Outputs: `ClusterArn`, `ClusterName`.
 
+## teardown-cardinal.sh (current)
+
+Tears down a per-stack install: deletes the five `cardinal-*` stacks in
+reverse-dependency order, then wipes the retained fixed-name survivors (the
+`cardinal-license` / `cardinal-admin-key` / `cardinal-db-master` secrets and the
+cooked / otel-raw buckets) so a fresh install can re-create them. Leaves the VPC
+and ECS cluster intact. Idempotent; gated behind `CONFIRM=DELETE`.
+
+```sh
+REGION=us-east-1 dev-scripts/teardown-cardinal.sh                 # plan only
+REGION=us-east-1 CONFIRM=DELETE dev-scripts/teardown-cardinal.sh  # execute
+```
+
+Env: `KEEP_SECRETS` / `KEEP_BUCKETS` / `DELETE_SNAPSHOTS`, stack-name overrides,
+`DEPLOYER_ROLE_ARN`. See `--help` and
+[`dev-environment.md`](../docs/operations/dev-environment.md).
+
 ## sweep-stranded-resources.sh (current)
 
 When a stack delete fails part-way and leaves `DELETE_FAILED` /
@@ -57,7 +74,4 @@ parameters, S3 buckets), then deregisters itself. Runs under a caller-supplied
 `run-cleanup.sh`, `cleanup-lakerunner.sh`, and `teardown-lakerunner.sh` target
 the retired **monolithic** `cardinal-infrastructure` + `cardinal-lakerunner`
 stacks and do **not** match the current per-stack model. For the per-stack
-teardown, use the manual sequence in
-[`dev-environment.md`](../docs/operations/dev-environment.md) (delete the five
-stacks in reverse order, then wipe the retained `cardinal-*` survivors). A
-per-stack teardown script is a future follow-up.
+teardown, use `teardown-cardinal.sh` (above).
