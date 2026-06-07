@@ -11,6 +11,12 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v1.0.1
+
+- **lakerunner `v1.40.4` -> `v1.41.6`.** Default `LakerunnerImage` bump. On
+  redeploy the DB migrator reruns (idempotent) before the service-tier stacks
+  update. No new parameters or resource replacements.
+
 ## v1.0.0
 
 First 1.0 release. No new parameters or resource replacements vs `v0.0.136`;
