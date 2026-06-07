@@ -86,7 +86,9 @@ command -v aws >/dev/null 2>&1 || fail 1 "aws CLI v2 is required"
 command -v jq  >/dev/null 2>&1 || fail 1 "jq is required"
 
 ACCOUNT="$(aws sts get-caller-identity --query Account --output text)"
-[ -n "$ACCOUNT" ] && [ "$ACCOUNT" != "None" ] || fail 1 "could not resolve AWS account id"
+if [ -z "$ACCOUNT" ] || [ "$ACCOUNT" = "None" ]; then
+    fail 1 "could not resolve AWS account id"
+fi
 COOKED_BUCKET="${COOKED_BUCKET:-cardinal-cooked-$ACCOUNT-$REGION}"
 RAW_BUCKET="${RAW_BUCKET:-cardinal-otel-raw-$ACCOUNT-$REGION}"
 
