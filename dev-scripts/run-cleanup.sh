@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Jenkins-friendly wrapper around dev-scripts/cleanup-lakerunner.sh.
+# CI-friendly wrapper around dev-scripts/cleanup-lakerunner.sh.
 #
 # The underlying driver deploys the cardinal-cleanup stack, runs the privileged
 # Fargate task that drains ECS services, deletes the cardinal-lakerunner stack,
 # wipes the cardinal-* data layer (S3 / RDS / SQS / secrets / SSM) with
 # ownership-tag enforcement, and self-deletes the cleanup stack. This wrapper
-# only translates ENV vars -> CLI flags so a Jenkins job can run with a single
+# only translates ENV vars -> CLI flags so a CI job can run with a single
 # env block.
 
 set -euo pipefail
@@ -31,7 +31,7 @@ TEMPLATE_BUCKET="${TEMPLATE_BUCKET:-cardinal-cfn-${REGION}}"
 TEMPLATE_BASE_URL="${TEMPLATE_BASE_URL:-https://${TEMPLATE_BUCKET}.s3.${REGION}.amazonaws.com/lakerunner}"
 
 # Safety: cleanup is destructive. Refuse to run unless the operator explicitly
-# sets CONFIRM=DELETE in the environment (Jenkins job parameter).
+# sets CONFIRM=DELETE in the environment (CI job parameter).
 if [ "${CONFIRM:-}" != "DELETE" ]; then
   die 'set CONFIRM=DELETE to confirm. This wipes RDS, S3, SQS, secrets, SSM.'
 fi

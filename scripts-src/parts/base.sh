@@ -1,7 +1,7 @@
 #!/bin/sh
 # Generic chained CloudFormation deploy driver for the 5-stack satellite-ingest
 # topology.  Create the stack if missing, otherwise update it in place, pulling
-# parameter values from upstream stacks' Outputs so the per-stack Jenkins jobs
+# parameter values from upstream stacks' Outputs so the per-stack drivers
 # can run as a chain.
 #
 # Self-contained: depends only on a POSIX shell, the AWS CLI v2, and jq.  Does
@@ -38,7 +38,7 @@
 #   5. the template's Default
 #   6. otherwise FAIL, listing the unresolved required parameters
 #
-# See docs/operations/jenkins-chained-deploy.md for operator documentation and
+# See docs/operations/production-deploy.md for operator documentation and
 # the per-stack wrappers (deploy-lakerunner-infra-base.sh, etc.).
 
 set -eu

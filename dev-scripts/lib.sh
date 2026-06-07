@@ -6,9 +6,9 @@
 # -----------
 # - Every deploy script accepts inputs via environment variables only. The
 #   defaults in each script never bake in customer-specific identifiers.
-# - Stdout is structured for Jenkins log readability: timestamped lines with a
+# - Stdout is structured for CI log readability: timestamped lines with a
 #   tag prefix that the operator can grep.
-# - Exit non-zero on any failure; Jenkins will mark the job red.
+# - Exit non-zero on any failure; the CI job will be marked failed.
 # - Long-running waits stream stack events so the operator can see what AWS is
 #   actually doing instead of watching a static "WAITING..." line.
 
@@ -39,7 +39,7 @@ need_cmd() {
 }
 
 # Verify the runner can talk to AWS in the requested region and has a usable
-# identity. Prints the account + identity so the Jenkins log shows who deployed.
+# identity. Prints the account + identity so the CI log shows who deployed.
 preflight_aws() {
   local region="$1"
   need_cmd aws

@@ -89,16 +89,16 @@ openssl verify -CAfile chain.pem cert.pem
 
 ### Where it goes
 
-| Cardinal parameter | Value |
+| Deploy script flag | Value |
 |---|---|
 | `CertificateArn` | leave empty |
-| `CertificateBodyCredentialId` | Jenkins **Secret File** ID for `cert.pem` |
-| `CertificatePrivateKeyCredentialId` | Jenkins **Secret File** ID for `private.key` |
-| `CertificateChainCredentialId` | Jenkins **Secret File** ID for `chain.pem` (optional but usually required) |
+| `--certificate-body-file` | path to `cert.pem` |
+| `--certificate-private-key-file` | path to `private.key` |
+| `--certificate-chain-file` | path to `chain.pem` (optional but usually required) |
 
-When running the script outside Jenkins, use `--certificate-body-file`, `--certificate-private-key-file`, `--certificate-chain-file` flags pointing at the local files.
+Pass the PEM material to the deploy script via the `--certificate-body-file`, `--certificate-private-key-file`, and `--certificate-chain-file` flags pointing at the local files.
 
-The cert child stack imports the PEMs into ACM via a Lambda custom resource. The resulting ACM ARN is wired into the ALB. Replacing the cert later (renewal, key rotation) is a stack update with new PEM values.
+The cert child stack imports the PEMs as an `AWS::IAM::ServerCertificate` (no Lambda); the ALB HTTPS listener accepts its ARN like an ACM one. Replacing the cert later (renewal, key rotation) is a stack update with new PEM values.
 
 ## Path 3: Self-signed for dev / private deployments
 

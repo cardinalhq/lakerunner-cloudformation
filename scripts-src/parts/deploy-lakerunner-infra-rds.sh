@@ -1,5 +1,5 @@
 #!/bin/sh
-# Jenkins job 2: deploy the cardinal-lakerunner-infra-rds stack.
+# Stack 2 of the deploy chain: the cardinal-lakerunner-infra-rds stack.
 #
 # Upstream: the lakerunner-infra-base stack supplies the per-service security
 # group ids (Control/Maestro/Migration/Process/Query SecurityGroupId outputs),
