@@ -101,4 +101,4 @@ The lakerunner stack owns no `Retain` or `Snapshot` resources, so
 S3 ingest, secrets, SSM, SQS) lives in the separate
 `cardinal-infrastructure` stack and survives stack delete by design
 via `Retain` / `Snapshot` policies. See
-[`tearing-down.md`](tearing-down.md) for the full layered procedure.
+[`dev-environment.md`](dev-environment.md) for the teardown procedure.

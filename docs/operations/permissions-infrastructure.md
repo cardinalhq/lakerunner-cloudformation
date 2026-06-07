@@ -59,6 +59,6 @@ child stack.
 Same actions as create; plus the `Retain` / `Snapshot` policies on the
 infra-tier data resources mean a `delete-stack` leaves orphans behind
 on purpose. Wiping the data is a deliberate operator step covered in
-[`cleanup.md`](cleanup.md) (the `cardinal-cleanup` stack uses a
+[`dev-environment.md`](dev-environment.md) (the `cardinal-cleanup` stack uses a
 separate, narrowly-scoped customer-supplied `CleanupTaskRoleArn` — see
 that doc for the policy).
