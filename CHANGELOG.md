@@ -11,6 +11,28 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v1.0.0
+
+First 1.0 release. No new parameters or resource replacements vs `v0.0.136`;
+this tags the consolidated, production-ready state. Operator-facing changes
+accumulated since `v0.0.136`:
+
+- **Docs consolidated to two paths.** Production installs follow
+  `docs/operations/production-deploy.md`; dev/test environments follow
+  `docs/operations/dev-environment.md`. The legacy monolithic-model runbooks
+  were retired (the per-stack model is the only supported one).
+- **Releases now attach version-baked deploy drivers.** Each release attaches
+  `deploy-*.sh` with `STACK_VERSION` baked in (matching the S3
+  `lakerunner/<version>/scripts/` copies); the committed `scripts/*.sh` remain
+  `dev`. Production should use the release-pinned drivers — see
+  `scripts/README.md`.
+- **Per-stack teardown driver added.** `dev-scripts/teardown-cardinal.sh`
+  deletes the five `cardinal-*` stacks in reverse order and wipes the retained
+  fixed-name survivors, leaving the VPC and ECS cluster intact (gated behind
+  `CONFIRM=DELETE`).
+
+No upgrade action beyond the usual redeploy.
+
 ## v0.0.136
 
 - **maestro `v1.53.0` -> `v1.53.1`.** Picks up the fix for the fresh-install
