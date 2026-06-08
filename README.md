@@ -23,11 +23,9 @@ order matters.
 The central application: API/query/process/control services, the database, and
 the Maestro UI.
 
-```
-1. cardinal-lakerunner-infra-base   deploy-lakerunner-infra-base.sh   creates IAM roles, security groups, cooked S3 bucket, license/admin-key secrets
-2. cardinal-lakerunner-infra-rds    deploy-lakerunner-infra-rds.sh    creates the RDS Postgres database
-3. cardinal-lakerunner-services     deploy-lakerunner-services.sh     creates the app ALB, query/process/control services, and maestro+dex
-```
+1. **`cardinal-lakerunner-infra-base`** (`deploy-lakerunner-infra-base.sh`) — creates IAM roles, security groups, the cooked S3 bucket, and the license/admin-key secrets.
+1. **`cardinal-lakerunner-infra-rds`** (`deploy-lakerunner-infra-rds.sh`) — creates the RDS Postgres database.
+1. **`cardinal-lakerunner-services`** (`deploy-lakerunner-services.sh`) — creates the app ALB, the query/process/control services, and maestro+dex.
 
 `cardinal-lakerunner-services` is a root template with nested children: `alb`,
 `cert`, `migration`, `services-query`, `services-process`, `services-control`,
@@ -39,10 +37,8 @@ The OTLP ingest edge — a raw bucket/queue plus the collector that fills them.
 May live in a different account from the base install; it only needs the base
 install's process-role ARN as its trusted principal.
 
-```
-1. cardinal-satellite-infra-base    deploy-satellite-infra-base.sh    creates the raw ingest S3 bucket, its SQS queue, and the cross-account access role the base install assumes
-2. cardinal-satellite-services      deploy-satellite-services.sh      creates the OTLP collector and its own ALB
-```
+1. **`cardinal-satellite-infra-base`** (`deploy-satellite-infra-base.sh`) — creates the raw ingest S3 bucket, its SQS queue, and the cross-account access role the base install assumes.
+1. **`cardinal-satellite-services`** (`deploy-satellite-services.sh`) — creates the OTLP collector and its own ALB.
 
 ### Single-account order
 
@@ -52,13 +48,11 @@ When the base and a satellite share one account, the dependencies interleave:
 Deploy in this order (see
 [`docs/operations/production-deploy.md`](docs/operations/production-deploy.md)):
 
-```
-1. cardinal-lakerunner-infra-base
-2. cardinal-lakerunner-infra-rds
-3. cardinal-satellite-infra-base
-4. cardinal-satellite-services
-5. cardinal-lakerunner-services
-```
+1. `cardinal-lakerunner-infra-base`
+1. `cardinal-lakerunner-infra-rds`
+1. `cardinal-satellite-infra-base`
+1. `cardinal-satellite-services`
+1. `cardinal-lakerunner-services`
 
 ## Published artifacts & versioning
 
