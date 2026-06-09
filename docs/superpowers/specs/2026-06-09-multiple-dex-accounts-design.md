@@ -46,23 +46,31 @@ staticPasswords:
     hash: "{{ getenv "DEX_ADMIN_HASH" | required "DEX_ADMIN_HASH is required" }}"
     username: "admin"
     userID: "00000000-0000-0000-0000-000000000001"
-{{- $extra := getenv "DEX_EXTRA_USERS" "[]" | data.JSON }}
+{{- $extra := getenv "DEX_EXTRA_USERS" "[]" | data.JSONArray }}
 {{- range $u := $extra }}
 {{-   $email := $u.email | required "each DEX_EXTRA_USERS entry needs an email" }}
+{{-   $un := index $u "username" }}
+{{-   $uid := index $u "userID" }}
+{{-   $h := crypto.SHA256 $email }}
   - email: "{{ $email }}"
     hash: "{{ $u.hash | required "each DEX_EXTRA_USERS entry needs a hash" }}"
-    username: "{{ if $u.username }}{{ $u.username }}{{ else }}{{ index (strings.Split "@" $email) 0 }}{{ end }}"
-    userID: "{{ if $u.userID }}{{ $u.userID }}{{ else }}{{ uuid.V5 "1b671a64-40d5-491e-99b0-da01ff1f3341" $email }}{{ end }}"
+    username: "{{ if $un }}{{ $un }}{{ else }}{{ index (strings.Split "@" $email) 0 }}{{ end }}"
+    userID: "{{ if $uid }}{{ $uid }}{{ else }}{{ printf "%s-%s-%s-%s-%s" (slice $h 0 8) (slice $h 8 12) (slice $h 12 16) (slice $h 16 20) (slice $h 20 32) }}{{ end }}"
 {{- end }}
 ```
 
 Properties:
 
-- Unset/empty `DEX_EXTRA_USERS` defaults to `"[]"` -> zero extra entries ->
-  byte-identical render to today (back-compat).
-- The operator supplies only `email` + `hash` per entry. `username` defaults to
-  the email local part; `userID` defaults to a stable `uuid.V5` of the email
-  (fixed Cardinal namespace UUID). Both may be overridden explicitly.
+- Uses `data.JSONArray` (gomplate's `data.JSON` parses only a top-level object,
+  not an array). Unset/empty `DEX_EXTRA_USERS` defaults to `"[]"` -> zero extra
+  entries -> byte-identical render to today (back-compat).
+- The operator supplies only `email` + `hash` per entry. Optional `username`/
+  `userID` are read with `index` (a missing map key under gomplate's strict mode
+  errors via `.field` access but returns nil via `index`). `username` defaults
+  to the email local part; `userID` defaults to a stable UUID-shaped digest of
+  the email -- gomplate has no `uuid.V5`, so the id is built from the first 32
+  hex chars of `crypto.SHA256(email)`. Dex only needs a stable, unique, non-empty
+  id; both fields may be overridden explicitly.
 - bcrypt `$` survives: JSON does not escape `$`, and gomplate renders in a
   single pass without re-scanning its output (the same property the admin hash
   already relies on).

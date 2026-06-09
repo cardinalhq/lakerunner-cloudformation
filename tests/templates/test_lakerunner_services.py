@@ -154,6 +154,17 @@ def test_migration_child_gets_no_org_content_params(td):
         assert gone not in migration, f"Migration child still gets {gone}"
 
 
+def test_dex_extra_users_param_and_forwarded_to_maestro(td):
+    """Additional DEX accounts: NoEcho param on the root, forwarded verbatim to
+    the Maestro child (which sets it as the dex DEX_EXTRA_USERS env var)."""
+    p = td["Parameters"]["DexExtraUsers"]
+    assert p["Type"] == "String"
+    assert p["NoEcho"] is True
+    assert p["Default"] == ""
+    maestro = td["Resources"]["Maestro"]["Properties"]["Parameters"]
+    assert maestro["DexExtraUsers"] == {"Ref": "DexExtraUsers"}
+
+
 def test_self_telemetry_endpoint_param(td):
     """The locked SelfTelemetry=[No] toggle is gone; a real configurable
     SelfTelemetryEndpoint (String, default "") takes its place."""

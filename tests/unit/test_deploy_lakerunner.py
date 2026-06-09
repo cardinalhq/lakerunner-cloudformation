@@ -442,6 +442,7 @@ def test_create_full_install_mix(tmp_path):
             "ParameterType": "String",
         },
         {"ParameterKey": "DexAdminPasswordHash", "ParameterType": "String"},
+        {"ParameterKey": "DexExtraUsers", "ParameterType": "String"},
         {"ParameterKey": "LicenseData", "ParameterType": "String"},
         {
             "ParameterKey": "TemplateBaseUrl",
@@ -454,6 +455,9 @@ def test_create_full_install_mix(tmp_path):
         "PrivateSubnets": "subnet-1,subnet-2",
         "DexAdminEmail": "ops@example.com",
         "DexAdminPasswordHash": "$2b$12$abcdef",
+        # Commas, quotes, and '$' in one PARAMS value: the engine JSON-encodes it
+        # (not CLI --parameter-overrides shorthand), so it must survive verbatim.
+        "DexExtraUsers": '[{"email":"a@b.com","hash":"$2y$10$abc.DEF/ghi"}]',
         "LicenseData": '{"customer":"acme"}',
         "TemplateBaseUrl": "https://my-mirror.example.com/v9.9.9/cardinal-lakerunner/",
     }
@@ -466,5 +470,9 @@ def test_create_full_install_mix(tmp_path):
     assert out["LakerunnerImage"]["ParameterValue"].endswith("1.20.0")
     assert out["DexAdminEmail"]["ParameterValue"] == "ops@example.com"  # CLI overrides default
     assert out["DexAdminPasswordHash"]["ParameterValue"].startswith("$2b$12$")
+    assert (
+        out["DexExtraUsers"]["ParameterValue"]
+        == '[{"email":"a@b.com","hash":"$2y$10$abc.DEF/ghi"}]'
+    )
     assert out["LicenseData"]["ParameterValue"] == '{"customer":"acme"}'
     assert out["TemplateBaseUrl"]["ParameterValue"].startswith("https://my-mirror.example.com")

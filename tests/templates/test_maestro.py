@@ -60,6 +60,22 @@ def test_dex_client_id_default(td):
     assert td["Parameters"]["DexClientId"]["Default"] == "maestro-ui"
 
 
+def test_dex_extra_users_parameter(td):
+    p = td["Parameters"]["DexExtraUsers"]
+    assert p["Type"] == "String"
+    # Holds bcrypt hashes -> NoEcho. Empty default -> admin-only, back-compat.
+    assert p["NoEcho"] is True
+    assert p["Default"] == ""
+
+
+def test_dex_extra_users_in_dex_parameter_group(td):
+    groups = td["Metadata"]["AWS::CloudFormation::Interface"]["ParameterGroups"]
+    dex_group = next(
+        g for g in groups if g["Label"]["default"] == "DEX configuration"
+    )
+    assert "DexExtraUsers" in dex_group["Parameters"]
+
+
 # ---------------------------------------------------------------------------
 # Core resources
 # ---------------------------------------------------------------------------
@@ -325,6 +341,14 @@ def test_dex_container_env_has_oidc_inputs(td):
         "DEX_ADMIN_EMAIL",
         "DEX_ADMIN_HASH",
     } <= env_names
+
+
+def test_dex_container_extra_users_env(td):
+    # The additive multi-account list is threaded to the dex gomplate template
+    # via DEX_EXTRA_USERS; the image renders zero entries when it is empty.
+    dex_c = _container(td, "dex")
+    env = {e["Name"]: e["Value"] for e in dex_c.get("Environment", [])}
+    assert env["DEX_EXTRA_USERS"] == {"Ref": "DexExtraUsers"}
 
 
 def test_dex_renders_config_in_image(td):
