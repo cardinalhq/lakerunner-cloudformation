@@ -1,0 +1,5 @@
+{
+  "name": "multiple-dex-accounts",
+  "description": "Let operators configure more than one bundled-Dex login account (each with its own username/password), so non-admin org members can be invited and sign in without an external IdP. Spans the dex-customization image template and the lakerunner CloudFormation parameter surface.",
+  "type": "feature"
+}
