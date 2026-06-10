@@ -11,7 +11,7 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
-## Unreleased
+## v1.1.0
 
 - **New optional parameter `DexExtraUsers`** (NoEcho, default empty) on the
   lakerunner-services stack. Adds bundled-DEX login accounts beyond the admin:

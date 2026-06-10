@@ -33,7 +33,7 @@ DEFAULT_IMAGE_REGISTRY="public.ecr.aws"
 # DB_INIT_IMAGE remains a full-URI escape hatch.
 LAKERUNNER_IMAGE_SUFFIX="cardinalhq.io/lakerunner:v1.41.6@sha256:b19a07106bd21658e7e1f833e4fa79e633418f810126c710907f436beab964a9"
 MAESTRO_IMAGE_SUFFIX="cardinalhq.io/maestro:v1.53.1@sha256:ac533a492623b5df7c4176f8fc887145a2de3662417388e5fc0fb678c49ba698"
-DEX_IMAGE_SUFFIX="cardinalhq.io/dex-customization:v0.3.0@sha256:7d5504390f799577d31c3bde21c816e1c3674de30f31bf755e0633886b4bbf77"
+DEX_IMAGE_SUFFIX="cardinalhq.io/dex-customization:v0.4.0@sha256:c85811b3a82b1574063971ce79126886607fbc82a1f9d777587fc4895ce18b7b"
 DB_INIT_IMAGE_SUFFIX="docker/library/postgres:18-alpine@sha256:96d56f7f57c6aacd1fcb908bc83b345ec5f83231ee486dd66a1baadce274db88"
 
 usage() {
