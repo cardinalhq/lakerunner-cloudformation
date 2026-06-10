@@ -11,6 +11,17 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v1.1.1
+
+- **Deploy-driver fix: inline `DEX_EXTRA_USERS` works and accepts multi-line
+  JSON.** In v1.1.0 the driver's newline guard rejected every inline
+  `DEX_EXTRA_USERS` value with a "contains a newline" error; the only working
+  path was `DEX_EXTRA_USERS_FILE`. The guard is gone — the driver now flattens
+  the JSON (newlines are insignificant whitespace) before passing it as the
+  `DexExtraUsers` stack param, so multi-line values pasted into an env var or
+  Jenkins param work. Driver-only change; no template changes, no upgrade
+  action, no resource replacement.
+
 ## v1.1.0
 
 - **New optional parameter `DexExtraUsers`** (NoEcho, default empty) on the
