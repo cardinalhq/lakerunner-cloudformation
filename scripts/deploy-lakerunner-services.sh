@@ -33,7 +33,7 @@ DEFAULT_IMAGE_REGISTRY="public.ecr.aws"
 # DB_INIT_IMAGE remains a full-URI escape hatch.
 LAKERUNNER_IMAGE_SUFFIX="cardinalhq.io/lakerunner:v1.41.6@sha256:b19a07106bd21658e7e1f833e4fa79e633418f810126c710907f436beab964a9"
 MAESTRO_IMAGE_SUFFIX="cardinalhq.io/maestro:v1.53.1@sha256:ac533a492623b5df7c4176f8fc887145a2de3662417388e5fc0fb678c49ba698"
-DEX_IMAGE_SUFFIX="cardinalhq.io/dex-customization:v0.3.0@sha256:7d5504390f799577d31c3bde21c816e1c3674de30f31bf755e0633886b4bbf77"
+DEX_IMAGE_SUFFIX="cardinalhq.io/dex-customization:v0.4.0@sha256:c85811b3a82b1574063971ce79126886607fbc82a1f9d777587fc4895ce18b7b"
 DB_INIT_IMAGE_SUFFIX="docker/library/postgres:18-alpine@sha256:96d56f7f57c6aacd1fcb908bc83b345ec5f83231ee486dd66a1baadce274db88"
 
 usage() {
@@ -86,6 +86,13 @@ Optional (template defaults preserved when unset):
   CERTIFICATE_CHAIN_FILE      PEM chain (path) -- fallback for CERTIFICATE_CHAIN.
   DEX_ADMIN_EMAIL             (template default admin@cardinal.local).
   DEX_CLIENT_ID               (template default maestro-ui).
+  DEX_EXTRA_USERS             JSON array of additional DEX login accounts, each
+                              with an "email" and a bcrypt "hash" (optional
+                              "username"/"userID").  Single-line; passed as the
+                              DexExtraUsers stack param.  Add a user's email to
+                              OIDC_SUPERADMIN_EMAILS to make them a superadmin.
+  DEX_EXTRA_USERS_FILE        Path to a JSON file with the same content (multi-
+                              line ok) -- fallback for DEX_EXTRA_USERS.
   OIDC_SUPERADMIN_EMAILS      (template default admin@cardinal.local).
   SATELLITE_SERVICES_STACK    Source of CollectorEndpoint for lakerunner self-
                               telemetry (default cardinal-satellite-services).
@@ -383,6 +390,29 @@ DexAdminPasswordHash=$DEX_ADMIN_PASSWORD_HASH"
 DexClientId=$DEX_CLIENT_ID"
 [ -n "${OIDC_SUPERADMIN_EMAILS:-}" ] && params="$params
 OidcSuperadminEmails=$OIDC_SUPERADMIN_EMAILS"
+
+# Additional DEX login accounts.  Inline DEX_EXTRA_USERS rides PARAMS (single-
+# line: PARAMS is newline-delimited, so a multi-line blob must use the _FILE
+# form, routed through FILE_PARAMS like the cert PEMs).  Inline wins when both
+# are set.
+if [ -n "${DEX_EXTRA_USERS:-}" ]; then
+    case "$DEX_EXTRA_USERS" in
+        *"$(printf '\n')"*)
+            echo "[deploy-lakerunner-services] ERROR: DEX_EXTRA_USERS contains a newline; pass a single-line value or use DEX_EXTRA_USERS_FILE" >&2
+            exit 2
+            ;;
+    esac
+    params="$params
+DexExtraUsers=$DEX_EXTRA_USERS"
+elif [ -n "${DEX_EXTRA_USERS_FILE:-}" ]; then
+    [ -r "$DEX_EXTRA_USERS_FILE" ] || { echo "[deploy-lakerunner-services] ERROR: cannot read DEX_EXTRA_USERS_FILE: $DEX_EXTRA_USERS_FILE" >&2; exit 2; }
+    if [ -n "$file_params" ]; then
+        file_params="$file_params
+DexExtraUsers=$DEX_EXTRA_USERS_FILE"
+    else
+        file_params="DexExtraUsers=$DEX_EXTRA_USERS_FILE"
+    fi
+fi
 
 [ -n "${PUBSUB_AUTOREGISTER:-}" ] && params="$params
 PubsubAutoRegister=$PUBSUB_AUTOREGISTER"

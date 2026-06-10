@@ -353,6 +353,15 @@ def build() -> Template:
             "Bcrypt hash ($2a$/$2b$/$2y$) of the DEX admin password. Required."
         ),
     )
+    add_no_echo_parameter(
+        t, "DexExtraUsers", default="",
+        description=(
+            "Optional JSON array of additional DEX login accounts, each "
+            "{\"email\":...,\"hash\":\"$2y$...\"} (optional \"username\"/"
+            "\"userID\"). Empty for admin-only. Add an email to "
+            "OidcSuperadminEmails to make that user a superadmin."
+        ),
+    )
     t.add_parameter(Parameter(
         "OidcSuperadminEmails",
         Type="String",
@@ -478,6 +487,7 @@ def build() -> Template:
             {"label": "Advanced",
              "parameters": ["DeployMaestro",
                             "DexAdminEmail", "DexAdminPasswordHash",
+                            "DexExtraUsers",
                             "OidcSuperadminEmails",
                             "OrganizationId", "OrgName",
                             "TemplateBaseUrl"]},
@@ -701,6 +711,7 @@ def build() -> Template:
         "DexClientId": Ref("DexClientId"),
         "DexAdminEmail": Ref("DexAdminEmail"),
         "DexAdminPasswordHash": Ref("DexAdminPasswordHash"),
+        "DexExtraUsers": Ref("DexExtraUsers"),
         "OidcSuperadminEmails": Ref("OidcSuperadminEmails"),
         "AdminApiKeySecretArn": Ref("AdminKeySecretArn"),
         "OrganizationId": Ref("OrganizationId"),

@@ -11,6 +11,20 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v1.1.0
+
+- **New optional parameter `DexExtraUsers`** (NoEcho, default empty) on the
+  lakerunner-services stack. Adds bundled-DEX login accounts beyond the admin:
+  a JSON array of `{"email":...,"hash":"$2y$..."}` objects (optional
+  `username`/`userID`). The deploy driver accepts it as `DEX_EXTRA_USERS`
+  (inline, single-line JSON) or `DEX_EXTRA_USERS_FILE` (path to a JSON file).
+  Leave it empty for the existing admin-only behavior — no upgrade action.
+  Make any of the extra users a superadmin by also adding their email to
+  `OIDC_SUPERADMIN_EMAILS`; otherwise an admin invites them to an org in the
+  Maestro UI after their first login. Requires the bundled DEX image that
+  supports `DEX_EXTRA_USERS` (shipped with this release's `DexImage` default);
+  an empty value works on any prior image. No resource replacement.
+
 ## v1.0.1
 
 - **lakerunner `v1.40.4` -> `v1.41.6`.** Default `LakerunnerImage` bump. On

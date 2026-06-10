@@ -309,6 +309,21 @@ def build() -> Template:
             "(or any bcrypt $2a$/$2b$/$2y$ hash). Required."
         ),
     )
+    add_no_echo_parameter(
+        t,
+        "DexExtraUsers",
+        default="",
+        description=(
+            "Optional additional DEX login accounts, beyond the admin above. "
+            "JSON array of objects, each with a required \"email\" and bcrypt "
+            "\"hash\" (same form as DexAdminPasswordHash) plus optional "
+            "\"username\"/\"userID\": "
+            "[{\"email\":\"a@b.com\",\"hash\":\"$2y$...\"}]. Leave empty for "
+            "admin-only. Make any of them a superadmin by also adding their "
+            "email to OidcSuperadminEmails; otherwise an admin invites them to "
+            "an org in the Maestro UI after their first login."
+        ),
+    )
 
     # ---------------------------------------------------------------------
     # Console parameter grouping
@@ -359,6 +374,7 @@ def build() -> Template:
                     "DexClientId",
                     "DexAdminEmail",
                     "DexAdminPasswordHash",
+                    "DexExtraUsers",
                     "OidcSuperadminEmails",
                 ],
             },
@@ -593,6 +609,8 @@ def build() -> Template:
             Environment(Name="DEX_PORT", Value=str(dex_port)),
             Environment(Name="DEX_ADMIN_EMAIL", Value=Ref("DexAdminEmail")),
             Environment(Name="DEX_ADMIN_HASH", Value=Ref("DexAdminPasswordHash")),
+            # Additive non-admin accounts; empty -> the image renders admin only.
+            Environment(Name="DEX_EXTRA_USERS", Value=Ref("DexExtraUsers")),
         ],
         LogConfiguration=LogConfiguration(
             LogDriver="awslogs",
