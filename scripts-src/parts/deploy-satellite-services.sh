@@ -108,6 +108,11 @@ Optional (template defaults preserved when unset):
   INGEST_SOURCE_CIDR   Allowed source CIDR for the collector ALB (template default 10.0.0.0/8).
   OTEL_REPLICAS        Collector replica count (default 1; >1 requires a
                        collector config change first).
+  NAME_SUFFIX          Optional suffix appended to the stack's fixed physical
+                       names (the /cardinal/otel-grpc log group) so a
+                       second collector stack (e.g. dev + prod) can share an
+                       account/region.  Max 16 chars, lowercase alphanumeric
+                       and hyphens.  Leave unset on existing stacks.
   EXECUTION_ROLE_POLICY_ARNS   Comma-separated managed-policy ARNs to attach to
                        the collector execution role (e.g. ECR pull-through
                        import, cross-account ECR, KMS decrypt).
@@ -141,8 +146,8 @@ otel_image="$image_registry/$OTEL_IMAGE_SUFFIX"
 echo "[deploy-satellite-services] inputs visible to this process:" >&2
 for _v in STACK_NAME REGION STACK_VERSION VERSION SATELLITE_INFRA_BASE_STACK \
           ORGANIZATION_ID VPC_ID ALB_SUBNETS TASK_SUBNETS ECS_CLUSTER_ARN \
-          ALB_SCHEME INGEST_SOURCE_CIDR OTEL_REPLICAS IMAGE_REGISTRY \
-          TEMPLATE_BASE_URL DEPLOYER_ROLE_ARN NO_EXECUTE; do
+          ALB_SCHEME INGEST_SOURCE_CIDR OTEL_REPLICAS NAME_SUFFIX \
+          IMAGE_REGISTRY TEMPLATE_BASE_URL DEPLOYER_ROLE_ARN NO_EXECUTE; do
     eval "_val=\${$_v:-}"
     printf '[deploy-satellite-services]   %-27s = %s\n' "$_v" "${_val:-<unset>}" >&2
 done
@@ -186,6 +191,8 @@ OtelImage=$otel_image"
 AlbScheme=$ALB_SCHEME"
 [ -n "${INGEST_SOURCE_CIDR:-}" ] && params="$params
 IngestSourceCidr=$INGEST_SOURCE_CIDR"
+[ -n "${NAME_SUFFIX:-}" ] && params="$params
+NameSuffix=$NAME_SUFFIX"
 
 # Optional execution-role extra managed policies (pasted JSON and/or ARNs).
 EXEC_EXTRA_ARNS=""

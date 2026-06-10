@@ -11,6 +11,22 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v1.1.2
+
+- **New optional parameter `NameSuffix`** (default empty) on the
+  satellite-infra-base and satellite-services stacks, so multiple satellite
+  stacks (e.g. one collector for prod and one for dev) can coexist in a single
+  AWS account. When set, it is appended to the stacks' fixed physical names:
+  the `cardinal-satellite-access` IAM role (account-global, the previous hard
+  collision), the default raw bucket name
+  `cardinal-otel-raw-<account>-<region>`, and the `/cardinal/otel-grpc` log
+  group. Max 16 chars (lowercase alphanumeric and hyphens) to keep the default
+  bucket name within S3's 63-char limit. The suffixed role still matches the
+  central install's existing `cardinal-satellite-access*` assume-role grant,
+  so no change is needed on the lakerunner side. The deploy drivers accept it
+  as `NAME_SUFFIX`. Leave it unset on existing stacks: all names resolve to
+  exactly their previous values — no upgrade action, no resource replacement.
+
 ## v1.1.1
 
 - **Deploy-driver fix: inline `DEX_EXTRA_USERS` works and accepts multi-line

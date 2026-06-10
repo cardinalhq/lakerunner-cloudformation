@@ -98,7 +98,8 @@ def build() -> Template:
             Default="",
             Description=(
                 "Name for the raw ingest bucket. Blank uses the default "
-                "cardinal-otel-raw-<account>-<region>."
+                "cardinal-otel-raw-<account>-<region>, with -<NameSuffix> "
+                "appended when NameSuffix is set."
             ),
             AllowedPattern=r"^$|^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$",
         )
@@ -133,7 +134,26 @@ def build() -> Template:
         )
     )
 
+    t.add_parameter(
+        Parameter(
+            "NameSuffix",
+            Type="String",
+            Default="",
+            Description=(
+                "Optional suffix appended to this stack's fixed physical "
+                "names (the cardinal-satellite-access role and the default "
+                "raw bucket name) so multiple satellite stacks can coexist "
+                "in one account. Blank (the default) keeps the original "
+                "names, so existing stacks are unaffected. Max 16 chars "
+                "(lowercase alphanumeric and hyphens) to keep the default "
+                "bucket name within S3's 63-char limit."
+            ),
+            AllowedPattern=r"^$|^[a-z0-9]([a-z0-9-]{0,14}[a-z0-9])?$",
+        )
+    )
+
     t.add_condition("UseDefaultBucketName", Equals(Ref("RawBucketName"), ""))
+    t.add_condition("HasNameSuffix", Not(Equals(Ref("NameSuffix"), "")))
     t.add_condition("HasExternalId", Not(Equals(Ref("ExternalId"), "")))
     t.add_condition(
         "AddRawBucketPublicAccessBlock",
@@ -142,7 +162,11 @@ def build() -> Template:
 
     bucket_name_value = If(
         "UseDefaultBucketName",
-        Sub("cardinal-otel-raw-${AWS::AccountId}-${AWS::Region}"),
+        If(
+            "HasNameSuffix",
+            Sub("cardinal-otel-raw-${AWS::AccountId}-${AWS::Region}-${NameSuffix}"),
+            Sub("cardinal-otel-raw-${AWS::AccountId}-${AWS::Region}"),
+        ),
         Ref("RawBucketName"),
     )
 
@@ -246,8 +270,14 @@ def build() -> Template:
             "LakerunnerAccessRole",
             # Fixed name so the lakerunner process tier can grant
             # sts:AssumeRole on the cardinal-satellite-access* pattern across
-            # accounts. One install per account makes a fixed name safe.
-            RoleName="cardinal-satellite-access",
+            # accounts. NameSuffix keeps additional satellite stacks in the
+            # same account collision-free while still matching that pattern
+            # (IAM role names are account-global; 64-char cap).
+            RoleName=If(
+                "HasNameSuffix",
+                Sub("cardinal-satellite-access-${NameSuffix}"),
+                "cardinal-satellite-access",
+            ),
             AssumeRolePolicyDocument={
                 "Version": "2012-10-17",
                 "Statement": [

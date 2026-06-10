@@ -39,6 +39,12 @@ Optional (template defaults preserved when unset):
                              version baked into this driver ($DEFAULT_STACK_VERSION).
                              (VERSION is accepted as a legacy alias.)
   EXTERNAL_ID                Optional STS ExternalId for the assume-role trust.
+  NAME_SUFFIX                Optional suffix appended to the stack's fixed
+                             physical names (access role, default bucket name)
+                             so a second satellite stack (e.g. dev + prod) can
+                             share an account.  Max 16 chars, lowercase
+                             alphanumeric and hyphens.  Leave unset on existing
+                             stacks: their names stay exactly as deployed.
   RAW_BUCKET_NAME            Optional explicit raw ingest bucket name.
   RAW_BUCKET_LIFECYCLE_DAYS  (template default 7).
   CONFIGURE_BUCKET_PUBLIC_ACCESS_BLOCK
@@ -79,6 +85,8 @@ MAPS=""
 params="LakerunnerPrincipal=$LAKERUNNER_PRINCIPAL
 "
 [ -n "${EXTERNAL_ID:-}" ] && params="${params}ExternalId=$EXTERNAL_ID
+"
+[ -n "${NAME_SUFFIX:-}" ] && params="${params}NameSuffix=$NAME_SUFFIX
 "
 [ -n "${RAW_BUCKET_NAME:-}" ] && params="${params}RawBucketName=$RAW_BUCKET_NAME
 "

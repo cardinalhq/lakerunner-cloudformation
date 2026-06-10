@@ -228,6 +228,22 @@ def build() -> Template:
     )
     t.add_parameter(
         Parameter(
+            "NameSuffix",
+            Type="String",
+            Default="",
+            Description=(
+                "Optional suffix appended to this stack's fixed physical "
+                "names (the /cardinal/otel-grpc log group) so multiple "
+                "satellite collector stacks can coexist in one account and "
+                "region. Blank (the default) keeps the original names, so "
+                "existing stacks are unaffected. Max 16 chars (lowercase "
+                "alphanumeric and hyphens), matching satellite-infra-base."
+            ),
+            AllowedPattern=r"^$|^[a-z0-9]([a-z0-9-]{0,14}[a-z0-9])?$",
+        )
+    )
+    t.add_parameter(
+        Parameter(
             "OtelConfigYaml",
             Type="String",
             Default="",
@@ -252,6 +268,7 @@ def build() -> Template:
     t.add_condition(
         "HasOtelConfigOverride", Not(Equals(Ref("OtelConfigYaml"), ""))
     )
+    t.add_condition("HasNameSuffix", Not(Equals(Ref("NameSuffix"), "")))
 
     # ------------------------------------------------------------------
     # Console parameter grouping
@@ -284,6 +301,7 @@ def build() -> Template:
                     "OtelCpu",
                     "OtelMemory",
                     "OtelConfigYaml",
+                    "NameSuffix",
                 ],
             },
             {
@@ -550,7 +568,14 @@ def build() -> Template:
     log_group = t.add_resource(
         LogGroup(
             "OtelGrpcLogGroup",
-            LogGroupName=f"/cardinal/{_SERVICE_KEY}",
+            # Fixed name collides when a second collector stack lands in the
+            # same account/region; NameSuffix disambiguates without touching
+            # existing (suffix-less) stacks.
+            LogGroupName=If(
+                "HasNameSuffix",
+                Sub(f"/cardinal/{_SERVICE_KEY}-${{NameSuffix}}"),
+                f"/cardinal/{_SERVICE_KEY}",
+            ),
             RetentionInDays=14,
             Tags=_tags(component="satellite-otel-log"),
         )

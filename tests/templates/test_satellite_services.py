@@ -284,3 +284,28 @@ def test_exec_role_managed_policy_arns_conditional(td):
     blob = json.dumps(arns)
     assert "AmazonECSTaskExecutionRolePolicy" in blob
     assert "ExecutionRoleExtraPolicyArns" in blob
+
+
+# ---------------------------------------------------------------------------
+# NameSuffix (multiple collector stacks per account/region)
+# ---------------------------------------------------------------------------
+
+
+def test_name_suffix_blank_default_and_bounded(td):
+    p = td["Parameters"]["NameSuffix"]
+    assert p["Default"] == ""
+    assert p["AllowedPattern"] == r"^$|^[a-z0-9]([a-z0-9-]{0,14}[a-z0-9])?$"
+
+
+def test_log_group_name_gets_suffix(td):
+    """The fixed log group name collides on a second same-account/region
+    collector stack; NameSuffix disambiguates, blank keeps the original
+    name so existing stacks never change."""
+    name = td["Resources"]["OtelGrpcLogGroup"]["Properties"]["LogGroupName"]
+    assert name == {
+        "Fn::If": [
+            "HasNameSuffix",
+            {"Fn::Sub": "/cardinal/otel-grpc-${NameSuffix}"},
+            "/cardinal/otel-grpc",
+        ]
+    }
