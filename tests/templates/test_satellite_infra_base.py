@@ -99,11 +99,44 @@ def test_bucket_lifecycle_uses_parameter(td):
 
 def test_role_named_cardinal_satellite_access(td):
     """Fixed name lets the lakerunner process tier scope cross-account
-    sts:AssumeRole to the cardinal-satellite-access* pattern."""
-    assert (
-        td["Resources"]["LakerunnerAccessRole"]["Properties"]["RoleName"]
-        == "cardinal-satellite-access"
-    )
+    sts:AssumeRole to the cardinal-satellite-access* pattern. NameSuffix
+    (blank default) appends -<suffix> while still matching that pattern;
+    blank resolves to the original name so existing stacks never change."""
+    assert td["Resources"]["LakerunnerAccessRole"]["Properties"]["RoleName"] == {
+        "Fn::If": [
+            "HasNameSuffix",
+            {"Fn::Sub": "cardinal-satellite-access-${NameSuffix}"},
+            "cardinal-satellite-access",
+        ]
+    }
+
+
+def test_name_suffix_blank_default_and_bounded(td):
+    p = td["Parameters"]["NameSuffix"]
+    assert p["Default"] == ""
+    # Max 16 chars so the default bucket name stays within S3's 63-char cap
+    # (18 prefix + 12 account + 1 + 14 longest region + 1 + 16 = 62).
+    assert p["AllowedPattern"] == r"^$|^[a-z0-9]([a-z0-9-]{0,14}[a-z0-9])?$"
+
+
+def test_default_bucket_name_gets_suffix(td):
+    name = td["Resources"]["RawIngestBucket"]["Properties"]["BucketName"]
+    assert name == {
+        "Fn::If": [
+            "UseDefaultBucketName",
+            {
+                "Fn::If": [
+                    "HasNameSuffix",
+                    {
+                        "Fn::Sub": "cardinal-otel-raw-${AWS::AccountId}"
+                        "-${AWS::Region}-${NameSuffix}"
+                    },
+                    {"Fn::Sub": "cardinal-otel-raw-${AWS::AccountId}-${AWS::Region}"},
+                ]
+            },
+            {"Ref": "RawBucketName"},
+        ]
+    }
 
 
 def test_role_trusts_lakerunner_principal(td):
