@@ -88,11 +88,12 @@ Optional (template defaults preserved when unset):
   DEX_CLIENT_ID               (template default maestro-ui).
   DEX_EXTRA_USERS             JSON array of additional DEX login accounts, each
                               with an "email" and a bcrypt "hash" (optional
-                              "username"/"userID").  Single-line; passed as the
-                              DexExtraUsers stack param.  Add a user's email to
-                              OIDC_SUPERADMIN_EMAILS to make them a superadmin.
-  DEX_EXTRA_USERS_FILE        Path to a JSON file with the same content (multi-
-                              line ok) -- fallback for DEX_EXTRA_USERS.
+                              "username"/"userID").  Multi-line ok (flattened
+                              before passing as the DexExtraUsers stack param).
+                              Add a user's email to OIDC_SUPERADMIN_EMAILS to
+                              make them a superadmin.
+  DEX_EXTRA_USERS_FILE        Path to a JSON file with the same content --
+                              fallback for DEX_EXTRA_USERS.
   OIDC_SUPERADMIN_EMAILS      (template default admin@cardinal.local).
   SATELLITE_SERVICES_STACK    Source of CollectorEndpoint for lakerunner self-
                               telemetry (default cardinal-satellite-services).
@@ -391,19 +392,13 @@ DexClientId=$DEX_CLIENT_ID"
 [ -n "${OIDC_SUPERADMIN_EMAILS:-}" ] && params="$params
 OidcSuperadminEmails=$OIDC_SUPERADMIN_EMAILS"
 
-# Additional DEX login accounts.  Inline DEX_EXTRA_USERS rides PARAMS (single-
-# line: PARAMS is newline-delimited, so a multi-line blob must use the _FILE
-# form, routed through FILE_PARAMS like the cert PEMs).  Inline wins when both
-# are set.
+# Additional DEX login accounts.  Inline DEX_EXTRA_USERS rides PARAMS, which is
+# newline-delimited -- but the value is JSON, where newlines are only ever
+# insignificant whitespace, so a multi-line blob is flattened before appending.
+# Inline wins when both forms are set.
 if [ -n "${DEX_EXTRA_USERS:-}" ]; then
-    case "$DEX_EXTRA_USERS" in
-        *"$(printf '\n')"*)
-            echo "[deploy-lakerunner-services] ERROR: DEX_EXTRA_USERS contains a newline; pass a single-line value or use DEX_EXTRA_USERS_FILE" >&2
-            exit 2
-            ;;
-    esac
     params="$params
-DexExtraUsers=$DEX_EXTRA_USERS"
+DexExtraUsers=$(printf '%s' "$DEX_EXTRA_USERS" | tr -d '\r\n')"
 elif [ -n "${DEX_EXTRA_USERS_FILE:-}" ]; then
     [ -r "$DEX_EXTRA_USERS_FILE" ] || { echo "[deploy-lakerunner-services] ERROR: cannot read DEX_EXTRA_USERS_FILE: $DEX_EXTRA_USERS_FILE" >&2; exit 2; }
     if [ -n "$file_params" ]; then
