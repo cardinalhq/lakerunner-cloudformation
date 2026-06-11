@@ -46,6 +46,8 @@ internal_resolve_create_params=""
 internal_resolve_create_params_arg2=""
 internal_classify_status=""
 internal_classify_reason=""
+internal_ascii_check_label=""
+internal_ascii_check_file=""
 
 # State held across stages so the abort handler can clean up.
 change_set_name=""
@@ -94,6 +96,76 @@ fail() {
     shift
     printf '[deploy-lakerunner] ERROR: %s\n' "$*" >&2
     exit "$code"
+}
+
+# ---------------------------------------------------------------------------
+# ASCII-only input validation.  Every operator-supplied value (flag values and
+# input-file contents) must be plain ASCII: smart quotes, no-break spaces, and
+# other typographic characters -- usually introduced by pasting from a word
+# processor, browser, or chat tool -- ride silently into the CloudFormation
+# parameter JSON and surface much later as inscrutable template or service
+# errors.  Reject them up front, naming the exact character and where it sits.
+# Allowed bytes: printable ASCII 0x20-0x7E plus tab, newline, carriage return.
+# ---------------------------------------------------------------------------
+
+# Print a description of the first disallowed byte in "$1" (one line of text),
+# e.g.:  byte 12: left double curly quote (U+201C) -- use a plain " instead
+ascii_describe_line() {
+    _adl_hex=$(printf '%s' "$1" | od -An -v -tx1 | tr -d ' \n')
+    _adl_pos=1
+    while [ -n "$_adl_hex" ]; do
+        _adl_byte=$(printf '%.2s' "$_adl_hex")
+        case "$_adl_byte" in
+            7f) break ;;
+            09|0d|2?|3?|4?|5?|6?|7?) ;;
+            *) break ;;
+        esac
+        _adl_hex=${_adl_hex#??}
+        _adl_pos=$((_adl_pos + 1))
+    done
+    _adl_desc=""
+    case "$_adl_hex" in
+        e28098*) _adl_desc="left single curly quote (U+2018) -- use a plain apostrophe (')" ;;
+        e28099*) _adl_desc="right single curly quote (U+2019) -- use a plain apostrophe (')" ;;
+        e2809c*) _adl_desc='left double curly quote (U+201C) -- use a plain double quote (")' ;;
+        e2809d*) _adl_desc='right double curly quote (U+201D) -- use a plain double quote (")' ;;
+        e28093*) _adl_desc='en dash (U+2013) -- use a plain hyphen (-)' ;;
+        e28094*) _adl_desc='em dash (U+2014) -- use a plain hyphen (-)' ;;
+        e2808b*) _adl_desc='zero-width space (U+200B) -- invisible; delete it' ;;
+        e2808?*) _adl_desc='typographic space or invisible formatting character (U+2000-U+200F) -- use a plain space or delete it' ;;
+        e280a8*|e280a9*) _adl_desc='Unicode line/paragraph separator (U+2028/U+2029) -- use a plain newline' ;;
+        e280af*) _adl_desc='narrow no-break space (U+202F) -- looks like a space but is not; use a plain space' ;;
+        efbbbf*) _adl_desc='UTF-8 byte order mark (U+FEFF) -- invisible; remove it (often at the very start of a file)' ;;
+        c2a0*) _adl_desc='no-break space (U+00A0) -- looks like a space but is not; use a plain space' ;;
+        c2ad*) _adl_desc='soft hyphen (U+00AD) -- invisible; delete it' ;;
+    esac
+    if [ -z "$_adl_desc" ]; then
+        _adl_byte=$(printf '%.2s' "$_adl_hex")
+        case "$_adl_byte" in
+            0?|1?|7f) _adl_desc="control character (byte 0x$_adl_byte)" ;;
+            *) _adl_desc="non-ASCII character (UTF-8 bytes 0x$(printf '%.6s' "$_adl_hex"))" ;;
+        esac
+    fi
+    printf 'byte %d: %s' "$_adl_pos" "$_adl_desc"
+}
+
+# ascii_check LABEL TEXT -- fail (exit 2) when TEXT contains anything other
+# than printable ASCII, tab, newline, or carriage return.  The error names
+# the first offending character and its line/byte position.
+ascii_check() {
+    _ac_label="$1"
+    _ac_text="$2"
+    [ -n "$_ac_text" ] || return 0
+    [ -n "$(printf '%s' "$_ac_text" | LC_ALL=C tr -d '\11\12\15\40-\176')" ] || return 0
+    _ac_lineno=0
+    while IFS= read -r _ac_line; do
+        _ac_lineno=$((_ac_lineno + 1))
+        [ -n "$(printf '%s' "$_ac_line" | LC_ALL=C tr -d '\11\15\40-\176')" ] || continue
+        fail 2 "$_ac_label is not plain ASCII: line $_ac_lineno, $(ascii_describe_line "$_ac_line").  Curly quotes, odd spaces, and similar characters usually come from pasting text out of a word processor, browser, or chat tool; retype the value using plain ASCII characters."
+    done <<ASCII_CHECK_EOF
+$_ac_text
+ASCII_CHECK_EOF
+    fail 2 "$_ac_label is not plain ASCII (contains a disallowed control or non-ASCII byte)"
 }
 
 # ---------------------------------------------------------------------------
@@ -335,6 +407,11 @@ parse_args() {
                 internal_classify_reason="$3"
                 shift 3
                 ;;
+            --internal-ascii-check)
+                internal_ascii_check_label="$2"
+                internal_ascii_check_file="$3"
+                shift 3
+                ;;
             -h|--help) usage; exit 0 ;;
             *) fail 2 "unknown argument: $1" ;;
         esac
@@ -364,6 +441,17 @@ build_create_overrides() {
     cert_body=$(read_file_or_empty "$cli_certificate_body_file")
     cert_pkey=$(read_file_or_empty "$cli_certificate_private_key_file")
     cert_chain=$(read_file_or_empty "$cli_certificate_chain_file")
+
+    ascii_check "--vpc-id" "$cli_vpc_id"
+    ascii_check "--private-subnets" "$cli_private_subnets"
+    ascii_check "--certificate-arn" "$cli_certificate_arn"
+    ascii_check "--dex-admin-email" "$cli_dex_admin_email"
+    ascii_check "--dex-admin-password-hash" "$cli_dex_admin_password_hash"
+    ascii_check "--oidc-superadmin-emails" "$cli_oidc_superadmin_emails"
+    ascii_check "license data file ($cli_license_data_file)" "$license_data"
+    ascii_check "certificate body file ($cli_certificate_body_file)" "$cert_body"
+    ascii_check "certificate private key file ($cli_certificate_private_key_file)" "$cert_pkey"
+    ascii_check "certificate chain file ($cli_certificate_chain_file)" "$cert_chain"
 
     jq -n \
         --arg vpc_id "$cli_vpc_id" \
@@ -421,6 +509,13 @@ main() {
         classify_status "$internal_classify_status" "$internal_classify_reason"
         return 0
     fi
+    if [ -n "$internal_ascii_check_file" ]; then
+        if [ ! -r "$internal_ascii_check_file" ]; then
+            fail 2 "cannot read file: $internal_ascii_check_file"
+        fi
+        ascii_check "$internal_ascii_check_label" "$(cat "$internal_ascii_check_file")"
+        return 0
+    fi
 
     preflight
 
@@ -428,6 +523,12 @@ main() {
         usage >&2
         fail 2 "--stack-name, --region, and --version are required"
     fi
+
+    ascii_check "--stack-name" "$stack_name"
+    ascii_check "--region" "$region"
+    ascii_check "--version" "$version"
+    ascii_check "--template-base-url" "$template_base_url"
+    ascii_check "--deployer-role-arn" "$deployer_role_arn"
 
     log "checking whether stack $stack_name exists in $region"
     # REVIEW_IN_PROGRESS and ROLLBACK_COMPLETE both indicate a stack record

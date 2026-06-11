@@ -476,3 +476,46 @@ def test_create_full_install_mix(tmp_path):
     )
     assert out["LicenseData"]["ParameterValue"] == '{"customer":"acme"}'
     assert out["TemplateBaseUrl"]["ParameterValue"].startswith("https://my-mirror.example.com")
+
+
+# ---------------------------------------------------------------------------
+# ASCII-only input validation: operator-supplied values and file contents must
+# be plain ASCII; smart quotes / no-break spaces (typically pasted from a word
+# processor or chat tool) are rejected with a message naming the character.
+# Exercised via the --internal-ascii-check <label> <file> hook.
+# ---------------------------------------------------------------------------
+
+
+def _run_ascii_check(label, path):
+    return subprocess.run(
+        ["sh", str(SCRIPT), "--internal-ascii-check", label, str(path)],
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_ascii_check_rejects_smart_quotes_with_description(tmp_path):
+    f = tmp_path / "license.json"
+    f.write_text('{\u201ccustomer\u201d: \u201cacme\u201d}', encoding="utf-8")
+    result = _run_ascii_check("license data", f)
+    assert result.returncode == 2, result.stderr
+    assert "license data" in result.stderr
+    assert "U+201C" in result.stderr
+    assert "curly quote" in result.stderr
+
+
+def test_ascii_check_rejects_no_break_space_with_location(tmp_path):
+    f = tmp_path / "users.json"
+    f.write_text('[\n {"email":\u00a0"a@b.c"}\n]\n', encoding="utf-8")
+    result = _run_ascii_check("dex users", f)
+    assert result.returncode == 2, result.stderr
+    assert "U+00A0" in result.stderr
+    assert "no-break space" in result.stderr
+    assert "line 2" in result.stderr
+
+
+def test_ascii_check_accepts_plain_ascii(tmp_path):
+    f = tmp_path / "clean.json"
+    f.write_text('[{"email": "a@b.c", "hash": "$2y$10$abc./DEF"}]\n')
+    result = _run_ascii_check("dex users", f)
+    assert result.returncode == 0, result.stderr
