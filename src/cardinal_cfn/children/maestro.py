@@ -122,7 +122,11 @@ def build() -> Template:
         Parameter(
             "AlbDnsName",
             Type="String",
-            Description="DNS name of the shared ALB (used to derive issuer URLs).",
+            Description=(
+                "Public DNS name the install is reached at (the shared ALB's "
+                "DNS name, or a vanity CNAME pointing at it); used to derive "
+                "issuer URLs."
+            ),
         )
     )
     t.add_parameter(

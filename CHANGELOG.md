@@ -11,6 +11,30 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v1.1.3
+
+- **New optional parameter `PublicDnsName`** (default empty) on the
+  lakerunner-services stack. Sets the DNS name the install is reached at
+  (e.g. `lakerunner.example.com`) — typically a CNAME the operator points at
+  the ALB (the stack's `AlbDnsName` output). When set, the Maestro/Dex OIDC
+  issuer and redirect URLs and the `QueryApiUrl` output are derived from it
+  instead of the raw `*.elb.amazonaws.com` name, so browser logins work
+  through the vanity name; the supplied certificate
+  (`CERTIFICATE_ARN`/`CERTIFICATE_BODY`) must match it. The deploy driver
+  accepts it as `PUBLIC_DNS_NAME`. Leave it unset for the existing
+  ALB-DNS-name behavior — no upgrade action, no resource replacement. Setting
+  it on an existing install redeploys the Maestro service (new issuer env
+  vars) and invalidates sessions issued under the old hostname.
+
+Template changes:
+
+- `cardinal-lakerunner-services.yaml`
+- `cardinal-lakerunner/maestro.yaml` (parameter description only)
+
+Script changes:
+
+- `deploy-lakerunner-services.sh`
+
 ## v1.1.2
 
 - **New optional parameter `NameSuffix`** (default empty) on the
