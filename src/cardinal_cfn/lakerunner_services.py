@@ -272,6 +272,18 @@ def build() -> Template:
             "parameters instead."
         ),
     ))
+    t.add_parameter(Parameter(
+        "PublicDnsName",
+        Type="String",
+        Default="",
+        Description=(
+            "Optional DNS name the install is reached at (e.g. "
+            "lakerunner.example.com), typically a CNAME the customer points "
+            "at the ALB. Used to derive the Maestro/Dex OIDC issuer and "
+            "redirect URLs; the supplied certificate must match it. Empty "
+            "uses the ALB's generated DNS name."
+        ),
+    ))
 
     # ---------------------------------------------------------------------
     # Cloud Map (in-cluster service discovery) namespace name
@@ -473,6 +485,7 @@ def build() -> Template:
              "parameters": ["VpcId", "PrivateSubnets",
                             "AlbScheme", "PublicSubnets",
                             "ServiceNamespaceName",
+                            "PublicDnsName",
                             "CertificateArn",
                             "CertificateBody", "CertificatePrivateKey",
                             "CertificateChain"]},
@@ -506,6 +519,8 @@ def build() -> Template:
         "SelfTelemetryOn", Not(Equals(Ref("SelfTelemetryEndpoint"), "")))
     self_telemetry_endpoint = Ref("SelfTelemetryEndpoint")
     self_telemetry_enabled = If("SelfTelemetryOn", "true", "false")
+
+    t.add_condition("PublicDnsNameSet", Not(Equals(Ref("PublicDnsName"), "")))
 
     # ---------------------------------------------------------------------
     # Install-id derivation (computed inline; not a parameter on root)
@@ -575,6 +590,14 @@ def build() -> Template:
         "AlbSgId": sec_alb_sg,
         "CertificateArn": GetAtt(cert_stack, "Outputs.EffectiveCertificateArn"),
     }, depends_on=["Cert"])
+
+    # Hostname the externally visible URLs are derived from: the customer's
+    # vanity DNS name when supplied, otherwise the ALB's generated DNS name.
+    public_dns_name = If(
+        "PublicDnsNameSet",
+        Ref("PublicDnsName"),
+        GetAtt(alb_stack, "Outputs.AlbDnsName"),
+    )
 
     migration_stack = _add_child(t, "Migration", "migration.yaml", {
         "InstallIdShort": install_short,
@@ -694,7 +717,7 @@ def build() -> Template:
         "PrivateSubnetsCsv": private_subnets_csv,
         "VpcId": Ref("VpcId"),
         "HttpsListenerArn": GetAtt(alb_stack, "Outputs.HttpsListenerArn"),
-        "AlbDnsName": GetAtt(alb_stack, "Outputs.AlbDnsName"),
+        "AlbDnsName": public_dns_name,
         "ServiceNamespaceName": namespace_name,
         "DbEndpoint": Ref("DbEndpoint"),
         "DbPort": Ref("DbPort"),
@@ -727,12 +750,14 @@ def build() -> Template:
                         Description="Long per-install identifier."))
     t.add_output(Output("AlbDnsName",
                         Value=GetAtt(alb_stack, "Outputs.AlbDnsName"),
-                        Description="DNS name of the shared Cardinal ALB."))
+                        Description=(
+                            "DNS name of the shared Cardinal ALB. When "
+                            "PublicDnsName is set, point its CNAME here.")))
     t.add_output(Output(
         "QueryApiUrl",
         Value=Sub(
             "https://${AlbDns}/api/v1/query/",
-            AlbDns=GetAtt(alb_stack, "Outputs.AlbDnsName"),
+            AlbDns=public_dns_name,
         ),
         Description="Base URL for the lakerunner query API.",
     ))

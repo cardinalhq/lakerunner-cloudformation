@@ -113,6 +113,12 @@ Optional (template defaults preserved when unset):
                               PUBLIC_SUBNETS, and the ALB SG internet ingress is
                               enabled on the infra-base stack (its ALB_SCHEME /
                               ALB_ALLOWED_CIDR* settings).
+  PUBLIC_DNS_NAME             DNS name the install is reached at (e.g.
+                              lakerunner.example.com), typically a CNAME the
+                              operator points at the ALB (AlbDnsName stack
+                              output).  Maestro/Dex OIDC issuer and redirect
+                              URLs are derived from it, so the certificate must
+                              match it.  Unset: the raw ALB DNS name is used.
   DB_INIT_IMAGE               Full image URI override for the db-init image
                               (official postgres psql client). Bypasses
                               IMAGE_REGISTRY. Default: the baked, pinned suffix
@@ -248,6 +254,8 @@ PublicSubnets=$PUBLIC_SUBNETS"
 AlbScheme=$ALB_SCHEME"
 [ -n "${SERVICE_NAMESPACE_NAME:-}" ] && params="$params
 ServiceNamespaceName=$SERVICE_NAMESPACE_NAME"
+[ -n "${PUBLIC_DNS_NAME:-}" ] && params="$params
+PublicDnsName=$PUBLIC_DNS_NAME"
 [ -n "$self_telemetry_endpoint" ] && params="$params
 SelfTelemetryEndpoint=$self_telemetry_endpoint"
 

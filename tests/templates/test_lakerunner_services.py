@@ -239,3 +239,28 @@ def test_self_telemetry_wired_to_tiers_only(td):
         p = td["Resources"][other]["Properties"]["Parameters"]
         assert "SelfTelemetryEndpoint" not in p, other
         assert "SelfTelemetryEnabled" not in p, other
+
+
+def test_public_dns_name_overrides_hostname(td):
+    """PublicDnsName (optional, default "") replaces the ALB DNS name in every
+    externally visible URL: the Maestro child's AlbDnsName (issuer/redirect
+    URLs) and the QueryApiUrl output. The AlbDnsName output stays the raw ALB
+    name so the operator knows the CNAME target."""
+    p = td["Parameters"]["PublicDnsName"]
+    assert p["Type"] == "String"
+    assert p["Default"] == ""
+    assert td["Conditions"]["PublicDnsNameSet"] == {
+        "Fn::Not": [{"Fn::Equals": [{"Ref": "PublicDnsName"}, ""]}]
+    }
+    effective = {"Fn::If": [
+        "PublicDnsNameSet",
+        {"Ref": "PublicDnsName"},
+        {"Fn::GetAtt": ["Alb", "Outputs.AlbDnsName"]},
+    ]}
+    maestro = td["Resources"]["Maestro"]["Properties"]["Parameters"]
+    assert maestro["AlbDnsName"] == effective
+    query_url = td["Outputs"]["QueryApiUrl"]["Value"]
+    assert query_url["Fn::Sub"][1]["AlbDns"] == effective
+    assert td["Outputs"]["AlbDnsName"]["Value"] == {
+        "Fn::GetAtt": ["Alb", "Outputs.AlbDnsName"]
+    }
