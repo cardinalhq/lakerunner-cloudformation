@@ -11,6 +11,28 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v1.1.4
+
+- **Deploy drivers now reject non-ASCII input with a precise error.** Every
+  operator-supplied value — environment variables / flags and the contents of
+  input files (license token, DEX extra users JSON, certificate PEMs, policy
+  JSON) — is validated before any AWS call. A value containing smart quotes,
+  no-break spaces, or other non-ASCII or control characters now fails fast
+  (exit 2) with a message naming the parameter, the offending character (e.g.
+  `left double curly quote (U+201C)`), its line and byte position, and the
+  plain-ASCII replacement to use. Previously such characters — typically
+  introduced by pasting from a word processor, browser, or chat tool —
+  flowed into the stack parameters and surfaced much later as confusing
+  JSON or template errors. No template changes, no upgrade action; if a
+  redeploy now fails the new check, the flagged value was already corrupt —
+  fix it as the message says.
+
+Script changes:
+
+- `deploy-lakerunner-infra-base.sh`, `deploy-lakerunner-infra-rds.sh`,
+  `deploy-lakerunner-services.sh`, `deploy-satellite-infra-base.sh`,
+  `deploy-satellite-services.sh` (shared engine), `deploy-lakerunner.sh`
+
 ## v1.1.3
 
 - **New optional parameter `PublicDnsName`** (default empty) on the

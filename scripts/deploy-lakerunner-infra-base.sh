@@ -292,6 +292,10 @@ Optional:
   DEPLOYER_ROLE_ARN   Passed via --role-arn to create-change-set.
   NO_EXECUTE          Non-empty: create and describe the change set, then stop.
 
+All PARAMS values and FILE_PARAMS file contents must be plain ASCII; smart
+quotes, no-break spaces, and similar pasted characters are rejected with a
+message naming the offending character and its position.
+
 Exit codes:
   0  success or no-op
   1  generic / AWS / change set failure
@@ -308,6 +312,77 @@ fail() {
     shift
     printf '[deploy-stack] ERROR: %s\n' "$*" >&2
     exit "$code"
+}
+
+# ---------------------------------------------------------------------------
+# ASCII-only input validation.  Every operator-supplied value (PARAMS entries
+# composed from the driver's environment variables, FILE_PARAMS file contents)
+# must be plain ASCII: smart quotes, no-break spaces, and other typographic
+# characters -- usually introduced by pasting from a word processor, browser,
+# or chat tool -- ride silently into the CloudFormation parameter JSON and
+# surface much later as inscrutable template or service errors.  Reject them
+# up front, naming the exact character and where it sits.
+# Allowed bytes: printable ASCII 0x20-0x7E plus tab, newline, carriage return.
+# ---------------------------------------------------------------------------
+
+# Print a description of the first disallowed byte in "$1" (one line of text),
+# e.g.:  byte 12: left double curly quote (U+201C) -- use a plain " instead
+ascii_describe_line() {
+    _adl_hex=$(printf '%s' "$1" | od -An -v -tx1 | tr -d ' \n')
+    _adl_pos=1
+    while [ -n "$_adl_hex" ]; do
+        _adl_byte=$(printf '%.2s' "$_adl_hex")
+        case "$_adl_byte" in
+            7f) break ;;
+            09|0d|2?|3?|4?|5?|6?|7?) ;;
+            *) break ;;
+        esac
+        _adl_hex=${_adl_hex#??}
+        _adl_pos=$((_adl_pos + 1))
+    done
+    _adl_desc=""
+    case "$_adl_hex" in
+        e28098*) _adl_desc="left single curly quote (U+2018) -- use a plain apostrophe (')" ;;
+        e28099*) _adl_desc="right single curly quote (U+2019) -- use a plain apostrophe (')" ;;
+        e2809c*) _adl_desc='left double curly quote (U+201C) -- use a plain double quote (")' ;;
+        e2809d*) _adl_desc='right double curly quote (U+201D) -- use a plain double quote (")' ;;
+        e28093*) _adl_desc='en dash (U+2013) -- use a plain hyphen (-)' ;;
+        e28094*) _adl_desc='em dash (U+2014) -- use a plain hyphen (-)' ;;
+        e2808b*) _adl_desc='zero-width space (U+200B) -- invisible; delete it' ;;
+        e2808?*) _adl_desc='typographic space or invisible formatting character (U+2000-U+200F) -- use a plain space or delete it' ;;
+        e280a8*|e280a9*) _adl_desc='Unicode line/paragraph separator (U+2028/U+2029) -- use a plain newline' ;;
+        e280af*) _adl_desc='narrow no-break space (U+202F) -- looks like a space but is not; use a plain space' ;;
+        efbbbf*) _adl_desc='UTF-8 byte order mark (U+FEFF) -- invisible; remove it (often at the very start of a file)' ;;
+        c2a0*) _adl_desc='no-break space (U+00A0) -- looks like a space but is not; use a plain space' ;;
+        c2ad*) _adl_desc='soft hyphen (U+00AD) -- invisible; delete it' ;;
+    esac
+    if [ -z "$_adl_desc" ]; then
+        _adl_byte=$(printf '%.2s' "$_adl_hex")
+        case "$_adl_byte" in
+            0?|1?|7f) _adl_desc="control character (byte 0x$_adl_byte)" ;;
+            *) _adl_desc="non-ASCII character (UTF-8 bytes 0x$(printf '%.6s' "$_adl_hex"))" ;;
+        esac
+    fi
+    printf 'byte %d: %s' "$_adl_pos" "$_adl_desc"
+}
+
+# ascii_check LABEL TEXT -- fail (exit 2) when TEXT contains anything other
+# than printable ASCII, tab, newline, or carriage return.  The error names
+# the first offending character and its line/byte position.
+ascii_check() {
+    _ac_label="$1"
+    _ac_text="$2"
+    [ -n "$_ac_text" ] || return 0
+    [ -n "$(printf '%s' "$_ac_text" | LC_ALL=C tr -d '\11\12\15\40-\176')" ] || return 0
+    _ac_lineno=0
+    while IFS= read -r _ac_line; do
+        _ac_lineno=$((_ac_lineno + 1))
+        [ -n "$(printf '%s' "$_ac_line" | LC_ALL=C tr -d '\11\15\40-\176')" ] || continue
+        fail 2 "$_ac_label is not plain ASCII: line $_ac_lineno, $(ascii_describe_line "$_ac_line").  Curly quotes, odd spaces, and similar characters usually come from pasting text out of a word processor, browser, or chat tool; retype the value using plain ASCII characters."
+    done <<ASCII_CHECK_EOF
+$_ac_text
+ASCII_CHECK_EOF
+    fail 2 "$_ac_label is not plain ASCII (contains a disallowed control or non-ASCII byte)"
 }
 
 # ---------------------------------------------------------------------------
@@ -533,6 +608,7 @@ build_upstream_values() {
         done >"$out_file.fileparams" || exit $?
         while IFS="$(printf '\t')" read -r key path; do
             [ -n "$key" ] || continue
+            ascii_check "FILE_PARAMS parameter '$key' (file $path)" "$(cat "$path")"
             merged=$(
                 jq -nc --argjson m "$merged" --arg key "$key" --rawfile val "$path" '
                     $m + {($key): $val}
@@ -551,6 +627,8 @@ build_upstream_values() {
             if [ "$key" = "$entry" ] || [ -z "$key" ]; then
                 fail 2 "PARAMS expects Key=Value, got: $entry"
             fi
+            ascii_check "PARAMS parameter name '$key'" "$key"
+            ascii_check "value for parameter '$key' (from PARAMS / a driver environment variable)" "$val"
             printf '%s\t%s\n' "$key" "$val"
         done >"$out_file.params"
         merged=$(
@@ -616,6 +694,11 @@ main() {
         usage >&2
         fail 2 "missing required: $(echo "$missing_required" | sed 's/^ //; s/ /, /g')"
     fi
+
+    ascii_check "STACK_NAME" "$stack_name"
+    ascii_check "TEMPLATE_URL" "$template_url"
+    ascii_check "REGION" "$region"
+    ascii_check "DEPLOYER_ROLE_ARN" "$deployer_role_arn"
 
     log "checking whether stack $stack_name exists in $region"
     existing_status=$(aws cloudformation describe-stacks \

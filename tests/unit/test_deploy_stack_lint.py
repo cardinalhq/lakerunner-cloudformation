@@ -447,3 +447,53 @@ def test_params_wins_over_file_params_for_same_key(tmp_path):
     assert merged["CertificateBody"] == "literal-wins", (
         "PARAMS should win over FILE_PARAMS for the same key"
     )
+
+
+# ---------------------------------------------------------------------------
+# ASCII-only input validation: PARAMS values (composed from the drivers'
+# environment variables) and FILE_PARAMS file contents must be plain ASCII;
+# smart quotes / no-break spaces (typically pasted from a word processor or
+# chat tool) are rejected with a message naming the character and its position.
+# ---------------------------------------------------------------------------
+
+
+def test_params_smart_quote_rejected_with_description():
+    result = _build_upstream(
+        {"PARAMS": 'DexExtraUsers=[{\u201cemail\u201d: \u201cx@y.z\u201d}]'}
+    )
+    assert result.returncode == 2, (
+        f"expected exit 2 for a smart quote in a PARAMS value, got "
+        f"{result.returncode}:\n{result.stdout}\n{result.stderr}"
+    )
+    assert "DexExtraUsers" in result.stderr
+    assert "U+201C" in result.stderr
+    assert "curly quote" in result.stderr
+
+
+def test_params_no_break_space_rejected_with_description():
+    result = _build_upstream({"PARAMS": "VpcId=vpc-123\u00a0extra"})
+    assert result.returncode == 2, result.stderr
+    assert "VpcId" in result.stderr
+    assert "U+00A0" in result.stderr
+    assert "no-break space" in result.stderr
+
+
+def test_file_params_non_ascii_content_rejected_with_location(tmp_path):
+    users = tmp_path / "users.json"
+    users.write_text(
+        '[\n {"email": "a@b.c"},\n {"hash": "\u2019bad"}\n]\n', encoding="utf-8"
+    )
+    result = _build_upstream({"FILE_PARAMS": f"DexExtraUsers={users}"})
+    assert result.returncode == 2, result.stderr
+    assert "DexExtraUsers" in result.stderr
+    assert "U+2019" in result.stderr
+    assert "line 3" in result.stderr
+
+
+def test_params_plain_ascii_accepted():
+    result = _build_upstream(
+        {"PARAMS": 'A=plain ascii: punctuation! ($2y$10$hash./val) -- ok'}
+    )
+    assert result.returncode == 0, result.stderr
+    merged = json.loads(result.stdout)
+    assert merged["A"] == 'plain ascii: punctuation! ($2y$10$hash./val) -- ok'
