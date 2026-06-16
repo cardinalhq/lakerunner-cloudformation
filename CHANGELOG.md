@@ -11,6 +11,21 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v1.1.7
+
+- **process-logs memory default `2048` -> `4096` MiB.** `ProcessLogsMemory`
+  default doubled (still 1 vCPU; 4096 MiB is a valid Fargate combo). On redeploy
+  the process-logs task definition revises and the service rolls; each
+  process-logs task now reserves 4 GiB. If you pin `ProcessLogsMemory` via a
+  parameter, it is unchanged. Note the autoscaler ceiling is unchanged
+  (`ProcessLogsReplicas`, default 10), so peak reservation rises accordingly.
+- **Image bumps: lakerunner `v1.51.3` -> `v1.51.5`, maestro `v1.60.3` ->
+  `v1.62.4`.** Default `LakerunnerImage` and `MaestroImage` bumps (digest-pinned
+  multi-arch manifests). On redeploy the DB migrator reruns (idempotent) before
+  the service-tier stacks update. No new parameters or resource replacements;
+  upgrade action is none if you use the defaults. If you pin the images via
+  parameters, set them to the new versions explicitly.
+
 ## v1.1.6
 
 - **Image bump: lakerunner `v1.51.1` -> `v1.51.3`.** Default `LakerunnerImage`
