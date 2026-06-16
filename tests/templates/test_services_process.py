@@ -400,6 +400,30 @@ def test_process_services_have_no_autoregister_env(td):
 
 
 # ---------------------------------------------------------------------------
+# log tracked-fields override (temporary, until a Maestro UI exists)
+# ---------------------------------------------------------------------------
+
+
+def test_process_logs_sets_tracked_fields_env(td):
+    """process-logs carries the explicit tracked-fields override consumed by
+    the log-ingest worklane (the lone GetLogTrackedFields caller)."""
+    env = _env(td, "ProcessLogsTaskDef")
+    assert env.get("LAKERUNNER_LOG_TRACKED_FIELDS") == (
+        "service_name,environment_type,installation,proc_name,partition_id"
+    ), env.get("LAKERUNNER_LOG_TRACKED_FIELDS")
+
+
+def test_other_process_services_have_no_tracked_fields_env(td):
+    """Only process-logs reads tracked fields; metrics/traces/pubsub must not
+    carry the override."""
+    for task_def_id in ("ProcessMetricsTaskDef", "ProcessTracesTaskDef", "PubsubSqsTaskDef"):
+        env = _env(td, task_def_id)
+        assert "LAKERUNNER_LOG_TRACKED_FIELDS" not in env, (
+            f"{task_def_id} unexpectedly has LAKERUNNER_LOG_TRACKED_FIELDS"
+        )
+
+
+# ---------------------------------------------------------------------------
 # B → C boundary
 # ---------------------------------------------------------------------------
 
