@@ -33,8 +33,8 @@ storage_profiles:
 # so the two cannot drift; any change to LakerunnerImage retriggers migrations.
 # ---------------------------------------------------------------------------
 images:
-  lakerunner: "public.ecr.aws/cardinalhq.io/lakerunner:v1.41.6@sha256:b19a07106bd21658e7e1f833e4fa79e633418f810126c710907f436beab964a9"
-  maestro:    "public.ecr.aws/cardinalhq.io/maestro:v1.53.1@sha256:ac533a492623b5df7c4176f8fc887145a2de3662417388e5fc0fb678c49ba698"
+  lakerunner: "public.ecr.aws/cardinalhq.io/lakerunner:v1.51.1@sha256:4035270bcab86b14492c442ef6f9cf6bd2a76cd3e577bdd01d8aea89f84fcc82"
+  maestro:    "public.ecr.aws/cardinalhq.io/maestro:v1.60.3@sha256:c974dfaa6becfac0b4b9a87f1997d78f9db5519d527ebea0cd1383efa9f05e49"
   otel:       "public.ecr.aws/cardinalhq.io/cardinalhq-otel-collector:v1.8.0@sha256:9906eea2b38f1614047ada60ce7887704652484bb5b01a7f8a1d932277e1f151"
   dex:        "public.ecr.aws/cardinalhq.io/dex-customization:v0.4.0@sha256:c85811b3a82b1574063971ce79126886607fbc82a1f9d777587fc4895ce18b7b"
   db_init:    "public.ecr.aws/docker/library/postgres:18-alpine@sha256:96d56f7f57c6aacd1fcb908bc83b345ec5f83231ee486dd66a1baadce274db88"
@@ -128,7 +128,7 @@ services:
     command: ["/app/bin/lakerunner", "query-worker"]
     cpu: 4096
     memory_mib: 8192
-    replicas: 8
+    replicas: 4
     ingress:
       port: 8082
       description: "From Query API (gRPC control stream)"
