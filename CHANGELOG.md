@@ -13,6 +13,12 @@ v0.0.114.
 
 ## v1.1.6
 
+- **Image bump: lakerunner `v1.51.1` -> `v1.51.3`.** Default `LakerunnerImage`
+  bump (digest-pinned multi-arch manifest); this is the version that honors
+  `LAKERUNNER_LOG_TRACKED_FIELDS` (below). On redeploy the DB migrator reruns
+  (idempotent) before the service-tier stacks update. No new parameters or
+  resource replacements; upgrade action is none if you use the defaults. If you
+  pin `LakerunnerImage` via a parameter, set it to the new version explicitly.
 - **process-logs now sets `LAKERUNNER_LOG_TRACKED_FIELDS`.** The process-logs
   task hardcodes the tracked-field set
   `service_name,environment_type,installation,proc_name,partition_id` — the log
