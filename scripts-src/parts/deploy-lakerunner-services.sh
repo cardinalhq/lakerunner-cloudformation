@@ -118,6 +118,17 @@ Optional (template defaults preserved when unset):
                               output).  Maestro/Dex OIDC issuer and redirect
                               URLs are derived from it, so the certificate must
                               match it.  Unset: the raw ALB DNS name is used.
+  PROCESS_LOGS_MEMORY         Fargate task memory (MiB) for process-logs
+                              (template default 4096).  Must be a valid Fargate
+                              CPU/memory combo (at 1 vCPU: 2048-8192).  Unset
+                              keeps the stack's current value on update (template
+                              default on create) -- set it to apply a new size.
+  PROCESS_METRICS_MEMORY      Fargate task memory (MiB) for process-metrics
+                              (template default 2048).  Same combo rules; unset
+                              keeps the current value.
+  PROCESS_TRACES_MEMORY       Fargate task memory (MiB) for process-traces
+                              (template default 2048).  Same combo rules; unset
+                              keeps the current value.
   DB_INIT_IMAGE               Full image URI override for the db-init image
                               (official postgres psql client). Bypasses
                               IMAGE_REGISTRY. Default: the baked, pinned suffix
@@ -257,6 +268,18 @@ ServiceNamespaceName=$SERVICE_NAMESPACE_NAME"
 PublicDnsName=$PUBLIC_DNS_NAME"
 [ -n "$self_telemetry_endpoint" ] && params="$params
 SelfTelemetryEndpoint=$self_telemetry_endpoint"
+
+# Process-tier Fargate memory (MiB). Passed only when explicitly set, so an
+# existing install's value carries forward on update unless the operator
+# overrides it (like the images above, a bumped template default is otherwise
+# never picked up on update -- but unlike the images we do NOT force these, to
+# avoid clobbering an operator's deliberate sizing).
+[ -n "${PROCESS_LOGS_MEMORY:-}" ] && params="$params
+ProcessLogsMemory=$PROCESS_LOGS_MEMORY"
+[ -n "${PROCESS_METRICS_MEMORY:-}" ] && params="$params
+ProcessMetricsMemory=$PROCESS_METRICS_MEMORY"
+[ -n "${PROCESS_TRACES_MEMORY:-}" ] && params="$params
+ProcessTracesMemory=$PROCESS_TRACES_MEMORY"
 
 # Public-ECR images: composed from IMAGE_REGISTRY + the baked, locked suffixes,
 # always passed as literal params so a redeploy carries the pinned defaults

@@ -11,6 +11,19 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v1.1.8
+
+- **`deploy-lakerunner-services.sh` gains `PROCESS_LOGS_MEMORY` /
+  `PROCESS_METRICS_MEMORY` / `PROCESS_TRACES_MEMORY`.** Optional env vars that
+  set the Fargate task memory (MiB) for the process-{logs,metrics,traces}
+  services. Each must be a valid Fargate CPU/memory combo (at 1 vCPU:
+  2048-8192). Passed to the stack only when set, so an existing install's value
+  carries forward on update unless you override it -- note this means a bumped
+  template default (e.g. the v1.1.7 process-logs 4096) does NOT reach an existing
+  install through a plain upgrade; set the matching env var on the services
+  driver to apply a new size in place. No upgrade action if you are happy with
+  your current sizing.
+
 ## v1.1.7
 
 - **process-logs memory default `2048` -> `4096` MiB.** `ProcessLogsMemory`
