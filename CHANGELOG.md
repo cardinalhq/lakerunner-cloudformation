@@ -11,6 +11,18 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v1.1.6
+
+- **process-logs now sets `LAKERUNNER_LOG_TRACKED_FIELDS`.** The process-logs
+  task hardcodes the tracked-field set
+  `service_name,environment_type,installation,proc_name,partition_id` — the log
+  fields whose distinct values are rolled up into the fast tag-value lookup
+  table at ingest, overriding lakerunner's compiled-in default
+  (`k8s_cluster_name,k8s_namespace_name,service_name`). Requires a lakerunner
+  image that honors this env var. No new parameters; on redeploy the
+  process-logs task definition revises and the service rolls. Temporary until
+  tracked fields get a Maestro UI; per-org admin-API config still overrides it.
+
 ## v1.1.5
 
 - **Image bumps: lakerunner `v1.41.6` -> `v1.51.1`, maestro `v1.53.1` ->

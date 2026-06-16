@@ -406,6 +406,17 @@ def build() -> Template:
             "memory_mib": Ref("ProcessLogsMemory"),
             "desired_count": _min_replicas(logs_cfg),
             "output_name": "ProcessLogsServiceName",
+            # Temporary hack until tracked fields get a Maestro UI: override the
+            # default set of log fields rolled up into the log_field_values fast
+            # tag-value lookup table at ingest. process-logs is the only task
+            # that reads this (the lone GetLogTrackedFields caller is the
+            # log-ingest worklane). Per-org admin-API config still wins.
+            "extra_env": [
+                Environment(
+                    Name="LAKERUNNER_LOG_TRACKED_FIELDS",
+                    Value="service_name,environment_type,installation,proc_name,partition_id",
+                ),
+            ],
         },
         {
             "service_key": "process-metrics",
