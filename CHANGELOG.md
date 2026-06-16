@@ -11,6 +11,18 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v1.1.5
+
+- **Image bumps: lakerunner `v1.41.6` -> `v1.51.1`, maestro `v1.53.1` ->
+  `v1.60.3`.** Default `LakerunnerImage` and `MaestroImage` bumps (digest-pinned
+  multi-arch manifests). On redeploy the DB migrator reruns (idempotent) before
+  the service-tier stacks update. No new parameters or resource replacements;
+  upgrade action is none if you use the defaults. If you pin `LakerunnerImage` /
+  `MaestroImage` via parameters, set them to the new versions explicitly.
+- **Default `QueryWorkerReplicas` lowered from `8` to `4`.** On redeploy the
+  lakerunner-query-worker service scales down to 4 tasks. If you rely on the
+  previous count, set `QueryWorkerReplicas=8` explicitly.
+
 ## v1.1.4
 
 - **Deploy drivers now reject non-ASCII input with a precise error.** Every
