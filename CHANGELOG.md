@@ -11,6 +11,14 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v1.2.0
+
+- **lakerunner image bumped to `v1.54.0`** (from `v1.51.5`). The single
+  `LakerunnerImage` drives every lakerunner task and the DB migrator, so the
+  update redeploys `MigratorService` (reruns the idempotent migrator) before the
+  service tiers roll. No parameter or IAM changes. Upgrade action: deploy v1.2.0;
+  no manual steps.
+
 ## v1.1.9
 
 - **process-{logs,metrics,traces} now autoscale on CPU via native ECS
