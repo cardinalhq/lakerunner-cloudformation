@@ -22,6 +22,12 @@ VPC and ECS cluster are bring-your-own and intentionally excluded.
   physical names. Tighten to your install prefix if needed.
 - No `kms:*` is required — the templates rely on AWS-managed keys for
   RDS, Secrets Manager, and S3.
+- The process-tier autoscaling uses the
+  `AWSServiceRoleForApplicationAutoScaling_ECSService` service-linked
+  role. AWS creates it automatically the first time a scalable target is
+  registered; if your account does not already have it, the deployer
+  also needs `iam:CreateServiceLinkedRole` for the
+  `ecs.application-autoscaling.amazonaws.com` service.
 
 ## API actions by AWS service
 
@@ -36,6 +42,8 @@ VPC and ECS cluster are bring-your-own and intentionally excluded.
 | `secretsmanager` | License, admin-key, db-master secrets + the secret-target attachment. | `CreateSecret`, `DeleteSecret`, `DescribeSecret`, `UpdateSecret`, `TagResource`, `UntagResource`, `ListSecrets`, `PutSecretValue`, `GetSecretValue` (for the SecretTargetAttachment lookup) |
 | `ssm` | Storage-profiles + api-keys parameters. | `PutParameter`, `DeleteParameter`, `GetParameter`, `GetParameters`, `AddTagsToResource`, `RemoveTagsFromResource`, `ListTagsForResource` |
 | `ecs` | Task definitions, services (the lakerunner stack does NOT create the cluster). | `RegisterTaskDefinition`, `DeregisterTaskDefinition`, `DescribeTaskDefinition`, `CreateService`, `UpdateService`, `DeleteService`, `DescribeServices`, `ListServices`, `ListTasks`, `DescribeTasks`, `TagResource`, `UntagResource`, `ListTagsForResource` |
+| `application-autoscaling` | CPU target-tracking autoscaling for the process-{logs,metrics,traces} services. | `RegisterScalableTarget`, `DeregisterScalableTarget`, `DescribeScalableTargets`, `PutScalingPolicy`, `DeleteScalingPolicy`, `DescribeScalingPolicies` |
+| `cloudwatch` | Target-tracking policies create the alarms that drive scale in/out. | `PutMetricAlarm`, `DeleteAlarms`, `DescribeAlarms` |
 | `elasticloadbalancingv2` | ALB, three listeners (443, 9443, 4318), target groups, listener rules. | `CreateLoadBalancer`, `DeleteLoadBalancer`, `DescribeLoadBalancers`, `ModifyLoadBalancerAttributes`, `CreateListener`, `DeleteListener`, `ModifyListener`, `DescribeListeners`, `CreateTargetGroup`, `DeleteTargetGroup`, `DescribeTargetGroups`, `ModifyTargetGroup`, `CreateRule`, `DeleteRule`, `ModifyRule`, `DescribeRules`, `AddTags`, `RemoveTags`, `DescribeTags` |
 | `logs` | Per-service log groups + retention. | `CreateLogGroup`, `DeleteLogGroup`, `PutRetentionPolicy`, `DescribeLogGroups`, `TagResource`, `UntagResource`, `ListTagsForResource` |
 | `servicediscovery` | Cloud Map private DNS namespace (created by the lakerunner root) + per-service registrations. | `CreatePrivateDnsNamespace`, `DeleteNamespace`, `GetNamespace`, `ListNamespaces`, `CreateService`, `DeleteService`, `GetService`, `ListServices`, `GetOperation`, `TagResource`, `UntagResource`, `ListTagsForResource` |

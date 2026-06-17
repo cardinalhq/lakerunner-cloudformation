@@ -7,8 +7,7 @@ Owns a SINGLE ECS Fargate service running one task with four containers:
   inside the cluster — currently just maestro — can reach it without
   hairpinning through the ALB and tripping the self-signed cert path)
 - sweeper (internal)
-- monitoring (internal; gRPC port not exposed on the ALB; drives ECS
-  autoscaling of the process-* services via ecs:UpdateService)
+- monitoring (internal; gRPC port not exposed on the ALB)
 - alert-evaluator (internal)
 
 These four control-plane components are tiny (~1-3 millicores, ~20-25 MiB
@@ -81,6 +80,13 @@ def build() -> Template:
     # Cross-stack inputs (forwarded from root)
     # ---------------------------------------------------------------------
     t.add_parameter(Parameter("ClusterArn", Type="String", Description="ECS cluster ARN."))
+    t.add_parameter(
+        Parameter(
+            "ClusterName",
+            Type="String",
+            Description="ECS cluster name (not ARN), used in OTel resource attributes.",
+        )
+    )
     t.add_parameter(
         Parameter(
             "TaskSecurityGroupId",
@@ -180,65 +186,6 @@ def build() -> Template:
         )
     )
 
-    # Inputs the monitoring service uses to drive ECS-based autoscaling of the
-    # process-* services. ClusterName is the ECS cluster name (not ARN) — both
-    # the autoscaler's ECS_CLUSTER env var and the IAM resource ARNs need the
-    # name form. The three service-name inputs come from services-process stack
-    # outputs; the three replica inputs are the per-service max replicas (the
-    # Process*Replicas parameters, also exposed on services-process). The
-    # process-* services are created at one replica there; the autoscaler then
-    # scales them up to this max, so it tracks whatever the customer set at
-    # deploy time.
-    t.add_parameter(
-        Parameter(
-            "ClusterName",
-            Type="String",
-            Description="ECS cluster name (not ARN), used by the monitoring autoscaler.",
-        )
-    )
-    t.add_parameter(
-        Parameter(
-            "ProcessLogsServiceName",
-            Type="String",
-            Description="ECS service name for lakerunner-process-logs.",
-        )
-    )
-    t.add_parameter(
-        Parameter(
-            "ProcessMetricsServiceName",
-            Type="String",
-            Description="ECS service name for lakerunner-process-metrics.",
-        )
-    )
-    t.add_parameter(
-        Parameter(
-            "ProcessTracesServiceName",
-            Type="String",
-            Description="ECS service name for lakerunner-process-traces.",
-        )
-    )
-    t.add_parameter(
-        Parameter(
-            "ProcessLogsReplicas",
-            Type="Number",
-            Description="Maximum desired replicas for lakerunner-process-logs.",
-        )
-    )
-    t.add_parameter(
-        Parameter(
-            "ProcessMetricsReplicas",
-            Type="Number",
-            Description="Maximum desired replicas for lakerunner-process-metrics.",
-        )
-    )
-    t.add_parameter(
-        Parameter(
-            "ProcessTracesReplicas",
-            Type="Number",
-            Description="Maximum desired replicas for lakerunner-process-traces.",
-        )
-    )
-
     # MigrationComplete is unused inside this stack on purpose. The root passes
     # the migration-stack output through this parameter; CloudFormation cannot
     # render this nested stack until the migration stack finishes producing
@@ -276,6 +223,7 @@ def build() -> Template:
                     "InstallIdShort",
                     "InstallIdLong",
                     "ClusterArn",
+                    "ClusterName",
                     "TaskSecurityGroupId",
                     "ExecutionRoleArn",
                     "TaskRoleArn",
@@ -288,13 +236,6 @@ def build() -> Template:
                     "BucketName",
                     "LicenseSecretArn",
                     "MigrationComplete",
-                    "ClusterName",
-                    "ProcessLogsServiceName",
-                    "ProcessMetricsServiceName",
-                    "ProcessTracesServiceName",
-                    "ProcessLogsReplicas",
-                    "ProcessMetricsReplicas",
-                    "ProcessTracesReplicas",
                 ],
             },
             {
@@ -376,51 +317,15 @@ def build() -> Template:
         ]
     )
 
-    # The monitoring container drives ECS autoscaling of the process-* services.
-    # Env vars match cmd/monitoring.go + config/autoscaler.go in the lakerunner
-    # repo; the shared TaskRole (ControlRole) carries the ecs:UpdateService /
-    # DescribeServices grant it needs.
-    # The lakerunner binary defaults Autoscaler.ObserveOnly=true and per-service
-    # MinReplicas=0, which would log decisions but never scale and would scale
-    # services to zero on idle. Override both: the customer set max replicas to
-    # opt into actual scaling, and 1 is the documented floor (lakerunner
-    # docs/guides/admin/autoscaling.md: "Set to 1 to prevent scale-to-zero").
+    # The monitoring container no longer drives autoscaling -- the process-*
+    # services scale on CPU via native ECS Application Auto Scaling (see
+    # services-process), mirroring the Kubernetes HPA. monitoring keeps only its
+    # base/OTel env and a distinct health-check port.
     monitoring_env = (
         list(base_env)
         + services_common.lakerunner_otel_env(service_key="monitoring")
         + _service_specific_env(monitoring_cfg)
         + [
-            Environment(Name="LAKERUNNER_AUTOSCALER_ENABLED", Value="true"),
-            Environment(Name="LAKERUNNER_AUTOSCALER_OBSERVE_ONLY", Value="false"),
-            Environment(Name="LAKERUNNER_AUTOSCALER_PLATFORM", Value="ecs"),
-            Environment(Name="ECS_CLUSTER", Value=Ref("ClusterName")),
-            Environment(
-                Name="LAKERUNNER_AUTOSCALER_SERVICES_LOGS_DEPLOYMENT",
-                Value=Ref("ProcessLogsServiceName"),
-            ),
-            Environment(Name="LAKERUNNER_AUTOSCALER_SERVICES_LOGS_MIN_REPLICAS", Value="1"),
-            Environment(
-                Name="LAKERUNNER_AUTOSCALER_SERVICES_LOGS_MAX_REPLICAS",
-                Value=Ref("ProcessLogsReplicas"),
-            ),
-            Environment(
-                Name="LAKERUNNER_AUTOSCALER_SERVICES_METRICS_DEPLOYMENT",
-                Value=Ref("ProcessMetricsServiceName"),
-            ),
-            Environment(Name="LAKERUNNER_AUTOSCALER_SERVICES_METRICS_MIN_REPLICAS", Value="1"),
-            Environment(
-                Name="LAKERUNNER_AUTOSCALER_SERVICES_METRICS_MAX_REPLICAS",
-                Value=Ref("ProcessMetricsReplicas"),
-            ),
-            Environment(
-                Name="LAKERUNNER_AUTOSCALER_SERVICES_TRACES_DEPLOYMENT",
-                Value=Ref("ProcessTracesServiceName"),
-            ),
-            Environment(Name="LAKERUNNER_AUTOSCALER_SERVICES_TRACES_MIN_REPLICAS", Value="1"),
-            Environment(
-                Name="LAKERUNNER_AUTOSCALER_SERVICES_TRACES_MAX_REPLICAS",
-                Value=Ref("ProcessTracesReplicas"),
-            ),
             Environment(Name="HEALTH_CHECK_PORT", Value="8092"),
         ]
     )

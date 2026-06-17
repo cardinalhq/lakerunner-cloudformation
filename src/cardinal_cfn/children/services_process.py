@@ -8,10 +8,11 @@ Owns four ECS Fargate services that ingest from SQS and write to S3:
 - process-traces (signal_type: traces, replicas + memory tunable)
 
 None of these services attach to the ALB. The process-* services are created
-at one replica (min_replicas); the monitoring service in services-control
-scales them up to the Process*Replicas cap via ecs:UpdateService -- launching
-at the max would triple the steady-state Fargate footprint on every deploy.
-CPU values come from cardinal-defaults.yaml directly.
+at one replica (min_replicas) and scale on CPU via native ECS Application Auto
+Scaling target-tracking (ECSServiceAverageCPUUtilization at cpu_target_percent,
+mirroring the Kubernetes HPA) up to the Process*Replicas cap -- launching at the
+max would triple the steady-state Fargate footprint on every deploy. CPU values
+come from cardinal-defaults.yaml directly.
 """
 
 from troposphere import (
@@ -24,6 +25,12 @@ from troposphere import (
     Ref,
     Sub,
     Template,
+)
+from troposphere.applicationautoscaling import (
+    PredefinedMetricSpecification,
+    ScalableTarget,
+    ScalingPolicy,
+    TargetTrackingScalingPolicyConfiguration,
 )
 from troposphere.ecs import Environment, Secret
 
@@ -211,9 +218,8 @@ def build() -> Template:
     #
     # For process-*, "Replicas" is the autoscaler's *max* cap, not the initial
     # desired count -- the services are created at min_replicas (see the
-    # per-service blocks below) and the monitoring service scales up to this
-    # value. The same Refs are forwarded to services-control as the
-    # autoscaler's per-service max.
+    # per-service blocks below) and the ECS CPU target-tracking policy scales
+    # up to this value under load.
     # ---------------------------------------------------------------------
     t.add_parameter(
         Parameter(
@@ -221,10 +227,9 @@ def build() -> Template:
             Type="Number",
             Default=str(_max_replicas(logs_cfg)),
             Description=(
-                "Maximum replicas the monitoring autoscaler may scale "
+                "Maximum replicas the CPU autoscaler may scale "
                 "lakerunner-process-logs to. The service is created at "
-                "min_replicas and the autoscaler scales it up to this cap "
-                "under load."
+                "min_replicas and scales up to this cap under load."
             ),
         )
     )
@@ -242,10 +247,9 @@ def build() -> Template:
             Type="Number",
             Default=str(_max_replicas(metrics_cfg)),
             Description=(
-                "Maximum replicas the monitoring autoscaler may scale "
+                "Maximum replicas the CPU autoscaler may scale "
                 "lakerunner-process-metrics to. The service is created at "
-                "min_replicas and the autoscaler scales it up to this cap "
-                "under load."
+                "min_replicas and scales up to this cap under load."
             ),
         )
     )
@@ -263,10 +267,9 @@ def build() -> Template:
             Type="Number",
             Default=str(_max_replicas(traces_cfg)),
             Description=(
-                "Maximum replicas the monitoring autoscaler may scale "
+                "Maximum replicas the CPU autoscaler may scale "
                 "lakerunner-process-traces to. The service is created at "
-                "min_replicas and the autoscaler scales it up to this cap "
-                "under load."
+                "min_replicas and scales up to this cap under load."
             ),
         )
     )
@@ -391,9 +394,9 @@ def build() -> Template:
     # ---------------------------------------------------------------------
     # Per-service blocks (log group, task def, ECS service).
     #
-    # process-* services are created at their min replica count; the monitoring
-    # service (services-control) then scales them up to Process*Replicas via
-    # ecs:UpdateService. Starting at the max would launch ~3x the steady-state
+    # process-* services are created at their min replica count; a native ECS
+    # Application Auto Scaling target-tracking policy (CPU) then scales them up
+    # to Process*Replicas. Starting at the max would launch ~3x the steady-state
     # task count on every deploy (and can blow the account's Fargate vCPU
     # quota). pubsub-sqs has no autoscaler, so its DesiredCount is the
     # PubsubSqsReplicas parameter directly.
@@ -406,6 +409,7 @@ def build() -> Template:
             "memory_mib": Ref("ProcessLogsMemory"),
             "desired_count": _min_replicas(logs_cfg),
             "output_name": "ProcessLogsServiceName",
+            "max_replicas_param": "ProcessLogsReplicas",
             # Temporary hack until tracked fields get a Maestro UI: override the
             # default set of log fields rolled up into the log_field_values fast
             # tag-value lookup table at ingest. process-logs is the only task
@@ -425,6 +429,7 @@ def build() -> Template:
             "memory_mib": Ref("ProcessMetricsMemory"),
             "desired_count": _min_replicas(metrics_cfg),
             "output_name": "ProcessMetricsServiceName",
+            "max_replicas_param": "ProcessMetricsReplicas",
         },
         {
             "service_key": "process-traces",
@@ -433,6 +438,7 @@ def build() -> Template:
             "memory_mib": Ref("ProcessTracesMemory"),
             "desired_count": _min_replicas(traces_cfg),
             "output_name": "ProcessTracesServiceName",
+            "max_replicas_param": "ProcessTracesReplicas",
         },
         {
             "service_key": "pubsub-sqs",
@@ -487,7 +493,68 @@ def build() -> Template:
         )
         t.add_output(Output(spec["output_name"], Value=GetAtt(ecs_service, "Name")))
 
+        # process-* services scale on CPU via native ECS Application Auto
+        # Scaling, mirroring the Kubernetes HPA (target_percent CPU). pubsub-sqs
+        # has no max_replicas_param and is left at its literal DesiredCount.
+        if spec.get("max_replicas_param"):
+            _add_cpu_autoscaling(
+                t,
+                ecs_service=ecs_service,
+                service_key=spec["service_key"],
+                config=spec["config"],
+                min_replicas=_min_replicas(spec["config"]),
+                max_replicas_param=spec["max_replicas_param"],
+            )
+
     return t
+
+
+def _add_cpu_autoscaling(
+    t: Template,
+    *,
+    ecs_service,
+    service_key: str,
+    config: dict,
+    min_replicas: int,
+    max_replicas_param: str,
+):
+    """Attach a CPU target-tracking autoscaler to a process-* ECS service.
+
+    Uses native ECS Application Auto Scaling (no RoleARN -> the account's
+    AWSServiceRoleForApplicationAutoScaling_ECSService service-linked role,
+    created automatically on first use). The target percent comes from the
+    service's cardinal-defaults.yaml autoscaling block and matches the
+    Kubernetes HPA we run elsewhere.
+    """
+    title = services_common._resource_title(service_key, "")
+    scalable_target = t.add_resource(
+        ScalableTarget(
+            f"{title}ScalableTarget",
+            DependsOn=[ecs_service.title],
+            ServiceNamespace="ecs",
+            ScalableDimension="ecs:service:DesiredCount",
+            ResourceId=Sub(
+                "service/${ClusterName}/${ServiceName}",
+                ServiceName=GetAtt(ecs_service, "Name"),
+            ),
+            MinCapacity=min_replicas,
+            MaxCapacity=Ref(max_replicas_param),
+        )
+    )
+    t.add_resource(
+        ScalingPolicy(
+            f"{title}CpuScalingPolicy",
+            PolicyName=Sub("${ServiceName}-cpu", ServiceName=GetAtt(ecs_service, "Name")),
+            PolicyType="TargetTrackingScaling",
+            ScalingTargetId=Ref(scalable_target),
+            TargetTrackingScalingPolicyConfiguration=TargetTrackingScalingPolicyConfiguration(
+                PredefinedMetricSpecification=PredefinedMetricSpecification(
+                    PredefinedMetricType="ECSServiceAverageCPUUtilization",
+                ),
+                TargetValue=float(config["autoscaling"]["cpu_target_percent"]),
+            ),
+        )
+    )
 
 
 def _build_service_block(
@@ -556,9 +623,9 @@ def _max_replicas(service_cfg: dict) -> int:
 def _min_replicas(service_cfg: dict) -> int:
     """Initial ECS DesiredCount for an autoscaling-eligible service.
 
-    The service is created at this count; the monitoring service (in
-    services-control) scales it up to the Process*Replicas cap under load.
-    Falls back to `replicas` if autoscaling is absent.
+    The service is created at this count; the CPU target-tracking policy scales
+    it up to the Process*Replicas cap under load. Falls back to `replicas` if
+    autoscaling is absent.
     """
     autoscaling = service_cfg.get("autoscaling")
     if autoscaling and "min_replicas" in autoscaling:

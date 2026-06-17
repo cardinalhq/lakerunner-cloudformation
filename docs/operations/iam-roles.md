@@ -173,9 +173,10 @@ CloudWatchLogs: logs:CreateLogStream,PutLogEvents on tier log groups
 **What the containers do at runtime:**
 - `sweeper`: deletes objects from the ingest bucket past the lifecycle
   cutoff (after S3 lifecycle has tagged them) and houses-keeps lrdb.
-- `monitoring`: autoscales `process-{logs,metrics,traces}` by calling
-  `ecs:UpdateService` on the cluster (uses the `Process*Replicas`
-  parameters as the ceiling).
+- `monitoring`: internal control-plane component. It no longer drives
+  scaling -- `process-{logs,metrics,traces}` autoscale on CPU via native
+  ECS Application Auto Scaling (the `Process*Replicas` parameters are the
+  ceiling), so monitoring needs no ECS API access.
 - `admin-api`: admin REST API. Bcrypts the bootstrap admin key from
   Secrets Manager, writes initial state into lrdb.
 - `alert-evaluator`: runs alert queries against lrdb + S3 cooked data;
@@ -187,10 +188,11 @@ ReadSecrets:    secretsmanager:Get/DescribeSecret on [DbMasterSecretArn, License
 ReadSsmParams:  ssm:GetParameter,GetParameters on [StorageProfilesParamName, ApiKeysParamName]
 SweeperS3Cleanup: s3:GetObject,ListBucket,DeleteObject on ${BucketName}[/*]
                   (alert-evaluator also reads under this statement)
-MonitoringEcsScale: ecs:UpdateService,DescribeServices
-                    restricted by Condition ArnEquals ecs:cluster=${ClusterArn}
 CloudWatchLogs: logs:CreateLogStream,PutLogEvents on tier log groups
 ```
+
+**Must NOT have:** ECS UpdateService -- process-* autoscaling is now native
+ECS Application Auto Scaling, which uses its own service-linked role.
 
 **Must NOT have:** S3 write to `otel-raw/` or `db/` (sweeper only deletes
 expired files; writes are reserved for OTel + process tier), SQS consume,

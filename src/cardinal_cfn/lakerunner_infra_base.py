@@ -670,18 +670,6 @@ def build() -> Template:
                                 ),
                             ],
                         },
-                        {
-                            "Sid": "MonitoringEcsScale",
-                            "Effect": "Allow",
-                            "Action": [
-                                "ecs:UpdateService",
-                                "ecs:DescribeServices",
-                            ],
-                            "Resource": "*",
-                            "Condition": {
-                                "ArnEquals": {"ecs:cluster": Ref("ClusterArn")},
-                            },
-                        },
                         _stmt_cw_logs(),
                     ],
                 },
