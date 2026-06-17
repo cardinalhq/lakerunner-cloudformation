@@ -36,6 +36,15 @@ def test_required_cross_stack_parameters(td):
         "MigrationComplete",
         "LakerunnerImage",
         "ClusterName",
+    ):
+        assert n in td["Parameters"], f"missing parameter: {n}"
+
+
+def test_no_autoscaler_parameters(td):
+    """The process-* services now scale via native ECS autoscaling (see
+    services-process); the control tier no longer drives scaling, so the
+    service-name / replica inputs it used are gone."""
+    for n in (
         "ProcessLogsServiceName",
         "ProcessMetricsServiceName",
         "ProcessTracesServiceName",
@@ -43,7 +52,7 @@ def test_required_cross_stack_parameters(td):
         "ProcessMetricsReplicas",
         "ProcessTracesReplicas",
     ):
-        assert n in td["Parameters"], f"missing parameter: {n}"
+        assert n not in td["Parameters"], f"vestigial autoscaler parameter: {n}"
 
 
 def test_no_vestigial_queue_parameters(td):
@@ -431,35 +440,10 @@ def _task_def_for(td, container_name):
     raise AssertionError(f"no task definition with container {container_name!r}")
 
 
-def test_monitoring_container_has_autoscaler_env(td):
-    _, container = _task_def_for(td, "monitoring")
-    env = {e["Name"]: e["Value"] for e in container.get("Environment", [])}
-    assert env.get("LAKERUNNER_AUTOSCALER_ENABLED") == "true"
-    # Without ObserveOnly=false the autoscaler defaults to compute-don't-write,
-    # which would silently no-op the whole feature.
-    assert env.get("LAKERUNNER_AUTOSCALER_OBSERVE_ONLY") == "false"
-    assert env.get("LAKERUNNER_AUTOSCALER_PLATFORM") == "ecs"
-    assert env.get("ECS_CLUSTER") == {"Ref": "ClusterName"}
-    expected = {
-        "LAKERUNNER_AUTOSCALER_SERVICES_LOGS_DEPLOYMENT": "ProcessLogsServiceName",
-        "LAKERUNNER_AUTOSCALER_SERVICES_LOGS_MAX_REPLICAS": "ProcessLogsReplicas",
-        "LAKERUNNER_AUTOSCALER_SERVICES_METRICS_DEPLOYMENT": "ProcessMetricsServiceName",
-        "LAKERUNNER_AUTOSCALER_SERVICES_METRICS_MAX_REPLICAS": "ProcessMetricsReplicas",
-        "LAKERUNNER_AUTOSCALER_SERVICES_TRACES_DEPLOYMENT": "ProcessTracesServiceName",
-        "LAKERUNNER_AUTOSCALER_SERVICES_TRACES_MAX_REPLICAS": "ProcessTracesReplicas",
-    }
-    for env_name, param_name in expected.items():
-        assert env.get(env_name) == {"Ref": param_name}, (
-            f"{env_name} must Ref {param_name}; got {env.get(env_name)!r}"
-        )
-    for signal in ("LOGS", "METRICS", "TRACES"):
-        key = f"LAKERUNNER_AUTOSCALER_SERVICES_{signal}_MIN_REPLICAS"
-        assert env.get(key) == "1", f"{key} must default to 1, got {env.get(key)!r}"
-
-
-def test_only_monitoring_has_autoscaler_env(td):
-    """Sweeper / admin-api / alert-evaluator must not see the autoscaler env."""
-    for container_name in ("admin-api", "sweeper", "alert-evaluator"):
+def test_no_container_has_autoscaler_env(td):
+    """Process-* services scale via native ECS autoscaling now; no control-tier
+    container (monitoring included) carries the old binary-autoscaler env."""
+    for container_name in ("monitoring", "admin-api", "sweeper", "alert-evaluator"):
         _, container = _task_def_for(td, container_name)
         env_names = {e["Name"] for e in container.get("Environment", [])}
         leaked = {n for n in env_names if n.startswith("LAKERUNNER_AUTOSCALER_")}

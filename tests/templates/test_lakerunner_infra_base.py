@@ -224,13 +224,12 @@ def test_query_role_keeps_ecs_describe_condition(td):
     assert "ecs:DescribeServices" in desc["Action"]
 
 
-def test_control_role_can_scale_with_cluster_condition(td):
-    """The monitoring autoscaler's ecs:UpdateService must stay cluster-scoped."""
+def test_control_role_has_no_ecs_scale_grant(td):
+    """Process-* services scale via native ECS Application Auto Scaling (its own
+    service-linked role), so the control role no longer needs ecs:UpdateService."""
     stmts = _role_statements(td, "ControlRole")
-    scale = next(
-        s for s in stmts if "ecs:UpdateService" in s.get("Action", [])
-    )
-    assert scale["Condition"]["ArnEquals"]["ecs:cluster"] == {"Ref": "ClusterArn"}
+    blob = json.dumps(stmts)
+    assert "ecs:UpdateService" not in blob, "control role should not grant ecs:UpdateService"
 
 
 def test_query_role_s3_targets_cooked_bucket(td):

@@ -679,9 +679,8 @@ def build() -> Template:
         services_process_params[f"QueueUrl{n}"] = Ref(f"QueueUrl{n}")
         services_process_params[f"QueueRegion{n}"] = Ref(f"QueueRegion{n}")
         services_process_params[f"QueueRoleArn{n}"] = Ref(f"QueueRoleArn{n}")
-    services_process_stack = _add_child(
-        t, "Process", "services-process.yaml",
-        services_process_params, depends_on=["Migration"])
+    _add_child(t, "Process", "services-process.yaml",
+               services_process_params, depends_on=["Migration"])
 
     services_control_params = _service_tier_common(
         task_sg=sec_control_sg, task_role=control_role,
@@ -693,19 +692,10 @@ def build() -> Template:
         "VpcId": Ref("VpcId"),
         "ServiceNamespaceName": namespace_name,
         "ServiceNamespaceId": namespace_id,
-        "ProcessLogsServiceName":
-            GetAtt(services_process_stack, "Outputs.ProcessLogsServiceName"),
-        "ProcessMetricsServiceName":
-            GetAtt(services_process_stack, "Outputs.ProcessMetricsServiceName"),
-        "ProcessTracesServiceName":
-            GetAtt(services_process_stack, "Outputs.ProcessTracesServiceName"),
-        "ProcessLogsReplicas": Ref("ProcessLogsReplicas"),
-        "ProcessMetricsReplicas": Ref("ProcessMetricsReplicas"),
-        "ProcessTracesReplicas": Ref("ProcessTracesReplicas"),
     })
     _add_child(t, "Control", "services-control.yaml",
                services_control_params,
-               depends_on=["Migration", "Process"])
+               depends_on=["Migration"])
 
     maestro_stack = _add_child(t, "Maestro", "maestro.yaml", {
         "InstallIdShort": install_short,

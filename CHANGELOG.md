@@ -11,6 +11,26 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v1.1.9
+
+- **process-{logs,metrics,traces} now autoscale on CPU via native ECS
+  Application Auto Scaling.** Each service gets a scalable target (min 1, max
+  `Process*Replicas`) and a target-tracking policy on
+  `ECSServiceAverageCPUUtilization` at 90% -- mirroring the Kubernetes HPA. The
+  monitoring container no longer scales them (its `LAKERUNNER_AUTOSCALER_*` env
+  is removed), and the control task role no longer carries
+  `ecs:UpdateService` / `ecs:DescribeServices`. No customer-facing parameter
+  changes; the `Process*Replicas` parameters keep their meaning (the autoscaler
+  ceiling).
+- **Deployer IAM:** the deploy principal now needs `application-autoscaling:*`
+  (register/deregister scalable target, put/delete scaling policy, describe) and
+  `cloudwatch` alarm actions (`PutMetricAlarm` / `DeleteAlarms` /
+  `DescribeAlarms`) for the target-tracking alarms. First registration also
+  creates the `AWSServiceRoleForApplicationAutoScaling_ECSService` service-linked
+  role automatically; if your account lacks it, grant
+  `iam:CreateServiceLinkedRole` for `ecs.application-autoscaling.amazonaws.com`.
+  Upgrade action: extend your deployer policy before updating.
+
 ## v1.1.8
 
 - **`deploy-lakerunner-services.sh` gains `PROCESS_LOGS_MEMORY` /

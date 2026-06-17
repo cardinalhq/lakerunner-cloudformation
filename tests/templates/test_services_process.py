@@ -206,9 +206,9 @@ def test_pubsub_sqs_task_definition_uses_yaml_defaults(td):
 
 
 def test_process_services_start_at_one_replica(td):
-    """process-* are created at min_replicas (1); the monitoring autoscaler in
-    services-control scales them up to the Process*Replicas cap. Launching at
-    the max would triple the steady-state Fargate footprint on every deploy."""
+    """process-* are created at min_replicas (1); native ECS CPU autoscaling
+    scales them up to the Process*Replicas cap. Launching at the max would
+    triple the steady-state Fargate footprint on every deploy."""
     services = {
         logical_id: r
         for logical_id, r in td["Resources"].items()
@@ -217,6 +217,67 @@ def test_process_services_start_at_one_replica(td):
     for logical_id in ("ProcessLogsService", "ProcessMetricsService", "ProcessTracesService"):
         dc = services[logical_id]["Properties"]["DesiredCount"]
         assert dc == 1, f"{logical_id} should be created at 1 replica; got {dc!r}"
+
+
+def test_process_services_have_cpu_scalable_target(td):
+    """Each process-* service has a CPU autoscaling target spanning min(1) to its
+    Process*Replicas cap, scoped to the right ECS service."""
+    targets = {
+        logical_id: r
+        for logical_id, r in td["Resources"].items()
+        if r["Type"] == "AWS::ApplicationAutoScaling::ScalableTarget"
+    }
+    expected = {
+        "ProcessLogsScalableTarget": ("ProcessLogsService", "ProcessLogsReplicas"),
+        "ProcessMetricsScalableTarget": ("ProcessMetricsService", "ProcessMetricsReplicas"),
+        "ProcessTracesScalableTarget": ("ProcessTracesService", "ProcessTracesReplicas"),
+    }
+    assert set(targets) == set(expected), f"unexpected scalable targets: {set(targets)}"
+    for logical_id, (service_id, max_param) in expected.items():
+        props = targets[logical_id]["Properties"]
+        assert props["ServiceNamespace"] == "ecs"
+        assert props["ScalableDimension"] == "ecs:service:DesiredCount"
+        assert props["MinCapacity"] == 1
+        assert props["MaxCapacity"] == {"Ref": max_param}
+        # ResourceId points at this service via service/<cluster>/<name>.
+        resource_id = props["ResourceId"]["Fn::Sub"]
+        assert resource_id[0] == "service/${ClusterName}/${ServiceName}"
+        assert resource_id[1]["ServiceName"] == {"Fn::GetAtt": [service_id, "Name"]}
+
+
+def test_process_services_have_cpu_target_tracking_policy(td):
+    """Each process-* service tracks CPU at 90% (mirrors the Kubernetes HPA)."""
+    policies = {
+        logical_id: r
+        for logical_id, r in td["Resources"].items()
+        if r["Type"] == "AWS::ApplicationAutoScaling::ScalingPolicy"
+    }
+    expected = {
+        "ProcessLogsCpuScalingPolicy": "ProcessLogsScalableTarget",
+        "ProcessMetricsCpuScalingPolicy": "ProcessMetricsScalableTarget",
+        "ProcessTracesCpuScalingPolicy": "ProcessTracesScalableTarget",
+    }
+    assert set(policies) == set(expected), f"unexpected scaling policies: {set(policies)}"
+    for logical_id, target_id in expected.items():
+        props = policies[logical_id]["Properties"]
+        assert props["PolicyType"] == "TargetTrackingScaling"
+        assert props["ScalingTargetId"] == {"Ref": target_id}
+        cfg = props["TargetTrackingScalingPolicyConfiguration"]
+        assert (
+            cfg["PredefinedMetricSpecification"]["PredefinedMetricType"]
+            == "ECSServiceAverageCPUUtilization"
+        )
+        assert cfg["TargetValue"] == 90.0
+
+
+def test_pubsub_sqs_has_no_autoscaling(td):
+    """pubsub-sqs is a fixed-count singleton -- no scalable target or policy."""
+    autoscale = [
+        logical_id
+        for logical_id, r in td["Resources"].items()
+        if r["Type"].startswith("AWS::ApplicationAutoScaling::") and "Pubsub" in logical_id
+    ]
+    assert not autoscale, f"pubsub-sqs should have no autoscaling resources; got {autoscale}"
 
 
 def test_pubsub_sqs_desired_count_uses_replicas_param(td):
