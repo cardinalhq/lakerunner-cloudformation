@@ -11,6 +11,13 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v1.2.1
+
+- **maestro image bumped to `v1.62.10`** (from `v1.62.4`). Default `MaestroImage`
+  bump (digest-pinned multi-arch manifest). On redeploy the Maestro service rolls
+  to the new task definition; no parameter, IAM, or resource changes. Upgrade
+  action: deploy v1.2.1; no manual steps.
+
 ## v1.2.0
 
 - **lakerunner image bumped to `v1.54.0`** (from `v1.51.5`). The single
