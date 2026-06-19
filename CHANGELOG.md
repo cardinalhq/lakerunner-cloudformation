@@ -11,6 +11,14 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v1.2.2
+
+- **lakerunner image bumped to `v1.57.1`** (from `v1.54.0`). The single
+  `LakerunnerImage` drives every lakerunner task and the DB migrator, so the
+  update redeploys `MigratorService` (reruns the idempotent migrator) before the
+  service tiers roll. No parameter or IAM changes. Upgrade action: deploy v1.2.2;
+  no manual steps.
+
 ## v1.2.1
 
 - **maestro image bumped to `v1.62.10`** (from `v1.62.4`). Default `MaestroImage`
