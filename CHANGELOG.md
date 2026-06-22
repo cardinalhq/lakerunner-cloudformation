@@ -11,6 +11,19 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v1.4.1
+
+- **Process workers now set a compaction target file size.** New env vars on the
+  three process services: `LAKERUNNER_PROCESSING_LOGS_COMPACT_TARGET_FILE_SIZE`,
+  `LAKERUNNER_PROCESSING_METRICS_COMPACT_TARGET_FILE_SIZE`, and
+  `LAKERUNNER_PROCESSING_TRACES_COMPACT_TARGET_FILE_SIZE`, each set to `2097152`
+  (2 MiB). Changes compaction output sizing only; no parameter, IAM, or resource
+  changes.
+- **`process-metrics` memory bumped to 4096 MiB** (from 2048), matching
+  `process-logs`. The task definition rolls to the larger size on redeploy;
+  ensure the cluster has Fargate capacity for the increase.
+- Upgrade action: deploy v1.4.1; no manual steps.
+
 ## v1.4.0
 
 - **lakerunner image bumped to `v1.61.1`** (from `v1.60.0`). The single

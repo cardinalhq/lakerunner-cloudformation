@@ -71,13 +71,14 @@ services:
     health_check:
       type: "go"
       command: ["/app/bin/lakerunner", "sysinfo"]
-    environment: {}
+    environment:
+      LAKERUNNER_PROCESSING_LOGS_COMPACT_TARGET_FILE_SIZE: "2097152"
 
   lakerunner-process-metrics:
     signal_type: metrics
     command: ["/app/bin/lakerunner", "process-metrics"]
     cpu: 1024
-    memory_mib: 2048
+    memory_mib: 4096
     autoscaling:
       min_replicas: 1
       max_replicas: 10
@@ -85,7 +86,8 @@ services:
     health_check:
       type: "go"
       command: ["/app/bin/lakerunner", "sysinfo"]
-    environment: {}
+    environment:
+      LAKERUNNER_PROCESSING_METRICS_COMPACT_TARGET_FILE_SIZE: "2097152"
 
   lakerunner-process-traces:
     signal_type: traces
@@ -99,7 +101,8 @@ services:
     health_check:
       type: "go"
       command: ["/app/bin/lakerunner", "sysinfo"]
-    environment: {}
+    environment:
+      LAKERUNNER_PROCESSING_TRACES_COMPACT_TARGET_FILE_SIZE: "2097152"
 
   lakerunner-sweeper:
     signal_type: common
