@@ -11,6 +11,18 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v1.4.2
+
+- **Lakerunner bumped to v1.61.2.** Pod startup now tolerates a database schema
+  that is *ahead* of the binary: a task whose image is older than the applied
+  migrations starts and waits rather than failing, and migrations remain
+  one-way (forward only). This makes a CloudFormation stack rollback safe across
+  a migration — if an upgrade applies migrations and then fails, the rolled-back
+  (older) tasks no longer crash on the newer schema. Bumping `LakerunnerImage`
+  redeploys the migrator (reruns migrations as a no-op) before the service tier
+  updates, as usual.
+- Upgrade action: deploy v1.4.2; no manual steps.
+
 ## v1.4.1
 
 - **Process workers now set a compaction target file size.** New env vars on the
