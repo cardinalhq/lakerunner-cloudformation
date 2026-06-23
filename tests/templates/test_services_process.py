@@ -246,7 +246,7 @@ def test_process_services_have_cpu_scalable_target(td):
 
 
 def test_process_services_have_cpu_target_tracking_policy(td):
-    """Each process-* service tracks CPU at 90% (mirrors the Kubernetes HPA)."""
+    """Each process-* service tracks CPU at 50%."""
     policies = {
         logical_id: r
         for logical_id, r in td["Resources"].items()
@@ -267,7 +267,7 @@ def test_process_services_have_cpu_target_tracking_policy(td):
             cfg["PredefinedMetricSpecification"]["PredefinedMetricType"]
             == "ECSServiceAverageCPUUtilization"
         )
-        assert cfg["TargetValue"] == 90.0
+        assert cfg["TargetValue"] == 50.0
 
 
 def test_pubsub_sqs_has_no_autoscaling(td):
