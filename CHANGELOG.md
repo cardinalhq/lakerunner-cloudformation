@@ -11,6 +11,16 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v1.4.3
+
+- **Process-tier CPU autoscaling target lowered 90% → 50%.** The three process
+  services (process-logs, process-metrics, process-traces) now scale out when
+  average CPU crosses 50% instead of 90%, so they leave the 1-replica floor and
+  scale toward `max_replicas` (10) under sustained ingest load much sooner. At
+  90% a steady-but-not-saturated workload could stall at one replica and fall
+  behind, delaying when data becomes queryable.
+- Upgrade action: deploy v1.4.3; no manual steps.
+
 ## v1.4.2
 
 - **Lakerunner bumped to v1.61.2.** Pod startup now tolerates a database schema

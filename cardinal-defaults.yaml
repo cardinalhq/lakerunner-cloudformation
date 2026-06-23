@@ -67,7 +67,7 @@ services:
     autoscaling:
       min_replicas: 1
       max_replicas: 10
-      cpu_target_percent: 90
+      cpu_target_percent: 50
     health_check:
       type: "go"
       command: ["/app/bin/lakerunner", "sysinfo"]
@@ -82,7 +82,7 @@ services:
     autoscaling:
       min_replicas: 1
       max_replicas: 10
-      cpu_target_percent: 90
+      cpu_target_percent: 50
     health_check:
       type: "go"
       command: ["/app/bin/lakerunner", "sysinfo"]
@@ -97,7 +97,7 @@ services:
     autoscaling:
       min_replicas: 1
       max_replicas: 10
-      cpu_target_percent: 90
+      cpu_target_percent: 50
     health_check:
       type: "go"
       command: ["/app/bin/lakerunner", "sysinfo"]
