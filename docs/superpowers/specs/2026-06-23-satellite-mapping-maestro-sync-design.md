@@ -71,12 +71,15 @@ bucket mapping and the queue poll list derive from it.
 5. **`pubsub-sqs` sources its queue poll list from configdb** (written by Maestro),
    not from ECS env. This is the only version where the JSON is genuinely the
    single source. Requires a lakerunner-binary change.
-6. **One writable collector per org = the cooked destination = group 0 (primary).**
-   Exactly one collector per org has `readonly: false`; all `readonly: true`
-   satellites in that org route their cooked output to it. That writable collector
-   *is* the primary (group-0) queue + bucket — there is no separate primary-queue
-   concept. `pubsub-sqs` treats it as just another configdb-sourced queue entry.
-   Reconcile rejects an org with zero or more than one writable collector.
+6. **One `normal` collector per org = the cooked destination = group 0 (primary).**
+   Each collector has a `mode` (`normal` / `read-only` / `satellite`); exactly one
+   per org is `normal`. All `read-only` / `satellite` collectors route their cooked
+   output to that `normal` collector. The `normal` collector *is* the primary
+   (group-0) queue + bucket — there is no separate primary-queue concept.
+   `pubsub-sqs` treats it as just another configdb-sourced queue entry. Reconcile
+   rejects an org with zero or more than one `normal` collector. `mode` maps to the
+   existing `delete_sources` / `writes_to_instance_num` columns (see the JSON-schema
+   table); the server derives both from `mode`.
 7. **Delivery via SSM `/cardinal/satellites`.** CFN writes the JSON verbatim to
    this SSM parameter and injects it into the Maestro container as an env var,
    reusing the machinery the migrator already uses for `STORAGE_PROFILES_YAML`
@@ -107,7 +110,7 @@ bucket mapping and the queue poll list derive from it.
           "region": "us-east-1"
         },
         "satellite-eu": {
-          "readonly": true,
+          "mode": "read-only",
           "bucket": "eu-raw",
           "sqsurl": "https://sqs.eu-west-1.amazonaws.com/222.../eu",
           "region": "eu-west-1",
@@ -126,11 +129,19 @@ Per-collector fields:
 - `region` (required) — region for both the bucket and the queue.
 - `role` (optional) — assume-role ARN for cross-account access; omit to use the
   task's own credentials.
-- `readonly` (optional, default `false`) — `true` marks a raw-only input whose
-  cooked output is written to the org's single writable collector.
+- `mode` (optional, default `normal`) — one of `normal`, `read-only`, `satellite`.
+  Maps onto two existing configdb axes:
 
-Collector key = `collector_name`. Validation: each org has exactly one collector
-with `readonly` false/absent; org keys are UUIDs; required fields present.
+  | mode | `delete_sources` | `writes_to_instance_num` | meaning |
+  |---|---|---|---|
+  | `normal` | true | self (NULL) | our bucket; write cooked locally, delete raw. This *is* the org's cooked destination. |
+  | `read-only` | false | the `normal` collector | foreign raw bucket; route cooked to the writable collector, never delete. |
+  | `satellite` | true | the `normal` collector | our raw bucket; route cooked to the writable collector *and* delete raw after processing. |
+
+Collector key = `collector_name`. Validation: each org has **exactly one
+collector with `mode: normal`** (the cooked destination); `read-only` /
+`satellite` collectors route their cooked output to it. Org keys are UUIDs;
+required fields present.
 
 ## Data flow
 
@@ -143,8 +154,8 @@ maestro.py   (SSM value injected into the Maestro container as an env var)
 Maestro provisioning worker   (reads JSON, reconciles)
    │  upsert declared, delete stale managed_by=external_json_config rows
    ▼
-configdb   organization_buckets (mapping + readonly + cooked routing + managed_by)
-           + queue list (url / region / role + managed_by)
+configdb   organization_buckets (mapping + mode-derived routing + managed_by)
+           bucket_configurations (+ sqs_queue_url for the poll list)
    ▲                                    ▲
    │ query / process read mapping       │ pubsub-sqs reads its poll list
 ```
@@ -174,8 +185,9 @@ This is a cross-repo system change. Boundaries:
 
 ### Conductor / Maestro repo
 
-- Extend the `DesiredBucket` contract + admin-API payload with `readonly` and the
-  cooked-instance routing, plus `managed_by`.
+- Extend the `DesiredBucket` contract + admin-API payload with `mode`, `sqs_queue_url`,
+  and `managed_by`. The server derives `delete_sources` / `writes_to_instance_num`
+  from `mode` and the org's single `normal` collector.
 - Read the satellite JSON (from the injected env / SSM) and build the
   `DesiredBucket[]` for each org from it (today it builds one from
   `bootstrap.bucket`).
@@ -189,14 +201,16 @@ This is a cross-repo system change. Boundaries:
 - Remove autoregister.
 - Make `pubsub-sqs` source its queue poll list from configdb instead of
   `SQS_QUEUE_URL_<n>` env.
-- configdb schema: add `managed_by` to the mapping table; add a queue-list table
-  (or columns) if not already present; readonly + cooked-instance routing
-  columns as needed.
+- configdb schema: add `managed_by` to `organization_buckets`; add `sqs_queue_url`
+  to `bucket_configurations`. Cooked routing reuses the existing
+  `writes_to_instance_num` (organization_buckets) and `delete_sources`
+  (bucket_configurations) columns — derived from `mode`.
 
 ## Error handling
 
-- **Invalid JSON / failed validation** (bad schema, zero or >1 writable collector
-  per org): the deploy driver fails before writing SSM, with a specific message.
+- **Invalid JSON / failed validation** (bad schema, unknown `mode`, zero or >1
+  `normal` collector per org): the deploy driver fails before writing SSM, with a
+  specific message.
   Maestro re-validates and refuses to reconcile a malformed document, leaving the
   prior good state in place.
 - **Provision API unreachable on fresh install:** the worker already ramps/backs
