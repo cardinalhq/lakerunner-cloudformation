@@ -71,10 +71,12 @@ bucket mapping and the queue poll list derive from it.
 5. **`pubsub-sqs` sources its queue poll list from configdb** (written by Maestro),
    not from ECS env. This is the only version where the JSON is genuinely the
    single source. Requires a lakerunner-binary change.
-6. **One writable collector per org = the cooked destination.** Exactly one
-   collector per org has `readonly: false`; all `readonly: true` satellites in
-   that org route their cooked output to it. Reconcile rejects an org with zero
-   or more than one writable collector.
+6. **One writable collector per org = the cooked destination = group 0 (primary).**
+   Exactly one collector per org has `readonly: false`; all `readonly: true`
+   satellites in that org route their cooked output to it. That writable collector
+   *is* the primary (group-0) queue + bucket — there is no separate primary-queue
+   concept. `pubsub-sqs` treats it as just another configdb-sourced queue entry.
+   Reconcile rejects an org with zero or more than one writable collector.
 7. **Delivery via SSM `/cardinal/satellites`.** CFN writes the JSON verbatim to
    this SSM parameter and injects it into the Maestro container as an env var,
    reusing the machinery the migrator already uses for `STORAGE_PROFILES_YAML`
@@ -160,8 +162,9 @@ This is a cross-repo system change. Boundaries:
 - `src/cardinal_cfn/children/services_process.py`: **delete** `QueueUrl<n>` /
   `QueueRegion<n>` / `QueueRoleArn<n>` params, `MAX_ADDITIONAL_QUEUES`, the
   `HasQueue<n>` conditions, and the per-group env emission. The primary
-  `QueueUrl` / `QueueRoleArn` (group 0) likely also moves to configdb-sourced;
-  confirm during planning. Remove `PUBSUB_AUTOREGISTER*` params.
+  `QueueUrl` / `QueueRoleArn` (group 0) also goes away — group 0 is the org's
+  writable collector in the JSON and is configdb-sourced like every other queue.
+  Remove `PUBSUB_AUTOREGISTER*` params.
 - `src/cardinal_cfn/children/maestro.py`: widen the bootstrap-bucket input from a
   single bucket to the satellite JSON; inject `/cardinal/satellites` as an env
   var.
@@ -221,9 +224,6 @@ This is a cross-repo system change. Boundaries:
 
 ## Open items for planning
 
-- Whether the group-0 primary queue (`QueueUrl` / `QueueRoleArn`) also moves to
-  configdb-sourced, or stays as the central bucket's entry in the JSON (likely
-  the latter — the central writable collector *is* group 0).
 - Exact configdb schema for the queue list and routing columns (owned by the
   lakerunner repo).
 - SSM 8 KB ceiling vs S3 delivery trigger point.
