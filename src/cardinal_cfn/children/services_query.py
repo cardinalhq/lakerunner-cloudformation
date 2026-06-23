@@ -296,10 +296,12 @@ def build() -> Template:
             subnets_csv_param="PrivateSubnetsCsv",
             security_group_id_param="TaskSecurityGroupId",
             container_name="query-worker",
-            # Base=1 guarantees the first NEW task of a rolling upgrade lands on
-            # on-demand even in a transient FARGATE_SPOT shortage; the remaining
-            # scale-out replicas stay spot-weighted (~85-90% spot).
-            capacity="fallback",
+            # Build-time "lakerunner_capacity" knob (default "fallback": Base=1
+            # guarantees the first NEW task of a rolling upgrade lands on
+            # on-demand even in a transient FARGATE_SPOT shortage, while the
+            # remaining scale-out replicas stay spot-weighted ~85-90% spot;
+            # "ondemand" disables spot on the lakerunner side).
+            capacity=defaults.get("lakerunner_capacity", "ondemand"),
         )
     )
 
