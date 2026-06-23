@@ -43,6 +43,16 @@ images:
   aws_cli:    "public.ecr.aws/aws-cli/aws-cli:2.34.63@sha256:c95ab0642137f55a12b95b6956dd03cefdbd73e760e0e7b870afc9b47f9c8150"
 
 # ---------------------------------------------------------------------------
+# Capacity for the autoscaled lakerunner scale-out workers (process-logs,
+# process-metrics, process-traces, query-worker). One build-time knob:
+#   "ondemand" - pure on-demand FARGATE; disables Spot on the lakerunner side (default).
+#   "fallback" - Base=1 on-demand FARGATE + FARGATE_SPOT scale-out.
+# Deploy-critical singletons (query-api, control, maestro, pubsub-sqs,
+# migrator) and the collector are always on-demand and ignore this knob.
+# ---------------------------------------------------------------------------
+lakerunner_capacity: ondemand
+
+# ---------------------------------------------------------------------------
 # Lakerunner microservices. Each entry's tier (query / process / control) is
 # determined by which services-*.yaml child stack owns it; this file does not
 # encode the tier mapping (the generators do).

@@ -385,12 +385,11 @@ def test_query_api_is_pure_on_demand(td):
     assert all("Base" not in i for i in items)
 
 
-def test_query_worker_has_ondemand_base_with_spot_scaleout(td):
-    # query-worker autoscales (to 8): Base=1 guarantees the first NEW task of a
-    # rolling upgrade lands on on-demand even in a transient FARGATE_SPOT
-    # shortage; scale-out replicas stay spot-weighted.
-    assert _service_strategy(td, "QueryWorkerService") == {"FARGATE_SPOT", "FARGATE"}
-    by_provider = {i["CapacityProvider"]: i for i in _service_items(td, "QueryWorkerService")}
-    assert by_provider["FARGATE"]["Base"] == 1
-    assert by_provider["FARGATE_SPOT"]["Weight"] == 4
-    assert "Base" not in by_provider["FARGATE_SPOT"]
+def test_query_worker_is_pure_on_demand_by_default(td):
+    # The shipped default (lakerunner_capacity: ondemand) disables Spot on the
+    # lakerunner side, so query-worker runs pure on-demand FARGATE. The
+    # "fallback" (spot scale-out) strategy is covered in test_services_common.py.
+    assert _service_strategy(td, "QueryWorkerService") == {"FARGATE"}
+    items = _service_items(td, "QueryWorkerService")
+    assert items == [{"CapacityProvider": "FARGATE", "Weight": 1}]
+    assert all("Base" not in i for i in items)

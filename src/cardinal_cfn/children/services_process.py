@@ -57,6 +57,7 @@ def build() -> Template:
     )
 
     defaults = load_defaults()
+    lakerunner_capacity = defaults.get("lakerunner_capacity", "ondemand")
     pubsub_cfg = defaults["services"]["lakerunner-pubsub-sqs"]
     logs_cfg = defaults["services"]["lakerunner-process-logs"]
     metrics_cfg = defaults["services"]["lakerunner-process-metrics"]
@@ -484,12 +485,13 @@ def build() -> Template:
             base_env=base_env,
             base_secrets=base_secrets,
             extra_env=spec.get("extra_env"),
-            # Autoscaled workers (process-{logs,metrics,traces}) default to
-            # "fallback": Base=1 on-demand guarantees the first NEW task of a
-            # rolling upgrade places even in a transient FARGATE_SPOT shortage,
-            # while scale-out replicas ride cheap spot. pubsub-sqs overrides this
-            # to "ondemand" (it's a deploy-critical singleton, not autoscaled).
-            capacity=spec.get("capacity", "fallback"),
+            # Autoscaled workers (process-{logs,metrics,traces}) take the
+            # build-time "lakerunner_capacity" knob (default "fallback": Base=1
+            # on-demand guarantees the first NEW task of a rolling upgrade places
+            # even in a transient FARGATE_SPOT shortage, while scale-out replicas
+            # ride cheap spot; "ondemand" disables spot). pubsub-sqs overrides
+            # this to "ondemand" (deploy-critical singleton, not autoscaled).
+            capacity=spec.get("capacity", lakerunner_capacity),
         )
         t.add_output(Output(spec["output_name"], Value=GetAtt(ecs_service, "Name")))
 

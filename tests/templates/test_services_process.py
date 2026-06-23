@@ -529,17 +529,6 @@ def _assert_on_demand(items):
     assert all("Base" not in i for i in items)
 
 
-def _assert_fallback(items):
-    # Autoscaled worker: Base=1 on-demand first replica + weighted spot scale-out.
-    by_provider = {i["CapacityProvider"]: i for i in items}
-    assert by_provider["FARGATE"]["Base"] == 1
-    assert "FARGATE_SPOT" in by_provider
-    assert by_provider["FARGATE_SPOT"]["Weight"] == 4
-    assert "Base" not in by_provider["FARGATE_SPOT"]
-    bases = [i.get("Base", 0) for i in items]
-    assert sum(1 for b in bases if b) == 1
-
-
 def test_pubsub_sqs_is_pure_on_demand(td):
     # pubsub-sqs is a non-autoscaled, deploy-critical singleton: pure on-demand
     # FARGATE so a rolling deploy always places. No FARGATE_SPOT.
@@ -547,10 +536,10 @@ def test_pubsub_sqs_is_pure_on_demand(td):
     _assert_on_demand(_service_items(td, "PubsubSqsService"))
 
 
-def test_process_workers_have_ondemand_base_with_spot_scaleout(td):
-    # process-* autoscale (to 10): Base=1 guarantees the first NEW task of a
-    # rolling upgrade lands on on-demand even in a transient FARGATE_SPOT
-    # shortage; scale-out replicas stay spot-weighted.
+def test_process_workers_are_pure_on_demand_by_default(td):
+    # The shipped default (lakerunner_capacity: ondemand) disables Spot on the
+    # lakerunner side, so process-* run pure on-demand FARGATE. The "fallback"
+    # (spot scale-out) strategy is covered in test_services_common.py.
     for suffix in ("ProcessLogsService", "ProcessMetricsService", "ProcessTracesService"):
-        assert _service_strategy(td, suffix) == {"FARGATE_SPOT", "FARGATE"}, suffix
-        _assert_fallback(_service_items(td, suffix))
+        assert _service_strategy(td, suffix) == {"FARGATE"}, suffix
+        _assert_on_demand(_service_items(td, suffix))

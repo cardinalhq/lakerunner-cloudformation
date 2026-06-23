@@ -11,6 +11,20 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v1.4.4
+
+- **Spot is now disabled by default for the lakerunner side.** New build-time
+  knob `lakerunner_capacity` in `cardinal-defaults.yaml`, default `ondemand`:
+  the four autoscaled workers (process-logs, process-metrics, process-traces,
+  query-worker) now run pure on-demand FARGATE instead of the previous Base=1
+  on-demand + FARGATE_SPOT scale-out. This removes exposure to FARGATE_SPOT
+  capacity shortages on the lakerunner tier. Set `lakerunner_capacity: fallback`
+  to opt back into Spot scale-out. Deploy-critical singletons and the collector
+  were already on-demand and are unaffected.
+- Upgrade action: deploy v1.4.4. Expect a higher steady-state Fargate bill on the
+  process and query-worker tiers (on-demand vs spot); set `lakerunner_capacity:
+  fallback` before building if you want the prior Spot behavior.
+
 ## v1.4.3
 
 - **Process-tier CPU autoscaling target lowered 90% → 50%.** The three process
