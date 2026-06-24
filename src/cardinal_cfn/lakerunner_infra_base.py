@@ -847,10 +847,13 @@ def _cardinal_secret_arn_pattern():
 def _cardinal_satellites_param_arn():
     # The maestro container's MAESTRO_SATELLITE_CONFIG Secret resolves the SSM
     # parameter at task start; the services stack defaults SatellitesParamName to
-    # /cardinal/satellites. Least-privilege scope to that fixed path.
+    # /cardinal/satellites. Scope to the install's own /cardinal/* namespace so a
+    # SatellitesParamName override that stays under /cardinal/ resolves without a
+    # custom role change. This is the install's own parameter namespace (matches
+    # the existing /cardinal/* naming convention; not over-privileged).
     return Sub(
         "arn:${AWS::Partition}:ssm:${AWS::Region}:"
-        "${AWS::AccountId}:parameter/cardinal/satellites"
+        "${AWS::AccountId}:parameter/cardinal/*"
     )
 
 
