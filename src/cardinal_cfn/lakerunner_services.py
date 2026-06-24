@@ -370,6 +370,16 @@ def build() -> Template:
         Description="Display name for the org Maestro pre-populates.",
     ))
     t.add_parameter(Parameter(
+        "SatellitesParamName",
+        Type="String",
+        Default="/cardinal/satellites",
+        Description=(
+            "SSM parameter holding the satellite-mapping JSON. Forwarded to "
+            "Maestro as MAESTRO_SATELLITE_CONFIG; Maestro's provisioning worker "
+            "reconciles it into lakerunner's configdb."
+        ),
+    ))
+    t.add_parameter(Parameter(
         "TemplateBaseUrl",
         Type="String",
         Default=DEFAULT_TEMPLATE_BASE_URL,
@@ -669,7 +679,7 @@ def build() -> Template:
         "DbEndpoint": Ref("DbEndpoint"),
         "DbPort": Ref("DbPort"),
         "DbSecretArn": Ref("DbMasterSecretArn"),
-        "BucketName": Ref("CookedBucketName"),
+        "SatellitesParamName": Ref("SatellitesParamName"),
         "LicenseSecretArn": Ref("LicenseSecretArn"),
         "MigrationComplete": migration_complete,
         "MaestroImage": maestro_image,

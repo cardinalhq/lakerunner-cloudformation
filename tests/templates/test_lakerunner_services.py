@@ -145,6 +145,16 @@ def test_cooked_bucket_wired_to_children(td):
     assert query["BucketName"] == ref
 
 
+def test_maestro_child_gets_satellites_param_not_bucket_name(td):
+    """Maestro now reads the satellite JSON from SSM; the root forwards
+    SatellitesParamName and must NOT forward BucketName."""
+    maestro = td["Resources"]["Maestro"]["Properties"]["Parameters"]
+    assert maestro.get("SatellitesParamName") == {"Ref": "SatellitesParamName"}, (
+        "SatellitesParamName must be forwarded to Maestro child"
+    )
+    assert "BucketName" not in maestro, "Maestro child must not receive BucketName"
+
+
 def test_migration_child_gets_no_org_content_params(td):
     """Org content is Maestro-owned: the Migration child no longer receives the
     SSM-seed param names, the org id, or the ingest bucket."""
