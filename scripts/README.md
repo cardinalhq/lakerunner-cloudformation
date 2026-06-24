@@ -35,6 +35,22 @@ The release pipeline (`.github/workflows/release.yml`) bakes the tag version
 into these drivers and publishes the templates + drivers together to S3 and the
 GitHub release, as a unit.
 
+## `deploy-lakerunner-services.sh` satellite config env vars
+
+The services driver synthesizes a satellite-mapping JSON and writes it to SSM
+before deploying the stack. Maestro reads it as `MAESTRO_SATELLITE_CONFIG`.
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `SATELLITE_CONFIG` | (empty) | Inline JSON `{ "organizations": { ... } }` of operator-supplied read-only/satellite collectors. Do not include a `normal` collector for the install org. |
+| `SATELLITE_CONFIG_FILE` | (empty) | Path to a JSON file with the same shape (used when `SATELLITE_CONFIG` is unset). |
+| `CENTRAL_COLLECTOR_NAME` | `lakerunner` | Collector name for the auto-synthesized central entry. On upgrade this must match the install's existing collector name or a duplicate `normal` rejection occurs. |
+| `SATELLITES_PARAM_NAME` | `/cardinal/satellites` | SSM parameter name receiving the composed satellite config JSON. Passed to the stack as `SatellitesParamName`. |
+
+The central `normal` collector (the install's own bucket + queue) is always
+synthesized automatically from the stack outputs — operators supply only
+read-only or satellite collectors in `SATELLITE_CONFIG`.
+
 ## Related
 
 - [`docs/operations/production-deploy.md`](../docs/operations/production-deploy.md) — the production install path (admins).

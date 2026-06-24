@@ -11,6 +11,67 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v1.5.0
+
+**Satellite collector mapping via `SATELLITE_CONFIG` → SSM → Maestro.**
+
+- **New:** satellite collector configuration is now delivered to Maestro as
+  `MAESTRO_SATELLITE_CONFIG` via SSM parameter `/cardinal/satellites`. The
+  deploy driver (`deploy-lakerunner-services.sh`) auto-synthesizes the central
+  `normal` collector (collector name `lakerunner`, from the install's bucket /
+  queue / region) and merges it with any operator-supplied read-only or satellite
+  collectors from `SATELLITE_CONFIG` / `SATELLITE_CONFIG_FILE`. The merged JSON
+  is written to SSM before the stack deploys. Maestro's provisioning worker
+  reconciles the JSON into lakerunner's configdb on startup and on subsequent
+  reconcile cycles.
+- **Removed stack parameters:** `QueueUrl`, `QueueRoleArn`, `QueueUrl<n>`,
+  `QueueRegion<n>`, `QueueRoleArn<n>` (numbered satellite queues) and
+  `PubsubAutoRegister`, `PubsubAutoRegisterWritesToInstance` (autoregister).
+  The `pubsub-sqs` container no longer receives any SQS env vars; it reads
+  queues from configdb on the new lakerunner image.
+- **New driver env vars:** `SATELLITE_CONFIG` (inline JSON), `SATELLITE_CONFIG_FILE`
+  (path), `CENTRAL_COLLECTOR_NAME` (default `lakerunner`),
+  `SATELLITES_PARAM_NAME` (default `/cardinal/satellites`).
+- **New stack parameter:** `SatellitesParamName` (default `/cardinal/satellites`),
+  forwarded to the Maestro child.
+- **IAM:** the shared `ExecutionRole` now resolves
+  `ssm:GetParameters` on
+  `arn:${Partition}:ssm:${Region}:${Account}:parameter/cardinal/satellites`
+  (the `/cardinal/*` wildcard already covers this; no policy change is required
+  unless you have a custom execution role policy).
+- **Image dependency:** this release requires a lakerunner image in which
+  `pubsub-sqs` reads SQS queues from configdb (not from env), and a Maestro image
+  that consumes `MAESTRO_SATELLITE_CONFIG`. The bundled image pins in
+  `cardinal-defaults.yaml` will be bumped to the qualifying versions in a
+  follow-on release, gated on the upstream PRs merging. Do not deploy v1.5.0
+  against the current image pins; wait for the image-bump release.
+- **Brief ingestion gap on first deploy:** after the stack updates, `pubsub-sqs`
+  polls no queues until Maestro's startup reconcile writes `sqs_queue_url` into
+  configdb (typically within minutes). Ingestion resumes automatically.
+
+**Upgrade actions (existing installs):**
+
+1. **Move numbered-queue satellites into `SATELLITE_CONFIG`.** Any queues
+   previously passed as `QUEUE_URL_1` / `QUEUE_REGION_1` / `QUEUE_ROLE_ARN_1`
+   (and higher-numbered variants) must be moved into the `SATELLITE_CONFIG` JSON
+   as `read-only` or `satellite` collectors with `bucket`, `sqsurl`, `region`,
+   and optionally `role` fields. Until you do this, those satellites will not be
+   polled. The central (install org) collector is auto-synthesized; do not
+   redeclare it.
+2. **Central collector name.** The default `CENTRAL_COLLECTOR_NAME=lakerunner`
+   matches the legacy value written by older Maestro versions, so the first
+   reconcile converts the existing unmanaged `organization_buckets` row to
+   `external_json_config` in place (no duplicate `normal`, no manual migration).
+   If your install used a different collector name, set
+   `CENTRAL_COLLECTOR_NAME=<that name>` before deploying, or the reconcile will
+   attempt to insert a second `normal` collector and be rejected.
+3. **Lingering autoregister rows.** Any autoregister-created unmanaged satellite
+   rows in configdb remain but have no `sqs_queue_url` and are never polled.
+   They may be deleted manually; they do not cause errors.
+4. **Remove `PUBSUB_AUTOREGISTER` / `QUEUE_URL_<n>` from your deploy
+   invocation** before running the new driver version. The driver will exit with
+   an error if those env vars are present and no longer recognized.
+
 ## v1.4.4
 
 - **Spot is now disabled by default for the lakerunner side.** New build-time

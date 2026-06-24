@@ -56,8 +56,7 @@ ARNs the ExecutionRole must read. Aggregated:
 
 | SSM parameter (parameter Ref) | Pulled by containers in tiers |
 |---|---|
-| `StorageProfilesParamName` | migration (migrator container injects as `STORAGE_PROFILES_YAML`) |
-| `ApiKeysParamName` | migration (migrator container injects as `API_KEYS_YAML`) |
+| `SatellitesParamName` | maestro (injected as `MAESTRO_SATELLITE_CONFIG` at task start) |
 
 ### ExecutionRole policy
 
@@ -67,7 +66,7 @@ ResolveCardinalSecrets:  secretsmanager:GetSecretValue,DescribeSecret
 
 ResolveCardinalSsm:      ssm:GetParameter,GetParameters
                          on arn:aws:ssm:<region>:<acct>:parameter/cardinal/*
-                         (matches /cardinal/storage-profiles and /cardinal/api-keys)
+                         (matches /cardinal/satellites)
 
 Managed: arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
          (ECR pull + CloudWatch Logs CreateLogStream/PutLogEvents)
@@ -97,7 +96,6 @@ the contract again. See PR #135 for the regression.
 **Required policy:**
 ```text
 ReadSecrets:    secretsmanager:Get/DescribeSecret on [DbMasterSecretArn]
-ReadSsmParams:  ssm:GetParameter,GetParameters on [StorageProfilesParamName, ApiKeysParamName]
 CloudWatchLogs: logs:CreateLogStream,PutLogEvents on the tier log groups
 ```
 
@@ -121,7 +119,6 @@ CloudWatchLogs: logs:CreateLogStream,PutLogEvents on the tier log groups
 **Required policy:**
 ```text
 ReadSecrets:    secretsmanager:Get/DescribeSecret on [DbMasterSecretArn, LicenseSecretArn]
-ReadSsmParams:  ssm:GetParameter,GetParameters on [StorageProfilesParamName, ApiKeysParamName]
 IngestBucketRead: s3:GetObject,ListBucket,GetBucketLocation on ${BucketName}[/*]
 CloudWatchLogs: logs:CreateLogStream,PutLogEvents on tier log groups
 DescribeWorkerTasks: ecs:DescribeServices,DescribeTasks,ListTasks
@@ -151,7 +148,6 @@ Bedrock, ECS UpdateService.
 **Required policy:**
 ```text
 ReadSecrets:    secretsmanager:Get/DescribeSecret on [DbMasterSecretArn, LicenseSecretArn]
-ReadSsmParams:  ssm:GetParameter,GetParameters on [StorageProfilesParamName, ApiKeysParamName]
 IngestBucketReadWrite: s3:GetObject,PutObject,DeleteObject,ListBucket,GetBucketLocation on ${BucketName}[/*]
 IngestQueueConsume: sqs:ReceiveMessage,DeleteMessage,GetQueueAttributes on ${QueueArn}
 InvokeBedrockFoundationModels:
@@ -185,7 +181,6 @@ CloudWatchLogs: logs:CreateLogStream,PutLogEvents on tier log groups
 **Required policy:**
 ```text
 ReadSecrets:    secretsmanager:Get/DescribeSecret on [DbMasterSecretArn, LicenseSecretArn, AdminKeySecretArn]
-ReadSsmParams:  ssm:GetParameter,GetParameters on [StorageProfilesParamName, ApiKeysParamName]
 SweeperS3Cleanup: s3:GetObject,ListBucket,DeleteObject on ${BucketName}[/*]
                   (alert-evaluator also reads under this statement)
 CloudWatchLogs: logs:CreateLogStream,PutLogEvents on tier log groups
@@ -234,17 +229,26 @@ on `otel-raw/`), SQS, Bedrock, ECS API.
 - `wait-for-mcp`: localhost poll.
 - `maestro`: web UI + REST API. Talks to lrdb, calls lakerunner via
   internal endpoints (Cloud Map), bootstrap admin key passed in via env.
+  Reads `MAESTRO_SATELLITE_CONFIG` (injected from SSM `/cardinal/satellites`
+  at task start by the ExecutionRole) and reconciles satellite collectors
+  into lakerunner's configdb.
 - `dex-init`: bootstraps DEX storage in lrdb.
 - `dex`: DEX OIDC IDP. Stores state in lrdb.
 
-**Required policy:**
+**Required policy (TaskRole):**
 ```text
 ReadSecrets:    secretsmanager:Get/DescribeSecret on [DbMasterSecretArn, LicenseSecretArn, AdminKeySecretArn]
-ReadSsmParams:  ssm:GetParameter,GetParameters on [StorageProfilesParamName, ApiKeysParamName]
 CloudWatchLogs: logs:CreateLogStream,PutLogEvents on tier log groups
 ```
 
-**Must NOT have:** S3, SQS, Bedrock, ECS API.
+**ExecutionRole addition (resolved at task start, not TaskRole):**
+```text
+ResolveCardinalSsm:  ssm:GetParameter,GetParameters
+                     on arn:${Partition}:ssm:${Region}:${Account}:parameter/cardinal/satellites
+                     (ECS resolves the Secret entry before the container starts)
+```
+
+**Must NOT have (TaskRole):** S3, SQS, Bedrock, ECS API.
 
 ## Rule for adding new permissions
 
