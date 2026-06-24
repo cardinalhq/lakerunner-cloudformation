@@ -48,7 +48,7 @@ ARNs the ExecutionRole must read. Aggregated:
 
 | Secret ARN (parameter Ref) | Pulled by containers in tiers |
 |---|---|
-| `DbMasterSecretArn` | migration (configdb-init, migrator, ensure-storage-profile), query (query-api, query-worker), process (process-{logs,metrics,traces}, pubsub-sqs), control (admin-api, alert-evaluator, monitoring, sweeper), maestro (db-init, mcp-gateway, maestro) |
+| `DbMasterSecretArn` | migration (configdb-init, migrator, keepalive), query (query-api, query-worker), process (process-{logs,metrics,traces}, pubsub-sqs), control (admin-api, alert-evaluator, monitoring, sweeper), maestro (db-init, mcp-gateway, maestro) |
 | `LicenseSecretArn` | query, process, control, otel, maestro (every container that pulls LICENSE_DATA) |
 | `AdminKeySecretArn` | control (admin-api), maestro (maestro) |
 
