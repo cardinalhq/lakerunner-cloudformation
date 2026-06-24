@@ -295,10 +295,19 @@ def test_bootstrap_bucket_env_removed(td):
 
 
 def test_satellite_config_secret_present(td):
-    """MAESTRO_SATELLITE_CONFIG is injected from SSM via the Secrets list."""
+    """MAESTRO_SATELLITE_CONFIG is injected from SSM via the Secrets list, with
+    a well-formed parameter ARN (no slash between `parameter` and the var)."""
     maestro_c = _container(td, "maestro")
-    secret_names = {s["Name"] for s in maestro_c.get("Secrets", [])}
-    assert "MAESTRO_SATELLITE_CONFIG" in secret_names
+    secrets = {s["Name"]: s["ValueFrom"] for s in maestro_c.get("Secrets", [])}
+    assert "MAESTRO_SATELLITE_CONFIG" in secrets
+    secret_vf = secrets["MAESTRO_SATELLITE_CONFIG"]
+    assert "Fn::Sub" in secret_vf
+    assert secret_vf["Fn::Sub"] == (
+        "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}"
+        ":parameter${SatellitesParamName}"
+    )
+    assert ":parameter${SatellitesParamName}" in secret_vf["Fn::Sub"]
+    assert ":parameter/${SatellitesParamName}" not in secret_vf["Fn::Sub"]
 
 
 def test_maestro_container_admin_api_key_from_secret(td):
