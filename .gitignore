@@ -16,3 +16,4 @@ generated-templates/
 
 # Local scratch / not-for-commit scripts
 do-not-commit*.sh
+.superpowers/

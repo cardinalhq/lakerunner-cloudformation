@@ -14,20 +14,6 @@ api_keys:
       - f70603aa00e6f67999cc66e336134887
 
 # ---------------------------------------------------------------------------
-# Storage profiles. ${BUCKET_NAME} and ${AWS_REGION} are filled in by the
-# config stack at deploy time using CFN intrinsic functions.
-# ---------------------------------------------------------------------------
-storage_profiles:
-  - bucket: "${BUCKET_NAME}"
-    cloud_provider: aws
-    collector_name: lakerunner
-    insecure_tls: false
-    instance_num: 1
-    organization_id: 12340000-0000-4000-8000-000000000000
-    region: "${AWS_REGION}"
-    use_path_style: true
-
-# ---------------------------------------------------------------------------
 # Container images. Each can be overridden via *Image parameters on the root.
 # The migrator runs from the same image as the lakerunner tasks (LakerunnerImage)
 # so the two cannot drift; any change to LakerunnerImage retriggers migrations.

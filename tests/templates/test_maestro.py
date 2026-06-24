@@ -279,17 +279,35 @@ def test_maestro_container_has_bootstrap_env(td):
     )
 
 
-def test_maestro_container_has_bootstrap_bucket_env(td):
-    """Bucket coordinates so a fixed maestro version can re-insert the
-    organization_buckets join row after provision_org (v1.45.9 wipes it
-    without re-inserting; deploy-time ensure-storage-profile only runs
-    on stack-image change)."""
+def test_bootstrap_bucket_env_removed(td):
+    """Central bucket now arrives via MAESTRO_SATELLITE_CONFIG JSON; the four
+    MAESTRO_BOOTSTRAP_BUCKET_* env vars and the BucketName parameter are gone."""
     maestro_c = _container(td, "maestro")
-    env = {e["Name"]: e["Value"] for e in maestro_c.get("Environment", [])}
-    assert env["MAESTRO_BOOTSTRAP_BUCKET_NAME"] == {"Ref": "BucketName"}
-    assert env["MAESTRO_BOOTSTRAP_BUCKET_REGION"] == {"Ref": "AWS::Region"}
-    assert env["MAESTRO_BOOTSTRAP_BUCKET_CLOUD_PROVIDER"] == "aws"
-    assert env["MAESTRO_BOOTSTRAP_BUCKET_COLLECTOR_NAME"] == "lakerunner"
+    env = {e["Name"] for e in maestro_c.get("Environment", [])}
+    for k in (
+        "MAESTRO_BOOTSTRAP_BUCKET_NAME",
+        "MAESTRO_BOOTSTRAP_BUCKET_REGION",
+        "MAESTRO_BOOTSTRAP_BUCKET_CLOUD_PROVIDER",
+        "MAESTRO_BOOTSTRAP_BUCKET_COLLECTOR_NAME",
+    ):
+        assert k not in env, f"env var {k} must be removed"
+    assert "BucketName" not in td.get("Parameters", {}), "BucketName param must be removed"
+
+
+def test_satellite_config_secret_present(td):
+    """MAESTRO_SATELLITE_CONFIG is injected from SSM via the Secrets list, with
+    a well-formed parameter ARN (no slash between `parameter` and the var)."""
+    maestro_c = _container(td, "maestro")
+    secrets = {s["Name"]: s["ValueFrom"] for s in maestro_c.get("Secrets", [])}
+    assert "MAESTRO_SATELLITE_CONFIG" in secrets
+    secret_vf = secrets["MAESTRO_SATELLITE_CONFIG"]
+    assert "Fn::Sub" in secret_vf
+    assert secret_vf["Fn::Sub"] == (
+        "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}"
+        ":parameter${SatellitesParamName}"
+    )
+    assert ":parameter${SatellitesParamName}" in secret_vf["Fn::Sub"]
+    assert ":parameter/${SatellitesParamName}" not in secret_vf["Fn::Sub"]
 
 
 def test_maestro_container_admin_api_key_from_secret(td):

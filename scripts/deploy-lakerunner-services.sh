@@ -9,11 +9,10 @@
 # All of those output names match the template's parameter names, so plain
 # FROM_STACKS pulls wire them up.
 #
-# Special case: QueueUrl and QueueRoleArn are pulled from the satellite-infra-
-# base stack outputs (RawQueueUrl / LakerunnerAccessRoleArn) and passed via
-# PARAMS lines (highest precedence). The pubsub-sqs container sets them as plain
-# SQS_QUEUE_URL / SQS_ROLE_ARN env vars; the region is the stack's own
-# AWS::Region, so no QueueRegion param is needed.
+# Satellite config: RawQueueUrl / RawBucketName / LakerunnerAccessRoleArn are
+# pulled from the satellite-infra-base stack and used to synthesize the central
+# collector entry in the MAESTRO_SATELLITE_CONFIG JSON, which is written to SSM
+# /cardinal/satellites and passed as SatellitesParamName.
 #
 # Self-contained single-file driver: this front-half sets the engine env, then
 # falls through into the engine embedded below by scripts-src/build.sh (do not
@@ -47,8 +46,8 @@ Required:
   REGION                      AWS region (never defaulted; must be set explicitly).
   INFRA_BASE_STACK            Upstream lakerunner-infra-base.
   INFRA_RDS_STACK             Upstream lakerunner-infra-rds.
-  SATELLITE_INFRA_BASE_STACK  Source of RawQueueUrl / LakerunnerAccessRoleArn
-                              for the QueueUrl / QueueRoleArn params.
+  SATELLITE_INFRA_BASE_STACK  Source of RawQueueUrl / RawBucketName /
+                              LakerunnerAccessRoleArn for the central collector.
   CLUSTER_ARN                 ECS cluster ARN.
   CLUSTER_NAME                ECS cluster name (no upstream output for it).
   VPC_ID                      VPC for the services.
@@ -134,20 +133,27 @@ Optional (template defaults preserved when unset):
                               (official postgres psql client). Bypasses
                               IMAGE_REGISTRY. Default: the baked, pinned suffix
                               under IMAGE_REGISTRY (always passed to the stack).
-  PUBSUB_AUTOREGISTER         pubsub-sqs auto-registration of satellite buckets
-                              (template default "true").  Set "false" to disable.
-                              When true, unseen satellite raw-bucket orgs are
-                              registered and cooked output is routed to the
-                              central instance.
-  PUBSUB_AUTOREGISTER_WRITES_TO_INSTANCE
-                              Central cooked-bucket instance_num that auto-
-                              registered orgs write to (default 1). Required
-                              when PUBSUB_AUTOREGISTER=true.
-  QUEUE_URL_<n>, QUEUE_REGION_<n>, QUEUE_ROLE_ARN_<n>
-                              Additional satellite queues for pubsub-sqs, n=1..10.
-                              Set QUEUE_URL_<n> (and optionally the matching
-                              region / assume-role ARN) to add a queue beyond the
-                              primary one.  QUEUE_REGION_<n> defaults to REGION.
+  SATELLITE_CONFIG            JSON string: operator satellite collectors, as an
+                              { "organizations": { ... } } document.  This is a
+                              single-install deployment: declare read-only/satellite
+                              collectors under the INSTALL org (ORGANIZATION_ID)
+                              ONLY -- any other org key is rejected.  Must NOT
+                              declare a "normal" collector (the central collector is
+                              auto-synthesized from the infra-base stack outputs).
+                              Merged with the central collector before writing to SSM.
+                              UPGRADE NOTE: move any old QUEUE_URL_<n>/
+                              QUEUE_REGION_<n>/QUEUE_ROLE_ARN_<n> entries here;
+                              CENTRAL_COLLECTOR_NAME must match the existing
+                              install's collector name (default: lakerunner).
+  SATELLITE_CONFIG_FILE       Path to a JSON file with the same content as
+                              SATELLITE_CONFIG.  Fallback when SATELLITE_CONFIG is
+                              unset.
+  CENTRAL_COLLECTOR_NAME      Name for the central (normal) collector synthesized
+                              from the install's infra-base outputs.  Default:
+                              lakerunner.  MUST match the existing collector name
+                              on upgrades (the upsert is keyed on this name).
+  SATELLITES_PARAM_NAME       SSM parameter name to write the composed satellite
+                              JSON to.  Default: /cardinal/satellites.
   TEMPLATE_BASE_URL           Default: $DEFAULT_TEMPLATE_BASE_URL.  Also
                               forwarded as the TemplateBaseUrl param (nested
                               children load from the matching prefix).
@@ -205,7 +211,7 @@ echo "[deploy-lakerunner-services] resolved DbInitImage     = $db_init_image" >&
 
 TEMPLATE_URL="$template_base_url/$stack_version/$TEMPLATE_KEY"
 
-# --- Read QueueUrl / QueueRoleArn from the satellite-infra-base stack. --------
+# --- Read RawQueueUrl / RawBucketName / LakerunnerAccessRoleArn from the satellite-infra-base stack. ---
 sat_outputs=$(aws cloudformation describe-stacks \
     --stack-name "$SATELLITE_INFRA_BASE_STACK" \
     --region "$REGION" \
@@ -213,12 +219,86 @@ sat_outputs=$(aws cloudformation describe-stacks \
     --output json)
 
 queue_url=$(printf '%s' "$sat_outputs" | jq -r '(.[] | select(.OutputKey == "RawQueueUrl") | .OutputValue) // ""')
+raw_bucket=$(printf '%s' "$sat_outputs" | jq -r '(.[] | select(.OutputKey == "RawBucketName") | .OutputValue) // ""')
 role_arn=$(printf '%s' "$sat_outputs" | jq -r '(.[] | select(.OutputKey == "LakerunnerAccessRoleArn") | .OutputValue) // ""')
 
-if [ -z "$queue_url" ] || [ -z "$role_arn" ]; then
-    echo "[deploy-lakerunner-services] ERROR: satellite-infra-base stack '$SATELLITE_INFRA_BASE_STACK' is missing one of RawQueueUrl/LakerunnerAccessRoleArn outputs" >&2
+if [ -z "$queue_url" ] || [ -z "$raw_bucket" ]; then
+    echo "[deploy-lakerunner-services] ERROR: satellite-infra-base stack '$SATELLITE_INFRA_BASE_STACK' is missing RawQueueUrl or RawBucketName output" >&2
     exit 2
 fi
+
+# --- Synthesize central collector + merge operator satellites -> SSM. ---------
+# The central collector is always "normal" mode, keyed under the install org.
+# role is included only when LakerunnerAccessRoleArn is non-empty (cross-account).
+central_collector="${CENTRAL_COLLECTOR_NAME:-lakerunner}"
+operator_json="${SATELLITE_CONFIG:-}"
+if [ -z "$operator_json" ] && [ -n "${SATELLITE_CONFIG_FILE:-}" ]; then
+    [ -r "$SATELLITE_CONFIG_FILE" ] || { echo "[deploy-lakerunner-services] ERROR: cannot read SATELLITE_CONFIG_FILE: $SATELLITE_CONFIG_FILE" >&2; exit 2; }
+    operator_json=$(cat "$SATELLITE_CONFIG_FILE")
+fi
+operator_json="${operator_json:-{\"organizations\":{}}}"
+
+# Single-install: every satellite must feed the install org.  Reject any
+# operator-declared org key other than $ORGANIZATION_ID with a friendly message
+# before the generic validation (which would otherwise emit a cryptic "0-normal"
+# error for the foreign org).
+other_orgs=$(printf '%s' "$operator_json" | jq -r --arg org "$ORGANIZATION_ID" \
+    '[(.organizations // {} | keys[]) | select(. != $org)] | join(", ")' 2>&1) \
+    || { echo "[deploy-lakerunner-services] ERROR parsing SATELLITE_CONFIG: $other_orgs" >&2; exit 2; }
+if [ -n "$other_orgs" ]; then
+    echo "[deploy-lakerunner-services] ERROR: SATELLITE_CONFIG may only define satellites under the install org $ORGANIZATION_ID; found other org key(s): $other_orgs. This is a single-install deployment -- all satellite raw buckets feed this org." >&2
+    exit 2
+fi
+
+if [ -n "$role_arn" ]; then
+    central_json=$(jq -n \
+        --arg org "$ORGANIZATION_ID" --arg coll "$central_collector" \
+        --arg bucket "$raw_bucket" --arg sqs "$queue_url" \
+        --arg region "$REGION" --arg role "$role_arn" \
+        '{organizations: {($org): {collectors: {($coll): {bucket:$bucket, sqsurl:$sqs, region:$region, mode:"normal", role:$role}}}}}')
+else
+    central_json=$(jq -n \
+        --arg org "$ORGANIZATION_ID" --arg coll "$central_collector" \
+        --arg bucket "$raw_bucket" --arg sqs "$queue_url" \
+        --arg region "$REGION" \
+        '{organizations: {($org): {collectors: {($coll): {bucket:$bucket, sqsurl:$sqs, region:$region, mode:"normal"}}}}}')
+fi
+
+# Merge operator satellites into central, unioning collectors maps per org.
+# Rejects if the operator declares a normal collector for the install org, or a
+# collector whose name collides with the auto-synthesized central collector
+# (which the union `+` would otherwise silently overwrite).
+satellites_json=$(printf '%s' "$operator_json" | jq --argjson c "$central_json" --arg coll "$central_collector" '
+    . as $op
+    | ($c.organizations | keys[0]) as $org
+    | if (($op.organizations[$org].collectors // {}) | has($coll)) then
+        error("SATELLITE_CONFIG collector name \"\($coll)\" collides with the auto-synthesized central collector for org \($org); choose a different collector name")
+      else . end
+    | (($op.organizations[$org].collectors // {}) | to_entries
+       | map(select((.value.mode // "normal") == "normal")) | length) as $op_normals
+    | if $op_normals > 0 then
+        error("operator SATELLITE_CONFIG must not declare a normal collector for the install org \($org)")
+      else . end
+    | reduce ($op.organizations | to_entries[]) as $entry (
+        $c;
+        .organizations[$entry.key].collectors = (
+            (.organizations[$entry.key].collectors // {}) + $entry.value.collectors
+        )
+      )
+' 2>&1) || { echo "[deploy-lakerunner-services] ERROR composing satellite config: $satellites_json" >&2; exit 2; }
+
+# Validate: each org must have exactly one normal collector.
+bad=$(printf '%s' "$satellites_json" | jq -r '
+    [.organizations | to_entries[] |
+        {org:.key, normals: ([.value.collectors[] | select((.mode // "normal") == "normal")] | length)}
+        | select(.normals != 1)
+        | "\(.org):\(.normals)"] | join(", ")')
+[ -n "$bad" ] && { echo "[deploy-lakerunner-services] ERROR: orgs without exactly one normal collector: $bad" >&2; exit 2; }
+
+sat_param="${SATELLITES_PARAM_NAME:-/cardinal/satellites}"
+aws ssm put-parameter --name "$sat_param" --type String --tier Advanced \
+    --value "$satellites_json" --overwrite --region "$REGION" >/dev/null
+echo "[deploy-lakerunner-services] wrote satellite config to SSM $sat_param" >&2
 
 # --- Resolve the self-telemetry OTLP/HTTP endpoint. --------------------------
 # Self-telemetry is on by default: the lakerunner account always runs a
@@ -247,11 +327,10 @@ fi
 FROM_STACKS="$INFRA_BASE_STACK $INFRA_RDS_STACK"
 MAPS=""
 
-# QueueUrl/QueueRoleArn and TemplateBaseUrl are always set.  TemplateBaseUrl
+# SatellitesParamName and TemplateBaseUrl are always set.  TemplateBaseUrl
 # must track the version we deploy so nested children load from the matching
 # prefix.
-params="QueueUrl=$queue_url
-QueueRoleArn=$role_arn
+params="SatellitesParamName=$sat_param
 OrganizationId=$ORGANIZATION_ID
 TemplateBaseUrl=$template_base_url/$stack_version/cardinal-lakerunner/
 ClusterArn=$CLUSTER_ARN
@@ -290,26 +369,6 @@ LakerunnerImage=$lakerunner_image
 MaestroImage=$maestro_image
 DexImage=$dex_image
 DbInitImage=$db_init_image"
-
-# --- Additional satellite queues (groups 1..10). -----------------------------
-# pubsub-sqs consumes extra satellite queues from numbered env groups.  For each
-# n, set QUEUE_URL_<n> (and optionally QUEUE_REGION_<n> / QUEUE_ROLE_ARN_<n>) to
-# add one.  The ceiling mirrors MAX_ADDITIONAL_QUEUES in services_process.py.
-n=1
-while [ "$n" -le 10 ]; do
-    eval "q_url=\${QUEUE_URL_$n:-}"
-    if [ -n "$q_url" ]; then
-        eval "q_region=\${QUEUE_REGION_$n:-}"
-        eval "q_role=\${QUEUE_ROLE_ARN_$n:-}"
-        params="$params
-QueueUrl$n=$q_url"
-        [ -n "$q_region" ] && params="$params
-QueueRegion$n=$q_region"
-        [ -n "$q_role" ] && params="$params
-QueueRoleArn$n=$q_role"
-    fi
-    n=$((n + 1))
-done
 
 # --- Certificate handling. ---------------------------------------------------
 # Cert PEM material reaches the template via FILE_PARAMS (multi-line safe), never
@@ -439,11 +498,6 @@ DexExtraUsers=$DEX_EXTRA_USERS_FILE"
         file_params="DexExtraUsers=$DEX_EXTRA_USERS_FILE"
     fi
 fi
-
-[ -n "${PUBSUB_AUTOREGISTER:-}" ] && params="$params
-PubsubAutoRegister=$PUBSUB_AUTOREGISTER"
-[ -n "${PUBSUB_AUTOREGISTER_WRITES_TO_INSTANCE:-}" ] && params="$params
-PubsubAutoRegisterWritesToInstance=$PUBSUB_AUTOREGISTER_WRITES_TO_INSTANCE"
 
 PARAMS="$params"
 FILE_PARAMS="$file_params"

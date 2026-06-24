@@ -10,7 +10,7 @@ from cardinal_cfn.defaults import load_defaults
 
 def test_load_defaults_returns_dict_with_expected_top_level_keys():
     d = load_defaults()
-    expected = {"services", "images", "api_keys", "storage_profiles", "maestro", "otel"}
+    expected = {"services", "images", "api_keys", "maestro", "otel"}
     assert expected.issubset(d.keys())
 
 

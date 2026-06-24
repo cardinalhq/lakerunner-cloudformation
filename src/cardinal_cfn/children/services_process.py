@@ -16,10 +16,7 @@ come from cardinal-defaults.yaml directly.
 """
 
 from troposphere import (
-    Equals,
     GetAtt,
-    If,
-    Not,
     Output,
     Parameter,
     Ref,
@@ -41,13 +38,6 @@ from cardinal_cfn.parameters import (
     add_install_id_parameters,
     add_parameter_group_metadata,
 )
-
-# pubsub-sqs reads additional satellite queues from numbered env-var groups
-# (SQS_QUEUE_URL_<n> / SQS_REGION_<n> / SQS_ROLE_ARN_<n>). The binary itself has
-# no cap; the stack exposes a fixed set of optional numbered queue parameters.
-# Bump this to raise the ceiling (each adds three parameters + two conditions).
-MAX_ADDITIONAL_QUEUES = 10
-
 
 def build() -> Template:
     t = Template()
@@ -98,68 +88,6 @@ def build() -> Template:
     t.add_parameter(
         Parameter("BucketName", Type="String", Description="Name of the ingest S3 bucket.")
     )
-    # SQS inputs for the pubsub-sqs service's primary queue (group 0). The
-    # lakerunner binary reads SQS_QUEUE_URL / SQS_REGION / SQS_ROLE_ARN as three
-    # plain env vars; an empty queue URL idles the service. Multi-account
-    # fan-out (numbered SQS_*_N groups) will later use ECS environmentFiles from
-    # S3; this only handles the single primary queue.
-    t.add_parameter(
-        Parameter(
-            "QueueUrl",
-            Type="String",
-            Default="",
-            Description=(
-                "SQS queue URL for the pubsub-sqs primary queue (group 0). "
-                "Empty leaves the pubsub-sqs service idle."
-            ),
-        )
-    )
-    t.add_parameter(
-        Parameter(
-            "QueueRoleArn",
-            Type="String",
-            Default="",
-            Description=(
-                "IAM role ARN the pubsub-sqs service STS-assumes to read the "
-                "primary queue and its bucket (group 0)."
-            ),
-        )
-    )
-    # Additional satellite queues (groups 1..MAX_ADDITIONAL_QUEUES). Each set,
-    # when QueueUrl<n> is non-empty, is emitted as SQS_QUEUE_URL_<n> /
-    # SQS_REGION_<n> / SQS_ROLE_ARN_<n> on the pubsub-sqs container so the poller
-    # consumes that satellite's queue (cross-account/region) via its own role.
-    # QueueRegion<n> defaults to the stack region when left empty.
-    for n in range(1, MAX_ADDITIONAL_QUEUES + 1):
-        t.add_parameter(
-            Parameter(
-                f"QueueUrl{n}",
-                Type="String",
-                Default="",
-                Description=f"SQS queue URL for additional satellite queue group {n}. "
-                "Empty skips this group.",
-            )
-        )
-        t.add_parameter(
-            Parameter(
-                f"QueueRegion{n}",
-                Type="String",
-                Default="",
-                Description=f"AWS region for additional satellite queue group {n}. "
-                "Empty uses the stack region.",
-            )
-        )
-        t.add_parameter(
-            Parameter(
-                f"QueueRoleArn{n}",
-                Type="String",
-                Default="",
-                Description=f"IAM role ARN the pubsub-sqs service STS-assumes for "
-                f"additional satellite queue group {n}.",
-            )
-        )
-        t.add_condition(f"HasQueue{n}", Not(Equals(Ref(f"QueueUrl{n}"), "")))
-        t.add_condition(f"HasQueueRegion{n}", Not(Equals(Ref(f"QueueRegion{n}"), "")))
     t.add_parameter(
         Parameter(
             "LicenseSecretArn",
@@ -290,31 +218,6 @@ def build() -> Template:
             Description="Desired replicas for lakerunner-pubsub-sqs.",
         )
     )
-    t.add_parameter(
-        Parameter(
-            "PubsubAutoRegister",
-            Type="String",
-            Default="true",
-            AllowedValues=["true", "false"],
-            Description=(
-                "Enable pubsub-sqs auto-registration of unseen satellite raw "
-                "buckets. When true, the worker registers new orgs and routes "
-                "cooked output to PubsubAutoRegisterWritesToInstance."
-            ),
-        )
-    )
-    t.add_parameter(
-        Parameter(
-            "PubsubAutoRegisterWritesToInstance",
-            Type="String",
-            Default="1",
-            Description=(
-                "Central cooked-bucket instance_num that pubsub-sqs auto-"
-                "registered orgs write to. Required when PubsubAutoRegister "
-                "is true."
-            ),
-        )
-    )
 
     # ---------------------------------------------------------------------
     # Console parameter grouping
@@ -354,13 +257,7 @@ def build() -> Template:
             },
             {
                 "label": "Pubsub-SQS tunables",
-                "parameters": [
-                    "PubsubSqsReplicas",
-                    "QueueUrl",
-                    "QueueRoleArn",
-                    "PubsubAutoRegister",
-                    "PubsubAutoRegisterWritesToInstance",
-                ],
+                "parameters": ["PubsubSqsReplicas"],
             },
             {
                 "label": "Image overrides",
@@ -453,23 +350,6 @@ def build() -> Template:
             # shortage can't block its one task and trip the deploy circuit
             # breaker. process-* default to fallback (Base=1 + spot scale-out).
             "capacity": "ondemand",
-            # pubsub-sqs alone consumes SQS. The lakerunner binary reads the
-            # primary queue (group 0) from three plain env vars. The image is
-            # distroless (no shell), so these must be real container env vars,
-            # not a shell-evalable blob. The other three process-* services
-            # never read SQS. Multi-account fan-out (numbered SQS_*_N groups)
-            # will later use ECS environmentFiles from S3.
-            "extra_env": [
-                Environment(Name="SQS_QUEUE_URL", Value=Ref("QueueUrl")),
-                Environment(Name="SQS_REGION", Value=Ref("AWS::Region")),
-                Environment(Name="SQS_ROLE_ARN", Value=Ref("QueueRoleArn")),
-                Environment(Name="LAKERUNNER_PUBSUB_AUTOREGISTER", Value=Ref("PubsubAutoRegister")),
-                Environment(
-                    Name="LAKERUNNER_PUBSUB_AUTOREGISTER_WRITES_TO_INSTANCE",
-                    Value=Ref("PubsubAutoRegisterWritesToInstance"),
-                ),
-                *_additional_queue_env(),
-            ],
         },
     ]
 
@@ -639,49 +519,6 @@ def _service_specific_env(service_cfg: dict) -> list:
     """Convert the YAML environment dict into a list of ECS Environment objects."""
     env = service_cfg.get("environment") or {}
     return [Environment(Name=k, Value=str(v)) for k, v in env.items()]
-
-
-def _additional_queue_env() -> list:
-    """Numbered SQS env groups for additional satellite queues.
-
-    For each group n in 1..MAX_ADDITIONAL_QUEUES emit SQS_QUEUE_URL_<n> /
-    SQS_REGION_<n> / SQS_ROLE_ARN_<n>, but only when QueueUrl<n> is set --
-    Fn::If with AWS::NoValue drops the entry from the Environment list
-    otherwise. SQS_REGION_<n> falls back to the stack region when QueueRegion<n>
-    is left empty.
-    """
-    no_value = Ref("AWS::NoValue")
-    entries: list = []
-    for n in range(1, MAX_ADDITIONAL_QUEUES + 1):
-        entries.append(
-            If(
-                f"HasQueue{n}",
-                Environment(Name=f"SQS_QUEUE_URL_{n}", Value=Ref(f"QueueUrl{n}")),
-                no_value,
-            )
-        )
-        entries.append(
-            If(
-                f"HasQueue{n}",
-                Environment(
-                    Name=f"SQS_REGION_{n}",
-                    Value=If(
-                        f"HasQueueRegion{n}",
-                        Ref(f"QueueRegion{n}"),
-                        Ref("AWS::Region"),
-                    ),
-                ),
-                no_value,
-            )
-        )
-        entries.append(
-            If(
-                f"HasQueue{n}",
-                Environment(Name=f"SQS_ROLE_ARN_{n}", Value=Ref(f"QueueRoleArn{n}")),
-                no_value,
-            )
-        )
-    return entries
 
 
 if __name__ == "__main__":

@@ -81,8 +81,10 @@ def test_data_plane_params(td):
     # Org content is Maestro-owned: the SSM-seed param names are gone.
     assert "StorageProfilesParamName" not in params
     assert "ApiKeysParamName" not in params
-    # QueueArn was never plumbed; QueueUrl/QueueRoleArn are the group-0 inputs.
+    # SQS queue params removed: pubsub-sqs reads queue config from configdb.
     assert "QueueArn" not in params, "vestigial queue param present: QueueArn"
+    assert "QueueUrl" not in params, "QueueUrl must be removed"
+    assert "QueueRoleArn" not in params, "QueueRoleArn must be removed"
 
 
 def test_organization_id_required_no_default(td):
@@ -96,17 +98,15 @@ def test_organization_id_required_no_default(td):
     )
 
 
-def test_pubsub_sqs_queue_wired_to_process_child(td):
-    """The group-0 SQS inputs (QueueUrl/QueueRoleArn) flow into the Process
-    child, where the pubsub-sqs container sets them as plain SQS_* env vars."""
+def test_pubsub_sqs_queue_params_absent(td):
+    """QueueUrl/QueueRoleArn are removed; pubsub-sqs now reads queue config
+    from configdb instead of SQS env vars."""
     assert "PubsubSqsEnv" not in td["Parameters"], "old shell-blob param still present"
     for n in ("QueueUrl", "QueueRoleArn"):
-        assert n in td["Parameters"], f"missing queue param: {n}"
-        assert td["Parameters"][n]["Default"] == "", n
+        assert n not in td["Parameters"], f"{n} must be removed"
     process = td["Resources"]["Process"]["Properties"]["Parameters"]
-    assert process["QueueUrl"] == {"Ref": "QueueUrl"}
-    assert process["QueueRoleArn"] == {"Ref": "QueueRoleArn"}
-    assert "PubsubSqsEnv" not in process, "Process child should not receive PubsubSqsEnv"
+    assert "QueueUrl" not in process, "Process child must not receive QueueUrl"
+    assert "QueueRoleArn" not in process, "Process child must not receive QueueRoleArn"
 
 
 def test_process_child_params_match_declared(td):
@@ -143,6 +143,16 @@ def test_cooked_bucket_wired_to_children(td):
     ref = {"Ref": "CookedBucketName"}
     query = td["Resources"]["Query"]["Properties"]["Parameters"]
     assert query["BucketName"] == ref
+
+
+def test_maestro_child_gets_satellites_param_not_bucket_name(td):
+    """Maestro now reads the satellite JSON from SSM; the root forwards
+    SatellitesParamName and must NOT forward BucketName."""
+    maestro = td["Resources"]["Maestro"]["Properties"]["Parameters"]
+    assert maestro.get("SatellitesParamName") == {"Ref": "SatellitesParamName"}, (
+        "SatellitesParamName must be forwarded to Maestro child"
+    )
+    assert "BucketName" not in maestro, "Maestro child must not receive BucketName"
 
 
 def test_migration_child_gets_no_org_content_params(td):
@@ -184,39 +194,31 @@ def test_self_telemetry_on_condition(td):
     }
 
 
-def test_pubsub_autoregister_params_present_with_defaults(td):
-    """PubsubAutoRegister and PubsubAutoRegisterWritesToInstance exist on the
-    root with the correct defaults."""
+def test_pubsub_autoregister_params_absent(td):
+    """PubsubAutoRegister and PubsubAutoRegisterWritesToInstance are removed;
+    pubsub-sqs reads registration config from configdb."""
     params = td["Parameters"]
-    assert "PubsubAutoRegister" in params
-    assert params["PubsubAutoRegister"]["Default"] == "true"
-    assert params["PubsubAutoRegister"]["AllowedValues"] == ["true", "false"]
-    assert "PubsubAutoRegisterWritesToInstance" in params
-    assert params["PubsubAutoRegisterWritesToInstance"]["Default"] == "1"
+    assert "PubsubAutoRegister" not in params, "PubsubAutoRegister must be removed"
+    assert "PubsubAutoRegisterWritesToInstance" not in params, (
+        "PubsubAutoRegisterWritesToInstance must be removed"
+    )
 
 
-def test_additional_queue_groups_forwarded_to_process_child(td):
-    """The root declares numbered queue params and forwards them to the process
-    child so pubsub-sqs can consume multiple satellite queues."""
+def test_additional_queue_groups_absent(td):
+    """Numbered satellite queue params (QueueUrl<n>/QueueRegion<n>/QueueRoleArn<n>)
+    are removed; pubsub-sqs reads its queue list from configdb."""
     params = td["Parameters"]
     for n in (1, 10):
         for p in (f"QueueUrl{n}", f"QueueRegion{n}", f"QueueRoleArn{n}"):
-            assert p in params, f"root missing {p}"
-            assert params[p]["Default"] == ""
+            assert p not in params, f"{p} must be removed"
     process = td["Resources"]["Process"]["Properties"]["Parameters"]
-    assert process["QueueUrl1"] == {"Ref": "QueueUrl1"}
-    assert process["QueueRoleArn10"] == {"Ref": "QueueRoleArn10"}
+    assert "QueueUrl1" not in process, "Process child must not receive QueueUrl1"
+    assert "QueueRoleArn10" not in process, "Process child must not receive QueueRoleArn10"
 
 
-def test_pubsub_autoregister_wired_to_process_child(td):
-    """The two auto-registration params are forwarded as Refs to the Process
-    child and are absent from all other children."""
-    process = td["Resources"]["Process"]["Properties"]["Parameters"]
-    assert process.get("PubsubAutoRegister") == {"Ref": "PubsubAutoRegister"}
-    assert process.get("PubsubAutoRegisterWritesToInstance") == (
-        {"Ref": "PubsubAutoRegisterWritesToInstance"}
-    )
-    for child in ("Query", "Control", "Migration", "Maestro", "Alb", "Cert"):
+def test_pubsub_autoregister_absent_from_all_children(td):
+    """PubsubAutoRegister* are gone from the root; no child should receive them."""
+    for child in ("Query", "Process", "Control", "Migration", "Maestro", "Alb", "Cert"):
         p = td["Resources"][child]["Properties"]["Parameters"]
         assert "PubsubAutoRegister" not in p, (
             f"{child} unexpectedly receives PubsubAutoRegister"

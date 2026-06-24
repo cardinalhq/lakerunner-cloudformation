@@ -17,9 +17,6 @@ is optional.
 
 - ALB minimization is deferred: query-api and admin-api still attach to the
   ALB (minimization would require child edits in services-query/control/alb).
-- The process-tier SQS primary queue (group 0) is driver-supplied via the
-  ``QueueUrl`` / ``QueueRoleArn`` parameters, set on the pubsub-sqs container as
-  plain ``SQS_QUEUE_URL`` / ``SQS_ROLE_ARN`` env vars. Empty idles the service.
 - The cooked bucket backs both otel-raw writes and cooked data in the
   single-account interim.
 """
@@ -41,7 +38,6 @@ from troposphere import (
 from troposphere.cloudformation import Stack
 from troposphere.servicediscovery import PrivateDnsNamespace
 
-from cardinal_cfn.children.services_process import MAX_ADDITIONAL_QUEUES
 from cardinal_cfn.install_id import install_id_short, install_id_long
 from cardinal_cfn.parameters import add_parameter_group_metadata, add_no_echo_parameter
 from cardinal_cfn.images import add_image_override
@@ -111,14 +107,6 @@ def _sizing_param_specs(defaults: dict) -> list[dict]:
          "description": "Fargate memory (MiB) for lakerunner-process-traces."},
         {"name": "PubsubSqsReplicas", "type": "Number", "default": int(pubsub["replicas"]),
          "min": 1, "description": "Desired replicas for lakerunner-pubsub-sqs."},
-        {"name": "PubsubAutoRegister", "type": "String", "default": "true",
-         "allowed_values": ["true", "false"],
-         "description": "Enable pubsub-sqs auto-registration of unseen satellite raw buckets."},
-        {"name": "PubsubAutoRegisterWritesToInstance", "type": "String", "default": "1",
-         "description": (
-             "Central cooked-bucket instance_num pubsub-sqs auto-registered orgs write to. "
-             "Required when PubsubAutoRegister is true."
-         )},
         # Maestro
         {"name": "MaestroTaskCpu", "type": "String", "default": str(maestro_cfg["task"]["cpu"]),
          "description": "Fargate CPU units for the maestro task definition."},
@@ -164,13 +152,6 @@ _INFRA_SETUP_PARAMS = [
     ("CookedBucketName", "String", None,
      "Name of the S3 cooked bucket (base infra output). Backs both otel-raw "
      "writes and cooked data in the single-account interim."),
-    ("QueueUrl", "String", "",
-     "SQS queue URL for the pubsub-sqs primary queue (group 0). Set as the "
-     "SQS_QUEUE_URL env var on the pubsub-sqs container. Empty idles the "
-     "service."),
-    ("QueueRoleArn", "String", "",
-     "IAM role ARN the pubsub-sqs service STS-assumes for the primary queue "
-     "and its bucket (group 0). Set as the SQS_ROLE_ARN env var."),
     ("LicenseSecretArn", "String", None,
      "ARN of the cardinal-license secret (infra output)."),
     ("AdminKeySecretArn", "String", None,
@@ -304,22 +285,6 @@ def build() -> Template:
     # ---------------------------------------------------------------------
     _add_string_params(t, _INFRA_SETUP_PARAMS)
 
-    # Additional satellite queue groups (1..MAX_ADDITIONAL_QUEUES), forwarded to
-    # the process child where they become SQS_QUEUE_URL_<n>/_REGION_<n>/_ROLE_ARN_<n>
-    # on the pubsub-sqs container.
-    for n in range(1, MAX_ADDITIONAL_QUEUES + 1):
-        _add_string_params(t, [
-            (f"QueueUrl{n}", "String", "",
-             f"SQS queue URL for additional satellite queue group {n} "
-             "(empty skips it)."),
-            (f"QueueRegion{n}", "String", "",
-             f"AWS region for additional satellite queue group {n} "
-             "(empty uses the stack region)."),
-            (f"QueueRoleArn{n}", "String", "",
-             f"IAM role ARN pubsub-sqs STS-assumes for additional satellite "
-             f"queue group {n}."),
-        ])
-
     # ---------------------------------------------------------------------
     # Security-tier inputs (SG ids + role ARNs); replace the Security child.
     # ---------------------------------------------------------------------
@@ -403,6 +368,16 @@ def build() -> Template:
         Type="String",
         Default="My Organization",
         Description="Display name for the org Maestro pre-populates.",
+    ))
+    t.add_parameter(Parameter(
+        "SatellitesParamName",
+        Type="String",
+        Default="/cardinal/satellites",
+        Description=(
+            "SSM parameter holding the satellite-mapping JSON. Forwarded to "
+            "Maestro as MAESTRO_SATELLITE_CONFIG; Maestro's provisioning worker "
+            "reconciles it into lakerunner's configdb."
+        ),
     ))
     t.add_parameter(Parameter(
         "TemplateBaseUrl",
@@ -663,8 +638,6 @@ def build() -> Template:
         task_sg=sec_process_sg, task_role=process_role,
     )
     services_process_params.update({
-        "QueueUrl": Ref("QueueUrl"),
-        "QueueRoleArn": Ref("QueueRoleArn"),
         "ProcessLogsReplicas": Ref("ProcessLogsReplicas"),
         "ProcessLogsMemory": Ref("ProcessLogsMemory"),
         "ProcessMetricsReplicas": Ref("ProcessMetricsReplicas"),
@@ -672,13 +645,7 @@ def build() -> Template:
         "ProcessTracesReplicas": Ref("ProcessTracesReplicas"),
         "ProcessTracesMemory": Ref("ProcessTracesMemory"),
         "PubsubSqsReplicas": Ref("PubsubSqsReplicas"),
-        "PubsubAutoRegister": Ref("PubsubAutoRegister"),
-        "PubsubAutoRegisterWritesToInstance": Ref("PubsubAutoRegisterWritesToInstance"),
     })
-    for n in range(1, MAX_ADDITIONAL_QUEUES + 1):
-        services_process_params[f"QueueUrl{n}"] = Ref(f"QueueUrl{n}")
-        services_process_params[f"QueueRegion{n}"] = Ref(f"QueueRegion{n}")
-        services_process_params[f"QueueRoleArn{n}"] = Ref(f"QueueRoleArn{n}")
     _add_child(t, "Process", "services-process.yaml",
                services_process_params, depends_on=["Migration"])
 
@@ -712,7 +679,7 @@ def build() -> Template:
         "DbEndpoint": Ref("DbEndpoint"),
         "DbPort": Ref("DbPort"),
         "DbSecretArn": Ref("DbMasterSecretArn"),
-        "BucketName": Ref("CookedBucketName"),
+        "SatellitesParamName": Ref("SatellitesParamName"),
         "LicenseSecretArn": Ref("LicenseSecretArn"),
         "MigrationComplete": migration_complete,
         "MaestroImage": maestro_image,

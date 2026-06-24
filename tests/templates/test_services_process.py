@@ -12,6 +12,20 @@ def td():
     return json.loads(services_process.build().to_json())
 
 
+def _pubsub_sqs_env_names(td):
+    """Return the set of Environment Name values on the pubsub-sqs container.
+
+    Skips conditional entries (Fn::If with AWS::NoValue) -- only plain
+    Name/Value dicts have a 'Name' key.
+    """
+    container = td["Resources"]["PubsubSqsTaskDef"]["Properties"]["ContainerDefinitions"][0]
+    return {
+        e["Name"]
+        for e in container.get("Environment", [])
+        if isinstance(e, dict) and "Name" in e
+    }
+
+
 # ---------------------------------------------------------------------------
 # Parameters
 # ---------------------------------------------------------------------------
@@ -30,8 +44,6 @@ def test_required_cross_stack_parameters(td):
         "DbPort",
         "DbSecretArn",
         "BucketName",
-        "QueueUrl",
-        "QueueRoleArn",
         "LicenseSecretArn",
         "MigrationComplete",
         "LakerunnerImage",
@@ -39,12 +51,16 @@ def test_required_cross_stack_parameters(td):
         assert n in td["Parameters"], f"missing parameter: {n}"
 
 
-def test_pubsub_queue_parameters_default_empty(td):
-    """The pubsub-sqs primary queue (group 0) is supplied via plain QueueUrl /
-    QueueRoleArn params; an empty QueueUrl leaves the service idle."""
-    for n in ("QueueUrl", "QueueRoleArn"):
-        assert n in td["Parameters"], f"missing parameter: {n}"
-        assert td["Parameters"][n]["Default"] == "", n
+def test_no_queue_or_autoregister_params(td):
+    """QueueUrl / QueueRoleArn / numbered satellite queue params / PubsubAutoRegister*
+    are removed; pubsub-sqs now reads its queue list from configdb."""
+    params = td.get("Parameters", {})
+    for k in (
+        "QueueUrl", "QueueRoleArn",
+        "QueueUrl1", "QueueRegion1", "QueueRoleArn1",
+        "PubsubAutoRegister", "PubsubAutoRegisterWritesToInstance",
+    ):
+        assert k not in params, f"{k} must be removed"
 
 
 def test_old_pubsub_sqs_env_parameter_is_gone(td):
@@ -366,14 +382,13 @@ def _env(td, task_def_id):
     }
 
 
-def test_pubsub_sqs_has_plain_group0_env(td):
-    """pubsub-sqs sets the group-0 SQS env as three plain container env vars
-    (the distroless image has no shell to eval a blob)."""
-    env = _env(td, "PubsubSqsTaskDef")
-    assert env["SQS_QUEUE_URL"] == {"Ref": "QueueUrl"}, env.get("SQS_QUEUE_URL")
-    assert env["SQS_REGION"] == {"Ref": "AWS::Region"}, env.get("SQS_REGION")
-    assert env["SQS_ROLE_ARN"] == {"Ref": "QueueRoleArn"}, env.get("SQS_ROLE_ARN")
-    assert "PUBSUB_SQS_ENV" not in env, "shell-evalable blob still present"
+def test_pubsub_sqs_has_no_sqs_env(td):
+    """pubsub-sqs reads its queue list from configdb; no SQS_* or AUTOREGISTER env."""
+    env_names = _pubsub_sqs_env_names(td)
+    assert not any(n.startswith("SQS_") or "AUTOREGISTER" in n for n in env_names), (
+        f"unexpected SQS/AUTOREGISTER env names on pubsub-sqs: "
+        f"{[n for n in env_names if n.startswith('SQS_') or 'AUTOREGISTER' in n]}"
+    )
 
 
 def test_no_container_command_uses_shell_wrapper(td):
@@ -400,52 +415,8 @@ def test_process_services_have_no_sqs_env(td):
 
 
 # ---------------------------------------------------------------------------
-# pubsub-sqs auto-registration env vars
+# pubsub-sqs: SQS env and autoregister gone
 # ---------------------------------------------------------------------------
-
-
-def test_pubsub_autoregister_params_exist_with_defaults(td):
-    """PubsubAutoRegister and PubsubAutoRegisterWritesToInstance are declared
-    with the expected defaults."""
-    params = td["Parameters"]
-    assert "PubsubAutoRegister" in params
-    assert params["PubsubAutoRegister"]["Default"] == "true"
-    assert params["PubsubAutoRegister"]["AllowedValues"] == ["true", "false"]
-    assert "PubsubAutoRegisterWritesToInstance" in params
-    assert params["PubsubAutoRegisterWritesToInstance"]["Default"] == "1"
-
-
-def test_additional_queue_groups_are_conditional(td):
-    """Each additional queue group N declares QueueUrl/Region/RoleArn params, a
-    HasQueue<N> condition, and emits SQS_*_<N> on pubsub-sqs only when set."""
-    params = td["Parameters"]
-    conditions = td.get("Conditions", {})
-    for n in (1, 2, 10):
-        for p in (f"QueueUrl{n}", f"QueueRegion{n}", f"QueueRoleArn{n}"):
-            assert p in params, f"missing param {p}"
-            assert params[p]["Default"] == "", f"{p} must default empty"
-        assert f"HasQueue{n}" in conditions
-        assert f"HasQueueRegion{n}" in conditions
-
-    # The SQS_*_N entries are Fn::If-gated on HasQueue<N> (dropped via NoValue).
-    env_raw = _container(td, "PubsubSqsTaskDef")["Environment"]
-    conds_used = {
-        e["Fn::If"][0] for e in env_raw if isinstance(e, dict) and "Fn::If" in e
-    }
-    assert "HasQueue1" in conds_used
-    assert "HasQueue10" in conds_used
-
-
-def test_pubsub_sqs_has_autoregister_env_vars(td):
-    """pubsub-sqs container carries the two auto-registration env vars wired
-    to their respective parameters."""
-    env = _env(td, "PubsubSqsTaskDef")
-    assert env.get("LAKERUNNER_PUBSUB_AUTOREGISTER") == {"Ref": "PubsubAutoRegister"}, (
-        env.get("LAKERUNNER_PUBSUB_AUTOREGISTER")
-    )
-    assert env.get("LAKERUNNER_PUBSUB_AUTOREGISTER_WRITES_TO_INSTANCE") == (
-        {"Ref": "PubsubAutoRegisterWritesToInstance"}
-    ), env.get("LAKERUNNER_PUBSUB_AUTOREGISTER_WRITES_TO_INSTANCE")
 
 
 def test_process_services_have_no_autoregister_env(td):

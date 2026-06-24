@@ -31,12 +31,12 @@ One per child stack. Trust is always `ecs-tasks.amazonaws.com`.
 
 | Role | Used by | Permissions (over and above bare-minimum CW logs) |
 |---|---|---|
-| `MigrationRole` | `Migration` child's migrator task. | `secretsmanager:GetSecretValue` on the db-master secret; `ssm:GetParameter*` on `/cardinal/storage-profiles` and `/cardinal/api-keys`. |
-| `QueryRole` | query-api + query-worker. | db-master + license secret read; storage-profiles + api-keys SSM read; `s3:GetObject` / `s3:ListBucket` on the ingest bucket; `ecs:DescribeServices`, `ecs:ListTasks`, `ecs:DescribeTasks` scoped to the cluster (query-api's ECS-based worker discovery). |
-| `ProcessRole` | process-{logs,metrics,traces} + pubsub-sqs. | db-master + license secret read; storage-profiles SSM read; `s3:GetObject` / `s3:PutObject` / `s3:DeleteObject` / `s3:ListBucket` on the ingest bucket; `sqs:ReceiveMessage` / `sqs:DeleteMessage` / `sqs:GetQueueAttributes` on the ingest queue; `bedrock:InvokeModel{,WithResponseStream}` on `foundation-model/*`. |
-| `ControlRole` | sweeper + monitoring + admin-api + alert-evaluator. | db-master + license + admin-key secret read; storage-profiles + api-keys SSM read; `s3:GetObject` / `s3:DeleteObject` / `s3:ListBucket` on the ingest bucket (sweeper). No ECS API -- process-* autoscaling is now native ECS Application Auto Scaling (its own service-linked role). |
+| `MigrationRole` | `Migration` child's migrator task. | `secretsmanager:GetSecretValue` on the db-master secret. |
+| `QueryRole` | query-api + query-worker. | db-master + license secret read; `s3:GetObject` / `s3:ListBucket` on the ingest bucket; `ecs:DescribeServices`, `ecs:ListTasks`, `ecs:DescribeTasks` scoped to the cluster (query-api's ECS-based worker discovery). |
+| `ProcessRole` | process-{logs,metrics,traces} + pubsub-sqs. | db-master + license secret read; `s3:GetObject` / `s3:PutObject` / `s3:DeleteObject` / `s3:ListBucket` on the ingest bucket; `sqs:ReceiveMessage` / `sqs:DeleteMessage` / `sqs:GetQueueAttributes` on the ingest queue; `bedrock:InvokeModel{,WithResponseStream}` on `foundation-model/*`. |
+| `ControlRole` | sweeper + monitoring + admin-api + alert-evaluator. | db-master + license + admin-key secret read; `s3:GetObject` / `s3:DeleteObject` / `s3:ListBucket` on the ingest bucket (sweeper). No ECS API -- process-* autoscaling is now native ECS Application Auto Scaling (its own service-linked role). |
 | `OtelRole` | otel-gateway collector. | License secret read; CW Logs writes only. |
-| `MaestroRole` | maestro + dex sidecar. | db-master + license + admin-key secret read; storage-profiles + api-keys SSM read. |
+| `MaestroRole` | maestro + dex sidecar. | db-master + license + admin-key secret read. |
 
 The migrator runs as an ECS service (`migration.yaml`: Fargate task
 that runs `lakerunner migrate`, then a `keepalive` container that
