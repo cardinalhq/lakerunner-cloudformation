@@ -11,6 +11,18 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v1.5.1
+
+**Image bump — unblocks v1.5.0 satellite mapping.**
+
+- **Images:** lakerunner `v1.61.2` → `v1.63.1`, maestro `v1.66.5` → `v1.68.0`.
+  These are the qualifying versions referenced by v1.5.0: `pubsub-sqs` reads SQS
+  queues from configdb (not env), and Maestro consumes `MAESTRO_SATELLITE_CONFIG`.
+  v1.5.1 is the first release safe to deploy with satellite mapping.
+- **Upgrade action:** redeploy the services stack to pick up the new image pins
+  (this retriggers DB migrations from the lakerunner image, as always). No
+  parameter changes beyond those already documented for v1.5.0.
+
 ## v1.5.0
 
 **Satellite collector mapping via `SATELLITE_CONFIG` → SSM → Maestro.**
