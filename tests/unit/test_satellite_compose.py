@@ -52,9 +52,12 @@ else
         '{organizations: {($org): {collectors: {($coll): {bucket:$bucket, sqsurl:$sqs, region:$region, mode:"normal"}}}}}')
 fi
 
-satellites_json=$(printf '%s' "$OPERATOR_JSON" | jq --argjson c "$central_json" '
+satellites_json=$(printf '%s' "$OPERATOR_JSON" | jq --argjson c "$central_json" --arg coll "$CENTRAL_COLL" '
     . as $op
     | ($c.organizations | keys[0]) as $org
+    | if (($op.organizations[$org].collectors // {}) | has($coll)) then
+        error("SATELLITE_CONFIG collector name \"\($coll)\" collides with the auto-synthesized central collector for org \($org); choose a different collector name")
+      else . end
     | (($op.organizations[$org].collectors // {}) | to_entries
        | map(select((.value.mode // "normal") == "normal")) | length) as $op_normals
     | if $op_normals > 0 then
@@ -195,6 +198,34 @@ def test_operator_normal_for_install_org_rejected():
         "must not declare a normal" in out.lower()
         or "compose_error" in out.lower()
     ), f"unexpected error message: {out}"
+
+
+# ---------------------------------------------------------------------------
+# T3b: operator collector keyed the same as the central collector name (but
+# non-normal mode) -> rejected for collision (the `+` merge would otherwise
+# silently overwrite the synthesized central, surfacing as a cryptic 0-normal).
+# ---------------------------------------------------------------------------
+def test_collector_name_collision_rejected():
+    operator = {
+        "organizations": {
+            ORG: {
+                "collectors": {
+                    COLL: {  # same key as the central collector name
+                        "mode": "read-only",
+                        "bucket": "x",
+                        "sqsurl": "y",
+                        "region": "us-east-1",
+                    }
+                }
+            }
+        }
+    }
+    ok, out = _compose(ORG, COLL, BUCKET, QUEUE, REGION, "", json.dumps(operator))
+    assert not ok, "expected rejection for collector-name collision with central"
+    assert "collides with the auto-synthesized central" in out.lower(), (
+        f"unexpected error message: {out}"
+    )
+    assert COLL in out, "collision message should name the colliding collector"
 
 
 # ---------------------------------------------------------------------------

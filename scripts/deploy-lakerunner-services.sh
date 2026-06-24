@@ -265,10 +265,15 @@ else
 fi
 
 # Merge operator satellites into central, unioning collectors maps per org.
-# Rejects if operator declares a normal collector for the install org.
-satellites_json=$(printf '%s' "$operator_json" | jq --argjson c "$central_json" '
+# Rejects if the operator declares a normal collector for the install org, or a
+# collector whose name collides with the auto-synthesized central collector
+# (which the union `+` would otherwise silently overwrite).
+satellites_json=$(printf '%s' "$operator_json" | jq --argjson c "$central_json" --arg coll "$central_collector" '
     . as $op
     | ($c.organizations | keys[0]) as $org
+    | if (($op.organizations[$org].collectors // {}) | has($coll)) then
+        error("SATELLITE_CONFIG collector name \"\($coll)\" collides with the auto-synthesized central collector for org \($org); choose a different collector name")
+      else . end
     | (($op.organizations[$org].collectors // {}) | to_entries
        | map(select((.value.mode // "normal") == "normal")) | length) as $op_normals
     | if $op_normals > 0 then
