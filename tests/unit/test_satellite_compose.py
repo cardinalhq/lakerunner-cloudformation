@@ -30,6 +30,14 @@ COLL = "lakerunner"
 #   OPERATOR_JSON
 _COMPOSE_SH = r"""
 set -e
+other_orgs=$(printf '%s' "$OPERATOR_JSON" | jq -r --arg org "$ORGANIZATION_ID" \
+    '[(.organizations // {} | keys[]) | select(. != $org)] | join(", ")' 2>&1) \
+    || { echo "PARSE_ERROR: $other_orgs" >&2; exit 2; }
+if [ -n "$other_orgs" ]; then
+    echo "OTHER_ORG_ERROR: SATELLITE_CONFIG may only define satellites under the install org $ORGANIZATION_ID; found other org key(s): $other_orgs. This is a single-install deployment -- all satellite raw buckets feed this org." >&2
+    exit 2
+fi
+
 if [ -n "$ROLE_ARN" ]; then
     central_json=$(jq -n \
         --arg org "$ORGANIZATION_ID" --arg coll "$CENTRAL_COLL" \
@@ -190,9 +198,9 @@ def test_operator_normal_for_install_org_rejected():
 
 
 # ---------------------------------------------------------------------------
-# T4: multi-org operator config
+# T4: single-install -- any non-install org key is rejected up front
 # ---------------------------------------------------------------------------
-def test_multi_org_operator_config():
+def test_non_install_org_rejected():
     operator = {
         "organizations": {
             OTHER_ORG: {
@@ -208,26 +216,20 @@ def test_multi_org_operator_config():
         }
     }
     ok, out = _compose(ORG, COLL, BUCKET, QUEUE, REGION, "", json.dumps(operator))
-    assert ok, f"expected success, got: {out}"
-    data = _j(out)
-    assert ORG in data["organizations"]
-    assert OTHER_ORG in data["organizations"]
-    install_normals = [
-        v for v in data["organizations"][ORG]["collectors"].values()
-        if v.get("mode", "normal") == "normal"
-    ]
-    assert len(install_normals) == 1
-    other_normals = [
-        v for v in data["organizations"][OTHER_ORG]["collectors"].values()
-        if v.get("mode", "normal") == "normal"
-    ]
-    assert len(other_normals) == 1
+    assert not ok, "expected rejection for a non-install org key"
+    assert (
+        "single-install" in out.lower()
+        or "other org key" in out.lower()
+        or "other_org_error" in out.lower()
+    ), f"unexpected error message: {out}"
+    assert OTHER_ORG in out, "rejection should name the offending org key"
 
 
 # ---------------------------------------------------------------------------
-# T5: operator config with an org that has zero normals -> validation fails
+# T4b: a read-only satellite under a NON-install org is also rejected up front
+# (this would otherwise surface as a cryptic 0-normal validation error).
 # ---------------------------------------------------------------------------
-def test_zero_normal_org_rejected_by_validation():
+def test_non_install_org_read_only_rejected():
     operator = {
         "organizations": {
             "cccccccc-0000-4000-8000-000000000003": {
@@ -243,8 +245,34 @@ def test_zero_normal_org_rejected_by_validation():
         }
     }
     ok, out = _compose(ORG, COLL, BUCKET, QUEUE, REGION, "", json.dumps(operator))
-    assert not ok, "expected validation failure for org with 0 normals"
+    assert not ok, "expected rejection for a non-install org key"
     assert (
-        "validate_error" in out.lower()
-        or "exactly one normal" in out.lower()
+        "single-install" in out.lower() or "other_org_error" in out.lower()
     ), f"unexpected error message: {out}"
+
+
+# ---------------------------------------------------------------------------
+# T5: install-org-only read-only config still passes (the happy path).
+# ---------------------------------------------------------------------------
+def test_install_org_only_read_only_passes():
+    operator = {
+        "organizations": {
+            ORG: {
+                "collectors": {
+                    "ro": {
+                        "mode": "read-only",
+                        "bucket": "c",
+                        "sqsurl": "https://sqs.us-east-1.amazonaws.com/444/c",
+                        "region": "us-east-1",
+                    }
+                }
+            }
+        }
+    }
+    ok, out = _compose(ORG, COLL, BUCKET, QUEUE, REGION, "", json.dumps(operator))
+    assert ok, f"expected success, got: {out}"
+    data = _j(out)
+    collectors = data["organizations"][ORG]["collectors"]
+    assert COLL in collectors and "ro" in collectors
+    normals = [v for v in collectors.values() if v.get("mode", "normal") == "normal"]
+    assert len(normals) == 1

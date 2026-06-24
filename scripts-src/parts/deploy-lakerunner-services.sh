@@ -133,13 +133,13 @@ Optional (template defaults preserved when unset):
                               IMAGE_REGISTRY. Default: the baked, pinned suffix
                               under IMAGE_REGISTRY (always passed to the stack).
   SATELLITE_CONFIG            JSON string: operator satellite collectors, as an
-                              { "organizations": { ... } } document.  Should
-                              contain only read-only/satellite collectors -- must
-                              NOT declare a "normal" collector for the install org
-                              (the central collector is auto-synthesized from the
-                              infra-base stack outputs).  Non-install orgs may each
-                              declare their own normal.  Merged with the central
-                              collector before writing to SSM.
+                              { "organizations": { ... } } document.  This is a
+                              single-install deployment: declare read-only/satellite
+                              collectors under the INSTALL org (ORGANIZATION_ID)
+                              ONLY -- any other org key is rejected.  Must NOT
+                              declare a "normal" collector (the central collector is
+                              auto-synthesized from the infra-base stack outputs).
+                              Merged with the central collector before writing to SSM.
                               UPGRADE NOTE: move any old QUEUE_URL_<n>/
                               QUEUE_REGION_<n>/QUEUE_ROLE_ARN_<n> entries here;
                               CENTRAL_COLLECTOR_NAME must match the existing
@@ -236,6 +236,18 @@ if [ -z "$operator_json" ] && [ -n "${SATELLITE_CONFIG_FILE:-}" ]; then
     operator_json=$(cat "$SATELLITE_CONFIG_FILE")
 fi
 operator_json="${operator_json:-{\"organizations\":{}}}"
+
+# Single-install: every satellite must feed the install org.  Reject any
+# operator-declared org key other than $ORGANIZATION_ID with a friendly message
+# before the generic validation (which would otherwise emit a cryptic "0-normal"
+# error for the foreign org).
+other_orgs=$(printf '%s' "$operator_json" | jq -r --arg org "$ORGANIZATION_ID" \
+    '[(.organizations // {} | keys[]) | select(. != $org)] | join(", ")' 2>&1) \
+    || { echo "[deploy-lakerunner-services] ERROR parsing SATELLITE_CONFIG: $other_orgs" >&2; exit 2; }
+if [ -n "$other_orgs" ]; then
+    echo "[deploy-lakerunner-services] ERROR: SATELLITE_CONFIG may only define satellites under the install org $ORGANIZATION_ID; found other org key(s): $other_orgs. This is a single-install deployment -- all satellite raw buckets feed this org." >&2
+    exit 2
+fi
 
 if [ -n "$role_arn" ]; then
     central_json=$(jq -n \
