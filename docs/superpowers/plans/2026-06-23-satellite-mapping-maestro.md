@@ -299,168 +299,141 @@ git commit -m "maestro: satellite-config parse/validate + per-org DesiredBucket 
 
 ---
 
-### Task 3: Reconcile tick + worker/startup wiring
+### Task 3: Inject satellite buckets into provisioning + startup reconcile
+
+**Design (revised after grounding):** Provisioning is per-deployment — `executeProvisionOrg` (in `lakerunner-provisioning.ts`) resolves the org's deployment via `managedInstances.getById(job.deploymentId)`, builds that deployment's admin client, and already calls `provisionOrganization(orgId, orgName, buckets, [])` (empty api_keys; keys are managed separately via `importApiKey`). So we do NOT build a standalone admin client. Instead: (a) inject a pre-built `satelliteBuckets: Record<orgId, DesiredBucket[]>` into the provisioning service and, in `executeProvisionOrg`, use it to REPLACE the instance-derived buckets for any org present in the satellite config (the satellite JSON is authoritative — its single `normal` collector is the org's central bucket, so the legacy instance/bootstrap bucket is suppressed for that org, avoiding a double-`normal`); (b) at startup, parse `MAESTRO_SATELLITE_CONFIG`, pre-build the per-org bucket lists with `buildOrgBuckets`, and call the existing `sharedInstallReconciler.reconcileForOrg(orgId, actor)` for each satellite org so a provision is enqueued on every boot ("every deploy re-applies"). Pre-building in `index.ts` avoids a circular import (`satellite-config.ts` imports `buildDesiredBucket` from `lakerunner-provisioning.ts`; the service must not import back from `satellite-config.ts`).
 
 **Files:**
-- Create: `packages/maestro/src/services/satellite-reconcile.ts`
-- Modify: `packages/maestro/src/services/lakerunner-provisioning-worker.ts` (add the tick to the poll loop, mirroring the alerting-reconcile cron at ~lines 129-157; add deps)
-- Modify: `packages/maestro/src/index.ts` (parse `MAESTRO_SATELLITE_CONFIG`, pass into the worker deps, ~lines 327-340 + 2044-2058)
-- Test: `packages/maestro/src/services/__tests__/satellite-reconcile.test.ts`
+- Modify: `packages/maestro/src/services/lakerunner-provisioning.ts` (`LakerunnerProvisioningDeps` — add `satelliteBuckets?`; `executeProvisionOrg` bucket-building branch, ~lines 360-455)
+- Modify: `packages/maestro/src/index.ts` (parse env near `defaultBucketConfig` ~line 328; pre-build buckets; pass dep into the provisioning service; enqueue `reconcileForOrg` per satellite org near the existing startup reconcile ~line 2348)
+- Test: `packages/maestro/src/services/__tests__/lakerunner-provisioning.test.ts` (extend)
 
 **Interfaces:**
-- Consumes: `SatelliteConfig`, `buildOrgBuckets` (Task 2); the admin client's `provisionOrganization(orgId, orgName, buckets, apiKeys)` (Task 1).
-- Produces: `runSatelliteReconcileTick(deps: { config: SatelliteConfig; orgs: OrgNameResolver; adminClient: LakerunnerAdminClient; logger: Logger }): Promise<void>` where `OrgNameResolver` is the minimal interface `{ findById(orgId: string): Promise<{ name: string } | null> }`. For each org in `config.organizations`: resolve the name (skip + warn if not found), build `buildOrgBuckets`, and call `adminClient.provisionOrganization(orgId, name, buckets, [])`. Errors per org are logged and do not abort the other orgs.
+- Consumes: `buildOrgBuckets` + `SatelliteConfig` (Task 2); `DesiredBucket` (Task 1); the existing `LakerunnerSharedInstallReconciler.reconcileForOrg(orgId, actor)`.
+- Produces: `LakerunnerProvisioningDeps` gains optional `satelliteBuckets?: Record<string, DesiredBucket[]>` (orgId → pre-built buckets). When `satelliteBuckets[job.orgId]` is set, `executeProvisionOrg` sends exactly those buckets (and the existing empty-api_keys call is unchanged); when absent, the existing instance-column logic runs untouched.
 
 - [ ] **Step 1: Write the failing test**
 
-Create `satellite-reconcile.test.ts`:
+In `lakerunner-provisioning.test.ts`, add a describe block that constructs the provisioning service with a stub `managedInstances.getById` returning a shared deployment (with `adminApiUrl`/`adminApiKey`), a captured `provisionOrganization` (via mocking `createLakerunnerAdminClient`, mirroring the existing test's admin-client mock), and `satelliteBuckets: { [ORG]: [ {bucket_name:"central", collector_name:"central", cloud_provider:"aws", region:"us-east-1", mode:"normal", managed_by:"external_json_config"}, {bucket_name:"eu", collector_name:"eu", cloud_provider:"aws", region:"eu-west-1", mode:"read-only", sqs_queue_url:"https://sqs/eu", managed_by:"external_json_config"} ] }`. Drive `executeProvisionOrg` for a `provision_org` job with `orgId === ORG` and assert:
 
 ```ts
-import { describe, it, expect, vi } from "vitest";
-import { runSatelliteReconcileTick } from "../satellite-reconcile.js";
-import { parseSatelliteConfig } from "../satellite-config.js";
-
-const ORG = "12340000-0000-4000-8000-000000000000";
-const cfg = parseSatelliteConfig(JSON.stringify({
-  organizations: { [ORG]: { collectors: {
-    central: { bucket: "central", sqsurl: "https://sqs/central", region: "us-east-1" },
-    eu: { bucket: "eu-raw", sqsurl: "https://sqs/eu", region: "eu-west-1", mode: "read-only" },
-  } } },
-}))!;
-
-const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
-
-describe("runSatelliteReconcileTick", () => {
-  it("provisions each org's full satellite list with empty api_keys", async () => {
-    const provisionOrganization = vi.fn().mockResolvedValue(undefined);
-    const orgs = { findById: vi.fn().mockResolvedValue({ name: "Acme" }) };
-    await runSatelliteReconcileTick({ config: cfg, orgs, adminClient: { provisionOrganization } as any, logger } as any);
-
-    expect(provisionOrganization).toHaveBeenCalledTimes(1);
-    const [orgId, orgName, buckets, apiKeys] = provisionOrganization.mock.calls[0];
-    expect(orgId).toBe(ORG);
-    expect(orgName).toBe("Acme");
-    expect(apiKeys).toEqual([]);
-    expect(buckets.map((b: any) => b.collector_name).sort()).toEqual(["central", "eu"]);
-    expect(buckets.every((b: any) => b.managed_by === "external_json_config")).toBe(true);
-  });
-
-  it("skips an org that does not exist in Maestro and continues", async () => {
-    const provisionOrganization = vi.fn().mockResolvedValue(undefined);
-    const orgs = { findById: vi.fn().mockResolvedValue(null) };
-    await runSatelliteReconcileTick({ config: cfg, orgs, adminClient: { provisionOrganization } as any, logger } as any);
-    expect(provisionOrganization).not.toHaveBeenCalled();
-    expect(logger.warn).toHaveBeenCalled();
-  });
-
-  it("isolates a per-org failure", async () => {
-    const provisionOrganization = vi.fn().mockRejectedValue(new Error("boom"));
-    const orgs = { findById: vi.fn().mockResolvedValue({ name: "Acme" }) };
-    await expect(
-      runSatelliteReconcileTick({ config: cfg, orgs, adminClient: { provisionOrganization } as any, logger } as any),
-    ).resolves.toBeUndefined();
-    expect(logger.error).toHaveBeenCalled();
-  });
-});
+const [, , buckets, apiKeys] = provisionOrganization.mock.calls[0];
+expect(apiKeys).toEqual([]);
+expect(buckets.map((b: any) => b.collector_name).sort()).toEqual(["central", "eu"]);
+expect(buckets.every((b: any) => b.managed_by === "external_json_config")).toBe(true);
+// exactly one normal in the payload
+expect(buckets.filter((b: any) => (b.mode ?? "normal") === "normal")).toHaveLength(1);
 ```
+
+Add a second test: with the SAME service but a job for an org NOT in `satelliteBuckets`, assert the instance-column bucket path is used (the bucket reflects the deployment's `bucketName`, not the satellite list) — i.e. satellite injection does not affect non-satellite orgs.
+
+(Match the existing test file's mocking of `createLakerunnerAdminClient` / `managedInstances`; if the existing suite already has a harness for `executeProvisionOrg`, reuse it.)
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `pnpm --filter @cardinalhq/maestro test:unit -- satellite-reconcile`
-Expected: FAIL — module does not exist.
+Run: `pnpm --filter @cardinalhq/maestro test:unit -- lakerunner-provisioning`
+Expected: FAIL — `satelliteBuckets` not in deps / not consumed.
 
-- [ ] **Step 3: Implement `satellite-reconcile.ts`**
+- [ ] **Step 3: Add the dep + branch**
+
+In `lakerunner-provisioning.ts`, add to `LakerunnerProvisioningDeps`:
 
 ```ts
-import { type SatelliteConfig, buildOrgBuckets } from "./satellite-config.js";
-import { type LakerunnerAdminClient } from "../lib/lakerunner-admin-client.js";
+  satelliteBuckets?: Record<string, import("../lib/lakerunner-admin-client.js").DesiredBucket[]>;
+```
 
-export interface OrgNameResolver {
-  findById(orgId: string): Promise<{ name: string } | null>;
+In `executeProvisionOrg`, replace the bucket-building section's start so the satellite list wins when present:
+
+```ts
+const satellite = this.deps.satelliteBuckets?.[job.orgId];
+let buckets: DesiredBucket[];
+if (satellite && satellite.length > 0) {
+  buckets = satellite; // satellite JSON authoritative: suppress instance/bootstrap bucket
+} else {
+  buckets = [];
+  // ... existing instance-column / defaultBucket logic, unchanged ...
 }
+```
 
-export interface SatelliteReconcileDeps {
-  config: SatelliteConfig;
-  orgs: OrgNameResolver;
-  adminClient: LakerunnerAdminClient;
-  logger: { info: (m: string, x?: unknown) => void; warn: (m: string, x?: unknown) => void; error: (m: string, x?: unknown) => void };
+Keep the existing `provisionOrganization(job.orgId, orgName, buckets, [])` call and the existing "shared instance with zero buckets throws" guard (satellite lists are non-empty, so satellite orgs pass it).
+
+- [ ] **Step 4: Run to verify pass**
+
+Run: `pnpm --filter @cardinalhq/maestro test:unit -- lakerunner-provisioning`
+Expected: PASS.
+
+- [ ] **Step 5: Startup wiring in `index.ts`**
+
+Near `defaultBucketConfig` (~line 328), parse + pre-build (fail-safe — a bad config disables the feature, never crashes):
+
+```ts
+import { parseSatelliteConfig } from "./services/satellite-config.js";
+import { buildOrgBuckets } from "./services/satellite-config.js";
+
+let satelliteBuckets: Record<string, import("./lib/lakerunner-admin-client.js").DesiredBucket[]> | undefined;
+try {
+  const satCfg = parseSatelliteConfig(process.env.MAESTRO_SATELLITE_CONFIG);
+  if (satCfg) {
+    satelliteBuckets = Object.fromEntries(
+      Object.entries(satCfg.organizations).map(([orgId, org]) => [orgId, buildOrgBuckets(org)]),
+    );
+  }
+} catch (err) {
+  logger.error("Invalid MAESTRO_SATELLITE_CONFIG; satellite mappings disabled", { error: String(err) });
+  satelliteBuckets = undefined;
 }
+```
 
-export async function runSatelliteReconcileTick(deps: SatelliteReconcileDeps): Promise<void> {
-  for (const [orgId, org] of Object.entries(deps.config.organizations)) {
+Pass `satelliteBuckets` into the provisioning service deps (wherever `LakerunnerProvisioningService` / the worker is constructed — it already receives `defaultBucket`). Then, after the existing startup bootstrap reconcile (~line 2348), enqueue an initial reconcile per satellite org so boot re-applies the config:
+
+```ts
+if (satelliteBuckets) {
+  for (const orgId of Object.keys(satelliteBuckets)) {
     try {
-      const record = await deps.orgs.findById(orgId);
-      if (record == null) {
-        deps.logger.warn("satellite reconcile: org not found in Maestro; skipping", { orgId });
-        continue;
-      }
-      const buckets = buildOrgBuckets(org);
-      await deps.adminClient.provisionOrganization(orgId, record.name, buckets, []);
-      deps.logger.info("satellite reconcile: provisioned org", { orgId, buckets: buckets.length });
+      await sharedInstallReconciler.reconcileForOrg(orgId, {
+        userId: orgId, role: "system", reason: "satellite_config_reconcile",
+      });
     } catch (err) {
-      deps.logger.error("satellite reconcile: org failed", { orgId, error: String(err) });
+      logger.error("Satellite startup reconcile failed for org", { orgId, error: String(err) });
     }
   }
 }
 ```
 
-- [ ] **Step 4: Run to verify pass**
+(Confirm the actor shape from the existing `reconcileForOrg` call at index.ts ~2348 and match it.)
 
-Run: `pnpm --filter @cardinalhq/maestro test:unit -- satellite-reconcile`
-Expected: PASS.
+- [ ] **Step 6: Typecheck + unit suite**
 
-- [ ] **Step 5: Wire the tick into the worker**
+Run: `pnpm --filter @cardinalhq/maestro typecheck` and `pnpm --filter @cardinalhq/maestro test:unit`
+Expected: no new type errors; tests pass.
 
-In `lakerunner-provisioning-worker.ts`, mirror the alerting-reconcile cron (the `lastAlertingReconcileAt` / interval pattern, ~lines 129-157). Add to the worker deps an optional `satelliteConfig?: SatelliteConfig` and the `orgs` resolver + `adminClient` (the worker already constructs/holds an admin client for provisioning — reuse it). Add a `lastSatelliteReconcileAt` and an interval from `LAKERUNNER_SATELLITE_RECONCILE_INTERVAL_MS` (default `300_000` = 5 min). On each poll tick, when `satelliteConfig` is set and the interval has elapsed (and on the first tick), call `runSatelliteReconcileTick({...})`; on error, log and do not advance the timestamp (retry next tick). Skip entirely when `satelliteConfig` is undefined.
-
-- [ ] **Step 6: Wire startup in `index.ts`**
-
-Near the `DEFAULT_BUCKET_*` parsing (~lines 327-340), add:
-
-```ts
-import { parseSatelliteConfig } from "./services/satellite-config.js";
-
-let satelliteConfig;
-try {
-  satelliteConfig = parseSatelliteConfig(process.env.MAESTRO_SATELLITE_CONFIG);
-} catch (err) {
-  logger.error("Invalid MAESTRO_SATELLITE_CONFIG; satellite reconcile disabled", { error: String(err) });
-  satelliteConfig = undefined; // fail safe: bad config disables the feature, does not crash Maestro
-}
-```
-
-Pass `satelliteConfig` (and the `orgs` repo, if not already in worker deps) into `startLakerunnerProvisioningWorker({ ... })` (~lines 2044-2058).
-
-- [ ] **Step 7: Run the package's unit suite + typecheck**
-
-Run: `pnpm --filter @cardinalhq/maestro test:unit` and `pnpm --filter @cardinalhq/maestro typecheck` (or the repo's `tsc -b` / lint script).
-Expected: PASS, no type errors.
-
-- [ ] **Step 8: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add packages/maestro/src/services/satellite-reconcile.ts packages/maestro/src/services/lakerunner-provisioning-worker.ts packages/maestro/src/index.ts packages/maestro/src/services/__tests__/satellite-reconcile.test.ts
-git commit -m "maestro: periodic satellite reconcile tick + startup wiring"
+git add packages/maestro/src/services/lakerunner-provisioning.ts packages/maestro/src/index.ts packages/maestro/src/services/__tests__/lakerunner-provisioning.test.ts
+git commit -m "maestro: provision satellite buckets per org + startup reconcile"
 ```
 
----
+> **Note — periodic drift reconcile is deferred.** Startup re-enqueues on every boot (a config change ships via a redeploy that restarts Maestro), and satellites are re-sent on every subsequent `provision_org` for the org. A periodic in-process tick (mirroring the alerting-reconcile cron) is a future enhancement, out of scope here.
 
 ## Self-Review
 
 **Spec coverage:**
 - "Extend DesiredBucket + admin payload with mode/sqs_queue_url/managed_by" → Task 1.
 - "Read the satellite JSON and build per-org DesiredBucket[]" → Task 2.
-- "Declarative reconcile, managed_by=external_json_config, empty api_keys" → Task 3 (relies on the foundation's managed_by-scoped replace + empty-api_keys no-op).
-- "Deploy-supplied (env), Maestro syncs" → Task 3 startup wiring (`MAESTRO_SATELLITE_CONFIG`).
+- "Declarative reconcile, managed_by=external_json_config, empty api_keys" → Task 3: `executeProvisionOrg` sends the per-org satellite buckets (all `external_json_config`) with empty api_keys, relying on the foundation's managed_by-scoped replace + empty-api_keys no-op.
+- "Deploy-supplied (env), Maestro syncs" → Task 3 startup wiring (`MAESTRO_SATELLITE_CONFIG` parsed + pre-built + `reconcileForOrg` per org).
 
 **Decisions baked in (note for reviewers):**
 - Stateless env-driven (no new Maestro DB table) — matches the existing `MAESTRO_BOOTSTRAP_BUCKET_*` / `DEFAULT_BUCKET_*` pattern and the spec's "configdb is the source of truth, Maestro is the sync engine."
 - zod for JSON validation (already a dependency; nested shape benefits from it) rather than the hand-rolled `bootstrap.ts` style.
 - `cloud_provider` is an optional per-collector field defaulting to `"aws"` (the satellite JSON spec is AWS-centric; lakerunner's `DesiredBucket` requires it).
 - Bad `MAESTRO_SATELLITE_CONFIG` disables the feature with a logged error rather than crashing Maestro (fail-safe).
+- **Satellite JSON is authoritative per org:** for any org in the config, `executeProvisionOrg` sends ONLY the satellite buckets (incl. the single `normal`/central), suppressing the legacy instance/bootstrap bucket — so there is never a double-`normal`. Reuses the per-deployment admin client `executeProvisionOrg` already builds; no standalone client.
+- Reconcile is triggered via the existing `sharedInstallReconciler.reconcileForOrg` (enqueues `provision_org`); periodic drift reconcile is deferred (startup + every subsequent provision covers the deploy-driven case).
 
 **Cross-repo dependency:** requires the lakerunner foundation PR (managed_by-scoped replace + empty-api_keys no-op) to be merged/available in the lakerunner image Maestro provisions against. Until then the reconcile would clobber other-origin rows / keys.
 
 ## Handoff to the CFN plan
 
-CFN must deliver the satellite JSON to the Maestro container as the env var `MAESTRO_SATELLITE_CONFIG` (a JSON string, the document in Global Constraints), sourced from SSM `/cardinal/satellites`. The reconcile interval override is `LAKERUNNER_SATELLITE_RECONCILE_INTERVAL_MS` (default 5 min).
+CFN must deliver the satellite JSON to the Maestro container as the env var `MAESTRO_SATELLITE_CONFIG` (a JSON string, the document in Global Constraints), sourced from SSM `/cardinal/satellites`. Because the satellite JSON is authoritative per org (its `normal` collector IS the central bucket), CFN should express the central bucket as the JSON's `normal` collector for satellite-managed orgs rather than relying on `MAESTRO_BOOTSTRAP_BUCKET_*` for them.
