@@ -17,6 +17,9 @@ is optional.
 
 - ALB minimization is deferred: query-api and admin-api still attach to the
   ALB (minimization would require child edits in services-query/control/alb).
+- The process-tier SQS primary queue is driver-supplied via the
+  ``QueueUrl`` / ``QueueRoleArn`` parameters, set on the pubsub-sqs container as
+  plain ``SQS_QUEUE_URL`` / ``SQS_ROLE_ARN`` env vars. Empty idles the service.
 - The cooked bucket backs both otel-raw writes and cooked data in the
   single-account interim.
 """
@@ -152,6 +155,13 @@ _INFRA_SETUP_PARAMS = [
     ("CookedBucketName", "String", None,
      "Name of the S3 cooked bucket (base infra output). Backs both otel-raw "
      "writes and cooked data in the single-account interim."),
+    ("QueueUrl", "String", "",
+     "SQS queue URL for the pubsub-sqs primary queue. Set as the "
+     "SQS_QUEUE_URL env var on the pubsub-sqs container. Empty idles the "
+     "service."),
+    ("QueueRoleArn", "String", "",
+     "IAM role ARN the pubsub-sqs service STS-assumes for the primary queue "
+     "and its bucket. Set as the SQS_ROLE_ARN env var."),
     ("LicenseSecretArn", "String", None,
      "ARN of the cardinal-license secret (infra output)."),
     ("AdminKeySecretArn", "String", None,
@@ -368,16 +378,6 @@ def build() -> Template:
         Type="String",
         Default="My Organization",
         Description="Display name for the org Maestro pre-populates.",
-    ))
-    t.add_parameter(Parameter(
-        "SatellitesParamName",
-        Type="String",
-        Default="/cardinal/satellites",
-        Description=(
-            "SSM parameter holding the satellite-mapping JSON. Forwarded to "
-            "Maestro as MAESTRO_SATELLITE_CONFIG; Maestro's provisioning worker "
-            "reconciles it into lakerunner's configdb."
-        ),
     ))
     t.add_parameter(Parameter(
         "TemplateBaseUrl",
@@ -638,6 +638,8 @@ def build() -> Template:
         task_sg=sec_process_sg, task_role=process_role,
     )
     services_process_params.update({
+        "QueueUrl": Ref("QueueUrl"),
+        "QueueRoleArn": Ref("QueueRoleArn"),
         "ProcessLogsReplicas": Ref("ProcessLogsReplicas"),
         "ProcessLogsMemory": Ref("ProcessLogsMemory"),
         "ProcessMetricsReplicas": Ref("ProcessMetricsReplicas"),
@@ -679,7 +681,7 @@ def build() -> Template:
         "DbEndpoint": Ref("DbEndpoint"),
         "DbPort": Ref("DbPort"),
         "DbSecretArn": Ref("DbMasterSecretArn"),
-        "SatellitesParamName": Ref("SatellitesParamName"),
+        "BucketName": Ref("CookedBucketName"),
         "LicenseSecretArn": Ref("LicenseSecretArn"),
         "MigrationComplete": migration_complete,
         "MaestroImage": maestro_image,

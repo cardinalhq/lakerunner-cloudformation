@@ -51,16 +51,21 @@ def test_required_cross_stack_parameters(td):
         assert n in td["Parameters"], f"missing parameter: {n}"
 
 
-def test_no_queue_or_autoregister_params(td):
-    """QueueUrl / QueueRoleArn / numbered satellite queue params / PubsubAutoRegister*
-    are removed; pubsub-sqs now reads its queue list from configdb."""
+def test_queue_params_present_no_numbered_or_autoregister(td):
+    """QueueUrl / QueueRoleArn are present (single primary queue).
+    Numbered satellite queue params and autoregister params remain removed."""
     params = td.get("Parameters", {})
-    for k in (
-        "QueueUrl", "QueueRoleArn",
-        "QueueUrl1", "QueueRegion1", "QueueRoleArn1",
-        "PubsubAutoRegister", "PubsubAutoRegisterWritesToInstance",
-    ):
-        assert k not in params, f"{k} must be removed"
+    assert "QueueUrl" in params, "QueueUrl must be present"
+    assert "QueueRoleArn" in params, "QueueRoleArn must be present"
+    # No numbered queue params (e.g. QueueUrl<n>, QueueRegion<n>).
+    allowed_queue = {"QueueUrl", "QueueRoleArn"}
+    numbered = [k for k in params
+                if (k.startswith("QueueUrl") or k.startswith("QueueRegion") or
+                    k.startswith("QueueRoleArn")) and k not in allowed_queue]
+    assert not numbered, f"unexpected numbered queue param(s): {numbered}"
+    # No autoregister params.
+    autoregister = [k for k in params if "AutoRegister" in k or "Autoregister" in k]
+    assert not autoregister, f"unexpected autoregister param(s): {autoregister}"
 
 
 def test_old_pubsub_sqs_env_parameter_is_gone(td):
@@ -382,13 +387,16 @@ def _env(td, task_def_id):
     }
 
 
-def test_pubsub_sqs_has_no_sqs_env(td):
-    """pubsub-sqs reads its queue list from configdb; no SQS_* or AUTOREGISTER env."""
+def test_pubsub_sqs_has_sqs_env(td):
+    """pubsub-sqs carries the three plain SQS_* env vars for the primary queue.
+    No AUTOREGISTER or numbered SQS_*_N env vars."""
     env_names = _pubsub_sqs_env_names(td)
-    assert not any(n.startswith("SQS_") or "AUTOREGISTER" in n for n in env_names), (
-        f"unexpected SQS/AUTOREGISTER env names on pubsub-sqs: "
-        f"{[n for n in env_names if n.startswith('SQS_') or 'AUTOREGISTER' in n]}"
-    )
+    for n in ("SQS_QUEUE_URL", "SQS_REGION", "SQS_ROLE_ARN"):
+        assert n in env_names, f"pubsub-sqs missing {n}"
+    assert "LAKERUNNER_PUBSUB_AUTOREGISTER" not in env_names
+    # No numbered satellite env groups.
+    assert not any(n.startswith("SQS_QUEUE_URL_") or n.startswith("SQS_REGION_") or
+                   n.startswith("SQS_ROLE_ARN_") for n in env_names)
 
 
 def test_no_container_command_uses_shell_wrapper(td):
@@ -415,7 +423,7 @@ def test_process_services_have_no_sqs_env(td):
 
 
 # ---------------------------------------------------------------------------
-# pubsub-sqs: SQS env and autoregister gone
+# pubsub-sqs: autoregister + numbered satellite env absent
 # ---------------------------------------------------------------------------
 
 
@@ -423,12 +431,8 @@ def test_process_services_have_no_autoregister_env(td):
     """process-logs/metrics/traces must NOT carry the auto-registration env vars."""
     for task_def_id in ("ProcessLogsTaskDef", "ProcessMetricsTaskDef", "ProcessTracesTaskDef"):
         env = _env(td, task_def_id)
-        assert "LAKERUNNER_PUBSUB_AUTOREGISTER" not in env, (
-            f"{task_def_id} unexpectedly has LAKERUNNER_PUBSUB_AUTOREGISTER"
-        )
-        assert "LAKERUNNER_PUBSUB_AUTOREGISTER_WRITES_TO_INSTANCE" not in env, (
-            f"{task_def_id} unexpectedly has LAKERUNNER_PUBSUB_AUTOREGISTER_WRITES_TO_INSTANCE"
-        )
+        bad = [k for k in env if "AUTOREGISTER" in k.upper()]
+        assert not bad, f"{task_def_id} unexpectedly has autoregister env var(s): {bad}"
 
 
 # ---------------------------------------------------------------------------

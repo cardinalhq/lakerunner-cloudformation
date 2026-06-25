@@ -178,19 +178,12 @@ def test_exec_role_secrets_scoped_to_cardinal_pattern(td):
     assert res["Fn::Sub"].endswith(":secret:cardinal-*")
 
 
-def test_exec_role_resolves_satellites_ssm_param(td):
-    """The ExecutionRole resolves the MAESTRO_SATELLITE_CONFIG SSM Secret on the
-    maestro task. Without it ECS cannot resolve /cardinal/satellites and maestro
-    fails to start (ResourceInitializationError / AccessDenied). The grant covers
-    the install's /cardinal/* namespace so a SatellitesParamName override under
-    /cardinal/ is still resolved by the generated role."""
-    s = next(s for s in _exec_statements(td) if s.get("Sid") == "ResolveCardinalSsm")
-    assert "ssm:GetParameters" in s["Action"]
-    assert "ssm:GetParameter" in s["Action"]
-    res = s["Resource"]
-    assert isinstance(res, dict) and "Fn::Sub" in res
-    # Covers /cardinal/* — the default /cardinal/satellites resolves under it.
-    assert res["Fn::Sub"].endswith(":parameter/cardinal/*")
+def test_exec_role_no_ssm_read_iam(td):
+    """The ExecutionRole grants no SSM read; Maestro receives the bucket name
+    via MAESTRO_BOOTSTRAP_BUCKET_* env vars (no SSM Secret needed)."""
+    stmts = _exec_statements(td)
+    blob = json.dumps(stmts)
+    assert "ssm:" not in blob, "ExecutionRole must not grant any ssm: action"
 
 
 def test_no_task_role_ssm_read_iam(td):

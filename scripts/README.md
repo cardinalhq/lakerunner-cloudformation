@@ -35,21 +35,18 @@ The release pipeline (`.github/workflows/release.yml`) bakes the tag version
 into these drivers and publishes the templates + drivers together to S3 and the
 GitHub release, as a unit.
 
-## `deploy-lakerunner-services.sh` satellite config env vars
+## `deploy-lakerunner-services.sh` primary ingest queue env vars
 
-The services driver synthesizes a satellite-mapping JSON and writes it to SSM
-before deploying the stack. Maestro reads it as `MAESTRO_SATELLITE_CONFIG`.
+The services driver reads the primary ingest queue from the satellite-infra-base
+stack and wires it directly into the lakerunner-services stack parameters.
 
-| Env var | Default | Purpose |
+| Env var (driver) | Stack parameter | Source |
 |---|---|---|
-| `SATELLITE_CONFIG` | (empty) | Inline JSON `{ "organizations": { ... } }` of operator-supplied read-only/satellite collectors. Do not include a `normal` collector for the install org. |
-| `SATELLITE_CONFIG_FILE` | (empty) | Path to a JSON file with the same shape (used when `SATELLITE_CONFIG` is unset). |
-| `CENTRAL_COLLECTOR_NAME` | `lakerunner` | Collector name for the auto-synthesized central entry. On upgrade this must match the install's existing collector name or a duplicate `normal` rejection occurs. |
-| `SATELLITES_PARAM_NAME` | `/cardinal/satellites` | SSM parameter name receiving the composed satellite config JSON. Passed to the stack as `SatellitesParamName`. |
+| (from stack output) | `QueueUrl` | `RawQueueUrl` output of `SATELLITE_INFRA_BASE_STACK` |
+| (from stack output) | `QueueRoleArn` | `LakerunnerAccessRoleArn` output of `SATELLITE_INFRA_BASE_STACK` |
 
-The central `normal` collector (the install's own bucket + queue) is always
-synthesized automatically from the stack outputs — operators supply only
-read-only or satellite collectors in `SATELLITE_CONFIG`.
+The `pubsub-sqs` container receives these as `SQS_QUEUE_URL` and `SQS_ROLE_ARN`
+env vars. An empty `QueueUrl` idles the pubsub-sqs service.
 
 ## Related
 

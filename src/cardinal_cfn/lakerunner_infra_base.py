@@ -534,21 +534,6 @@ def build() -> Template:
                             # and base's secrets cardinal-license/cardinal-admin-key.
                             "Resource": _cardinal_secret_arn_pattern(),
                         },
-                        {
-                            "Sid": "ResolveCardinalSsm",
-                            "Effect": "Allow",
-                            "Action": [
-                                "ssm:GetParameters",
-                                "ssm:GetParameter",
-                            ],
-                            # The maestro task definition injects the satellite
-                            # config from SSM /cardinal/satellites as the
-                            # MAESTRO_SATELLITE_CONFIG Secret; ECS resolves it via
-                            # the ExecutionRole before the container starts. Scoped
-                            # to the fixed default param path (the services stack's
-                            # SatellitesParamName default).
-                            "Resource": _cardinal_satellites_param_arn(),
-                        },
                     ],
                 },
             ),
@@ -841,19 +826,6 @@ def _cardinal_secret_arn_pattern():
     return Sub(
         "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:"
         "${AWS::AccountId}:secret:cardinal-*"
-    )
-
-
-def _cardinal_satellites_param_arn():
-    # The maestro container's MAESTRO_SATELLITE_CONFIG Secret resolves the SSM
-    # parameter at task start; the services stack defaults SatellitesParamName to
-    # /cardinal/satellites. Scope to the install's own /cardinal/* namespace so a
-    # SatellitesParamName override that stays under /cardinal/ resolves without a
-    # custom role change. This is the install's own parameter namespace (matches
-    # the existing /cardinal/* naming convention; not over-privileged).
-    return Sub(
-        "arn:${AWS::Partition}:ssm:${AWS::Region}:"
-        "${AWS::AccountId}:parameter/cardinal/*"
     )
 
 

@@ -183,25 +183,24 @@ def test_infra_base_driver_has_no_org_content_inputs():
     assert "ApiKeysParamName" not in text
 
 
-def test_lakerunner_services_satellite_config():
-    """lakerunner-services must read RawQueueUrl/RawBucketName/LakerunnerAccessRoleArn
-    from the satellite-infra-base stack, compose the satellite JSON, write it to
-    SSM, and pass SatellitesParamName to the stack (not raw QueueUrl/QueueRoleArn)."""
+def test_lakerunner_services_single_queue():
+    """lakerunner-services must read RawQueueUrl/LakerunnerAccessRoleArn from the
+    satellite-infra-base stack and pass QueueUrl/QueueRoleArn to the stack.
+    No satellite SSM compose, no numbered-queue loop, no autoregister."""
     text = (SCRIPTS_DIR / "deploy-lakerunner-services.sh").read_text()
-    # Still reads these from the infra-base stack outputs (for central collector synthesis).
-    for token in ("RawQueueUrl", "LakerunnerAccessRoleArn", "RawBucketName"):
+    # Reads queue outputs from the infra-base stack.
+    for token in ("RawQueueUrl", "LakerunnerAccessRoleArn"):
         assert token in text, f"deploy-lakerunner-services.sh missing {token}"
-    # Passes SatellitesParamName and writes to SSM.
-    assert "SatellitesParamName=" in text, "SatellitesParamName= not in params"
-    assert "ssm put-parameter" in text, "ssm put-parameter call missing"
-    # No longer emits raw queue/role params to the stack.
-    assert "QueueUrl=$queue_url" not in text, "old QueueUrl= param still present"
-    assert "QueueRoleArn=$role_arn" not in text, "old QueueRoleArn= param still present"
-    # Autoregister and numbered-queue machinery removed.
+    # Passes QueueUrl and QueueRoleArn directly to the stack.
+    assert "QueueUrl=$queue_url" in text, "QueueUrl=$queue_url not in params"
+    assert "QueueRoleArn=$role_arn" in text, "QueueRoleArn=$role_arn not in params"
+    # No satellite SSM write or satellite-named params.
+    assert "ssm put-parameter" not in text, "ssm put-parameter must be removed"
+    assert "RawBucketName" not in text, "RawBucketName must be removed"
+    # Autoregister and numbered-queue machinery remain gone.
     assert "PubsubSqsEnv" not in text, "old shell-blob PubsubSqsEnv still present"
-    assert "PubsubAutoRegister=" not in text, "old PubsubAutoRegister= param still present"
-    # The numbered-queue loop used eval "q_url=\${QUEUE_URL_$n:-}" -- check the loop body is gone.
-    assert 'QUEUE_URL_$n' not in text, "old numbered QUEUE_URL_<n> loop still present"
+    # No numbered QUEUE_URL_<n> eval loop (used \${QUEUE_URL_ as the loop token).
+    assert r'QUEUE_URL_$n' not in text, "old numbered QUEUE_URL_<n> loop still present"
 
 
 def test_lakerunner_services_requires_dex_admin_password_hash():

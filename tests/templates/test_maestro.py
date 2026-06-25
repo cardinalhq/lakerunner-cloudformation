@@ -279,35 +279,33 @@ def test_maestro_container_has_bootstrap_env(td):
     )
 
 
-def test_bootstrap_bucket_env_removed(td):
-    """Central bucket now arrives via MAESTRO_SATELLITE_CONFIG JSON; the four
-    MAESTRO_BOOTSTRAP_BUCKET_* env vars and the BucketName parameter are gone."""
+def test_bootstrap_bucket_env_present(td):
+    """BucketName parameter present; maestro container carries the four
+    MAESTRO_BOOTSTRAP_BUCKET_* env vars so its provision_org writes the
+    organization_buckets storage line via /api/v1/provision."""
+    assert "BucketName" in td["Parameters"], "BucketName param must be present"
     maestro_c = _container(td, "maestro")
-    env = {e["Name"] for e in maestro_c.get("Environment", [])}
-    for k in (
-        "MAESTRO_BOOTSTRAP_BUCKET_NAME",
-        "MAESTRO_BOOTSTRAP_BUCKET_REGION",
-        "MAESTRO_BOOTSTRAP_BUCKET_CLOUD_PROVIDER",
-        "MAESTRO_BOOTSTRAP_BUCKET_COLLECTOR_NAME",
-    ):
-        assert k not in env, f"env var {k} must be removed"
-    assert "BucketName" not in td.get("Parameters", {}), "BucketName param must be removed"
+    env = {e["Name"]: e["Value"] for e in maestro_c.get("Environment", [])}
+    assert env.get("MAESTRO_BOOTSTRAP_BUCKET_NAME") == {"Ref": "BucketName"}
+    assert env.get("MAESTRO_BOOTSTRAP_BUCKET_REGION") == {"Ref": "AWS::Region"}
+    assert env.get("MAESTRO_BOOTSTRAP_BUCKET_CLOUD_PROVIDER") == "aws"
+    assert env.get("MAESTRO_BOOTSTRAP_BUCKET_COLLECTOR_NAME") == "lakerunner"
 
 
-def test_satellite_config_secret_present(td):
-    """MAESTRO_SATELLITE_CONFIG is injected from SSM via the Secrets list, with
-    a well-formed parameter ARN (no slash between `parameter` and the var)."""
+def test_satellite_wiring_absent(td):
+    """Satellite SSM wiring is removed; Maestro now receives the bucket via
+    MAESTRO_BOOTSTRAP_BUCKET_* env vars. No SSM-backed satellite secret; no
+    satellite-named parameter."""
     maestro_c = _container(td, "maestro")
-    secrets = {s["Name"]: s["ValueFrom"] for s in maestro_c.get("Secrets", [])}
-    assert "MAESTRO_SATELLITE_CONFIG" in secrets
-    secret_vf = secrets["MAESTRO_SATELLITE_CONFIG"]
-    assert "Fn::Sub" in secret_vf
-    assert secret_vf["Fn::Sub"] == (
-        "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}"
-        ":parameter${SatellitesParamName}"
-    )
-    assert ":parameter${SatellitesParamName}" in secret_vf["Fn::Sub"]
-    assert ":parameter/${SatellitesParamName}" not in secret_vf["Fn::Sub"]
+    # No secret whose ValueFrom references an SSM parameter (satellite config gone).
+    for s in maestro_c.get("Secrets", []):
+        vf = json.dumps(s.get("ValueFrom", ""))
+        assert "ssm" not in vf.lower(), (
+            f"unexpected SSM-backed secret on maestro: {s['Name']!r}"
+        )
+    # No parameter with 'Satellite' in its name.
+    satellite_params = [k for k in td.get("Parameters", {}) if "Satellite" in k or "satellite" in k]
+    assert not satellite_params, f"unexpected satellite param(s): {satellite_params}"
 
 
 def test_maestro_container_admin_api_key_from_secret(td):
