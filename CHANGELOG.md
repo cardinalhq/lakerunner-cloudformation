@@ -11,7 +11,7 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
-## v1.6.0 (tentative)
+## v1.6.0
 
 **Back out satellite mapping; restore single bootstrap bucket + ingest queue.**
 
@@ -34,6 +34,9 @@ v0.0.114.
 - **Numbered-queue + autoregister remain gone** (as of v1.5.0): `QueueUrl<n>`,
   `QueueRegion<n>`, `QueueRoleArn<n>`, `PubsubAutoRegister`, and
   `PubsubAutoRegisterWritesToInstance` are NOT restored.
+- **Image bump:** lakerunner `v1.63.1` -> `v1.65.0`, maestro `v1.68.0` -> `v1.71.0`.
+  These images drop the satellite/JSON-sync bucket model; per-org bucket mapping is
+  now managed in the Maestro superadmin UI. otel/dex/db_init unchanged.
 - **Upgrade action:** remove `SATELLITE_CONFIG*` env vars from deploy invocations.
   The `/cardinal/satellites` SSM parameter (if written by a v1.5.x deploy) may be
   deleted manually — it is no longer read by any component.
