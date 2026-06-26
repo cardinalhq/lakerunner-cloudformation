@@ -90,6 +90,28 @@ def build() -> Template:
     )
     t.add_parameter(
         Parameter(
+            "QueueUrl",
+            Type="String",
+            Default="",
+            Description=(
+                "SQS queue URL for the pubsub-sqs primary queue. "
+                "Empty leaves the pubsub-sqs service idle."
+            ),
+        )
+    )
+    t.add_parameter(
+        Parameter(
+            "QueueRoleArn",
+            Type="String",
+            Default="",
+            Description=(
+                "IAM role ARN the pubsub-sqs service STS-assumes to read the "
+                "primary queue and its bucket."
+            ),
+        )
+    )
+    t.add_parameter(
+        Parameter(
             "LicenseSecretArn",
             Type="String",
             Description="ARN of the license Secrets Manager secret.",
@@ -257,7 +279,7 @@ def build() -> Template:
             },
             {
                 "label": "Pubsub-SQS tunables",
-                "parameters": ["PubsubSqsReplicas"],
+                "parameters": ["PubsubSqsReplicas", "QueueUrl", "QueueRoleArn"],
             },
             {
                 "label": "Image overrides",
@@ -350,6 +372,15 @@ def build() -> Template:
             # shortage can't block its one task and trip the deploy circuit
             # breaker. process-* default to fallback (Base=1 + spot scale-out).
             "capacity": "ondemand",
+            # pubsub-sqs alone consumes SQS. The lakerunner binary reads the
+            # primary queue from three plain env vars. The image is distroless
+            # (no shell), so these must be real container env vars. The other
+            # three process-* services never read SQS.
+            "extra_env": [
+                Environment(Name="SQS_QUEUE_URL", Value=Ref("QueueUrl")),
+                Environment(Name="SQS_REGION", Value=Ref("AWS::Region")),
+                Environment(Name="SQS_ROLE_ARN", Value=Ref("QueueRoleArn")),
+            ],
         },
     ]
 

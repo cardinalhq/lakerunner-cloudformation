@@ -141,13 +141,16 @@ def build() -> Template:
         )
     )
     t.add_parameter(Parameter(
-        "SatellitesParamName",
+        "BucketName",
         Type="String",
-        Default="/cardinal/satellites",
         Description=(
-            "SSM parameter holding the satellite-mapping JSON. Injected as the "
-            "MAESTRO_SATELLITE_CONFIG env var; Maestro's provisioning worker "
-            "reconciles it into lakerunner's configdb (sole writer)."
+            "Central S3 bucket name (the infra stack's cooked/ingest bucket "
+            "output). Maestro consumes this only to seed the "
+            "MAESTRO_BOOTSTRAP_BUCKET_* env vars so its in-process Lakerunner "
+            "provisioning worker writes the organization_buckets storage line "
+            "via /api/v1/provision -- the sole writer of that row, since CFN "
+            "seeds no org content. No S3 IAM is granted to the maestro task "
+            "role -- the bucket name is metadata only."
         ),
     ))
     t.add_parameter(Parameter("DbEndpoint", Type="String", Description="RDS endpoint hostname."))
@@ -350,7 +353,6 @@ def build() -> Template:
                     "DbSecretArn",
                     "LicenseSecretArn",
                     "AdminApiKeySecretArn",
-                    "SatellitesParamName",
                     "MigrationComplete",
                 ],
             },
@@ -550,6 +552,14 @@ def build() -> Template:
             Environment(Name="MAESTRO_BOOTSTRAP_ORG_ID", Value=Ref("OrganizationId")),
             Environment(Name="MAESTRO_BOOTSTRAP_ORG_NAME", Value=Ref("OrgName")),
             Environment(Name="MAESTRO_BOOTSTRAP_OWNER_EMAIL", Value=Ref("DexAdminEmail")),
+            # Bucket coordinates so maestro's provision_org writes the
+            # organization_buckets join row (the central bucket's storage line).
+            # This is now the ONLY writer of that row -- CFN seeds no org
+            # content -- so it must always be populated here.
+            Environment(Name="MAESTRO_BOOTSTRAP_BUCKET_NAME", Value=Ref("BucketName")),
+            Environment(Name="MAESTRO_BOOTSTRAP_BUCKET_REGION", Value=Ref("AWS::Region")),
+            Environment(Name="MAESTRO_BOOTSTRAP_BUCKET_CLOUD_PROVIDER", Value="aws"),
+            Environment(Name="MAESTRO_BOOTSTRAP_BUCKET_COLLECTOR_NAME", Value="lakerunner"),
             Environment(
                 Name="MAESTRO_BOOTSTRAP_LAKERUNNER_QUERY_API_URL",
                 Value=Sub("http://query-api.${ServiceNamespaceName}:8080"),
@@ -564,13 +574,6 @@ def build() -> Template:
             Secret(
                 Name="MAESTRO_BOOTSTRAP_LAKERUNNER_ADMIN_API_KEY",
                 ValueFrom=Sub("${AdminApiKeySecretArn}:key::"),
-            ),
-            Secret(
-                Name="MAESTRO_SATELLITE_CONFIG",
-                ValueFrom=Sub(
-                    "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}"
-                    ":parameter${SatellitesParamName}"
-                ),
             ),
         ],
         DependsOn=[
