@@ -11,6 +11,12 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v1.6.1
+
+**Image bump:** lakerunner `v1.65.0` → `v1.67.0`, maestro `v1.71.0` → `v1.72.1`.
+Upgrade action: redeploy the root stack. The lakerunner bump retriggers the DB
+migrator (reruns once, idempotent) before the service tiers update.
+
 ## v1.6.0
 
 **Back out satellite mapping; restore single bootstrap bucket + ingest queue.**
