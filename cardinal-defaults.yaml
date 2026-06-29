@@ -19,7 +19,7 @@ api_keys:
 # so the two cannot drift; any change to LakerunnerImage retriggers migrations.
 # ---------------------------------------------------------------------------
 images:
-  lakerunner: "public.ecr.aws/cardinalhq.io/lakerunner:v1.67.0@sha256:fbc91d75b4be77a808bc2e296d15ad8d081dea9656ef3b4eab17c90ba105dfa5"
+  lakerunner: "public.ecr.aws/cardinalhq.io/lakerunner:v1.67.1@sha256:81bab9db5bd71c484a23b1e7bb93e6831f54454bbf1e5fb03255620cd4a2e4c0"
   maestro:    "public.ecr.aws/cardinalhq.io/maestro:v1.72.1@sha256:7561d6281483bffbe2b41d42679165a191056e4cb4555261bebd7f8abddfdda3"
   otel:       "public.ecr.aws/cardinalhq.io/cardinalhq-otel-collector:v1.8.0@sha256:9906eea2b38f1614047ada60ce7887704652484bb5b01a7f8a1d932277e1f151"
   dex:        "public.ecr.aws/cardinalhq.io/dex-customization:v0.4.0@sha256:c85811b3a82b1574063971ce79126886607fbc82a1f9d777587fc4895ce18b7b"
