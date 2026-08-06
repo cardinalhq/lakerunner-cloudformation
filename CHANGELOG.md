@@ -11,6 +11,42 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## Unreleased
+
+**New stack: `cardinal-satellite-cwmetrics`.** Streams an account's CloudWatch
+metrics into the satellite's existing raw bucket under `cwmetrics-raw/`, via a
+CloudWatch metric stream and a Firehose delivery stream. It is a producer-only
+add-on, not a second satellite: it creates no bucket, no queue and no
+cross-account role, so the metrics arrive over the existing ingest queue and
+the existing `cardinal-satellite-access` role. Deploy with
+`scripts/deploy-satellite-cwmetrics.sh` after `satellite-infra-base`; it takes
+`SATELLITE_INFRA_BASE_STACK` and `ORGANIZATION_ID` (use the same org UUID as
+this account's satellite-services stack). Metric-stream output format is plain
+CloudWatch JSON and is deliberately not a parameter — `opentelemetry1.0` is a
+double conversion that emits OTLP summary form. No upgrade action for installs
+that do not want CloudWatch metrics.
+
+**`satellite-infra-base`: S3 notifications are now prefix-filtered.** The raw
+bucket previously notified the ingest queue for every created object; it now
+notifies only for `otel-raw/` and `cwmetrics-raw/`. This keeps Firehose's
+failed-record output (`cwmetrics-errors/`) out of the ingest path. Upgrade
+action: none for standard installs — the shipped collector config writes under
+`otel-raw/`. If you run a hand-edited collector config that writes to a
+different prefix, its objects will stop being ingested until that prefix is
+added to `INGEST_PREFIXES` in the generator.
+
+**`satellite-infra-base`: ingest queue gained a dead-letter queue.** A new
+`RawIngestDlq` (14-day retention) plus redrive at `maxReceiveCount: 5`, and the
+main queue's visibility timeout is now 90s (was the 30s default) so an
+in-flight message is not redelivered mid-processing and charged a redrive
+attempt. Without a DLQ, a message that can never be processed is redelivered
+for the full retention period, and once it outlives Lakerunner's 1h ingest
+dedup window it re-ingests the same object and writes duplicate segments. Both
+changes are in-place updates; no resource is replaced and no data is affected.
+New output: `RawDlqArn`. Upgrade action: redeploy the satellite-infra-base
+stack, then check the DLQ depth occasionally — a non-zero depth means objects
+are failing to ingest.
+
 ## v1.6.7
 
 **Image bump:** lakerunner `v1.75.0` → `v1.76.2`, maestro `v1.87.3` → `v1.87.8`,

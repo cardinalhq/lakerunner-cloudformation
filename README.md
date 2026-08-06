@@ -39,6 +39,7 @@ install's process-role ARN as its trusted principal.
 
 1. **`cardinal-satellite-infra-base`** (`deploy-satellite-infra-base.sh`) — creates the raw ingest S3 bucket, its SQS queue, and the cross-account access role the base install assumes.
 1. **`cardinal-satellite-services`** (`deploy-satellite-services.sh`) — creates the OTLP collector and its own ALB.
+1. **`cardinal-satellite-cwmetrics`** (`deploy-satellite-cwmetrics.sh`) — optional. Streams the account's CloudWatch metrics into the same raw bucket under `cwmetrics-raw/`, via a metric stream and Firehose. Creates no bucket, queue or role of its own — it reuses the ones above.
 
 ### Single-account order
 

@@ -85,6 +85,87 @@ def test_bucket_notifies_its_own_queue(td):
     assert qcfg["Queue"] == {"Fn::GetAtt": ["RawIngestQueue", "Arn"]}
 
 
+def _notification_prefixes(td):
+    return [
+        c["Filter"]["S3Key"]["Rules"][0]["Value"]
+        for c in td["Resources"]["RawIngestBucket"]["Properties"][
+            "NotificationConfiguration"
+        ]["QueueConfigurations"]
+    ]
+
+
+def test_notifications_are_prefix_filtered(td):
+    """Every producer prefix is notified, and only via a prefix rule -- an
+    unfiltered configuration would hand Firehose's error-output blobs to the
+    poller, which cannot parse them."""
+    cfgs = td["Resources"]["RawIngestBucket"]["Properties"][
+        "NotificationConfiguration"
+    ]["QueueConfigurations"]
+    assert len(cfgs) == len(satellite_infra_base.INGEST_PREFIXES)
+    for c in cfgs:
+        assert c["Filter"]["S3Key"]["Rules"][0]["Name"] == "prefix"
+    assert _notification_prefixes(td) == list(
+        satellite_infra_base.INGEST_PREFIXES
+    )
+
+
+def test_ingest_prefixes_cover_known_producers(td):
+    prefixes = _notification_prefixes(td)
+    # otel-collector (satellite-services) and the CloudWatch metric stream
+    # (satellite-cwmetrics) both write into this one bucket.
+    assert "otel-raw/" in prefixes
+    assert "cwmetrics-raw/" in prefixes
+
+
+def test_ingest_prefixes_do_not_overlap(td):
+    """S3 rejects overlapping prefix filters for the same event type."""
+    prefixes = _notification_prefixes(td)
+    for a in prefixes:
+        for b in prefixes:
+            if a is not b:
+                assert not a.startswith(b), f"{a!r} overlaps {b!r}"
+
+
+def test_firehose_error_prefix_is_not_notified(td):
+    """Error output lands under cwmetrics-errors/, which must not match any
+    notification prefix."""
+    for prefix in _notification_prefixes(td):
+        assert not "cwmetrics-errors/".startswith(prefix)
+
+
+def test_queue_has_dlq_redrive(td):
+    redrive = td["Resources"]["RawIngestQueue"]["Properties"]["RedrivePolicy"]
+    assert redrive["deadLetterTargetArn"] == {
+        "Fn::GetAtt": ["RawIngestDlq", "Arn"]
+    }
+    assert redrive["maxReceiveCount"] == satellite_infra_base.MAX_RECEIVE_COUNT
+
+
+def test_dlq_retains_long_enough_to_inspect(td):
+    dlq = td["Resources"]["RawIngestDlq"]
+    assert dlq["Properties"]["MessageRetentionPeriod"] == 1209600
+    assert dlq["DeletionPolicy"] == "Delete"
+
+
+def test_dlq_has_no_redrive_allow_policy(td):
+    """Pinning sourceQueueArns would make the two queues reference each other
+    and CloudFormation would reject the cycle."""
+    assert "RedriveAllowPolicy" not in td["Resources"]["RawIngestDlq"]["Properties"]
+
+
+def test_visibility_timeout_exceeds_processing_budget(td):
+    """A too-short visibility timeout redelivers in-flight messages and burns
+    redrive attempts, DLQ-ing healthy work."""
+    vt = td["Resources"]["RawIngestQueue"]["Properties"]["VisibilityTimeout"]
+    assert vt == satellite_infra_base.QUEUE_VISIBILITY_TIMEOUT
+    assert vt > 30
+
+
+def test_queues_are_encrypted(td):
+    for name in ("RawIngestQueue", "RawIngestDlq"):
+        assert td["Resources"][name]["Properties"]["SqsManagedSseEnabled"] is True
+
+
 def test_bucket_depends_on_queue_policy(td):
     assert td["Resources"]["RawIngestBucket"]["DependsOn"] == "RawIngestQueuePolicy"
 
@@ -194,6 +275,7 @@ def test_outputs_present(td):
         "RawBucketName",
         "RawQueueUrl",
         "RawQueueArn",
+        "RawDlqArn",
         "LakerunnerAccessRoleArn",
         "Region",
     ):
