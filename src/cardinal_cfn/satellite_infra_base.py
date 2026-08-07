@@ -47,8 +47,8 @@ from troposphere.s3 import (
 )
 from troposphere.sqs import Queue, QueuePolicy, RedrivePolicy
 
-APPLICATION = "cardinal-lakerunner"
-PROJECT = "cardinal"
+from cardinal_cfn.naming import cardinal_tags
+
 MANAGED_BY = "cardinal-cfn-satellite"
 
 # Key prefixes whose objects are ingestible telemetry and therefore notify the
@@ -71,13 +71,7 @@ DLQ_RETENTION_SECONDS = 1209600  # 14 days, for inspection/redrive
 
 
 def _tags(*, component: str) -> Tags:
-    return Tags(
-        Application=APPLICATION,
-        Project=PROJECT,
-        ManagedBy=MANAGED_BY,
-        Component=component,
-        Name=f"cardinal-{component}",
-    )
+    return cardinal_tags(component=component, managed_by=MANAGED_BY)
 
 
 def _delete(resource):

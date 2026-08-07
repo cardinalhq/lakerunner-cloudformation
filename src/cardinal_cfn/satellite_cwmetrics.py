@@ -40,12 +40,11 @@ from troposphere.firehose import (
 from troposphere.iam import Policy, Role
 from troposphere.logs import LogGroup
 
+from cardinal_cfn.naming import cardinal_tags
 from cardinal_cfn.parameters import add_parameter_group_metadata
 from cardinal_cfn.policies import apply_policy
 from cardinal_cfn.satellite_infra_base import INGEST_PREFIXES
 
-APPLICATION = "cardinal-lakerunner"
-PROJECT = "cardinal"
 MANAGED_BY = "cardinal-cfn-satellite"
 
 # Must be one of the raw bucket's notified prefixes or the delivered objects
@@ -68,13 +67,7 @@ _LOG_RETENTION_DAYS = 7
 
 
 def _tags(*, component: str) -> Tags:
-    return Tags(
-        Application=APPLICATION,
-        Project=PROJECT,
-        ManagedBy=MANAGED_BY,
-        Component=component,
-        Name=f"cardinal-{component}",
-    )
+    return cardinal_tags(component=component, managed_by=MANAGED_BY)
 
 
 def build() -> Template:

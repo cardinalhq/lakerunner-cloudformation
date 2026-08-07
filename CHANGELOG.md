@@ -13,6 +13,24 @@ v0.0.114.
 
 ## Unreleased
 
+**Consistent resource tagging.** Every Cardinal-created resource now carries
+the same five tags — `Name`, `Project=cardinal`,
+`Application=cardinal-lakerunner`, `Component`, `ManagedBy` — from a single
+helper (`naming.cardinal_tags`). Previously the nested children emitted no
+`Application` tag (so ~40% of an install's resources were invisible to an
+`Application` filter), and each root stack carried its own copy of the tag
+builder.
+
+The deploy drivers now also pass `Project` / `Application` / `ManagedBy` as
+**stack** tags on every change set. CloudFormation propagates those to
+resource types the templates cannot tag directly — ALB listeners and listener
+rules, Cloud Map namespaces and services, the IAM server certificate — which
+previously carried only `aws:cloudformation:*` tags.
+
+Upgrade action: redeploy each stack to apply the tags. Tag-only changes; no
+resource is replaced. Note that stack tags are re-applied from the driver on
+every deploy, so tags added by hand to a Cardinal stack will be dropped.
+
 **New stack: `cardinal-satellite-cwmetrics`.** Streams an account's CloudWatch
 metrics into the satellite's existing raw bucket under `cwmetrics-raw/`, via a
 CloudWatch metric stream and a Firehose delivery stream. It is a producer-only

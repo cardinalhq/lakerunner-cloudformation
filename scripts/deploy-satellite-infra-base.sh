@@ -146,6 +146,14 @@ set -eu
 
 CHANGE_SET_PREFIX="cardinal-deploy-"
 
+# Stack tags.  CloudFormation propagates these to every resource type that
+# supports tagging, including the ones the generators cannot tag directly
+# (ALB listeners and listener rules, Cloud Map, IAM server certificates), and
+# to nested stacks.  Per-resource Name/Component tags still come from the
+# generators (src/cardinal_cfn/naming.py).  Always passed, on create and
+# update alike: a change set that omits --tags drops the stack's tags.
+STACK_TAGS="Key=Project,Value=cardinal Key=Application,Value=cardinal-lakerunner Key=ManagedBy,Value=cardinal-cfn"
+
 stack_name="${STACK_NAME:-}"
 template_url="${TEMPLATE_URL:-}"
 region="${REGION:-}"
@@ -681,12 +689,15 @@ main() {
 
     change_set_name="${CHANGE_SET_PREFIX}$(date +%s)"
     log "creating change set: $change_set_name (type=$cs_type)"
+    # STACK_TAGS is a word list, not one argument -- splitting is intended.
+    # shellcheck disable=SC2086
     cfntool create-change-set \
         --stack-name "$stack_name" \
         --change-set-name "$change_set_name" \
         --change-set-type "$cs_type" \
         --template-url "$template_url" \
         --parameters "file://$work_dir/parameters.json" \
+        --tags $STACK_TAGS \
         --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
         --region "$region" >/dev/null
 

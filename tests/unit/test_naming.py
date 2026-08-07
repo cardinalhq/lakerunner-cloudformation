@@ -1,17 +1,18 @@
 """Tests for the naming and tag conventions module."""
 
-import pytest
-
 from cardinal_cfn.naming import (
     APPLICATION,
+    MANAGED_BY_TAG,
     PROJECT,
     LakerunnerComponent,
-    cardinal_tags_v2,
+    cardinal_tags,
     log_group_name,
     name_tag,
     secret_name,
     ssm_param_name,
 )
+
+COMMON_TAG_KEYS = {"Name", "Project", "Application", "Component", "ManagedBy"}
 
 
 def _tag_dict(tags) -> dict[str, str]:
@@ -23,31 +24,26 @@ def test_constants():
     assert APPLICATION == "cardinal-lakerunner"
 
 
-def test_tags_carry_required_keys():
-    tags = cardinal_tags_v2(component="task-role", managed_by="cardinal-prereqs-script")
-    keys = set(_tag_dict(tags).keys())
-    assert {"Application", "Component", "ManagedBy", "Name"} <= keys
-
-
-def test_tags_values_match_inputs():
-    tags = _tag_dict(cardinal_tags_v2(component="ingest-bucket", managed_by="cardinal-data-setup-script"))
+def test_tags_carry_the_common_set():
+    tags = _tag_dict(cardinal_tags(component="ingest-bucket", managed_by="cardinal-cfn-satellite"))
+    assert set(tags) == COMMON_TAG_KEYS
+    assert tags["Project"] == PROJECT
     assert tags["Application"] == APPLICATION
     assert tags["Component"] == "ingest-bucket"
-    assert tags["ManagedBy"] == "cardinal-data-setup-script"
+    assert tags["ManagedBy"] == "cardinal-cfn-satellite"
     assert tags["Name"] == "cardinal-ingest-bucket"
 
 
-def test_tags_install_version_optional():
-    tags_without = _tag_dict(cardinal_tags_v2(component="x", managed_by="m"))
-    assert "cardinal:install-version" not in tags_without
-
-    tags_with = _tag_dict(cardinal_tags_v2(component="x", managed_by="m", install_version="v1.2.3"))
-    assert tags_with["cardinal:install-version"] == "v1.2.3"
+def test_managed_by_defaults_to_the_children_value():
+    tags = _tag_dict(cardinal_tags(component="compute"))
+    assert tags["ManagedBy"] == MANAGED_BY_TAG
 
 
-def test_managed_by_required():
-    with pytest.raises(ValueError):
-        cardinal_tags_v2(component="x", managed_by="")
+def test_role_puts_install_id_in_name_and_keeps_the_common_set():
+    tags = _tag_dict(cardinal_tags(component="compute", role="query-api"))
+    assert set(tags) == COMMON_TAG_KEYS
+    assert tags["Name"] == {"Fn::Sub": "cardinal-query-api-${InstallIdShort}"}
+    assert tags["Component"] == "compute"
 
 
 def test_name_tag_emits_plain_string_no_install_id():

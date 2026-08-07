@@ -62,22 +62,15 @@ from troposphere.s3 import (
 )
 from troposphere.secretsmanager import GenerateSecretString, Secret
 
+from cardinal_cfn.naming import cardinal_tags
 from cardinal_cfn.parameters import add_no_echo_parameter, add_parameter_group_metadata
 
 
-PROJECT = "cardinal"
-APPLICATION = "cardinal-lakerunner"
 MANAGED_BY = "cardinal-cfn-infra-base"
 
 
 def _tags(*, component: str) -> Tags:
-    return Tags(
-        Application=APPLICATION,
-        Project=PROJECT,
-        ManagedBy=MANAGED_BY,
-        Component=component,
-        Name=f"cardinal-{component}",
-    )
+    return cardinal_tags(component=component, managed_by=MANAGED_BY)
 
 
 def _retain(resource):
