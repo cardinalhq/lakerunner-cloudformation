@@ -401,15 +401,22 @@ def build() -> Template:
         Image=db_init_image_ref,
         Essential=False,
         EntryPoint=["sh", "-c"],
-        # Create the maestro database; mcp-gateway can't create the database it
-        # connects to. Everything else (schema, ownership, the pgvector /
-        # pgcrypto / citext extensions) is handled by mcp-gateway's migrations,
-        # which run as the DB superuser. The "|| true" tolerates re-runs.
+        # Create the maestro database and its extensions; mcp-gateway can't
+        # create the database it connects to, and since maestro v1.87.8 its
+        # startup preflight requires vector/pgcrypto/citext to already exist
+        # ("provisioned by the operator, not by migrations"). Schema and
+        # ownership are still mcp-gateway's migrations. The "|| true" tolerates
+        # re-runs of CREATE DATABASE; the extension step must succeed.
         Command=[
             (
                 "PGPASSWORD=$LRDB_PASSWORD psql -h $LRDB_HOST -p $LRDB_PORT "
                 "-U $LRDB_USER -d postgres -v ON_ERROR_STOP=1 "
-                "-c \"CREATE DATABASE maestro\" || true"
+                "-c \"CREATE DATABASE maestro\" || true; "
+                "PGPASSWORD=$LRDB_PASSWORD psql -h $LRDB_HOST -p $LRDB_PORT "
+                "-U $LRDB_USER -d maestro -v ON_ERROR_STOP=1 "
+                "-c \"CREATE EXTENSION IF NOT EXISTS vector\" "
+                "-c \"CREATE EXTENSION IF NOT EXISTS pgcrypto\" "
+                "-c \"CREATE EXTENSION IF NOT EXISTS citext\""
             )
         ],
         Environment=[
@@ -460,6 +467,12 @@ def build() -> Template:
         PortMappings=[PortMapping(ContainerPort=mcp_gateway_port, Protocol="tcp")],
         Environment=db_env + [
             Environment(Name="MCP_PORT", Value=str(mcp_gateway_port)),
+            # The gateway fails closed on a missing API key since maestro
+            # v1.87.8. Its port has no target group and no SG ingress, so it
+            # is reachable only over loopback inside this task -- the same
+            # pod-local sidecar topology conductor's own deployment uses,
+            # which sets this flag too.
+            Environment(Name="MCP_ALLOW_NO_AUTH", Value="true"),
             Environment(
                 Name="MCP_MIGRATE_RECOVER_FROM_DIRTY",
                 Value=Ref("McpMigrateRecoverFromDirty"),

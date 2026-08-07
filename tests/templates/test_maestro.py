@@ -110,6 +110,33 @@ def test_db_init_is_not_essential(td):
     assert db_init["Essential"] is False
 
 
+def test_db_init_creates_maestro_extensions(td):
+    # mcp-gateway's startup preflight (maestro v1.87.8+) requires these to
+    # already exist in the maestro database; nothing else creates them.
+    task_def = next(
+        r for r in td["Resources"].values() if r["Type"] == "AWS::ECS::TaskDefinition"
+    )
+    db_init = next(
+        c for c in task_def["Properties"]["ContainerDefinitions"] if c["Name"] == "db-init"
+    )
+    command = " ".join(db_init["Command"])
+    assert "-d maestro" in command
+    for ext in ("vector", "pgcrypto", "citext"):
+        assert f"CREATE EXTENSION IF NOT EXISTS {ext}" in command
+
+
+def test_mcp_gateway_runs_without_api_key(td):
+    # The gateway fails closed on a missing key; its port is loopback-only.
+    task_def = next(
+        r for r in td["Resources"].values() if r["Type"] == "AWS::ECS::TaskDefinition"
+    )
+    gateway = next(
+        c for c in task_def["Properties"]["ContainerDefinitions"] if c["Name"] == "mcp-gateway"
+    )
+    env = {e["Name"]: e["Value"] for e in gateway["Environment"]}
+    assert env["MCP_ALLOW_NO_AUTH"] == "true"
+
+
 def test_maestro_and_dex_are_essential(td):
     task_def = next(
         r for r in td["Resources"].values() if r["Type"] == "AWS::ECS::TaskDefinition"
