@@ -18,6 +18,22 @@ otel-collector `v1.8.0` → `v1.10.0`.
 Upgrade action: redeploy the root stack. The lakerunner bump retriggers the DB
 migrator (reruns once, idempotent) before the service tiers update.
 
+**Maestro task changes required by maestro v1.87.8.** Two settings the new
+image needs, both applied automatically by the stack:
+
+- `db-init` now creates the `vector`, `pgcrypto` and `citext` extensions in the
+  `maestro` database. mcp-gateway's startup preflight requires them to exist;
+  its migrations no longer create them, so without this the maestro service
+  never starts and the deployment circuit breaker fails the stack.
+- The bundled mcp-gateway runs with `MCP_ALLOW_NO_AUTH=true`. It now fails
+  closed on a missing API key; its port has no target group and no
+  security-group ingress, so it is reachable only over loopback within the
+  maestro task.
+
+Upgrade action: none beyond redeploying — the extensions are created on the
+next maestro task start. The DB master credentials already have the privileges
+required (RDS `rds_superuser`).
+
 ## v1.6.6
 
 **Image bump:** lakerunner `v1.69.1` → `v1.75.0`, maestro `v1.74.0` → `v1.87.3`,
