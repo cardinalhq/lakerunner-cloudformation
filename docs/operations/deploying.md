@@ -7,45 +7,59 @@ permissions to roll back; if the operator lacks them, the stack lands in
 `UPDATE_ROLLBACK_FAILED` and only an admin (or `--resources-to-skip`) can
 recover it.
 
-The `cardinal-deployer-role.yaml` template breaks that coupling. It creates a
-service role that CloudFormation assumes for all stack operations, scoped to
-exactly the AWS APIs the lakerunner templates touch. Operators only need
-`cloudformation:*` and `iam:PassRole` on the deployer role itself.
+A CloudFormation **service role** breaks that coupling: CloudFormation assumes
+it for every stack operation, so apply and rollback both run with the same
+permissions regardless of who kicked off the deploy. Operators then only need
+`cloudformation:*` and `iam:PassRole` on that role.
 
-## Quick start
+The role is customer-supplied. This repo no longer ships a template for it —
+the `cardinal-deployer-role.yaml` stack was removed when infrastructure
+provisioning moved out of CloudFormation, and there is no in-repo policy
+document to copy. Build the role in whatever IAM tooling owns roles in the
+account, trusting `cloudformation.amazonaws.com`.
+
+## Using it
+
+Every deploy driver takes the role ARN as `DEPLOYER_ROLE_ARN`:
 
 ```sh
-# 1. Deploy the role once per account (use any region you like — the role is
-#    global, but the stack must live somewhere).
-aws cloudformation create-stack \
-  --stack-name cardinal-cfn-deployer \
-  --region us-east-1 \
-  --template-url https://cardinal-cfn-us-east-1.s3.us-east-1.amazonaws.com/lakerunner/<version>/cardinal-deployer-role.yaml \
-  --capabilities CAPABILITY_NAMED_IAM
-
-# 2. Grab the ARN.
-ROLE_ARN=$(aws cloudformation describe-stacks \
-  --stack-name cardinal-cfn-deployer --region us-east-1 \
-  --query 'Stacks[0].Outputs[?OutputKey==`DeployerRoleArn`].OutputValue' \
-  --output text)
-
-# 3. Use it for every cardinal-lakerunner update.
-aws cloudformation update-stack \
-  --stack-name cardinal-lakerunner \
-  --region us-east-1 \
-  --role-arn "$ROLE_ARN" \
-  --template-url https://cardinal-cfn-us-east-1.s3.us-east-1.amazonaws.com/lakerunner/<version>/cardinal-lakerunner.yaml \
-  --use-previous-parameters \
-  --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND
+DEPLOYER_ROLE_ARN=arn:aws:iam::<acct>:role/<role> \
+STACK_NAME=cardinal-lakerunner-services ... \
+  scripts/deploy-lakerunner-services.sh
 ```
 
-For initial creation use the same `--role-arn` flag with `create-stack`.
+The driver passes it to `create-change-set`; CloudFormation reuses the role for
+`execute-change-set`, so it covers both create and update. It is the only
+CloudFormation call that accepts `--role-arn` — see the `cfntool()` wrapper in
+`scripts-src/parts/base.sh`.
+
+## Scoping the policy
+
+The role needs write access to every resource type the stacks create. The
+authoritative list is the templates themselves; as of v1.7.x that is:
+
+- CloudFormation (nested stacks), ECS (cluster-scoped services, task
+  definitions, tagging), ELBv2, EC2 security groups, IAM roles and policies,
+  Logs, S3, SQS, Secrets Manager, RDS, Service Discovery / Route 53,
+  Application Auto Scaling, and — for the cwmetrics add-on — Firehose and
+  CloudWatch metric streams.
+
+When a template starts creating a new resource type, the role needs the
+matching permissions before the next deploy, or the stack fails mid-update.
+
+**Tag-conditioned roles:** the drivers set `Project` / `Application` /
+`ManagedBy` as stack tags and the templates tag each resource (see
+`src/cardinal_cfn/naming.py`). A role that gates writes on `aws:ResourceTag`
+must still be able to modify *untagged* resources for the one upgrade that
+first applies the tags — the resources cannot become compliant before that
+update runs. Likewise a role constraining `aws:TagKeys` must permit every key
+in the common set.
 
 ## Why this fixes the wedge
 
-Without `--role-arn`:
+Without a service role:
 
-1. Operator runs `update-stack` with their SSO identity.
+1. Operator runs the deploy with their SSO identity.
 2. CFN tries to update an inline IAM role policy. Operator lacks
    `iam:PutRolePolicy`. Update fails.
 3. CFN starts rolling back. Rollback also calls `iam:PutRolePolicy` to put the
@@ -54,51 +68,29 @@ Without `--role-arn`:
    have `iam:PutRolePolicy`, or `--resources-to-skip` (which leaves the role
    on whatever inline policy is currently attached).
 
-With `--role-arn`:
+With one:
 
-1. Operator runs `update-stack`. CFN assumes the deployer role, which has
+1. Operator runs the deploy. CFN assumes the deployer role, which has
    `iam:PutRolePolicy`.
 2. Apply or rollback both succeed regardless of operator permissions.
-3. Worst case is `UPDATE_FAILED` (recoverable by another `update-stack`),
-   never `UPDATE_ROLLBACK_FAILED`.
+3. Worst case is `UPDATE_FAILED` (recoverable by another deploy), never
+   `UPDATE_ROLLBACK_FAILED`.
 
 ## Hardening: `--disable-rollback`
 
-For updates that touch IAM, consider:
-
-```sh
-aws cloudformation update-stack ... --disable-rollback
-```
-
-A failed apply leaves the stack in `UPDATE_FAILED` rather than triggering an
-automatic rollback. From there `update-stack` can fix forward. This is mainly
-useful when *both* the apply and the rollback would fail (e.g. a code bug in
-the new IAM policy that CFN can't put either way) — `--disable-rollback`
+For updates that touch IAM, consider running the underlying
+`aws cloudformation` call with `--disable-rollback`. A failed apply leaves the
+stack in `UPDATE_FAILED` rather than triggering an automatic rollback, and a
+later deploy can fix forward. This is mainly useful when *both* the apply and
+the rollback would fail (e.g. a bad IAM policy CFN can't put either way) — it
 keeps the stack out of the harder-to-recover `UPDATE_ROLLBACK_FAILED` state.
-
-## Customer-managed alternative
-
-Customers who already manage IAM via Terraform / Pulumi / ClickOps don't have
-to use this template. The policy in
-[`src/cardinal_cfn/cardinal_deployer.py`](../../src/cardinal_cfn/cardinal_deployer.py)
-is the source of truth for which actions the deployer role needs — copy it
-into whatever IAM tooling owns roles in the customer account, attach the
-result to a role that trusts `cloudformation.amazonaws.com`, and pass that
-role's ARN to `update-stack --role-arn`. The template is the convenience
-path; the policy contents are the contract.
-
-When you change the lakerunner templates in a way that introduces a new AWS
-resource type, update `_POLICY_STATEMENTS` in `cardinal_deployer.py` so
-customers running the template get the new permission. The drift test in
-`tests/templates/test_cardinal_deployer.py` will fail if the template adds a
-resource type that isn't represented in the policy.
 
 ## Tearing down
 
-The lakerunner stack owns no `Retain` or `Snapshot` resources, so
-`delete-stack cardinal-lakerunner` cleans up everything it created
-(including all stack-created SGs and IAM roles). The data layer (RDS,
-S3 ingest, secrets, SSM, SQS) lives in the separate
-`cardinal-infrastructure` stack and survives stack delete by design
-via `Retain` / `Snapshot` policies. See
-[`dev-environment.md`](dev-environment.md) for the teardown procedure.
+Teardown deletes the five stacks in reverse dependency order and then removes
+the retained, fixed-name survivors (the `cardinal-license` /
+`cardinal-admin-key` / `cardinal-db-master` secrets, the cooked and raw
+buckets, the RDS final snapshot) that would otherwise block a fresh install.
+`cardinal-satellite-cwmetrics`, if deployed, is deleted first. The exact
+sequence is under "Burn it down" in [`dev-environment.md`](dev-environment.md);
+pass `DEPLOYER_ROLE_ARN` there too when a service role is in use.

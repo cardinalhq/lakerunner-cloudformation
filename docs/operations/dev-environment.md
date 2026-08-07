@@ -51,7 +51,8 @@ this is the dev preference set. Run each, waiting for `CREATE/UPDATE_COMPLETE`
 before the next (later drivers read earlier stacks' outputs).
 
 ```sh
-# 1. infra-base — app ALB PUBLIC
+# 1. infra-base — app ALB PUBLIC (needs CLUSTER_ARN: it tags the exec-role
+#    policy with ecs:cluster, so deploy lrdev-baseinfra first)
 STACK_NAME=cardinal-lakerunner-infra-base \
   LICENSE_DATA_FILE=./license.txt \
   ALB_SCHEME=internet-facing ALB_ALLOWED_CIDR1=0.0.0.0/0 \
@@ -92,6 +93,15 @@ STACK_NAME=cardinal-lakerunner-services \
 (it sets the Maestro admin password). Generate one with
 `htpasswd -bnBC 10 "" '<password>' | cut -d: -f2`.
 
+## 3b. Map the raw bucket in the Maestro superadmin UI
+
+Nothing cooks until this is done — CloudFormation does not create it. Maestro's
+bootstrap registers only the cooked bucket, so `pubsub-sqs` logs
+`No storage profile for (org, bucket); skipping` for every object until the
+satellite raw bucket is associated with the org (bucket `RawBucketName`, role
+`LakerunnerAccessRoleArn`, collector name = the `a<8-hex>` segment in the raw
+object paths). Full field list: ["After the install"](production-deploy.md).
+
 ## 4. Validate (self-telemetry end-to-end)
 
 ```sh
@@ -112,6 +122,13 @@ curl -ksS -o /dev/null -w '%{http_code}\n' "https://$ALB/dex/healthz" # 200
 Goal met when the raw bucket has logs/metrics/traces under your org, pubsub
 shows `... 0 failed`, the cooked bucket is non-empty, and logging into Maestro
 (the public ALB) shows logs/traces/metrics from the `lakerunner-*` services.
+
+> A license carrying its own telemetry endpoint overrides
+> `OTEL_EXPORTER_OTLP_ENDPOINT`, so the services ship to that endpoint as their
+> primary. The stack passes the install's collector in
+> `LAKERUNNER_SELF_TELEMETRY_ENDPOINT`, which is a *second* destination, so
+> self-telemetry reaches the local collector either way. On a pre-v1.7.0 install
+> the raw bucket stays empty with such a license.
 
 > If `pubsub-sqs` logs `organization does not exist` and cooking never starts on
 > a brand-new install, that is the maestro↔admin-api provisioning cold-start

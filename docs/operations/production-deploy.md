@@ -120,16 +120,34 @@ automatically by pulling `CollectorEndpoint` from satellite-services.
 - App ALB visibility: `ALB_SCHEME=internet-facing` + `PUBLIC_SUBNETS` (CSV) for a public Maestro; must agree with the infra-base `ALB_SCHEME`/CIDR settings.
 - Certificate: `CERTIFICATE_ARN`, or `CERTIFICATE_BODY[_FILE]` + `CERTIFICATE_PRIVATE_KEY[_FILE]` (+ optional `CERTIFICATE_CHAIN[_FILE]`). Unset on first create → self-signed; on update the existing cert is kept. See [`certificates.md`](certificates.md).
 - Self-telemetry: leave `SELF_TELEMETRY_ENDPOINT` unset to auto-pull the collector endpoint from `SATELLITE_SERVICES_STACK` (default `cardinal-satellite-services`); set it to override.
-- Satellite collectors: the driver auto-synthesizes the central `lakerunner` collector from the install's bucket/queue/region. Additional read-only or satellite collectors are supplied via `SATELLITE_CONFIG` (inline JSON) or `SATELLITE_CONFIG_FILE` (path to a JSON file). The JSON shape is:
-  ```json
-  { "organizations": { "<org-uuid>": { "collectors": {
-    "<name>": { "bucket": "...", "sqsurl": "...", "region": "...", "role": "(optional)",
-                "mode": "read-only|satellite" } } } } }
-  ```
-  Do not declare a `normal` collector for the install org — the driver synthesizes one automatically. The merged JSON is written to SSM `SATELLITES_PARAM_NAME` (default `/cardinal/satellites`) and injected into Maestro as `MAESTRO_SATELLITE_CONFIG`.
-- `CENTRAL_COLLECTOR_NAME` (default `lakerunner`): the collector name assigned to the auto-synthesized central entry. Must match the install's existing collector name on upgrade (see v1.5.0 CHANGELOG).
-- `SATELLITES_PARAM_NAME` (default `/cardinal/satellites`): SSM parameter receiving the composed satellite config JSON.
+- Bucket mapping: Maestro's bootstrap registers only the install's own output bucket (`MAESTRO_BOOTSTRAP_BUCKET_*`, wired to the cooked bucket). The satellite raw bucket is mapped to the org by hand in the Maestro superadmin UI — see "After the install" below. `SATELLITE_CONFIG` / `SATELLITES_PARAM_NAME` / `CENTRAL_COLLECTOR_NAME` were removed in v1.6.0; the driver writes no SSM parameter.
 - Optional: `DEX_ADMIN_EMAIL`, `OIDC_SUPERADMIN_EMAILS`, `DEX_CLIENT_ID`, `SERVICE_NAMESPACE_NAME`, `DB_INIT_IMAGE`, `IMAGE_REGISTRY` (see [`air-gapped-images.md`](../air-gapped-images.md)).
+
+## After the install
+
+Two mappings live in the Maestro superadmin UI, not in CloudFormation. Until
+both exist, objects land in the raw bucket and `pubsub-sqs` logs
+`No storage profile for (org, bucket); skipping` — the cooked bucket stays
+empty and nothing is queryable.
+
+1. **Associate the satellite bucket with the org.** Values come from the
+   satellite-infra-base outputs and the satellite-services stack:
+
+   | Field | Where it comes from |
+   |---|---|
+   | bucket | `RawBucketName` (`cardinal-otel-raw-<acct>-<region>`) |
+   | region / cloud provider | the install region / `aws` |
+   | role | `LakerunnerAccessRoleArn` (`cardinal-satellite-access`) |
+   | collector name | the third path segment of the raw objects, `a<8-hex>` — the satellite-services stack's install id |
+
+   The collector name must match the objects' path exactly
+   (`otel-raw/<org>/<collector>/…`); the stack sets it from its own stack id.
+
+2. **Add a prefix mapping per non-OTLP producer.** The org and credentials
+   resolve from the bucket, but the object *format* and *signal* come from the
+   prefix mapping. The `cwmetrics` add-on needs
+   `cwmetrics-raw/<org>` → format `cwmetrics`, signal `metrics`; without it
+   those objects are read as OTLP protobuf.
 
 ## Upgrades
 
