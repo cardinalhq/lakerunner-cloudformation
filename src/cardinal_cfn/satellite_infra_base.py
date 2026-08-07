@@ -1,10 +1,17 @@
 """cardinal-satellite-infra-base: per-source-account ingest primitive.
 
 Standalone stack a source ("satellite") account deploys to expose its raw
-OTEL telemetry to a Lakerunner install in another account, using a pull
-model: an in-account/in-region raw bucket + SQS queue + S3->SQS
-notification, plus a cross-account IAM role the Lakerunner poller assumes
-to read/delete the raw objects and consume the queue.
+telemetry to a Lakerunner install in another account, using a pull model:
+an in-account/in-region raw bucket + SQS queue (with a dead-letter queue)
++ prefix-filtered S3->SQS notifications, plus a cross-account IAM role the
+Lakerunner poller assumes to read/delete the raw objects and consume the
+queue.
+
+The bucket is shared by every producer in the account: the otel-collector
+(cardinal-satellite-services) under otel-raw/, the CloudWatch metric stream
+(cardinal-satellite-cwmetrics) under cwmetrics-raw/.  One bucket means one
+queue and one access role, so adding a producer costs no extra SQS traffic
+and no extra cross-account trust.  See INGEST_PREFIXES.
 
 Nothing here pushes to the Lakerunner account; the only cross-account
 relationship is the role's trust policy naming the Lakerunner principal.
@@ -27,19 +34,40 @@ from troposphere.s3 import (
     AbortIncompleteMultipartUpload,
     Bucket,
     BucketEncryption,
+    Filter,
     LifecycleConfiguration,
     LifecycleRule,
     NotificationConfiguration,
     PublicAccessBlockConfiguration,
     QueueConfigurations,
+    Rules,
+    S3Key,
     ServerSideEncryptionByDefault,
     ServerSideEncryptionRule,
 )
-from troposphere.sqs import Queue, QueuePolicy
+from troposphere.sqs import Queue, QueuePolicy, RedrivePolicy
 
 APPLICATION = "cardinal-lakerunner"
 PROJECT = "cardinal"
 MANAGED_BY = "cardinal-cfn-satellite"
+
+# Key prefixes whose objects are ingestible telemetry and therefore notify the
+# queue.  Producers must write under one of these:
+#   otel-raw/       the otel-collector (cardinal-satellite-services)
+#   cwmetrics-raw/  the CloudWatch metric stream (cardinal-satellite-cwmetrics)
+# Anything outside them is deliberately NOT notified -- notably Firehose's
+# error-output blobs (cwmetrics-errors/), which are failed-record payloads the
+# poller cannot parse.  Adding a producer that writes elsewhere means adding
+# its prefix here; S3 rejects overlapping prefix filters for one event type,
+# so the prefixes must stay mutually exclusive.
+INGEST_PREFIXES = ("otel-raw/", "cwmetrics-raw/")
+
+# Must exceed the poller's 30s per-message processing budget plus the delete
+# call, so an in-flight message is not handed to a second poller mid-flight
+# and burn a redrive attempt against MAX_RECEIVE_COUNT.
+QUEUE_VISIBILITY_TIMEOUT = 90
+MAX_RECEIVE_COUNT = 5
+DLQ_RETENTION_SECONDS = 1209600  # 14 days, for inspection/redrive
 
 
 def _tags(*, component: str) -> Tags:
@@ -62,8 +90,10 @@ def build() -> Template:
     t = Template()
     t.set_description(
         "Cardinal satellite infra base: per-source-account raw ingest bucket, "
-        "SQS queue, S3->SQS notification, and the cross-account role the "
-        "Lakerunner poller assumes. Pull model; nothing pushes to Lakerunner."
+        "SQS queue and dead-letter queue, prefix-filtered S3->SQS "
+        "notifications, and the cross-account role the Lakerunner poller "
+        "assumes. Shared by every producer in the account (otel-raw/, "
+        "cwmetrics-raw/). Pull model; nothing pushes to Lakerunner."
     )
 
     t.add_parameter(
@@ -170,8 +200,41 @@ def build() -> Template:
         Ref("RawBucketName"),
     )
 
+    # Dead-letter queue.  Without it a message that can never be processed
+    # (an object whose org mapping never resolves, a batch with one bad
+    # record) is redelivered every visibility timeout for the full retention
+    # period.  Lakerunner's ingest dedup only guards re-ingest for 1h
+    # (worklane PurgeCompleted), so a message that outlives that window
+    # re-ingests the same object and writes duplicate segments.  Quarantining
+    # after MAX_RECEIVE_COUNT attempts lands well inside the 1h window.
+    dlq = t.add_resource(
+        _delete(
+            Queue(
+                "RawIngestDlq",
+                MessageRetentionPeriod=DLQ_RETENTION_SECONDS,
+                SqsManagedSseEnabled=True,
+                # RedriveAllowPolicy is intentionally left at its default
+                # (allowAll): pinning sourceQueueArns to RawIngestQueue would
+                # make the two queue resources reference each other and
+                # CloudFormation would reject the cycle.
+                Tags=_tags(component="otel-raw-dlq"),
+            )
+        )
+    )
+
     queue = t.add_resource(
-        _delete(Queue("RawIngestQueue", Tags=_tags(component="otel-raw-queue")))
+        _delete(
+            Queue(
+                "RawIngestQueue",
+                VisibilityTimeout=QUEUE_VISIBILITY_TIMEOUT,
+                SqsManagedSseEnabled=True,
+                RedrivePolicy=RedrivePolicy(
+                    deadLetterTargetArn=GetAtt(dlq, "Arn"),
+                    maxReceiveCount=MAX_RECEIVE_COUNT,
+                ),
+                Tags=_tags(component="otel-raw-queue"),
+            )
+        )
     )
 
     t.add_resource(
@@ -256,8 +319,14 @@ def build() -> Template:
                     QueueConfigurations=[
                         QueueConfigurations(
                             Event="s3:ObjectCreated:*",
+                            Filter=Filter(
+                                S3Key=S3Key(
+                                    Rules=[Rules(Name="prefix", Value=prefix)]
+                                )
+                            ),
                             Queue=GetAtt(queue, "Arn"),
                         )
+                        for prefix in INGEST_PREFIXES
                     ]
                 ),
                 Tags=_tags(component="otel-raw-bucket"),
@@ -377,6 +446,13 @@ def build() -> Template:
             "RawQueueArn",
             Description="Raw ingest SQS queue ARN.",
             Value=GetAtt(queue, "Arn"),
+        )
+    )
+    t.add_output(
+        Output(
+            "RawDlqArn",
+            Description="Dead-letter queue ARN for poison ingest messages.",
+            Value=GetAtt(dlq, "Arn"),
         )
     )
     t.add_output(

@@ -42,6 +42,9 @@ name, so they must run in this order:
 3. cardinal-satellite-infra-base      (deploy-satellite-infra-base.sh)
 4. cardinal-satellite-services        (deploy-satellite-services.sh)
 5. cardinal-lakerunner-services       (deploy-lakerunner-services.sh)
+
+optional, any time after 3:
+   cardinal-satellite-cwmetrics       (deploy-satellite-cwmetrics.sh)
 ```
 
 Common env for every step: `REGION`, and either a version-pinned driver or
@@ -87,6 +90,24 @@ satellite-infra-base.
 - Collector ALB visibility: `ALB_SCHEME=internal|internet-facing` (default `internal`). Keep the collector **internal** unless external senders must reach it; use private subnets for `ALB_SUBNETS`/`TASK_SUBNETS`.
 - `ORGANIZATION_ID` **must be identical** here and in step 5.
 - Output consumed later: `CollectorEndpoint` (e.g. `http://<alb>:4318`).
+
+### Optional: satellite-cwmetrics (CloudWatch metrics)
+
+Streams this account's CloudWatch metrics into the satellite's raw bucket under
+`cwmetrics-raw/`, through a CloudWatch metric stream and a Firehose delivery
+stream. Pulls `RawBucketName` from satellite-infra-base.
+
+It is an add-on to an existing satellite, not a second satellite: it creates no
+bucket, no queue and no cross-account role, so the metrics arrive over the same
+ingest queue and the same `cardinal-satellite-access` role, and no
+lakerunner-services rewiring is needed. Deploy any time after step 3.
+
+- Required: `STACK_NAME`, `REGION`, `SATELLITE_INFRA_BASE_STACK`, `ORGANIZATION_ID`.
+- `ORGANIZATION_ID` **must match** the satellite-services stack in this account — it is the first path segment under `cwmetrics-raw/`, which is how Lakerunner resolves the org.
+- Optional: `EXCLUDE_NAMESPACE` (default `AWS/Usage`; empty streams every namespace), `FIREHOSE_BUFFER_SECONDS` (default `300`), `FIREHOSE_BUFFER_SIZE_MB` (default `64`).
+- If metrics stop arriving, check the `FirehoseLogGroupName` output and the
+  `cwmetrics-errors/` prefix — failed-record output is deliberately not
+  notified to the ingest queue, so it fails quietly by design.
 
 ### 5. lakerunner-services (the application tier)
 
