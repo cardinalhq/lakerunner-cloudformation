@@ -650,6 +650,9 @@ def build() -> Template:
         Service(
             "CollectorService",
             Cluster=Ref("EcsClusterArn"),
+            # ECS copies these onto every task it launches; Fargate cost
+            # allocation bills against task tags, not service tags.
+            PropagateTags="SERVICE",
             # On-demand FARGATE only. The collector is the deploy-critical
             # ingest path, and ECS rolling deploys + the circuit breaker
             # require every new task to place. FARGATE_SPOT cannot guarantee

@@ -11,6 +11,34 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v1.7.1
+
+**ECS tasks now inherit the service's tags.** Every ECS service sets
+`PropagateTags: SERVICE`, so the tasks it launches carry the same five tags.
+Fargate cost allocation bills against *task* tags, not service tags, and
+CloudFormation cannot tag a task directly — so before this the largest
+recurring line item in an install was untagged, and a deployer role that gates
+on resource tags saw untagged tasks.
+
+Upgrade action: redeploy the services and satellite-services stacks. Note that
+ECS applies tags only to tasks it launches *after* the change — verified: the
+stack update alters the service in place and leaves the running tasks alone,
+still untagged. To tag them without waiting for the next image bump, force a
+deployment per service once the stack settles:
+
+```sh
+aws ecs update-service --cluster <cluster> --service <name> --force-new-deployment
+```
+
+Do this inside the same window as any other tag work, since it is the task
+launch — not the stack update — that applies the tags.
+
+Two resource types remain untaggable and are not covered: security-group
+**rules** (`AWS::EC2::SecurityGroupIngress` has no `Tags` property; the
+security groups themselves are tagged) and Application Auto Scaling
+**scalable targets / scaling policies** (likewise no `Tags` property). Both
+are CloudFormation limitations, not omissions.
+
 ## v1.7.0
 
 **Consistent resource tagging.** Every Cardinal-created resource now carries

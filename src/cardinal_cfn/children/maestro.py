@@ -712,6 +712,9 @@ def build() -> Template:
         Service(
             "MaestroService",
             Cluster=Ref("ClusterArn"),
+            # ECS copies these onto every task it launches; Fargate cost
+            # allocation bills against task tags, not service tags.
+            PropagateTags="SERVICE",
             # Singleton: pure on-demand FARGATE so its one task always places
             # during a rolling deploy; a transient FARGATE_SPOT shortage must
             # never block the task and trip the deploy circuit breaker.
