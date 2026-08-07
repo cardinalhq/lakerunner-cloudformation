@@ -1,13 +1,20 @@
 """Naming and tag conventions for Cardinal resources.
 
-Two helper sets coexist:
+``cardinal_tags()`` is the single source of the common tag set every
+Cardinal-created resource carries:
 
-- ``cardinal_tags(component=, role=)`` -- used by the lakerunner nested
-  children. Carries an ``InstallIdShort`` Sub in the Name tag so per-install
-  resources are visually distinguishable in the AWS console.
-- ``cardinal_tags_v2(component=, managed_by=)`` -- used by the data-setup
-  Lambda's CFN wrapper and by callers that want explicit ``managed_by``
-  attribution (which layer owns the resource).
+    Name         cardinal-<role or component>[-<InstallIdShort>]
+    Project      cardinal
+    Application  cardinal-lakerunner
+    Component    <what the resource is for>
+    ManagedBy    which layer owns it (cardinal-cfn-<layer>)
+
+Nested children pass ``role=`` so their Name tag carries the install id and
+per-install resources stay distinguishable in the console; root stacks pass
+``component=`` alone. The deploy drivers additionally set Project /
+Application / ManagedBy as *stack* tags, which CloudFormation propagates to
+resource types the generators cannot tag directly (ALB listeners and listener
+rules, Cloud Map, IAM server certificates).
 
 ``LakerunnerComponent``, ``log_group_name``, ``name_tag``, ``secret_name``,
 and ``ssm_param_name`` are constants/helpers for the bare ``cardinal-*`` /
@@ -22,32 +29,29 @@ from enum import Enum
 from troposphere import Sub, Tags
 
 
-# ---------------------------------------------------------------------------
-# Legacy (used by src/cardinal_cfn/children/* and src/cardinal_cfn/root.py)
-# ---------------------------------------------------------------------------
-
-CARDINAL_PROJECT_TAG = "cardinal"
-MANAGED_BY_TAG = "cardinal-cfn"
-
-
-def cardinal_tags(*, component: str, role: str) -> Tags:
-    """Legacy tag set. Carries an ``InstallIdShort`` Sub in the Name tag."""
-
-    return Tags(
-        Name=Sub(f"cardinal-{role}-${{InstallIdShort}}"),
-        Project=CARDINAL_PROJECT_TAG,
-        Component=component,
-        ManagedBy=MANAGED_BY_TAG,
-    )
-
-
-# ---------------------------------------------------------------------------
-# New shape (used by src/cardinal_cfn/{prereqs,data_setup}/* and the
-# to-be-written src/cardinal_cfn/{app,lakerunner}/* packages)
-# ---------------------------------------------------------------------------
-
 PROJECT = "cardinal"
 APPLICATION = "cardinal-lakerunner"
+MANAGED_BY_TAG = "cardinal-cfn"
+# Back-compat alias; PROJECT is the name to use.
+CARDINAL_PROJECT_TAG = PROJECT
+
+
+def cardinal_tags(
+    *,
+    component: str,
+    role: str | None = None,
+    managed_by: str = MANAGED_BY_TAG,
+) -> Tags:
+    """The common tag set. ``role`` (children) puts InstallIdShort in Name."""
+
+    name = Sub(f"cardinal-{role}-${{InstallIdShort}}") if role else f"cardinal-{component}"
+    return Tags(
+        Name=name,
+        Project=PROJECT,
+        Application=APPLICATION,
+        Component=component,
+        ManagedBy=managed_by,
+    )
 
 
 class LakerunnerComponent(str, Enum):
@@ -67,23 +71,6 @@ class LakerunnerComponent(str, Enum):
     MAESTRO = "maestro"
     DEX = "dex"
     MIGRATOR = "migrator"
-
-
-def cardinal_tags_v2(*, component: str, managed_by: str, install_version: str | None = None) -> Tags:
-    """New tag set. ``managed_by`` is required; no InstallId."""
-
-    if not managed_by:
-        raise ValueError("managed_by is required")
-
-    items: dict[str, str] = {
-        "Application": APPLICATION,
-        "Component": component,
-        "ManagedBy": managed_by,
-        "Name": f"cardinal-{component}",
-    }
-    if install_version:
-        items["cardinal:install-version"] = install_version
-    return Tags(**items)
 
 
 def name_tag(*, role: str) -> str:

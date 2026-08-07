@@ -27,21 +27,14 @@ from troposphere.secretsmanager import (
     SecretTargetAttachment,
 )
 
+from cardinal_cfn.naming import cardinal_tags
 from cardinal_cfn.parameters import add_parameter_group_metadata
 
-APPLICATION = "cardinal-lakerunner"
-PROJECT = "cardinal"
 MANAGED_BY = "cardinal-cfn-rds"
 
 
 def _tags(*, component: str) -> Tags:
-    return Tags(
-        Application=APPLICATION,
-        Project=PROJECT,
-        ManagedBy=MANAGED_BY,
-        Component=component,
-        Name=f"cardinal-{component}",
-    )
+    return cardinal_tags(component=component, managed_by=MANAGED_BY)
 
 
 def _delete(resource):

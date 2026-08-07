@@ -73,11 +73,10 @@ from troposphere.logs import LogGroup
 from cardinal_cfn.defaults import load_defaults, load_otel_default_config
 from cardinal_cfn.images import add_image_override
 from cardinal_cfn.install_id import install_id_short
+from cardinal_cfn.naming import cardinal_tags
 from cardinal_cfn.parameters import add_parameter_group_metadata
 from cardinal_cfn.policies import apply_policy
 
-APPLICATION = "cardinal-lakerunner"
-PROJECT = "cardinal"
 MANAGED_BY = "cardinal-cfn-satellite"
 
 _SERVICE_KEY = "otel-grpc"
@@ -86,13 +85,7 @@ _HEALTH_PORT = 13133
 
 
 def _tags(*, component: str) -> Tags:
-    return Tags(
-        Application=APPLICATION,
-        Project=PROJECT,
-        ManagedBy=MANAGED_BY,
-        Component=component,
-        Name=f"cardinal-{component}",
-    )
+    return cardinal_tags(component=component, managed_by=MANAGED_BY)
 
 
 def _ecs_tasks_trust() -> dict:

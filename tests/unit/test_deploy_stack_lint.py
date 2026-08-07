@@ -134,6 +134,20 @@ def test_cfntool_wrapper_only_wraps_role_capable_subcommands():
     )
 
 
+def test_change_set_carries_the_common_stack_tags():
+    """Stack tags are how listeners, listener rules, Cloud Map and the IAM
+    server certificate get tagged -- the generators cannot tag those. They must
+    ride every change set: omitting --tags on an update drops the stack's tags."""
+    text = ENGINE.read_text()
+    for key, value in (
+        ("Project", "cardinal"),
+        ("Application", "cardinal-lakerunner"),
+        ("ManagedBy", "cardinal-cfn"),
+    ):
+        assert f"Key={key},Value={value}" in text, f"STACK_TAGS missing {key}"
+    assert "--tags $STACK_TAGS" in text, "create-change-set does not pass --tags"
+
+
 def test_satellite_infra_base_takes_principal_directly():
     """The satellite trust principal arrives as a direct LAKERUNNER_PRINCIPAL env
     var, never mapped from the central lakerunner-infra-base stack -- a satellite
