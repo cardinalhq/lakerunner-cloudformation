@@ -11,7 +11,7 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
-## Unreleased
+## v1.7.0
 
 **Consistent resource tagging.** Every Cardinal-created resource now carries
 the same five tags — `Name`, `Project=cardinal`,
@@ -64,8 +64,6 @@ changes are in-place updates; no resource is replaced and no data is affected.
 New output: `RawDlqArn`. Upgrade action: redeploy the satellite-infra-base
 stack, then check the DLQ depth occasionally — a non-zero depth means objects
 are failing to ingest.
-
-## v1.6.7
 
 **Image bump:** lakerunner `v1.75.0` → `v1.76.2`, maestro `v1.87.3` → `v1.87.8`,
 otel-collector `v1.8.0` → `v1.10.0`.
