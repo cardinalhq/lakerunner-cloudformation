@@ -4,9 +4,11 @@ What the **running application** has access to.
 
 Every IAM role and security group is created by the `Security` nested
 stack in `cardinal-lakerunner`. The customer no longer supplies any of
-them. (The one exception is the `cardinal-cleanup` stack, which uses a
+them. (Two exceptions: the `cardinal-cleanup` stack uses a
 customer-supplied teardown role -- documented in
-[`dev-environment.md`](dev-environment.md).)
+[`dev-environment.md`](dev-environment.md) -- and the optional
+`cardinal-satellite-cwmetrics` stack creates two AWS-service roles of its
+own, below.)
 
 This doc is the "what does the running software actually do?" half of
 the permissions story. Install-time permissions for the deployer
@@ -38,6 +40,16 @@ One per child stack. Trust is always `ecs-tasks.amazonaws.com`.
 | `OtelRole` | otel-gateway collector. | License secret read; CW Logs writes only. |
 | `MaestroRole` | maestro + dex sidecar. | db-master + license + admin-key secret read. |
 
+### Service roles in `cardinal-satellite-cwmetrics` (optional add-on)
+
+Not task roles -- AWS services assume these directly. Both are created by
+the stack; neither is customer-supplied.
+
+| Role | Trusted principal | Permissions |
+|---|---|---|
+| `FirehoseDeliveryRole` | `firehose.amazonaws.com`, gated on `sts:ExternalId = ${AccountId}`. | `s3:GetBucketLocation` / `s3:ListBucket` / `s3:ListBucketMultipartUploads` on the raw bucket (bucket-level actions cannot be prefix-scoped); `s3:AbortMultipartUpload` / `s3:GetObject` / `s3:PutObject` scoped to `cwmetrics-raw/*` and `cwmetrics-errors/*` only -- never `otel-raw/`; `logs:PutLogEvents` on the stack's own Firehose log group. |
+| `MetricStreamRole` | `streams.metrics.cloudwatch.amazonaws.com`, gated on `aws:SourceAccount = ${AccountId}`. | `firehose:PutRecord` / `firehose:PutRecordBatch` on that one delivery stream ARN. |
+
 The migrator runs as an ECS service (`migration.yaml`: Fargate task
 that runs `lakerunner migrate`, then a `keepalive` container that
 idles). No Lambda anywhere in the product. The TLS cert path either
@@ -49,6 +61,11 @@ forwards a supplied `CertificateArn` or creates an
 | Policy | Owner | Why |
 |---|---|---|
 | `RawIngestQueuePolicy` (SQS) | `cardinal-satellite-infra-base` stack | S3 cannot deliver `s3:ObjectCreated:*` to SQS without an explicit grant. Allows `sqs:SendMessage` from `s3.amazonaws.com` only when `aws:SourceAccount = ${AccountId}` (blocks cross-account spam). |
+
+The raw bucket's notification config is prefix-filtered to `otel-raw/` and
+`cwmetrics-raw/`. Firehose's failed-record output (`cwmetrics-errors/`) is
+deliberately outside that set, so unparseable payloads never reach the
+poller or burn the queue's redrive count.
 
 ## Security groups (all stack-created)
 
@@ -81,7 +98,9 @@ All live in the customer's VPC. Tasks run in private subnets with
 ## What is **not** granted
 
 - No role grants `s3:*` or `sqs:*` on resources outside the install
-  (all ARN scopes are `cardinal-ingest-*` and `cardinal-ingest`).
+  (all ARN scopes are `cardinal-ingest-*` and `cardinal-ingest`; the
+  cwmetrics Firehose role is scoped to the raw bucket's `cwmetrics-*`
+  prefixes).
 - No running service has `iam:*`. The deployer needs `iam:PassRole` on
   the stack-created roles to register ECS task definitions -- see the
   install-time permissions doc.
