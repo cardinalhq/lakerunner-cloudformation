@@ -61,3 +61,17 @@ COMPOSITION_ONLY = {"cardinal_cfn.lakerunner_services"}
 def test_templates_actually_tag_something(module_name):
     """Guards the walker itself: a bad shape would make the check vacuous."""
     assert list(_tagged_resources(module_name)), f"{module_name} tagged nothing"
+
+
+@pytest.mark.parametrize("module_name", GENERATORS)
+def test_ecs_services_propagate_tags_to_tasks(module_name):
+    """Fargate cost allocation bills against task tags. CFN cannot tag a task,
+    so a service without PropagateTags launches untagged billable resources."""
+    template = importlib.import_module(module_name).build().to_dict()
+    offenders = [
+        logical_id
+        for logical_id, resource in template.get("Resources", {}).items()
+        if resource["Type"] == "AWS::ECS::Service"
+        and resource.get("Properties", {}).get("PropagateTags") != "SERVICE"
+    ]
+    assert not offenders, f"{module_name} ECS services not propagating tags: {offenders}"

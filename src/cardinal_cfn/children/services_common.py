@@ -329,6 +329,10 @@ def build_ecs_service(
             ),
         ),
         Tags=cardinal_tags(component="compute", role=service_key),
+        # Fargate cost allocation bills against TASK tags, not service
+        # tags, and CFN cannot tag a task directly -- ECS copies the
+        # service's tags onto every task it launches only when set.
+        PropagateTags="SERVICE",
     )
 
     if target_group_ref is not None:
