@@ -34,6 +34,16 @@ Upgrade action: none beyond redeploying — the extensions are created on the
 next maestro task start. The DB master credentials already have the privileges
 required (RDS `rds_superuser`).
 
+**Self-telemetry now reaches the install's own collector.** The service tiers
+receive the collector endpoint in `LAKERUNNER_SELF_TELEMETRY_ENDPOINT` instead
+of `OTEL_EXPORTER_OTLP_ENDPOINT`. A license that carries its own telemetry
+endpoint overrides the latter, so on such a license the install's collector
+previously received nothing. With the self var, a licensed install ships to
+both (license endpoint primary, collector secondary) and an install whose
+license carries no endpoint ships to the collector alone — no duplication in
+either case. Upgrade action: redeploy the services stack; no parameter
+changes.
+
 ## v1.6.6
 
 **Image bump:** lakerunner `v1.69.1` → `v1.75.0`, maestro `v1.74.0` → `v1.87.3`,

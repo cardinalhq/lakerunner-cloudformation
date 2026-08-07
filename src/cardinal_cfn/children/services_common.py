@@ -40,10 +40,18 @@ def lakerunner_otel_env(*, service_key: str) -> list:
     """OTel env vars wired to the in-cluster otel-collector.
 
     Mirrors the helm chart pattern: OTEL_SERVICE_NAME=lakerunner-<component>,
-    ENABLE_OTLP_TELEMETRY toggles the actual exporter, OTEL_EXPORTER_OTLP_ENDPOINT
-    points at the collector's Cloud Map DNS name, and OTEL_RESOURCE_ATTRIBUTES
-    carries ecs.cluster.name. All four env vars are unconditionally set; the
-    ENABLE_OTLP_TELEMETRY flag is what actually starts/stops exporting.
+    ENABLE_OTLP_TELEMETRY toggles the actual exporter,
+    LAKERUNNER_SELF_TELEMETRY_ENDPOINT points at the install's collector, and
+    OTEL_RESOURCE_ATTRIBUTES carries ecs.cluster.name. All four env vars are
+    unconditionally set; the ENABLE_OTLP_TELEMETRY flag is what actually
+    starts/stops exporting.
+
+    The endpoint is the self-telemetry var, not OTEL_EXPORTER_OTLP_ENDPOINT:
+    a license that carries its own telemetry endpoint overrides the latter and
+    ships nowhere else, whereas the self endpoint is a second destination
+    alongside the license one (and the sole destination when the license
+    carries none). Lakerunner sets OTEL_EXPORTER_OTLP_ENDPOINT itself from the
+    endpoint it resolves, so the stack must not also set it.
 
     Expects the calling stack to declare these parameters:
       - SelfTelemetryEndpoint (String): the OTLP gRPC URL, or "" when disabled.
@@ -52,7 +60,7 @@ def lakerunner_otel_env(*, service_key: str) -> list:
     """
     return [
         Environment(Name="OTEL_SERVICE_NAME", Value=f"lakerunner-{service_key}"),
-        Environment(Name="OTEL_EXPORTER_OTLP_ENDPOINT", Value=Ref("SelfTelemetryEndpoint")),
+        Environment(Name="LAKERUNNER_SELF_TELEMETRY_ENDPOINT", Value=Ref("SelfTelemetryEndpoint")),
         Environment(Name="ENABLE_OTLP_TELEMETRY", Value=Ref("SelfTelemetryEnabled")),
         Environment(
             Name="OTEL_RESOURCE_ATTRIBUTES",

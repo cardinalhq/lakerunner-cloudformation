@@ -7,6 +7,17 @@ import pytest
 from cardinal_cfn.children import services_common
 
 
+def test_otel_env_uses_self_telemetry_endpoint_var():
+    """The collector endpoint must ride LAKERUNNER_SELF_TELEMETRY_ENDPOINT: a
+    license carrying its own endpoint overrides OTEL_EXPORTER_OTLP_ENDPOINT, so
+    setting that one instead means the install's collector gets nothing."""
+    env = services_common.lakerunner_otel_env(service_key="query-api")
+    rendered = json.loads(json.dumps(env, default=lambda o: o.to_dict()))
+    by_name = {e["Name"]: e["Value"] for e in rendered}
+    assert by_name["LAKERUNNER_SELF_TELEMETRY_ENDPOINT"] == {"Ref": "SelfTelemetryEndpoint"}
+    assert "OTEL_EXPORTER_OTLP_ENDPOINT" not in by_name
+
+
 def test_build_log_group_uses_cardinal_naming_contract():
     lg = services_common.build_log_group(service_key="query-api")
     rendered = json.loads(json.dumps(lg, default=lambda o: o.to_dict()))
