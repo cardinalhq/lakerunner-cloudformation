@@ -11,6 +11,13 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v1.6.7
+
+**Image bump:** lakerunner `v1.75.0` → `v1.76.2`, maestro `v1.87.3` → `v1.87.8`,
+otel-collector `v1.8.0` → `v1.10.0`.
+Upgrade action: redeploy the root stack. The lakerunner bump retriggers the DB
+migrator (reruns once, idempotent) before the service tiers update.
+
 ## v1.6.6
 
 **Image bump:** lakerunner `v1.69.1` → `v1.75.0`, maestro `v1.74.0` → `v1.87.3`,

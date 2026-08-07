@@ -29,7 +29,7 @@ TEMPLATE_KEY="cardinal-satellite-services.yaml"
 DEFAULT_STACK_VERSION="dev"
 # Baked at publish time: the otel collector's registry-relative path (repo +
 # pinned tag/digest).  Only the registry prefix is operator-supplied.
-OTEL_IMAGE_SUFFIX="cardinalhq.io/cardinalhq-otel-collector:v1.8.0@sha256:9906eea2b38f1614047ada60ce7887704652484bb5b01a7f8a1d932277e1f151"
+OTEL_IMAGE_SUFFIX="cardinalhq.io/cardinalhq-otel-collector:v1.10.0@sha256:ad9d6459d2d231a4ea0b709347587e4c3dc43eb82e169e915305d9ddae73540c"
 DEFAULT_IMAGE_REGISTRY="public.ecr.aws"
 
 # Resolve optional execution-role managed-policy ARNs into the global
