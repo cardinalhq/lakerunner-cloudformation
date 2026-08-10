@@ -4,107 +4,144 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository overview
 
-Generators (Python + troposphere) emit one customer-facing CloudFormation root (the application stack) plus eight nested children, and an optional VPC root. All infra is provisioned by `scripts/data-setup.sh`, not by CloudFormation. Design context lives in:
+Generators (Python + troposphere) emit a set of **standalone** CloudFormation
+stacks — no single customer-facing root. Deployment is driven by env-var-only
+POSIX shell drivers in `scripts/`, each of which creates-or-updates one stack
+and pulls its parameters from upstream stacks' Outputs.
 
-- `docs/superpowers/specs/2026-04-28-cardinal-cfn-refactor-design.md` — design spec (source of truth)
-- `docs/superpowers/plans/2026-04-28-cardinal-cfn-refactor.md` — phased implementation plan
+Design context lives under `docs/superpowers/specs/` (specs are the source of
+truth) and `docs/superpowers/plans/`. Operator-facing docs live under
+`docs/operations/`. When in doubt, the newest spec wins.
 
-When in doubt, the design spec wins.
+## Stacks
 
-## Target architecture
+Customer-facing, in install order:
 
-Two customer-facing CloudFormation root templates:
-
-- `lrdev-vpc.yaml` — internal test-env VPC scaffolding (not customer-facing; we use it to simulate a customer-supplied VPC in our test account)
-- `lrdev-baseinfra.yaml` — internal test-env base-infrastructure scaffolding (ECS Fargate cluster; simulates a customer-supplied cluster)
-- `cardinal-lakerunner.yaml` — application root, composed of eight nested children
-
-Plus a single shell driver:
-
-- `scripts/data-setup.sh` — raw-AWS-CLI data provisioner. Creates RDS, S3 ingest, SQS, and the three `cardinal-*` Secrets Manager secrets (`-db-master`, `-license`, `-admin-key`). It seeds **no** org content: Lakerunner installs admin-key-only (admin-api seeds its first key from `cardinal-admin-key` via `ADMIN_INITIAL_API_KEY`), and Maestro is the sole owner of the org, its storage line, and its ingest key — provisioned at runtime through Lakerunner's `/api/v1/provision` admin API. Idempotent; emits a JSON document on stdout whose keys map 1:1 to the lakerunner stack's infra-setup parameters. The customer supplies all IAM roles, security groups, the ECS cluster, and the Cloud Map private DNS namespace out-of-band; they are inputs to the script, which forwards their identifiers into the JSON output.
-
-The lakerunner root nests these children — application-tier resources only:
-
-| # | Template | Owns |
+| Stack | Template | Owns |
 |---|---|---|
-| 1 | `alb.yaml` | ALB, default 443 listener (ALB SG is customer-supplied) |
-| 2 | `cert.yaml` | Optional cert installer (pass-through ACM/IAM ARN, or `AWS::IAM::ServerCertificate` from PEMs) |
-| 3 | `migration.yaml` | DB migration ECS service (runs migrator once, then idles) |
-| 4 | `services-query.yaml` | query-api, query-worker |
-| 5 | `services-process.yaml` | process-{logs,metrics,traces}, pubsub-sqs |
-| 6 | `services-control.yaml` | sweeper, monitoring, admin-api, alert-evaluator |
-| 7 | `otel.yaml` | otel-collector |
-| 8 | `maestro.yaml` | Maestro + bundled DEX OIDC |
+| `cardinal-lakerunner-infra-base` | `cardinal-lakerunner-infra-base.yaml` | ALB SG, 5 per-tier task SGs, execution role + 5 per-tier task roles, cooked S3 bucket, license/admin-key secrets |
+| `cardinal-lakerunner-infra-rds` | `cardinal-lakerunner-infra-rds.yaml` | RDS SG, subnet group, master-credential secret, DB instance |
+| `cardinal-satellite-infra-base` | `cardinal-satellite-infra-base.yaml` | Raw ingest bucket, SQS queue + DLQ, prefix-filtered S3→SQS notifications, cross-account access role |
+| `cardinal-satellite-services` | `cardinal-satellite-services.yaml` | otel-collector + its own ALB (OTLP/HTTP 4318) |
+| `cardinal-satellite-cwmetrics` | `cardinal-satellite-cwmetrics.yaml` | Optional: CloudWatch metric stream → Firehose → the raw bucket under `cwmetrics-raw/` |
+| `cardinal-lakerunner-services` | `cardinal-lakerunner-services.yaml` | Application root; nests the seven children below |
 
-The lakerunner stack creates **no infra** of its own — no ECS cluster, no security groups, no IAM roles, no databases, no buckets, no queues, no secrets, no SSM parameters. Every such resource is created by `data-setup.sh` (or by the customer) and threaded into the stack as a parameter.
+Plus:
 
-Cross-stack wiring goes through the root via `Fn::GetAtt childStack.Outputs.X` → child parameter. Sibling children never reference each other directly.
+- `cardinal-cleanup.yaml` — standalone teardown stack: one Fargate task definition
+  running the inline POSIX-sh script from `cleanup_script.SCRIPT` (in `EntryPoint`,
+  not `Command`, so `ecs:RunTask` cannot substitute a command).
+- `lrdev-vpc.yaml`, `lrdev-baseinfra.yaml` — **internal** test-env scaffolding
+  (VPC; ECS Fargate cluster). Not customer-facing; they simulate the
+  customer-supplied VPC and cluster in our test account. Driven from `dev-scripts/`.
 
-## Repo / generator code layout
+The customer supplies the VPC/subnets and the ECS cluster. Everything else is
+created by the stacks.
+
+### `cardinal-lakerunner-services` children
+
+| Template | Owns |
+|---|---|
+| `alb.yaml` | ALB, HTTPS 443, HTTPS 9443 (admin-api), HTTP 4318 listeners. ALB SG is a parameter |
+| `cert.yaml` | Pass-through ACM/IAM cert ARN, or `AWS::IAM::ServerCertificate` from PEMs |
+| `migration.yaml` | DB migration ECS service (runs migrator once, then idles) |
+| `services-query.yaml` | query-api, query-worker |
+| `services-process.yaml` | process-{logs,metrics,traces}, pubsub-sqs |
+| `services-control.yaml` | one task, four containers: admin-api, sweeper, monitoring, alert-evaluator |
+| `maestro.yaml` | Maestro + bundled DEX OIDC (five-container task) |
+
+There is **no** otel child in the lakerunner stack — the collector lives in
+`cardinal-satellite-services`.
+
+`cardinal-lakerunner-services` creates **no infra** of its own — no ECS cluster,
+security groups, IAM roles, databases, buckets, queues, secrets, or SSM
+parameters. Every such value arrives as a parameter, driver-wired from the
+infra stacks' Outputs.
+
+Cross-stack wiring inside the root goes through `Fn::GetAtt childStack.Outputs.X`
+→ child parameter. Sibling children never reference each other directly.
+Cross-*stack* wiring between the six top-level stacks is done by the drivers
+reading Outputs, not by CFN exports.
+
+## Repo layout
 
 ```
-src/
-  cardinal_cfn/
-    __init__.py
-    install_id.py            # InstallIdShort/InstallIdLong derivation (root only)
-    naming.py                # Tag conventions, name-tag helpers
-    parameters.py            # Shared parameter / NoEcho / parameter-group helpers
-    images.py                # Image-override parameter machinery
-    policies.py              # DeletionPolicy / UpdateReplacePolicy table
-    listener_priorities.py   # Pre-allocated ListenerRule priorities (B → C safe)
-    defaults.py              # cardinal-defaults.yaml loader
-    children/                # one module per nested-stack child
-    root.py                  # parent template generator
-    lrdev_vpc.py             # internal test-env VPC generator (lrdev-vpc.yaml)
-    lrdev_baseinfra.py       # internal test-env ECS cluster generator (lrdev-baseinfra.yaml)
-scripts/
-  data-setup.sh              # infra provisioner (raw AWS CLI; idempotent)
-  deploy-lakerunner.sh       # CFN deploy driver
-  teardown-lakerunner.sh     # CFN teardown driver
-cardinal-defaults.yaml       # consolidated defaults (services, images, maestro, otel)
-tests/
-  conftest.py                # adds src/ to sys.path; no pip install -e needed
-  unit/                      # helper-level tests
-  templates/                 # per-template assertions via cloud-radar
-.github/workflows/
-  test.yml                   # PR/main test runner
-  release.yml                # publish to S3 on tag
+src/cardinal_cfn/
+  lakerunner_infra_base.py     # cardinal-lakerunner-infra-base.yaml
+  lakerunner_infra_rds.py      # cardinal-lakerunner-infra-rds.yaml
+  lakerunner_services.py       # cardinal-lakerunner-services.yaml (app root)
+  satellite_infra_base.py      # cardinal-satellite-infra-base.yaml
+  satellite_services.py        # cardinal-satellite-services.yaml
+  satellite_cwmetrics.py       # cardinal-satellite-cwmetrics.yaml
+  cardinal_cleanup.py          # cardinal-cleanup.yaml
+  cleanup_script.py            # the inline teardown sh body
+  lrdev_vpc.py                 # internal test-env VPC
+  lrdev_baseinfra.py           # internal test-env ECS cluster
+  children/                    # one module per nested child (+ services_common.py)
+  install_id.py                # InstallIdShort/InstallIdLong (roots only)
+  naming.py                    # cardinal_tags(), name/log-group/secret helpers
+  parameters.py                # shared parameter / NoEcho / parameter-group helpers
+  images.py                    # image-override parameter machinery
+  image_manifest.py            # `manifest <stack>` / `suffix <key>` CLI
+  policies.py                  # DeletionPolicy / UpdateReplacePolicy table
+  listener_priorities.py       # pre-allocated ListenerRule priorities
+  defaults.py                  # cardinal-defaults.yaml loader
+scripts-src/
+  build.sh                     # concatenates parts/<driver>.sh + parts/base.sh
+  parts/base.sh                # the shared env-var-driven deploy engine
+  parts/deploy-*.sh            # per-stack front halves
+scripts/                       # GENERATED single-file drivers (committed)
+dev-scripts/                   # internal-only wrappers + lrdev scaffolding
+cardinal-defaults.yaml         # services, pinned images, capacity mode, api key seed
+build.sh                       # generate everything, then cfn-lint
+tests/unit/                    # helper-level tests
+tests/templates/               # per-template assertions via cloud-radar
+.github/workflows/{test,release}.yml
 ```
 
-Generated templates go to `generated-templates/`, mirroring the S3 key layout:
+Generated artifacts land in `generated-templates/`, mirroring the S3 key layout:
+the top-level templates, `cardinal-lakerunner/<child>.yaml` for the children, and
+`{lakerunner,satellite,cleanup}-images.txt` image manifests.
 
-```
-generated-templates/
-  lrdev-vpc.yaml
-  lrdev-baseinfra.yaml
-  cardinal-lakerunner.yaml             # the root
-  cardinal-lakerunner/                 # the children, mirrors S3 prefix
-    alb.yaml
-    cert.yaml
-    migration.yaml
-    services-query.yaml
-    services-process.yaml
-    services-control.yaml
-    otel.yaml
-    maestro.yaml
-```
+`scripts/*.sh` are **generated** from `scripts-src/parts/` by `make scripts`
+(also run by `build.sh`) and are committed. `tests/unit/test_deploy_stack_lint.py`
+asserts they match a fresh build — regenerate and commit after editing any part.
+Edit `scripts-src/parts/`, never `scripts/`.
 
 ## Key design rules
 
 ### Naming and tags
 
 - Default to **CloudFormation-generated physical names** with a `Name` tag.
-- Prefix is `cardinal-`. Use `chq-` only when an AWS resource name length cap forces it.
-- Explicit physical names *only* where externally referenced — the S3 ingest bucket name (predictability), license/admin secrets (referenced from outside the stack).
-- Never name RDS, ECS clusters/services, listener rules, log groups, target groups — explicit names block in-place updates.
+- Prefix is `cardinal-`. Use `chq-` only when an AWS name-length cap forces it.
+- `cardinal_tags()` in `naming.py` is the single source of the common tag set
+  (`Name`, `Project`, `Application`, `Component`, `ManagedBy`). Children pass
+  `role=` (Name carries the install id); root stacks pass `component=`.
+- Drivers additionally set stack-level tags, which CFN propagates to resource
+  types the generators cannot tag directly (listeners, listener rules, Cloud
+  Map, IAM server certificates). Security-group *rules* and Application Auto
+  Scaling targets/policies remain untaggable.
+- ECS services set `PropagateTags: SERVICE` so launched tasks carry the tags
+  (Fargate cost allocation bills against task tags).
+- Explicit physical names *only* where externally referenced — the S3 bucket
+  names, and the `cardinal-license` / `cardinal-admin-key` / `cardinal-db-master`
+  secrets. The base stack's IAM roles scope secret access by the
+  `arn:...:secret:cardinal-*` name pattern, so those secret names are a contract.
+- Never name RDS, ECS clusters/services, listener rules, log groups, or target
+  groups — explicit names block in-place updates.
 
 ### Single-install assumption
 
-The fixed `cardinal-*` resource names the script creates (RDS instance, S3 bucket, SQS queue, secrets) imply one Cardinal install per AWS account/region. The ECS cluster + Cloud Map namespace names are customer-chosen but should be picked with the same constraint in mind. Customers running multiple installs should use separate accounts (or separate regions).
+The fixed `cardinal-*` names imply one Cardinal install per AWS account/region.
+Customers running multiple installs use separate accounts (or regions).
 
-### Multi-install isolation (lakerunner-internal)
+### Multi-install isolation (within one root)
 
-Within a single account/region, `InstallIdShort` (8 hex) and `InstallIdLong` (12 hex) are derived from the root stack's `AWS::StackId` and propagated as parameters to every nested child. **Children never compute these themselves** — `Ref(AWS::StackId)` in a child returns the child's id, not the root's.
+`InstallIdShort` (8 hex) and `InstallIdLong` (12 hex) are derived from the root
+stack's `AWS::StackId` and propagated as parameters to every nested child.
+**Children never compute these themselves** — `Ref(AWS::StackId)` in a child
+returns the child's id, not the root's (`tests/unit/test_no_install_id_in_children.py`
+enforces this).
 
 ```
 UUID            = Fn::Select(2, Fn::Split("/", Ref(AWS::StackId)))
@@ -114,104 +151,177 @@ InstallIdLong   = Fn::Join("", [first two segments of UUID])
 
 ### Sensitive values
 
-- Sensitive values **always** go to Secrets Manager. `AWS::SSM::Parameter` cannot be `SecureString` in CloudFormation.
-- Parameters carrying secrets (`LicenseData`, `ApiKeysOverride`, `StorageProfilesOverride`) declare `NoEcho: true`.
+- Sensitive values **always** go to Secrets Manager. `AWS::SSM::Parameter`
+  cannot be `SecureString` in CloudFormation.
+- Parameters carrying secrets declare `NoEcho: true`.
+- No org content is seeded by the stacks: admin-api seeds its first key from
+  `cardinal-admin-key` via `ADMIN_INITIAL_API_KEY`, and Maestro is the sole
+  owner of the org, its storage line, and its ingest key — provisioned at
+  runtime through Lakerunner's `/api/v1/provision` admin API.
 
 ### List parameters into nested stacks
 
-CloudFormation passes nested-stack parameters as strings. Lists like `PrivateSubnets` cannot be reliably forwarded as `List<...>`. The convention: every child declares such parameters as `String` (CSV) and uses `Fn::Split(",", ...)` internally. The root joins with `Fn::Join(",", ...)` before passing.
+CloudFormation passes nested-stack parameters as strings. Lists like
+`PrivateSubnets` cannot be reliably forwarded as `List<...>`. Convention: every
+child declares such parameters as `String` (CSV) and uses `Fn::Split(",", ...)`
+internally; the root joins with `Fn::Join(",", ...)` before passing.
 
 ### Lifecycle policies
 
-Customer-data-bearing resources get `DeletionPolicy: Snapshot` (RDS) or `Retain` (S3 ingest, license/admin secrets). Stateless resources are `Delete`. The exact table lives in `src/cardinal_cfn/policies.py` and is enforced by `apply_policy(resource, kind)`.
+Customer-data-bearing resources get `DeletionPolicy: Snapshot` (RDS) or `Retain`
+(S3 buckets, license/admin/db-master secrets). Stateless resources are `Delete`.
+The table lives in `policies.py` and is enforced by `apply_policy(resource, kind)`.
 
 ### ListenerRule priorities
 
-Pre-allocated, registered in `src/cardinal_cfn/listener_priorities.py`. Each service's priority stays the same when the service is later moved into its own per-service stack — preventing collisions during the future B → C split.
+Pre-allocated in `listener_priorities.py`; unique per listener across all stacks
+attached to it. 400–999 reserved for new services.
 
-| Service | Priority |
-|---|---|
-| query-api | 100 |
-| admin-api | 110 |
-| maestro-https | 200 |
-| maestro-dex | 210 |
-| otel-grpc | 300 |
-| (reserved) | 400-999 |
+| Service | Priority | Listener |
+|---|---|---|
+| query-api | 100 | 443 |
+| query-api-extra | 105 | 443 (second slot; routes exceed 5 path patterns per condition) |
+| maestro-dex | 210 | 443 |
+| otel-grpc | 300 | satellite ALB 4318 |
+| maestro-https | 49999 | 443 (catch-all `/*`; must be numerically highest so all others win) |
+| admin-api-https | 1 | dedicated 9443 listener |
+
+admin-api gets its own 9443 listener because the lakerunner binary serves its
+embedded UI at `/` — a path-prefixed rule on 443 would break either the API (no
+path stripping) or the UI's react-router.
 
 ### Migration (no Lambda)
 
-`migration.yaml` runs the lakerunner DB migrator as an **ECS service**, not a Lambda-backed custom resource (some target environments cannot run Lambda). Design: `docs/superpowers/specs/2026-05-12-no-lambda-migration-design.md`.
+`migration.yaml` runs the migrator as an **ECS service**, not a Lambda-backed
+custom resource. Design: `docs/superpowers/specs/2026-05-12-no-lambda-migration-design.md`.
 
-- The migrator task definition has three containers: `configdb-init` (non-essential; `psql CREATE DATABASE configdb` if absent) → `migrator` (non-essential; `lakerunner migrate --databases=lrdb,configdb`; `dependsOn configdb-init=COMPLETE`) → `keepalive` (essential; sleeps; `dependsOn migrator=SUCCESS`).
-- Because `keepalive` is the only essential container and ECS won't start it until `migrator` exits 0, the task — and therefore the `MigratorService`, and therefore the `MigrationStack` nested stack — only reaches a stable state after migrations succeed. The service-tier stacks `DependsOn MigrationStack`, so they only deploy after migrations run. A failed migration → `keepalive` never starts → the ECS deployment circuit breaker fails the service → `MigrationStack` fails → the parent stack rolls back.
-- The migrator runs from the same image as the lakerunner service tasks (single `LakerunnerImage` parameter), so the two cannot drift; an image change redeploys `MigratorService` (rerunning the migrator) before the service-tier stacks update. Customers who want digest pinning use `image@sha256:...`; mutable tags like `:latest` are not supported.
-- `DesiredCount` is hardcoded to `1` (~$3/month Fargate). An operator may `aws ecs update-service --desired-count 0` to reclaim the slot — harmless CFN drift, re-applied on the next `LakerunnerImage` bump. The migrator must stay idempotent (a stray task recycle reruns it as a no-op).
-- There are no Lambdas anywhere in the product. `cert.yaml` either forwards a supplied ACM/IAM certificate ARN, or — when `CertificateArn` is empty and PEM material is supplied — creates an `AWS::IAM::ServerCertificate` (an ALB HTTPS listener accepts an IAM server-cert ARN like an ACM one).
+- Three containers: `configdb-init` (non-essential; `psql CREATE DATABASE configdb`
+  if absent) → `migrator` (non-essential; `lakerunner migrate --databases=lrdb,configdb`;
+  `dependsOn configdb-init=COMPLETE`) → `keepalive` (essential; sleeps;
+  `dependsOn migrator=SUCCESS`).
+- `keepalive` is the only essential container and ECS will not start it until
+  `migrator` exits 0, so the service — and therefore `MigrationStack` — only
+  reaches a stable state after migrations succeed. The service-tier stacks
+  `DependsOn MigrationStack`. A failed migration → circuit breaker fails the
+  service → the root rolls back. Loud, not silent.
+- The migrator runs from the same image as the lakerunner tasks (single
+  `LakerunnerImage` parameter), so the two cannot drift; an image change reruns
+  the migrator before the service tiers update. Digest pinning via
+  `image@sha256:...`; mutable tags like `:latest` are not supported.
+- `DesiredCount` is hardcoded to `1` (~$3/month Fargate). An operator may
+  `aws ecs update-service --desired-count 0`; that is harmless drift, re-applied
+  on the next `LakerunnerImage` bump. The migrator must stay idempotent.
 
-### Service tier rule (B → C safe)
+**There are no Lambdas anywhere in the product.** `cert.yaml` either forwards a
+supplied ACM/IAM certificate ARN or creates an `AWS::IAM::ServerCertificate`
+from PEMs (an ALB HTTPS listener accepts an IAM server-cert ARN like an ACM one).
 
-The three service tier stacks (`services-query`, `services-process`, `services-control`) own *only* per-service resources: ECS Service, TaskDefinition, TargetGroup, ListenerRule, per-service log group. Anything shared across services lives in `alb` or arrives as an infra-setup parameter (cluster, task SG, task/execution roles, secret ARNs, SSM param names). This rule keeps the door open to a future per-service-stack split with minimal disruption.
+### Service tier rule
+
+The three service tier stacks own *only* per-service resources: ECS Service,
+TaskDefinition, TargetGroup, ListenerRule, per-service log group, scalable
+target/policy. Anything shared lives in `alb` or arrives as a parameter
+(cluster, SGs, roles, secret ARNs). This keeps a future per-service-stack split
+cheap.
 
 ### Process-tier autoscaling
 
-`services-process` creates `process-{logs,metrics,traces}` at one replica (`min_replicas` from `cardinal-defaults.yaml`). The `monitoring` service in `services-control` scales them up to the `ProcessLogsReplicas` / `ProcessMetricsReplicas` / `ProcessTracesReplicas` cap (default 10 each) via `ecs:UpdateService`. Those parameters are the autoscaler *ceiling*, not the initial `DesiredCount` — creating the services at the ceiling would launch ~3x the steady-state task count on every deploy and can exhaust the account's Fargate vCPU quota. `pubsub-sqs` is not autoscaled; `PubsubSqsReplicas` (default 1) is its literal `DesiredCount`. The root forwards the same `Process*Replicas` Refs to both `services-process` (where they are now unused — kept symmetric with the customer-facing surface) and `services-control` (the autoscaler max).
+`services-process` creates `process-{logs,metrics,traces}` at `min_replicas`
+(from `cardinal-defaults.yaml`) and scales them on CPU via **native ECS
+Application Auto Scaling** (`ScalableTarget` + target-tracking policy, mirroring
+the Kubernetes HPA) up to the `Process*Replicas` cap (default 10 each). Those
+parameters are the autoscaler *ceiling*, not the initial `DesiredCount` —
+creating at the ceiling would launch ~3x the steady-state task count on every
+deploy and can exhaust the account's Fargate vCPU quota. `pubsub-sqs` is not
+autoscaled; `PubsubSqsReplicas` is its literal `DesiredCount`.
+
+### Capacity mode
+
+`lakerunner_capacity` in `cardinal-defaults.yaml` is a build-time knob for the
+scale-out workers, applied via `services_common.capacity_provider_strategy()`:
+
+- `ondemand` (default) — pure on-demand `FARGATE`.
+- `fallback` — `Base=1` on-demand + weighted `FARGATE_SPOT` (4:1) scale-out.
+- `spot` — pure `FARGATE_SPOT`; explicit opt-in only, deploy-unsafe.
+
+Deploy-critical singletons (query-api, control, maestro, pubsub-sqs, migrator)
+and the collector are always on-demand and ignore this knob.
 
 ## Build and testing
 
-Canonical workflow uses the Makefile:
-
 ```sh
 make install        # one-time: create .venv and install requirements.txt
-make build          # generate every template into generated-templates/, then cfn-lint
+make build          # ./build.sh: generate every template + image manifest +
+                    # regenerate scripts/ drivers, then cfn-lint
+make scripts        # regenerate scripts/ drivers only
 make test           # all tests (helper unit + per-template)
-make test-unit      # helper unit tests only
-make test-templates # cloud-radar per-template assertions only
+make test-unit
+make test-templates
 make lint           # cfn-lint over generated-templates/
 make check          # alias for `make test` (pre-push gate)
+make clean
 ```
 
-For debugging a single template, generators can be invoked directly (PYTHONPATH=src):
+For debugging a single template (`PYTHONPATH=src`):
 
 ```sh
-python3 -m cardinal_cfn.children.<child>   # emits child YAML to stdout
-python3 -m cardinal_cfn.root               # emits root YAML
-python3 -m cardinal_cfn.lrdev_vpc          # emits internal lrdev VPC YAML
-python3 -m cardinal_cfn.lrdev_baseinfra    # emits internal lrdev base-infra (ECS cluster) YAML
+python3 -m cardinal_cfn.children.<child>       # a nested child
+python3 -m cardinal_cfn.lakerunner_services    # the app root
+python3 -m cardinal_cfn.satellite_infra_base   # etc. — one module per stack
+python3 -m cardinal_cfn.image_manifest manifest lakerunner
 ```
 
-All templates must pass cfn-lint with no errors. Warnings are tolerable when explainable; `.cfnlintrc` carries the project-wide ignores.
+Tests use pytest + cloud-radar; offline, no AWS credentials. All templates must
+pass cfn-lint with no errors. Warnings are tolerable when explainable;
+`.cfnlintrc` carries the project-wide ignores.
 
 ## Publishing
 
-GitHub Actions on tag push (`v*`) builds, lints, tests, and publishes to the vendor-managed public S3 buckets, provisioned in `terraform-deployments/aws/production/cloudformation-distribution.tf`. The buckets are region-suffixed, one per published region:
-
-- `cardinal-cfn-us-east-1` (us-east-1)
-- `cardinal-cfn-us-east-2` (us-east-2)
-
-Customers paste the regional S3 URL for their region into the CloudFormation console (substitute the matching region in both the bucket name and the host):
+GitHub Actions on tag push (`v*`) builds, lints, tests, and publishes templates
+**and the version-baked deploy drivers** to `cardinal-cfn-us-east-1` (the
+source-of-truth bucket; S3 replication populates `cardinal-cfn-us-east-2` and
+any other regional mirror out of band), plus a GitHub release with the drivers
+attached.
 
 ```
-https://cardinal-cfn-us-east-1.s3.us-east-1.amazonaws.com/lakerunner/<version>/cardinal-lakerunner.yaml
-https://cardinal-cfn-us-east-2.s3.us-east-2.amazonaws.com/lakerunner/<version>/cardinal-lakerunner.yaml
+https://cardinal-cfn-<region>.s3.<region>.amazonaws.com/lakerunner/<version>/<template>.yaml
+s3://cardinal-cfn-<region>/lakerunner/<version>/scripts/deploy-*.sh
 ```
 
-Air-gapped customers override the `TemplateBaseUrl` parameter on the root stack to point at a customer-owned mirror. The `data-setup.sh` script is run by the customer's operator out-of-band and does not need to be hosted; it is committed under `scripts/`.
+There is no `latest` — pin a tag. The drivers committed under `scripts/` bake
+`STACK_VERSION=dev` and are for dev/test iteration; production uses the
+release-pinned copies (or sets `STACK_VERSION=vX.Y.Z` explicitly).
+
+Air-gapped customers mirror the `lakerunner/<version>/` prefix and set
+`TEMPLATE_BASE_URL`, and point images at a private registry via `IMAGE_REGISTRY`
+(see `docs/air-gapped-images.md`; the `*-images.txt` manifests are the mirror list).
 
 ### Changelog (required before every tag)
 
-`CHANGELOG.md` (repo root) records the operational and system-level changes an operator needs when updating an existing install — new/changed parameters, changed defaults, image bumps, IAM and security-group changes, resource replacements, and new manual steps. It is the upgrade guide, not an exhaustive code log.
+`CHANGELOG.md` records the operational and system-level changes an operator
+needs when updating an existing install — new/changed parameters, changed
+defaults, image bumps, IAM and security-group changes, resource replacements,
+new manual steps. It is the upgrade guide, not an exhaustive code log.
 
-Before pushing a `v*` release tag, add a `## v0.0.NNN` section for the new version (newest first) and commit it. Because the tag is cut from that commit, tagging and pushing the release automatically carries the changelog — so the rule is simply: **no release tag without its changelog entry.** Keep entries operator-facing: state the upgrade action (or "no upgrade action"), and flag anything that replaces a data-bearing resource.
+Before pushing a `v*` release tag, add a `## vX.Y.Z` section for the new version
+(newest first) and commit it. The tag is cut from that commit, so the rule is:
+**no release tag without its changelog entry.** Keep entries operator-facing:
+state the upgrade action (or "no upgrade action"), and flag anything that
+replaces a data-bearing resource.
 
 ## Security considerations
 
 - Never hardcode secrets — Secrets Manager only.
-- All ECS tasks run with `AssignPublicIp: DISABLED`.
+- All ECS tasks run with `AssignPublicIp: DISABLED`, in private subnets.
 - Database connections require SSL (`LRDB_SSLMODE: require`).
 - DB credentials are auto-generated into Secrets Manager.
-- ECS task roles follow least privilege — each service has its own task role scoped to exactly the resources it needs.
-- All tasks run in private subnets with no public IP assignment.
-- ECS rolling deployments use `MinimumHealthyPercent: 50`, `MaximumPercent: 200`, and the deployment circuit breaker enabled, so a bad image bump rolls back automatically.
+- Per-tier IAM task roles follow least privilege; the contract is documented in
+  `docs/operations/iam-roles.md` and enforced by tests.
+- Satellite ingest is **pull-only**: a satellite account never pushes to the
+  Lakerunner account. The only cross-account relationship is the access role's
+  trust policy naming the Lakerunner principal.
+- ECS rolling deployments use `MinimumHealthyPercent: 50`, `MaximumPercent: 200`,
+  and the deployment circuit breaker, so a bad image bump rolls back.
 
 ## Coding style
 
