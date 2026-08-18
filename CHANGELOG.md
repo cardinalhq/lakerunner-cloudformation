@@ -11,6 +11,14 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v1.7.3
+
+**Image bumps.** Default `LakerunnerImage` v1.79.0 → v1.79.1 and
+`MaestroImage` v1.93.0 → v1.93.1 (both digest-pinned).
+
+Upgrade action: redeploy the services stack. The `LakerunnerImage` change
+reruns the migrator before the service tiers update, as designed.
+
 ## v1.7.2
 
 **Image bumps.** Default `LakerunnerImage` v1.76.2 → v1.79.0 and
