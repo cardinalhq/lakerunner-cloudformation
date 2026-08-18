@@ -16,6 +16,18 @@ v0.0.114.
 **Image bumps.** Default `LakerunnerImage` v1.79.0 → v1.79.1 and
 `MaestroImage` v1.93.0 → v1.93.1 (both digest-pinned).
 
+Behavior change worth flagging on the lakerunner bump: per-`(rule, group_key)`
+suppression window is now applied to every alert rule
+(cardinalhq/lakerunner#1290 → spec `kb/specs/alerting/suppression-window.md`).
+While a group_key keeps firing, its incident stays open and silent; once the
+group has been quiet for the whole window, the incident auto-resolves and a
+fresh firing after that opens a new one. Static-threshold and anomaly
+incidents therefore resolve after the full quiet window rather than the
+first ok tick — effective default resolve latency is 300s. Existing rules
+back-filled to the 300s default at migration; currently-open incidents are
+seeded to the migration timestamp so they do not burst-resolve on the first
+tick post-cutover.
+
 Upgrade action: redeploy the services stack. The `LakerunnerImage` change
 reruns the migrator before the service tiers update, as designed.
 
