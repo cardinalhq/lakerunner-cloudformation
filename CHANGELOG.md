@@ -11,6 +11,24 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v1.7.5
+
+**Image bumps.** Default `LakerunnerImage` v1.79.2 → v1.81.0 and
+`MaestroImage` v1.93.3 → v1.94.1 (both digest-pinned).
+
+Worth flagging on the lakerunner bump: DuckDB and direct parquet segment
+reading are gone (cardinalhq/lakerunner#1296, #1301, #1303) and the
+lkrn-native query engine is now the only query path (#1298). Query workers no
+longer carry the DuckDB runtime; no stack-side parameter or sizing change is
+required, but it is a large change under the query tier. Also included:
+structured-log filter execution in LogQL (#1297) and several alerting fixes —
+fingerprint incident lifecycle (#1300), exception rules firing on any step
+at/above `min_count` rather than every step (#1302), and notifier fallback for
+rules with no bound webhook actions (#1295).
+
+Upgrade action: redeploy the services stack. The `LakerunnerImage` change
+reruns the migrator before the service tiers update, as designed.
+
 ## v1.7.4
 
 **Image bumps.** Default `LakerunnerImage` v1.79.1 → v1.79.2 and
