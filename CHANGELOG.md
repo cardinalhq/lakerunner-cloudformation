@@ -11,6 +11,22 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v1.7.6
+
+**Image bumps.** Default `LakerunnerImage` v1.81.0 → v1.87.0 and
+`MaestroImage` v1.94.1 → v1.95.10 (both digest-pinned).
+
+Worth flagging on the lakerunner bump (six upstream releases, v1.82–v1.87):
+metric ingest is now metric-v2 only — the Format=1 lkrn path is removed
+(cardinalhq/lakerunner#1428) — with exact cumulative counters and histograms
+on by default (#1417, #1362); the linked log-index accelerator is enabled end
+to end (#1432, #1437); and the worklane quarantines repeatedly-failing inputs
+instead of retrying them forever (#1320). No stack-side parameter or sizing
+change is required.
+
+Upgrade action: redeploy the services stack. The `LakerunnerImage` change
+reruns the migrator before the service tiers update, as designed.
+
 ## v1.7.5
 
 **Image bumps.** Default `LakerunnerImage` v1.79.2 → v1.81.0 and
