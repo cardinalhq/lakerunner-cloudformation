@@ -11,6 +11,20 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v1.7.8
+
+**Image bumps.** Default `LakerunnerImage` v1.87.1 → v1.87.2 and
+`MaestroImage` v1.95.10 → v1.95.11 (both digest-pinned).
+
+Lakerunner v1.87.2 fixes segment pruning for fingerprint-scoped log
+aggregates grouped by unindexed fields (cardinalhq/lakerunner#1447). Maestro
+v1.95.11 includes the latest Logs Explore, Traces, and reliability authoring
+fixes, including bounded high-cardinality tag values and native-histogram
+percentile tiles.
+
+Upgrade action: redeploy the services stack. The `LakerunnerImage` change
+reruns the migrator before the service tiers update, as designed.
+
 ## v1.7.7
 
 **Image bump.** Default `LakerunnerImage` v1.87.0 → v1.87.1
