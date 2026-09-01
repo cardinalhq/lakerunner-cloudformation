@@ -11,6 +11,15 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v1.7.7
+
+**Image bump.** Default `LakerunnerImage` v1.87.0 → v1.87.1
+(digest-pinned). This patch reuses log-index partition caches during index
+generation (cardinalhq/lakerunner#1444).
+
+Upgrade action: redeploy the services stack. The `LakerunnerImage` change
+reruns the migrator before the service tiers update, as designed.
+
 ## v1.7.6
 
 **Image bumps.** Default `LakerunnerImage` v1.81.0 → v1.87.0 and
