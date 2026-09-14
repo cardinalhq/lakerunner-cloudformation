@@ -31,8 +31,8 @@ DEFAULT_IMAGE_REGISTRY="public.ecr.aws"
 # (official postgres psql client) is baked too -- this stack is always on
 # public.ecr.aws -- so a redeploy always carries the pinned default;
 # DB_INIT_IMAGE remains a full-URI escape hatch.
-LAKERUNNER_IMAGE_SUFFIX="cardinalhq.io/lakerunner:v1.87.2@sha256:5d9ca65d6c71e7ab1b1d3758f28f211ff7a18689be1aaaafa8ed7501aa4e38d1"
-MAESTRO_IMAGE_SUFFIX="cardinalhq.io/maestro:v1.95.11@sha256:078b260a402730d08e7b84507edb6fbc8b69102acf182c43c85faacc6540b485"
+LAKERUNNER_IMAGE_SUFFIX="cardinalhq.io/lakerunner:v1.88.3@sha256:292aa5501d4e93b342bd47b9f33fcf4ad2e24bee215c9cc6e16037d279ed2bd7"
+MAESTRO_IMAGE_SUFFIX="cardinalhq.io/maestro:v1.95.32@sha256:7ac2890fbbaf4e1f64bec562ccc8e403c1038dbfa6e9bd346b7044d85c12b055"
 DEX_IMAGE_SUFFIX="cardinalhq.io/dex-customization:v0.5.0@sha256:3fd7766b7a089948bfbe504ea4b23671b2257e2fed0247ac638c9902aca4aebd"
 DB_INIT_IMAGE_SUFFIX="docker/library/postgres:18-alpine@sha256:96d56f7f57c6aacd1fcb908bc83b345ec5f83231ee486dd66a1baadce274db88"
 

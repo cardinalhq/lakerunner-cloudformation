@@ -11,6 +11,24 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v1.7.9
+
+**Image bumps.** Default `LakerunnerImage` v1.87.2 → v1.88.3 and
+`MaestroImage` v1.95.11 → v1.95.32 (both digest-pinned).
+
+Lakerunner v1.88.x is a log-index and metrics-rollup release: bounded log
+index build memory, reuse of ingest postings and index runs for log
+compaction, paced log-index reconciliation backlog, and corrected METRICv2
+rollup ownership with the rollup epoch machinery removed so live rollups no
+longer block. Maestro v1.95.32 brings Logs Explore fixes (sort/empty-result
+table stability, severity UNKNOWN badge, `|=` message clauses and "message
+matches"), anomaly-severity sorting on Metrics Explore, Kubernetes event and
+object-change history in the infra map, and new BIND 9 and Headscale
+dashboard packs.
+
+Upgrade action: redeploy the services stack. The `LakerunnerImage` change
+reruns the migrator before the service tiers update, as designed.
+
 ## v1.7.8
 
 **Image bumps.** Default `LakerunnerImage` v1.87.1 → v1.87.2 and
