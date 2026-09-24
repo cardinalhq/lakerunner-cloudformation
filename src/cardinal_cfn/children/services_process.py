@@ -335,10 +335,21 @@ def build() -> Template:
             # tag-value lookup table at ingest. process-logs is the only task
             # that reads this (the lone GetLogTrackedFields caller is the
             # log-ingest worklane). Per-org admin-API config still wins.
+            #
+            # LAKERUNNER_FEATURES_LOG_EMBEDDED_C2_INDEX turns on the LKIDX004 C2
+            # text index inside every log .lkrn bundle at ingest. Default ON as
+            # of lakerunner v1.90.0 — turning it on changes what a segment IS,
+            # not just what it costs (newly written segments carry a C2 root
+            # older readers can't open). See kb/specs/lkrn-format/embedded-c2-admission.md
+            # in the lakerunner repo.
             "extra_env": [
                 Environment(
                     Name="LAKERUNNER_LOG_TRACKED_FIELDS",
                     Value="service_name,environment_type,installation,proc_name,partition_id",
+                ),
+                Environment(
+                    Name="LAKERUNNER_FEATURES_LOG_EMBEDDED_C2_INDEX",
+                    Value="true",
                 ),
             ],
         },
