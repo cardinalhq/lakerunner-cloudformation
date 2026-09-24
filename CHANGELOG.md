@@ -41,6 +41,53 @@ of PromQL native-histogram and reset-handling fixes.
 Upgrade action: redeploy the services stack. The `LakerunnerImage` change
 reruns the migrator before the service tiers update, as designed.
 
+**Known upgrade issue (from v1.7.9 or earlier).** The lakerunner v1.90.0
+migration drops `bootstrapped` from `metric_series_catalog_state` and
+`log_rid_catalog_state`, a column the previous image still reads. Between the
+migrator finishing and the process tier rolling (about 2–3 minutes), every
+ingest attempt by the old `process-{logs,metrics,traces}` tasks fails with
+`column "bootstrapped" does not exist`, and those inputs are **quarantined**
+rather than retried, so that window of telemetry is missing from queries.
+Nothing is deleted: the raw objects stay in the raw bucket and the
+quarantined rows are kept for 7 days before the sweeper purges them. Fresh
+installs are unaffected.
+
+Recovery, after the services stack reaches `UPDATE_COMPLETE`: in the
+`lakerunner` database (credentials in `cardinal-db-master`; reachable from a
+one-off task in a private subnet with `ControlSecurityGroupId`), return the
+quarantined ingest inputs to the queue. Set the lower bound to just before
+the upgrade started:
+
+```sql
+WITH revived AS (
+  UPDATE input_table
+  SET claim_state = 'new', attempt_count = 0, claimed_by = NULL,
+      claim_token = NULL, claimed_at = NULL, lease_expires_at = NULL
+  WHERE claim_state = 'quarantined' AND action = 'ingest'
+    AND received_at >= '<upgrade start, UTC>'
+  RETURNING organization_id, instance_num, signal, action, frequency_ms,
+            timebox, materialized, level, file_size, received_at
+)
+INSERT INTO fetch_lane_summary (organization_id, instance_num, signal, action,
+  frequency_ms, timebox, materialized, unclaimed_count, unclaimed_bytes,
+  oldest_received_at, last_touched_at, level)
+SELECT organization_id, instance_num, signal, action, frequency_ms, timebox,
+       materialized, count(*), sum(file_size), min(received_at), now(), level
+FROM revived
+GROUP BY organization_id, instance_num, signal, action, frequency_ms, timebox,
+         materialized, level
+ON CONFLICT (organization_id, instance_num, signal, action, frequency_ms,
+             timebox, materialized, level)
+DO UPDATE SET
+  unclaimed_count = fetch_lane_summary.unclaimed_count + EXCLUDED.unclaimed_count,
+  unclaimed_bytes = fetch_lane_summary.unclaimed_bytes + EXCLUDED.unclaimed_bytes,
+  oldest_received_at = LEAST(fetch_lane_summary.oldest_received_at, EXCLUDED.oldest_received_at),
+  last_touched_at = now();
+```
+
+The new tasks pick the inputs up within a minute and the gap fills in.
+Validated in the test account on a v1.7.9 → v1.7.11 upgrade.
+
 ## v1.7.9
 
 **Image bumps.** Default `LakerunnerImage` v1.87.2 → v1.88.3 and
