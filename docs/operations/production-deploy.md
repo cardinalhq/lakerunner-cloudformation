@@ -130,18 +130,28 @@ both exist, objects land in the raw bucket and `pubsub-sqs` logs
 `No storage profile for (org, bucket); skipping` — the cooked bucket stays
 empty and nothing is queryable.
 
-1. **Associate the satellite bucket with the org.** Values come from the
-   satellite-infra-base outputs and the satellite-services stack:
+1. **Associate the satellite bucket with the org.** Under Superadmin →
+   Lakerunner → Buckets & org mappings, first **Add Bucket**, then open it and
+   **Associate org**. Values come from the satellite-infra-base outputs and
+   the satellite-services stack:
 
    | Field | Where it comes from |
    |---|---|
-   | bucket | `RawBucketName` (`cardinal-otel-raw-<acct>-<region>`) |
-   | region / cloud provider | the install region / `aws` |
-   | role | `LakerunnerAccessRoleArn` (`cardinal-satellite-access`) |
-   | collector name | the third path segment of the raw objects, `a<8-hex>` — the satellite-services stack's install id |
+   | Bucket Name | `RawBucketName` (`cardinal-otel-raw-<acct>-<region>`) |
+   | Region / Cloud Provider | the install region / `aws` |
+   | Assume Role ARN | `LakerunnerAccessRoleArn` (`cardinal-satellite-access`) |
+   | SQS Queue URL | `RawQueueUrl` — required; Maestro rejects a satellite mapping on a bucket without a queue |
+   | Org (Associate org) | the org whose id is the satellite `ORGANIZATION_ID` |
+   | Mode | `satellite` (the raw bucket is read-only input) |
+   | Collector Name | the third path segment of the raw objects, `a<8-hex>` — the satellite-services stack's install id |
+   | Writes To | `lakerunner` (the cooked bucket's collector, the org's write target) |
 
    The collector name must match the objects' path exactly
    (`otel-raw/<org>/<collector>/…`); the stack sets it from its own stack id.
+   Find it with `aws s3 ls s3://<RawBucketName>/otel-raw/<org>/`. Within
+   about a minute `pubsub-sqs` logs `Using SQS queues from configdb` and the
+   cooked bucket starts filling. Objects that arrived before the mapping were
+   skipped and are not reprocessed.
 
 2. **Add a prefix mapping per non-OTLP producer.** The org and credentials
    resolve from the bucket, but the object *format* and *signal* come from the

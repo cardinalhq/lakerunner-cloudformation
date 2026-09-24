@@ -99,8 +99,9 @@ Nothing cooks until this is done — CloudFormation does not create it. Maestro'
 bootstrap registers only the cooked bucket, so `pubsub-sqs` logs
 `No storage profile for (org, bucket); skipping` for every object until the
 satellite raw bucket is associated with the org (bucket `RawBucketName`, role
-`LakerunnerAccessRoleArn`, collector name = the `a<8-hex>` segment in the raw
-object paths). Full field list: ["After the install"](production-deploy.md).
+`LakerunnerAccessRoleArn`, SQS queue `RawQueueUrl`, mode `satellite`,
+collector name = the `a<8-hex>` segment in the raw object paths, writes to
+`lakerunner`). Full field list: ["After the install"](production-deploy.md).
 
 ## 4. Validate (self-telemetry end-to-end)
 
