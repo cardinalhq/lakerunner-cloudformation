@@ -11,6 +11,36 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v1.7.11
+
+**Image bump.** Default `LakerunnerImage` v1.90.0 → v1.90.1 (digest-pinned).
+
+Lakerunner v1.90.1 turns histogram-valued query results on by default and
+fixes a scan bound for rows written under a re-typed metric name
+(cardinalhq/lakerunner#1727).
+
+Upgrade action: redeploy the services stack. The `LakerunnerImage` change
+reruns the migrator before the service tiers update, as designed.
+
+## v1.7.10
+
+**Image bump.** Default `LakerunnerImage` v1.88.3 → v1.90.0 (digest-pinned).
+
+**Changed default.** The `process-logs` task now sets
+`LAKERUNNER_FEATURES_LOG_EMBEDDED_C2_INDEX=true`, enabling the embedded C2
+log index by default. This mirrors the helm chart default flip that landed
+with lakerunner v1.90.0. Newly written log segments carry the embedded
+index; segments written before the upgrade are unchanged and remain
+queryable.
+
+Lakerunner v1.90.0 folds the C2 ranged-read, hydration, and concurrency
+flags into the code path (they are now unconditional), serves the Prometheus
+and Loki HTTP APIs as façades over the native endpoints, and carries a run
+of PromQL native-histogram and reset-handling fixes.
+
+Upgrade action: redeploy the services stack. The `LakerunnerImage` change
+reruns the migrator before the service tiers update, as designed.
+
 ## v1.7.9
 
 **Image bumps.** Default `LakerunnerImage` v1.87.2 → v1.88.3 and
