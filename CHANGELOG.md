@@ -11,6 +11,21 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v1.7.12
+
+**Image bump.** Default `MaestroImage` v1.95.32 → v1.96.2 (digest-pinned).
+
+Maestro v1.96.2 adds a per-service log freshness dashboard, a shared hover
+crosshair with axis labels, click-to-pin and drag-to-zoom on dashboard
+charts, and carries the unit and Y-axis label through Add to Dashboard from
+Explore. It also fixes API-key dashboard writes, stops Logs Explore from
+refreshing while a query is running, and picks up dependency security fixes
+(including grpc v1.83.2 in the MCP gateway). No new parameters, environment
+variables, or database migrations.
+
+Upgrade action: redeploy the services stack. Only the maestro task
+definition changes; the migrator does not rerun.
+
 ## v1.7.11
 
 **Image bump.** Default `LakerunnerImage` v1.90.0 → v1.90.1 (digest-pinned).

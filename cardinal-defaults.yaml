@@ -20,7 +20,7 @@ api_keys:
 # ---------------------------------------------------------------------------
 images:
   lakerunner: "public.ecr.aws/cardinalhq.io/lakerunner:v1.90.1@sha256:e37a85b053288761a9cc1ce9cd2472bbd6aed58ffa52a64ae3d6162605a0fcb8"
-  maestro:    "public.ecr.aws/cardinalhq.io/maestro:v1.95.32@sha256:7ac2890fbbaf4e1f64bec562ccc8e403c1038dbfa6e9bd346b7044d85c12b055"
+  maestro:    "public.ecr.aws/cardinalhq.io/maestro:v1.96.2@sha256:313bdaf0556e2134bfda97d2a0a343049da87abc2ee5da3221ed48cff0dd80e9"
   otel:       "public.ecr.aws/cardinalhq.io/cardinalhq-otel-collector:v1.10.0@sha256:ad9d6459d2d231a4ea0b709347587e4c3dc43eb82e169e915305d9ddae73540c"
   dex:        "public.ecr.aws/cardinalhq.io/dex-customization:v0.5.0@sha256:3fd7766b7a089948bfbe504ea4b23671b2257e2fed0247ac638c9902aca4aebd"
   db_init:    "public.ecr.aws/docker/library/postgres:18-alpine@sha256:96d56f7f57c6aacd1fcb908bc83b345ec5f83231ee486dd66a1baadce274db88"
