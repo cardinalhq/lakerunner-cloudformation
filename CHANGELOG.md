@@ -11,6 +11,22 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v1.7.15
+
+**Changed default: `LakerunnerMigrateForceDirty` is now `true`** (driver env
+`MIGRATION_FORCE_DIRTY`, default `true`). A `lrdb` or `configdb` left dirty
+by a failed migration is recovered on the next deploy instead of needing a
+manual fix. The driver now always passes the value, so an existing install
+switches to `true` on its next deploy even if it previously ran with `false`.
+
+That first deploy changes the migrator command, so the migrator runs once more
+(a no-op on a clean database) and, under `MIGRATION_SCALE_DOWN=auto`, the
+writers are scaled to zero for the couple of minutes it takes.
+
+Upgrade action: redeploy the services stack. If you override `LAKERUNNER_IMAGE`
+with a lakerunner older than v1.92.0, set `MIGRATION_FORCE_DIRTY=false`: an
+older migrator rejects `--force-dirty` and the update rolls back.
+
 ## v1.7.14
 
 **Image bump.** Default `LakerunnerImage` v1.91.0 → v1.92.0 (digest-pinned).

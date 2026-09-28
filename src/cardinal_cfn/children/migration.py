@@ -5,7 +5,7 @@ No Lambda. The migrator task definition has three containers:
 
   1. configdb-init (non-essential): psql CREATE DATABASE configdb if absent.
   2. migrator (non-essential): `lakerunner migrate --databases=lrdb,configdb`
-     (plus `--force-dirty` when MigrateForceDirty=true),
+     (plus `--force-dirty` when MigrateForceDirty=true, the default),
      dependsOn configdb-init=COMPLETE. It seeds NO org content -- with empty
      configdb tables the binary's initializeIfNeededFunc is a no-op. The org,
      its storage line, and its ingest key are owned by Maestro, which
@@ -100,7 +100,7 @@ def build() -> Template:
         Parameter(
             "MigrateForceDirty",
             Type="String",
-            Default="false",
+            Default="true",
             AllowedValues=["true", "false"],
             Description=(
                 "When true, the migrator runs `lakerunner migrate --force-dirty`: "

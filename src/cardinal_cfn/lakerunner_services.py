@@ -416,13 +416,14 @@ def build() -> Template:
     t.add_parameter(Parameter(
         "LakerunnerMigrateForceDirty",
         Type="String",
-        Default="false",
+        Default="true",
         AllowedValues=["true", "false"],
         Description=(
             "When true, the lakerunner migrator recovers a database left dirty "
             "by a failed migration: it rewinds to the previous version and "
             "re-runs the failed migration. No-op on a clean database. Needs a "
-            "LakerunnerImage whose `migrate` supports --force-dirty."
+            "LakerunnerImage whose `migrate` supports --force-dirty (v1.92.0+); "
+            "set false for an older image override."
         ),
     ))
     t.add_parameter(Parameter(

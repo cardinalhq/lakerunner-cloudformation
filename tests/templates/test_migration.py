@@ -205,7 +205,7 @@ def test_output_is_migration_service_arn(template_dict):
 
 def test_force_dirty_toggles_the_migrate_flag(template_dict):
     param = template_dict["Parameters"]["MigrateForceDirty"]
-    assert param["Default"] == "false"
+    assert param["Default"] == "true"
     assert template_dict["Conditions"]["MigrateForceDirtyEnabled"] == {
         "Fn::Equals": [{"Ref": "MigrateForceDirty"}, "true"]}
     condition, forced, plain = _containers(template_dict)["migrator"]["Command"]["Fn::If"]

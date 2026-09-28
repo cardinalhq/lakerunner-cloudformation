@@ -57,7 +57,7 @@ elif cmd == "cloudformation describe-stacks":
         if "StackStatus" in query:
             print("UPDATE_COMPLETE")
         elif "Parameters" in query:
-            print(json.dumps([{"ParameterKey": "LakerunnerMigrateForceDirty", "ParameterValue": "true"}]))
+            print(json.dumps([{"ParameterKey": "LakerunnerMigrateForceDirty", "ParameterValue": "false"}]))
         else:
             print("")
     elif name in ("infra-base", "infra-rds"):
@@ -65,7 +65,7 @@ elif cmd == "cloudformation describe-stacks":
     else:
         sys.exit(255)
 elif cmd == "cloudformation get-template-summary":
-    print(json.dumps([{"ParameterKey": "LakerunnerMigrateForceDirty", "DefaultValue": "false"}]))
+    print(json.dumps([{"ParameterKey": "LakerunnerMigrateForceDirty", "DefaultValue": "true"}]))
 elif cmd == "cloudformation create-change-set":
     with open(opt("--parameters")[len("file://"):]) as src, open(os.environ["FAKE_AWS_LOG"] + ".params", "w") as dst:
         dst.write(src.read())
@@ -231,11 +231,10 @@ def test_force_dirty_param_follows_env(tmp_path, value):
     result, _ = _run(tmp_path, **env)
     assert result.returncode == 0, result.stderr
     params = {p["ParameterKey"]: p for p in json.loads((tmp_path / "aws.log.params").read_text())}
-    if value is None:
-        assert params["LakerunnerMigrateForceDirty"] == {
-            "ParameterKey": "LakerunnerMigrateForceDirty", "UsePreviousValue": True}
-    else:
-        assert params["LakerunnerMigrateForceDirty"]["ParameterValue"] == value
+    # Always passed as a literal (never UsePreviousValue), so an install that
+    # deployed with false picks up the true default when the env is unset.
+    assert params["LakerunnerMigrateForceDirty"] == {
+        "ParameterKey": "LakerunnerMigrateForceDirty", "ParameterValue": value or "true"}
 
 
 def test_rejects_bad_scale_down_mode(tmp_path):
