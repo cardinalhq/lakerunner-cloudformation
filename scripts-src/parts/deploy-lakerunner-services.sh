@@ -133,6 +133,24 @@ Optional (template defaults preserved when unset):
                               (official postgres psql client). Bypasses
                               IMAGE_REGISTRY. Default: the baked, pinned suffix
                               under IMAGE_REGISTRY (always passed to the stack).
+  MIGRATION_FORCE_DIRTY       true | false.  true: the lakerunner migrator
+                              recovers a database left dirty by a failed
+                              migration (rewinds to the previous version and
+                              re-runs it); a no-op on a clean database.  Unset
+                              keeps the stack's current value on update.
+                              Changing it re-runs the migrator.
+  MIGRATION_SCALE_DOWN        auto | always | never (default auto).  The
+                              migrator runs while the old service tasks are
+                              still up, and its schema locks can deadlock
+                              against them.  Before executing, the driver
+                              scales the process and control services to zero
+                              (suspending their autoscaling), and afterwards
+                              restores their task counts and autoscaling --
+                              on success, failure, or interrupt.  auto: only
+                              when the change set touches the Migration child
+                              (e.g. an image bump).  always: on every update.
+                              never: leave them running.  Ingest pauses for
+                              the migration; queries keep serving.
   TEMPLATE_BASE_URL           Default: $DEFAULT_TEMPLATE_BASE_URL.  Also
                               forwarded as the TemplateBaseUrl param (nested
                               children load from the matching prefix).
@@ -164,6 +182,16 @@ if [ -n "$missing" ]; then
     echo "[deploy-lakerunner-services] ERROR: missing required: $(echo "$missing" | sed 's/^ //; s/ /, /g')" >&2
     exit 2
 fi
+
+migration_scale_down="${MIGRATION_SCALE_DOWN:-auto}"
+case "$migration_scale_down" in
+    auto|always|never) : ;;
+    *) echo "[deploy-lakerunner-services] ERROR: MIGRATION_SCALE_DOWN must be auto, always, or never (got '$migration_scale_down')" >&2; exit 2 ;;
+esac
+case "${MIGRATION_FORCE_DIRTY:-}" in
+    ""|true|false) : ;;
+    *) echo "[deploy-lakerunner-services] ERROR: MIGRATION_FORCE_DIRTY must be true or false (got '$MIGRATION_FORCE_DIRTY')" >&2; exit 2 ;;
+esac
 
 if ! command -v aws >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
     echo "[deploy-lakerunner-services] ERROR: aws and jq are required" >&2
@@ -266,6 +294,9 @@ ProcessLogsMemory=$PROCESS_LOGS_MEMORY"
 ProcessMetricsMemory=$PROCESS_METRICS_MEMORY"
 [ -n "${PROCESS_TRACES_MEMORY:-}" ] && params="$params
 ProcessTracesMemory=$PROCESS_TRACES_MEMORY"
+
+[ -n "${MIGRATION_FORCE_DIRTY:-}" ] && params="$params
+LakerunnerMigrateForceDirty=$MIGRATION_FORCE_DIRTY"
 
 # Public-ECR images: composed from IMAGE_REGISTRY + the baked, locked suffixes,
 # always passed as literal params so a redeploy carries the pinned defaults
@@ -404,6 +435,134 @@ DexExtraUsers=$DEX_EXTRA_USERS_FILE"
         file_params="DexExtraUsers=$DEX_EXTRA_USERS_FILE"
     fi
 fi
+
+# --- Stop the lrdb writers while the migrator runs. --------------------------
+# The Migration child updates before the service tiers (they DependsOn it), so
+# the migrator runs while the old process/control tasks are still working the
+# queues.  Its strong schema locks can deadlock against them and leave the
+# database dirty.  The engine calls these hooks around execute-change-set.
+# writer_state holds one line per stopped service:
+#   <service-arn> <desired-count> <scalable-target-resource-id> <suspended-state-json|null>
+writer_state=""
+
+# ECS service ARNs owned by the nested stack at logical id $1 (none if absent).
+nested_ecs_services() {
+    nested=$(aws cloudformation describe-stack-resource \
+        --stack-name "$STACK_NAME" \
+        --logical-resource-id "$1" \
+        --region "$REGION" \
+        --query 'StackResourceDetail.PhysicalResourceId' \
+        --output text 2>/dev/null || echo "")
+    [ -n "$nested" ] && [ "$nested" != "None" ] || return 0
+    aws cloudformation list-stack-resources \
+        --stack-name "$nested" \
+        --region "$REGION" \
+        --query "StackResourceSummaries[?ResourceType=='AWS::ECS::Service'].PhysicalResourceId" \
+        --output text
+}
+
+scale_down_writers() {
+    [ "$mode" = "update" ] || return 0
+    case "$migration_scale_down" in
+        never)
+            return 0
+            ;;
+        auto)
+            migration_action=$(aws cloudformation describe-change-set \
+                --stack-name "$STACK_NAME" \
+                --change-set-name "$change_set_name" \
+                --region "$REGION" \
+                --query "Changes[?ResourceChange.LogicalResourceId=='Migration'].ResourceChange.Action" \
+                --output text)
+            if [ -z "$migration_action" ]; then
+                echo "[deploy-lakerunner-services] change set does not touch the Migration child; leaving services running" >&2
+                return 0
+            fi
+            ;;
+    esac
+
+    stopped=""
+    for tier in Process Control; do
+        for svc in $(nested_ecs_services "$tier"); do
+            svc_name=${svc##*/}
+            desired=$(aws ecs describe-services \
+                --cluster "$CLUSTER_ARN" \
+                --services "$svc" \
+                --region "$REGION" \
+                --query 'services[0].desiredCount' \
+                --output text)
+            resource_id="service/$CLUSTER_NAME/$svc_name"
+            suspended=$(aws application-autoscaling describe-scalable-targets \
+                --service-namespace ecs \
+                --resource-ids "$resource_id" \
+                --region "$REGION" \
+                --query 'ScalableTargets[0].SuspendedState' \
+                --output json | jq -c .)
+            # Record before changing anything, so a failure part way through
+            # still restores this service.
+            writer_state="${writer_state}$svc $desired $resource_id $suspended
+"
+            if [ "$suspended" != "null" ]; then
+                aws application-autoscaling register-scalable-target \
+                    --service-namespace ecs \
+                    --scalable-dimension ecs:service:DesiredCount \
+                    --resource-id "$resource_id" \
+                    --suspended-state DynamicScalingInSuspended=true,DynamicScalingOutSuspended=true,ScheduledScalingSuspended=true \
+                    --region "$REGION" >/dev/null
+            fi
+            echo "[deploy-lakerunner-services] scaling $svc_name $desired -> 0 for the migration" >&2
+            aws ecs update-service \
+                --cluster "$CLUSTER_ARN" \
+                --service "$svc" \
+                --desired-count 0 \
+                --region "$REGION" >/dev/null
+            stopped="$stopped $svc"
+        done
+    done
+
+    for svc in $stopped; do
+        echo "[deploy-lakerunner-services] waiting for ${svc##*/} to stop" >&2
+        aws ecs wait services-stable \
+            --cluster "$CLUSTER_ARN" \
+            --services "$svc" \
+            --region "$REGION"
+    done
+}
+
+restore_writers() {
+    [ -n "$writer_state" ] || return 0
+    restore_failed=""
+    while read -r svc desired resource_id suspended; do
+        [ -n "$svc" ] || continue
+        echo "[deploy-lakerunner-services] restoring ${svc##*/} to $desired" >&2
+        aws ecs update-service \
+            --cluster "$CLUSTER_ARN" \
+            --service "$svc" \
+            --desired-count "$desired" \
+            --region "$REGION" >/dev/null || restore_failed="$restore_failed ${svc##*/}"
+        if [ "$suspended" != "null" ]; then
+            aws application-autoscaling register-scalable-target \
+                --service-namespace ecs \
+                --scalable-dimension ecs:service:DesiredCount \
+                --resource-id "$resource_id" \
+                --suspended-state "$suspended" \
+                --region "$REGION" >/dev/null || restore_failed="$restore_failed ${svc##*/}(autoscaling)"
+        fi
+    done <<WRITERS
+$writer_state
+WRITERS
+    writer_state=""
+    if [ -n "$restore_failed" ]; then
+        echo "[deploy-lakerunner-services] ERROR: could not restore:$restore_failed -- set their desired counts and autoscaling by hand" >&2
+        return 1
+    fi
+}
+
+# Read by the embedded engine below.
+# shellcheck disable=SC2034
+pre_execute_hook=scale_down_writers
+# shellcheck disable=SC2034
+post_execute_hook=restore_writers
 
 PARAMS="$params"
 FILE_PARAMS="$file_params"

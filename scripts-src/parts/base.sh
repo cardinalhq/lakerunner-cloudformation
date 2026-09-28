@@ -89,6 +89,14 @@ internal_resolve_current=""
 change_set_name=""
 work_dir=""
 
+# Optional front-half hooks around execute-change-set.  A front half sets
+# pre_execute_hook / post_execute_hook to the names of functions it defines.
+# The pre hook runs just before execution (never for a no-op or NO_EXECUTE
+# change set); the post hook runs once afterwards, whether the stack operation
+# succeeded, failed, or the script was interrupted -- including when the pre
+# hook itself failed part way.
+post_hook_pending=""
+
 usage() {
     cat <<'EOF'
 deploy-stack.sh -- generic chained CloudFormation deploy driver.
@@ -327,8 +335,16 @@ cfntool() {
     fi
 }
 
+run_post_execute_hook() {
+    [ "$post_hook_pending" = "true" ] || return 0
+    post_hook_pending=""
+    [ -n "${post_execute_hook:-}" ] || return 0
+    "$post_execute_hook" || log "WARNING: post-execute hook $post_execute_hook failed"
+}
+
 cleanup() {
     rc=$?
+    run_post_execute_hook
     if [ "$rc" -ne 0 ] && [ -n "$change_set_name" ] && [ -n "$stack_name" ] && [ -n "$region" ]; then
         log "cleanup: deleting change set $change_set_name"
         aws cloudformation delete-change-set \
@@ -654,6 +670,11 @@ main() {
         return 0
     fi
 
+    if [ -n "${pre_execute_hook:-}" ]; then
+        post_hook_pending="true"
+        "$pre_execute_hook"
+    fi
+
     log "executing change set"
     aws cloudformation execute-change-set \
         --stack-name "$stack_name" \
@@ -661,9 +682,12 @@ main() {
         --region "$region" >/dev/null
 
     log "waiting for $wait_target"
-    if ! aws cloudformation wait "$wait_target" \
-            --stack-name "$stack_name" \
-            --region "$region"; then
+    wait_ok="true"
+    aws cloudformation wait "$wait_target" \
+        --stack-name "$stack_name" \
+        --region "$region" || wait_ok="false"
+    run_post_execute_hook
+    if [ "$wait_ok" != "true" ]; then
         final_status=$(aws cloudformation describe-stacks \
             --stack-name "$stack_name" \
             --region "$region" \

@@ -414,6 +414,18 @@ def build() -> Template:
         ),
     ))
     t.add_parameter(Parameter(
+        "LakerunnerMigrateForceDirty",
+        Type="String",
+        Default="false",
+        AllowedValues=["true", "false"],
+        Description=(
+            "When true, the lakerunner migrator recovers a database left dirty "
+            "by a failed migration: it rewinds to the previous version and "
+            "re-runs the failed migration. No-op on a clean database. Needs a "
+            "LakerunnerImage whose `migrate` supports --force-dirty."
+        ),
+    ))
+    t.add_parameter(Parameter(
         "SelfTelemetryEndpoint",
         Type="String",
         Default="",
@@ -474,6 +486,7 @@ def build() -> Template:
             {"label": "Images", "parameters": image_param_names},
             {"label": "Advanced",
              "parameters": ["DeployMaestro",
+                            "LakerunnerMigrateForceDirty",
                             "DexAdminEmail", "DexAdminPasswordHash",
                             "DexExtraUsers",
                             "OidcSuperadminEmails",
@@ -589,6 +602,7 @@ def build() -> Template:
         "DbSecretArn": Ref("DbMasterSecretArn"),
         "LakerunnerImage": lakerunner_image,
         "DbInitImage": db_init_image,
+        "MigrateForceDirty": Ref("LakerunnerMigrateForceDirty"),
     })
 
     migration_complete = GetAtt(migration_stack, "Outputs.MigrationServiceArn")

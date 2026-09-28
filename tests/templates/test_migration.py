@@ -201,3 +201,15 @@ def test_output_is_migration_service_arn(template_dict):
     assert outs["MigrationServiceArn"]["Value"] == {"Ref": "MigratorService"}
     # the old custom-resource output name must not linger
     assert "MigrationCustomResourceRef" not in outs
+
+
+def test_force_dirty_toggles_the_migrate_flag(template_dict):
+    param = template_dict["Parameters"]["MigrateForceDirty"]
+    assert param["Default"] == "false"
+    assert template_dict["Conditions"]["MigrateForceDirtyEnabled"] == {
+        "Fn::Equals": [{"Ref": "MigrateForceDirty"}, "true"]}
+    condition, forced, plain = _containers(template_dict)["migrator"]["Command"]["Fn::If"]
+    assert condition == "MigrateForceDirtyEnabled"
+    base = ["/app/bin/lakerunner", "migrate", "--databases=lrdb,configdb"]
+    assert plain == base
+    assert forced == base + ["--force-dirty"]

@@ -275,3 +275,11 @@ def test_public_dns_name_overrides_hostname(td):
     assert td["Outputs"]["AlbDnsName"]["Value"] == {
         "Fn::GetAtt": ["Alb", "Outputs.AlbDnsName"]
     }
+
+
+def test_migrate_force_dirty_param_forwarded_to_migration(td):
+    param = td["Parameters"]["LakerunnerMigrateForceDirty"]
+    assert param["Default"] == "false"
+    assert param["AllowedValues"] == ["true", "false"]
+    migration = td["Resources"]["Migration"]["Properties"]["Parameters"]
+    assert migration["MigrateForceDirty"] == {"Ref": "LakerunnerMigrateForceDirty"}
