@@ -47,12 +47,22 @@ jobs:
       - name: Build templates and deploy drivers with version baked in
         env:
           CARDINAL_VERSION: ${{ steps.version.outputs.version }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
         run: |
           source .venv/bin/activate
           # build.sh generates the templates and regenerates the single-file
           # deploy drivers (scripts-src/build.sh) so the published drivers match
           # this tag's parts.
           ./build.sh
+          # A stable tag must be cut from the commit that carries its changelog
+          # entry, so the committed drivers already bake this version. Fail if
+          # the regenerated drivers differ from what the tag holds.
+          if [[ "${PRERELEASE}" == "false" ]]; then
+            git diff --exit-code -- scripts/ || {
+              echo "::error::committed scripts/ do not bake ${CARDINAL_VERSION}; add its CHANGELOG.md entry, run make scripts, and retag" >&2
+              exit 1
+            }
+          fi
 
       - uses: aws-actions/configure-aws-credentials@v6
         with:
@@ -84,8 +94,8 @@ jobs:
           # Attach the version-baked deploy drivers (same scripts/ that build.sh
           # regenerated with CARDINAL_VERSION and that were synced to S3 above)
           # as release assets, so a script downloaded from the GitHub release has
-          # this version baked in (STACK_VERSION="$VERSION"), not "dev". The repo
-          # copies under scripts/ stay "dev" by design (they pre-date the tag).
+          # this version baked in (STACK_VERSION="$VERSION"). For a stable tag
+          # they are identical to the committed copies under scripts/.
           gh release create "$VERSION" \
             scripts/*.sh \
             --title "$VERSION" \

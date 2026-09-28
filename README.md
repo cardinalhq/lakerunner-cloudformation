@@ -63,8 +63,8 @@ Per release tag at
 version-baked drivers are attached to each
 [GitHub release](https://github.com/cardinalhq/lakerunner-cloudformation/releases).
 There is no `latest` — pin a specific tag. The copies committed under `scripts/`
-default to `STACK_VERSION=dev`; production uses the release-pinned copies (see
-[`scripts/README.md`](scripts/README.md)).
+default `STACK_VERSION` to the newest `CHANGELOG.md` entry, so on a release tag
+they are that release's drivers (see [`scripts/README.md`](scripts/README.md)).
 
 ## Air-gapped deployment
 

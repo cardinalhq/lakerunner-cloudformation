@@ -11,6 +11,45 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v1.7.14
+
+**Image bump.** Default `LakerunnerImage` v1.91.0 → v1.92.0 (digest-pinned).
+
+**Writers stop around migrations.** When an update touches the migration
+child (an image bump, for example), `deploy-lakerunner-services.sh` scales the
+`process-*`, `pubsub-sqs`, and control services to zero before executing the
+change set, so the migrator never runs against live workers. It restores their
+task counts and autoscaling afterwards, whether the update succeeds, fails, or
+the driver is interrupted. Ingest pauses for the migration; queries keep
+serving. `MIGRATION_SCALE_DOWN=auto|always|never` (default `auto`) controls
+this. The identity running the driver now also needs `ecs:DescribeServices`,
+`ecs:UpdateService`, and `application-autoscaling:DescribeScalableTargets` /
+`RegisterScalableTarget`.
+
+**New parameter `LakerunnerMigrateForceDirty`** (default `false`; driver env
+`MIGRATION_FORCE_DIRTY=true|false`). When `true`, the migrator runs
+`lakerunner migrate --force-dirty`: a `lrdb` or `configdb` left dirty by a
+failed migration is rewound to the previous version and the failed migration
+re-runs. Each migration file is a single transaction, so a failed one left no
+partial schema. It is a no-op on a clean database. It needs a
+`LakerunnerImage` of v1.92.0 or later; an older image override rejects the
+flag. The `maestro` database is separate (`McpMigrateRecoverFromDirty`).
+
+Lakerunner v1.92.0 edits two lrdb migrations from v1.88.0 in place
+(`1788315695_metric_rollup_epoch_manifest`, `1788412040_drop_metric_rollup_epoch`)
+to take their table locks up front with a lock timeout and retry. They could
+deadlock against running workers and leave the database dirty. Installs that
+already applied them are unaffected. An install stuck dirty at either
+version recovers by deploying with `MIGRATION_FORCE_DIRTY=true`. Query changes: `service_name=~".+"` tag
+discovery is answered from object metadata.
+
+**Committed drivers carry the release version.** `scripts/deploy-*.sh` in the
+repo now default `STACK_VERSION` to the newest version in this changelog
+instead of `dev`, so the drivers at a release tag are that release's drivers.
+
+Upgrade action: redeploy the services stack. No new migrations run on a
+clean database.
+
 ## v1.7.13
 
 **Image bump.** Default `LakerunnerImage` v1.90.1 → v1.91.0 and

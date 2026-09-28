@@ -15,25 +15,23 @@ drivers for the **per-stack** Cardinal Lakerunner model. Each is self-contained
 Install order and the full env-var contract per driver are in
 [`docs/operations/production-deploy.md`](../docs/operations/production-deploy.md).
 
-## Versioning: `dev` vs a release
+## Versioning
 
-The copies committed in this directory bake `STACK_VERSION=dev` and resolve
-templates from a development prefix — they are for **building and dev/test
-iteration**, not production.
+Every driver bakes a default `STACK_VERSION`: the newest `## vX.Y.Z` entry in
+[`CHANGELOG.md`](../CHANGELOG.md). A changelog entry is committed before its
+tag is cut, so the copies on a release tag are exactly the published drivers
+for that version, and the release pipeline (`.github/workflows/release.yml`)
+fails a stable tag whose committed drivers do not match.
 
-For **production**, do not run the committed `dev` copies. Instead:
+On `main` the newest entry can be ahead of the last published tag (merged,
+not yet tagged). For production, use a release's drivers:
 
-- Download the **version-pinned** drivers from the
+- download them from the
   [GitHub Releases page](https://github.com/cardinalhq/lakerunner-cloudformation/releases)
-  (each release attaches `deploy-*.sh` with `STACK_VERSION=<that version>` baked
-  in), or pull them from
-  `s3://cardinal-cfn-<region>/lakerunner/<version>/scripts/`, **or**
+  or `s3://cardinal-cfn-<region>/lakerunner/<version>/scripts/`,
+- check out the release tag and run `scripts/` from there, **or**
 - run a committed copy with `STACK_VERSION=vX.Y.Z` set explicitly (it also sets
   the matching `TEMPLATE_BASE_URL` so the nested templates resolve).
-
-The release pipeline (`.github/workflows/release.yml`) bakes the tag version
-into these drivers and publishes the templates + drivers together to S3 and the
-GitHub release, as a unit.
 
 ## `deploy-lakerunner-services.sh` primary ingest queue env vars
 

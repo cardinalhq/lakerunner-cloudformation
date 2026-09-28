@@ -24,11 +24,15 @@ base="$parts_dir/base.sh"
 # self-contained, version-locked unit.  Single-sourced from
 # cardinal-defaults.yaml and the build's release version:
 #   @@STACK_VERSION@@      the published version this driver defaults to
-#                          (CARDINAL_VERSION at release time; "dev" locally).
+#                          (CARDINAL_VERSION if set, else the newest
+#                          `## vX.Y.Z` heading in CHANGELOG.md -- the entry
+#                          that must be committed before its tag is cut).
 #   @@OTEL_IMAGE_SUFFIX@@  the otel collector's registry-relative path
 #                          (repo + pinned tag/digest); only the registry prefix
 #                          is operator-supplied at deploy time.
-stack_version="${CARDINAL_VERSION:-dev}"
+changelog_version=$(sed -n 's/^## \(v[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)[[:space:]]*$/\1/p' "$repo_root/CHANGELOG.md" | head -n 1)
+stack_version="${CARDINAL_VERSION:-$changelog_version}"
+[ -n "$stack_version" ] || { echo "build.sh: no ## vX.Y.Z heading in CHANGELOG.md and CARDINAL_VERSION unset" >&2; exit 1; }
 py="python3"
 [ -x "$repo_root/.venv/bin/python3" ] && py="$repo_root/.venv/bin/python3"
 # Registry-relative suffixes for the public-ECR images that respect the

@@ -289,8 +289,10 @@ s3://cardinal-cfn-<region>/lakerunner/<version>/scripts/deploy-*.sh
 ```
 
 There is no `latest` — pin a tag. The drivers committed under `scripts/` bake
-`STACK_VERSION=dev` and are for dev/test iteration; production uses the
-release-pinned copies (or sets `STACK_VERSION=vX.Y.Z` explicitly).
+`STACK_VERSION` from the newest `## vX.Y.Z` heading in `CHANGELOG.md`
+(`CARDINAL_VERSION` overrides), so a tag's committed drivers are its published
+ones; the release workflow fails a stable tag whose `scripts/` would change on
+rebuild. On `main` that version may not be published yet.
 
 Air-gapped customers mirror the `lakerunner/<version>/` prefix and set
 `TEMPLATE_BASE_URL`, and point images at a private registry via `IMAGE_REGISTRY`
