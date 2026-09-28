@@ -11,6 +11,31 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v1.7.14
+
+**Image bump.** Default `LakerunnerImage` v1.91.0 → v1.92.0 (digest-pinned).
+
+**Migrator now self-heals dirty migrations.** The migrator runs
+`lakerunner migrate --databases=lrdb,configdb --force-dirty`. If a previous
+migration failed and left `lrdb` or `configdb` marked dirty, the migrator
+rewinds the record to the prior version and re-runs the failed migration
+instead of exiting and tripping the circuit breaker. Every lakerunner
+migration file is a single transaction, so a failed one leaves no schema
+behind. The flag is a no-op on a clean database, and it refuses a dirty
+version the image does not ship. This does not touch the `maestro` database;
+that is still governed by `McpMigrateRecoverFromDirty` (default `false`).
+
+Lakerunner v1.92.0 edits two lrdb migrations from v1.88.0 in place
+(`1788315695_metric_rollup_epoch_manifest`, `1788412040_drop_metric_rollup_epoch`)
+to take their table locks up front with a lock timeout and retry. They could
+deadlock against running workers and leave the database dirty. Installs that
+already applied them are unaffected. An install stuck dirty at either
+version recovers on this deploy. Query changes: `service_name=~".+"` tag
+discovery is answered from object metadata.
+
+Upgrade action: redeploy the services stack. No new migrations run on a
+clean database.
+
 ## v1.7.13
 
 **Image bump.** Default `LakerunnerImage` v1.90.1 → v1.91.0 and
