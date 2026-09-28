@@ -24,7 +24,7 @@ set -eu
 DEFAULT_TEMPLATE_BASE_URL="https://cardinal-cfn-us-east-1.s3.us-east-1.amazonaws.com/lakerunner"
 TEMPLATE_KEY="cardinal-lakerunner-services.yaml"
 # Baked at publish time (scripts-src/build.sh).  STACK_VERSION defaults to this.
-DEFAULT_STACK_VERSION="v1.7.15"
+DEFAULT_STACK_VERSION="v1.7.16"
 DEFAULT_IMAGE_REGISTRY="public.ecr.aws"
 # Baked, locked registry-relative paths (repo + pinned tag/digest) for the
 # public-ECR images.  Only the registry prefix is operator-supplied.  db-init
@@ -153,7 +153,14 @@ Optional (template defaults preserved when unset):
                               when the change set touches the Migration child
                               (e.g. an image bump).  always: on every update.
                               never: leave them running.  Ingest pauses for
-                              the migration; queries keep serving.
+                              the migration; queries keep serving.  The
+                              driver waits until every task's containers
+                              have exited, which includes the admin-api
+                              target group's deregistration delay.
+  MIGRATION_DRAIN_TIMEOUT     Seconds to wait for the stopped services' tasks
+                              to exit (default 900).  On timeout the driver
+                              restores the services and does not execute.
+  MIGRATION_DRAIN_POLL        Seconds between those checks (default 10).
   TEMPLATE_BASE_URL           Default: $DEFAULT_TEMPLATE_BASE_URL.  Also
                               forwarded as the TemplateBaseUrl param (nested
                               children load from the matching prefix).
@@ -191,6 +198,13 @@ case "$migration_scale_down" in
     auto|always|never) : ;;
     *) echo "[deploy-lakerunner-services] ERROR: MIGRATION_SCALE_DOWN must be auto, always, or never (got '$migration_scale_down')" >&2; exit 2 ;;
 esac
+migration_drain_timeout="${MIGRATION_DRAIN_TIMEOUT:-900}"
+migration_drain_poll="${MIGRATION_DRAIN_POLL:-10}"
+for v in "$migration_drain_timeout" "$migration_drain_poll"; do
+    case "$v" in
+        ''|*[!0-9]*) echo "[deploy-lakerunner-services] ERROR: MIGRATION_DRAIN_TIMEOUT and MIGRATION_DRAIN_POLL must be whole seconds (got '$v')" >&2; exit 2 ;;
+    esac
+done
 migration_force_dirty="${MIGRATION_FORCE_DIRTY:-true}"
 case "$migration_force_dirty" in
     true|false) : ;;
@@ -530,6 +544,47 @@ scale_down_writers() {
             --cluster "$CLUSTER_ARN" \
             --services "$svc" \
             --region "$REGION"
+        wait_tasks_exited "$svc"
+    done
+}
+
+# Number of the service's tasks whose containers may still be running.
+# runningCount drops to 0 as soon as a task leaves RUNNING, but a task behind a
+# target group then sits in DEACTIVATING for the deregistration delay with its
+# containers still up; they only exit during STOPPING.
+live_task_count() {
+    tasks=""
+    for desired in RUNNING STOPPED; do
+        listed=$(aws ecs list-tasks --cluster "$CLUSTER_ARN" --service-name "${1##*/}" \
+            --desired-status "$desired" --region "$REGION" \
+            --query 'taskArns[]' --output text) || return 1
+        tasks="$tasks
+$listed"
+    done
+    tasks=$(printf '%s\n' "$tasks" | tr '\t' '\n' | grep -v -e '^$' -e '^None$' || true)
+    [ -n "$tasks" ] || { echo 0; return 0; }
+    counts=$(echo "$tasks" | xargs -n 100 aws ecs describe-tasks --cluster "$CLUSTER_ARN" \
+        --region "$REGION" \
+        --query "length(tasks[?lastStatus!='DEPROVISIONING' && lastStatus!='STOPPED'])" \
+        --output text --tasks) || return 1
+    echo "$counts" | awk '{n += $1} END {print n + 0}'
+}
+
+wait_tasks_exited() {
+    waited=0
+    while :; do
+        live=$(live_task_count "$1") || {
+            echo "[deploy-lakerunner-services] ERROR: could not list ${1##*/} tasks; not running the migration" >&2
+            return 1
+        }
+        [ "$live" -eq 0 ] && return 0
+        if [ "$waited" -ge "$migration_drain_timeout" ]; then
+            echo "[deploy-lakerunner-services] ERROR: ${1##*/} still has $live task(s) running after ${waited}s; not running the migration" >&2
+            return 1
+        fi
+        echo "[deploy-lakerunner-services] ${1##*/}: $live task(s) still draining" >&2
+        sleep "$migration_drain_poll"
+        waited=$((waited + migration_drain_poll))
     done
 }
 

@@ -11,6 +11,27 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v1.7.16
+
+**Fix: the services driver now waits for the stopped writers to actually
+exit before running the migration.** With `MIGRATION_SCALE_DOWN`, the driver
+scales the process and control services to zero, but previously it only
+waited for their running task count to reach zero. The control task sits
+behind the admin-api target group, so it stays up for the target group's
+300-second deregistration delay after leaving RUNNING. Its containers
+(admin-api, sweeper, monitoring, alert-evaluator) kept working lrdb through
+the whole migration. The driver now polls until every task of each stopped
+service has exited.
+
+Expect ingest to pause about five minutes longer on an update that reruns
+the migrator. New driver env: `MIGRATION_DRAIN_TIMEOUT` (seconds, default
+900) and `MIGRATION_DRAIN_POLL` (default 10). If the tasks have not exited
+within the timeout, the driver restores the services and does not execute
+the change set.
+
+Upgrade action: none for the stacks; use the v1.7.16 drivers for future
+deploys. No template changes.
+
 ## v1.7.15
 
 **Changed default: `LakerunnerMigrateForceDirty` is now `true`** (driver env
