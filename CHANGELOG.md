@@ -15,22 +15,32 @@ v0.0.114.
 
 **Image bump.** Default `LakerunnerImage` v1.91.0 → v1.92.0 (digest-pinned).
 
-**Migrator now self-heals dirty migrations.** The migrator runs
-`lakerunner migrate --databases=lrdb,configdb --force-dirty`. If a previous
-migration failed and left `lrdb` or `configdb` marked dirty, the migrator
-rewinds the record to the prior version and re-runs the failed migration
-instead of exiting and tripping the circuit breaker. Every lakerunner
-migration file is a single transaction, so a failed one leaves no schema
-behind. The flag is a no-op on a clean database, and it refuses a dirty
-version the image does not ship. This does not touch the `maestro` database;
-that is still governed by `McpMigrateRecoverFromDirty` (default `false`).
+**Writers stop around migrations.** When an update touches the migration
+child (an image bump, for example), `deploy-lakerunner-services.sh` scales the
+`process-*`, `pubsub-sqs`, and control services to zero before executing the
+change set, so the migrator never runs against live workers. It restores their
+task counts and autoscaling afterwards, whether the update succeeds, fails, or
+the driver is interrupted. Ingest pauses for the migration; queries keep
+serving. `MIGRATION_SCALE_DOWN=auto|always|never` (default `auto`) controls
+this. The identity running the driver now also needs `ecs:DescribeServices`,
+`ecs:UpdateService`, and `application-autoscaling:DescribeScalableTargets` /
+`RegisterScalableTarget`.
+
+**New parameter `LakerunnerMigrateForceDirty`** (default `false`; driver env
+`MIGRATION_FORCE_DIRTY=true|false`). When `true`, the migrator runs
+`lakerunner migrate --force-dirty`: a `lrdb` or `configdb` left dirty by a
+failed migration is rewound to the previous version and the failed migration
+re-runs. Each migration file is a single transaction, so a failed one left no
+partial schema. It is a no-op on a clean database. It needs a
+`LakerunnerImage` of v1.92.0 or later; an older image override rejects the
+flag. The `maestro` database is separate (`McpMigrateRecoverFromDirty`).
 
 Lakerunner v1.92.0 edits two lrdb migrations from v1.88.0 in place
 (`1788315695_metric_rollup_epoch_manifest`, `1788412040_drop_metric_rollup_epoch`)
 to take their table locks up front with a lock timeout and retry. They could
 deadlock against running workers and leave the database dirty. Installs that
 already applied them are unaffected. An install stuck dirty at either
-version recovers on this deploy. Query changes: `service_name=~".+"` tag
+version recovers by deploying with `MIGRATION_FORCE_DIRTY=true`. Query changes: `service_name=~".+"` tag
 discovery is answered from object metadata.
 
 **Committed drivers carry the release version.** `scripts/deploy-*.sh` in the
