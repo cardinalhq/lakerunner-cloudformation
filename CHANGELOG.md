@@ -33,6 +33,10 @@ already applied them are unaffected. An install stuck dirty at either
 version recovers on this deploy. Query changes: `service_name=~".+"` tag
 discovery is answered from object metadata.
 
+**Committed drivers carry the release version.** `scripts/deploy-*.sh` in the
+repo now default `STACK_VERSION` to the newest version in this changelog
+instead of `dev`, so the drivers at a release tag are that release's drivers.
+
 Upgrade action: redeploy the services stack. No new migrations run on a
 clean database.
 

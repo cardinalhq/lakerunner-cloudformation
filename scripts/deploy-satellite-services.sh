@@ -26,7 +26,7 @@ set -eu
 DEFAULT_TEMPLATE_BASE_URL="https://cardinal-cfn-us-east-1.s3.us-east-1.amazonaws.com/lakerunner"
 TEMPLATE_KEY="cardinal-satellite-services.yaml"
 # Baked at publish time (scripts-src/build.sh).  STACK_VERSION defaults to this.
-DEFAULT_STACK_VERSION="dev"
+DEFAULT_STACK_VERSION="v1.7.14"
 # Baked at publish time: the otel collector's registry-relative path (repo +
 # pinned tag/digest).  Only the registry prefix is operator-supplied.
 OTEL_IMAGE_SUFFIX="cardinalhq.io/cardinalhq-otel-collector:v1.10.0@sha256:ad9d6459d2d231a4ea0b709347587e4c3dc43eb82e169e915305d9ddae73540c"
