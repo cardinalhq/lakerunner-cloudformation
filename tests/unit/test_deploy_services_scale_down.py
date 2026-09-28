@@ -88,6 +88,25 @@ elif cmd == "cloudformation list-stack-resources":
     print("\t".join(s for s in services if (s.endswith("/control")) == (tier == "ctrl")))
 elif cmd == "ecs describe-services":
     print(services[opt("--services")])
+elif cmd == "ecs list-tasks":
+    # One task per service with a drain budget; stopped tasks are listed too.
+    name = opt("--service-name")
+    if opt("--desired-status") == "STOPPED" and name in json.loads(os.environ.get("FAKE_DRAIN", "{}")):
+        print("arn:aws:ecs:us-east-1:111111111111:task/cl/" + name)
+elif cmd == "ecs describe-tasks":
+    # Each call reports the task live until its drain budget of polls is spent.
+    if os.environ.get("FAKE_DESCRIBE_TASKS_FAILS"):
+        sys.exit(255)
+    state_path = os.environ["FAKE_AWS_LOG"] + ".drain"
+    drain = json.load(open(state_path)) if os.path.exists(state_path) else json.loads(os.environ["FAKE_DRAIN"])
+    live = 0
+    for arn in args[args.index("--tasks") + 1:]:
+        name = arn.rsplit("/", 1)[1]
+        if drain[name] != 0:
+            live += 1
+            drain[name] -= 1
+    json.dump(drain, open(state_path, "w"))
+    print(live)
 elif cmd == "application-autoscaling describe-scalable-targets":
     if opt("--resource-ids") == "service/cl/process-logs":
         print(os.environ["FAKE_SUSPENDED"])
@@ -128,6 +147,7 @@ def _run(tmp_path, fake_source=FAKE_AWS, **env_overrides):
         "ORGANIZATION_ID": "00000000-0000-0000-0000-000000000001",
         "DEX_ADMIN_PASSWORD_HASH": "$2y$10$hash",
         "CERTIFICATE_ARN": "arn:aws:acm:us-east-1:1:certificate/c",
+        "MIGRATION_DRAIN_POLL": "0",
     }
     env.update(env_overrides)
     result = subprocess.run(["sh", str(SCRIPT)], env=env, capture_output=True, text=True)
@@ -220,6 +240,42 @@ def test_failed_stop_wait_restores_and_does_not_execute(tmp_path):
     restored = {name: count for _, name, count in _desired_updates(calls) if count != "0"}
     assert restored == {"process-logs": "3", "pubsub-sqs": "2", "control": "1"}
     assert json.loads(_suspend_calls(calls)[-1][1]) == PROCESS_LOGS_SUSPENDED
+
+
+def _describe_tasks(calls, service):
+    return [i for i, c in enumerate(calls)
+            if _is(c, "ecs", "describe-tasks") and any(a.endswith("/" + service) for a in c)]
+
+
+def test_waits_for_draining_tasks_before_execute(tmp_path):
+    # control's task stays live (ALB deregistration delay) for two polls after
+    # services-stable reports runningCount 0.
+    _require_tools()
+    result, calls = _run(tmp_path, FAKE_DRAIN=json.dumps({"control": 2}))
+    assert result.returncode == 0, result.stderr
+    execute = _index(calls, lambda c: _is(c, "cloudformation", "execute-change-set"))
+    polls = _describe_tasks(calls, "control")
+    assert len(polls) == 3 and all(i < execute for i in polls)
+    assert "control: 1 task(s) still draining" in result.stderr
+
+
+@pytest.mark.parametrize("env", [
+    {"FAKE_DRAIN": json.dumps({"control": -1}), "MIGRATION_DRAIN_TIMEOUT": "0"},
+    {"FAKE_DRAIN": json.dumps({"control": 1}), "FAKE_DESCRIBE_TASKS_FAILS": "1"},
+])
+def test_undrained_tasks_restore_and_do_not_execute(tmp_path, env):
+    _require_tools()
+    result, calls = _run(tmp_path, **env)
+    assert result.returncode != 0
+    assert not any(_is(c, "cloudformation", "execute-change-set") for c in calls)
+    restored = {name: count for _, name, count in _desired_updates(calls) if count != "0"}
+    assert restored == {"process-logs": "3", "pubsub-sqs": "2", "control": "1"}
+
+
+def test_rejects_bad_drain_timeout(tmp_path):
+    result, calls = _run(tmp_path, MIGRATION_DRAIN_TIMEOUT="5m")
+    assert result.returncode == 2
+    assert calls == []
 
 
 @pytest.mark.parametrize("value", ["true", "false", None])

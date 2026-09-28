@@ -16,7 +16,7 @@ set -eu
 DEFAULT_TEMPLATE_BASE_URL="https://cardinal-cfn-us-east-1.s3.us-east-1.amazonaws.com/lakerunner"
 TEMPLATE_KEY="cardinal-lakerunner-infra-rds.yaml"
 # Baked at publish time (scripts-src/build.sh).  STACK_VERSION defaults to this.
-DEFAULT_STACK_VERSION="v1.7.15"
+DEFAULT_STACK_VERSION="v1.7.16"
 
 usage() {
     cat <<EOF
