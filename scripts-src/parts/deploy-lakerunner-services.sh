@@ -133,12 +133,14 @@ Optional (template defaults preserved when unset):
                               (official postgres psql client). Bypasses
                               IMAGE_REGISTRY. Default: the baked, pinned suffix
                               under IMAGE_REGISTRY (always passed to the stack).
-  MIGRATION_FORCE_DIRTY       true | false.  true: the lakerunner migrator
-                              recovers a database left dirty by a failed
-                              migration (rewinds to the previous version and
-                              re-runs it); a no-op on a clean database.  Unset
-                              keeps the stack's current value on update.
-                              Changing it re-runs the migrator.
+  MIGRATION_FORCE_DIRTY       true | false (default true).  true: the lakerunner
+                              migrator recovers a database left dirty by a
+                              failed migration (rewinds to the previous version
+                              and re-runs it); a no-op on a clean database.
+                              Always passed, so unset means true on update too.
+                              Set false for a LAKERUNNER_IMAGE older than
+                              v1.92.0 (it rejects --force-dirty).  Changing it
+                              re-runs the migrator.
   MIGRATION_SCALE_DOWN        auto | always | never (default auto).  The
                               migrator runs while the old service tasks are
                               still up, and its schema locks can deadlock
@@ -188,9 +190,10 @@ case "$migration_scale_down" in
     auto|always|never) : ;;
     *) echo "[deploy-lakerunner-services] ERROR: MIGRATION_SCALE_DOWN must be auto, always, or never (got '$migration_scale_down')" >&2; exit 2 ;;
 esac
-case "${MIGRATION_FORCE_DIRTY:-}" in
-    ""|true|false) : ;;
-    *) echo "[deploy-lakerunner-services] ERROR: MIGRATION_FORCE_DIRTY must be true or false (got '$MIGRATION_FORCE_DIRTY')" >&2; exit 2 ;;
+migration_force_dirty="${MIGRATION_FORCE_DIRTY:-true}"
+case "$migration_force_dirty" in
+    true|false) : ;;
+    *) echo "[deploy-lakerunner-services] ERROR: MIGRATION_FORCE_DIRTY must be true or false (got '$migration_force_dirty')" >&2; exit 2 ;;
 esac
 
 if ! command -v aws >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
@@ -295,8 +298,8 @@ ProcessMetricsMemory=$PROCESS_METRICS_MEMORY"
 [ -n "${PROCESS_TRACES_MEMORY:-}" ] && params="$params
 ProcessTracesMemory=$PROCESS_TRACES_MEMORY"
 
-[ -n "${MIGRATION_FORCE_DIRTY:-}" ] && params="$params
-LakerunnerMigrateForceDirty=$MIGRATION_FORCE_DIRTY"
+params="$params
+LakerunnerMigrateForceDirty=$migration_force_dirty"
 
 # Public-ECR images: composed from IMAGE_REGISTRY + the baked, locked suffixes,
 # always passed as literal params so a redeploy carries the pinned defaults

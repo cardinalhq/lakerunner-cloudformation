@@ -279,7 +279,7 @@ def test_public_dns_name_overrides_hostname(td):
 
 def test_migrate_force_dirty_param_forwarded_to_migration(td):
     param = td["Parameters"]["LakerunnerMigrateForceDirty"]
-    assert param["Default"] == "false"
+    assert param["Default"] == "true"
     assert param["AllowedValues"] == ["true", "false"]
     migration = td["Resources"]["Migration"]["Properties"]["Parameters"]
     assert migration["MigrateForceDirty"] == {"Ref": "LakerunnerMigrateForceDirty"}

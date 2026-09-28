@@ -122,7 +122,7 @@ automatically by pulling `CollectorEndpoint` from satellite-services.
 - Self-telemetry: leave `SELF_TELEMETRY_ENDPOINT` unset to auto-pull the collector endpoint from `SATELLITE_SERVICES_STACK` (default `cardinal-satellite-services`); set it to override.
 - Bucket mapping: Maestro's bootstrap registers only the install's own output bucket (`MAESTRO_BOOTSTRAP_BUCKET_*`, wired to the cooked bucket). The satellite raw bucket is mapped to the org by hand in the Maestro superadmin UI — see "After the install" below. `SATELLITE_CONFIG` / `SATELLITES_PARAM_NAME` / `CENTRAL_COLLECTOR_NAME` were removed in v1.6.0; the driver writes no SSM parameter.
 - Optional: `DEX_ADMIN_EMAIL`, `OIDC_SUPERADMIN_EMAILS`, `DEX_CLIENT_ID`, `SERVICE_NAMESPACE_NAME`, `DB_INIT_IMAGE`, `IMAGE_REGISTRY` (see [`air-gapped-images.md`](../air-gapped-images.md)).
-- Migrations: `MIGRATION_SCALE_DOWN=auto|always|never` (default `auto`), `MIGRATION_FORCE_DIRTY=true|false` -- see "Upgrades" below.
+- Migrations: `MIGRATION_SCALE_DOWN=auto|always|never` (default `auto`), `MIGRATION_FORCE_DIRTY=true|false` (default `true`) -- see "Upgrades" below.
 
 ## After the install
 
@@ -175,12 +175,14 @@ succeeds, fails, or the driver is interrupted. Ingest pauses for the migration;
 queries keep serving. `MIGRATION_SCALE_DOWN=always` does this on every update,
 `never` skips it.
 
-If a migration failed and left the database dirty, the migrator exits with
-`migration is dirty` on every run. Re-run the services driver with
-`MIGRATION_FORCE_DIRTY=true`: the migrator rewinds the dirty record to the
-previous version and re-runs the failed migration (each migration is a single
-transaction, so a failed one left no partial schema). It is a no-op on a clean
-database, so it can stay on.
+If a migration fails and leaves the database dirty, the next deploy recovers
+it: `MIGRATION_FORCE_DIRTY` defaults to `true`, so the migrator rewinds the
+dirty record to the previous version and re-runs the failed migration (each
+migration is a single transaction, so a failed one left no partial schema). It
+is a no-op on a clean database. A migration that fails deterministically still
+fails, and the update rolls back. Set `MIGRATION_FORCE_DIRTY=false` only when
+overriding `LAKERUNNER_IMAGE` with a lakerunner older than v1.92.0, which
+rejects `--force-dirty`.
 
 ## Teardown
 
