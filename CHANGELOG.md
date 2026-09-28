@@ -11,6 +11,30 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v1.7.13
+
+**Image bump.** Default `LakerunnerImage` v1.90.1 → v1.91.0 and
+`MaestroImage` v1.96.2 → v1.97.16 (both digest-pinned).
+
+Lakerunner v1.91.0 is a query release: PromQL conformance fixes (unary minus,
+`__name__` handling under name-dropping functions, duplicate-labelset
+rejection), rate/increase/delta over exact histograms, a counter staleness
+fix, and faster grouped counts answered from C2 postings and partition stats.
+No lakerunner schema migrations.
+
+Maestro v1.97.16 adds Investigation Storyboards (authoring tools, receipts,
+and the `/storyboards` viewer), a heatmap panel kind, and device-flow
+dashboards/alerts/telemetry scopes for `/cardinal:connect`. Security fixes:
+the MCP gateway no longer echoes the Lakerunner API key and redacts
+credentials in receipts, and `execute_sql` is now enforced read-only at the
+database (for Postgres, a read-only transaction) rather than only
+lexically. mcp-gateway applies four new migrations to the `maestro` database
+at startup (receipts and storyboards tables). No new extensions, parameters,
+or environment variables.
+
+Upgrade action: redeploy the services stack. The `LakerunnerImage` change
+reruns the migrator before the service tiers update, as designed.
+
 ## v1.7.12
 
 **Image bump.** Default `MaestroImage` v1.95.32 → v1.96.2 (digest-pinned).
