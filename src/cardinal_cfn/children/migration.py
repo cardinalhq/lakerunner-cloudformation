@@ -4,7 +4,8 @@ ECS service that runs the migrator once and then sleeps.
 No Lambda. The migrator task definition has three containers:
 
   1. configdb-init (non-essential): psql CREATE DATABASE configdb if absent.
-  2. migrator (non-essential): `lakerunner migrate --databases=lrdb,configdb`,
+  2. migrator (non-essential): `lakerunner migrate --databases=lrdb,configdb`
+     (plus `--force-dirty` when MigrateForceDirty=true),
      dependsOn configdb-init=COMPLETE. It seeds NO org content -- with empty
      configdb tables the binary's initializeIfNeededFunc is a no-op. The org,
      its storage line, and its ingest key are owned by Maestro, which
@@ -23,6 +24,8 @@ stacks update, exactly as the old custom-resource trigger did.
 """
 
 from troposphere import (
+    Equals,
+    If,
     Template,
     Parameter,
     Ref,
@@ -93,6 +96,22 @@ def build() -> Template:
         )
     )
 
+    t.add_parameter(
+        Parameter(
+            "MigrateForceDirty",
+            Type="String",
+            Default="false",
+            AllowedValues=["true", "false"],
+            Description=(
+                "When true, the migrator runs `lakerunner migrate --force-dirty`: "
+                "a database left dirty by a failed migration is rewound to the "
+                "previous version and the failed migration re-runs. No-op on a "
+                "clean database."
+            ),
+        )
+    )
+    t.add_condition("MigrateForceDirtyEnabled", Equals(Ref("MigrateForceDirty"), "true"))
+
     # ---------------------------------------------------------------------------
     # Log group (shared by all three containers)
     # ---------------------------------------------------------------------------
@@ -142,7 +161,11 @@ def build() -> Template:
     migrator_container = ContainerDefinition(
         Name="migrator",
         Image=Ref("LakerunnerImage"),
-        Command=["/app/bin/lakerunner", "migrate", "--databases=lrdb,configdb"],
+        Command=If(
+            "MigrateForceDirtyEnabled",
+            ["/app/bin/lakerunner", "migrate", "--databases=lrdb,configdb", "--force-dirty"],
+            ["/app/bin/lakerunner", "migrate", "--databases=lrdb,configdb"],
+        ),
         # Non-essential: it runs to completion and exits. The task keeps running
         # via the keepalive container, which only starts once migrator exits 0.
         Essential=False,

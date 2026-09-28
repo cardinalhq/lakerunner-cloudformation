@@ -122,6 +122,7 @@ automatically by pulling `CollectorEndpoint` from satellite-services.
 - Self-telemetry: leave `SELF_TELEMETRY_ENDPOINT` unset to auto-pull the collector endpoint from `SATELLITE_SERVICES_STACK` (default `cardinal-satellite-services`); set it to override.
 - Bucket mapping: Maestro's bootstrap registers only the install's own output bucket (`MAESTRO_BOOTSTRAP_BUCKET_*`, wired to the cooked bucket). The satellite raw bucket is mapped to the org by hand in the Maestro superadmin UI — see "After the install" below. `SATELLITE_CONFIG` / `SATELLITES_PARAM_NAME` / `CENTRAL_COLLECTOR_NAME` were removed in v1.6.0; the driver writes no SSM parameter.
 - Optional: `DEX_ADMIN_EMAIL`, `OIDC_SUPERADMIN_EMAILS`, `DEX_CLIENT_ID`, `SERVICE_NAMESPACE_NAME`, `DB_INIT_IMAGE`, `IMAGE_REGISTRY` (see [`air-gapped-images.md`](../air-gapped-images.md)).
+- Migrations: `MIGRATION_SCALE_DOWN=auto|always|never` (default `auto`), `MIGRATION_FORCE_DIRTY=true|false` -- see "Upgrades" below.
 
 ## After the install
 
@@ -165,6 +166,21 @@ Re-run the relevant driver(s) at the new `STACK_VERSION` (a version-pinned
 driver from the new release). Drivers create-or-update; on update, parameters
 you do not set carry their previous value. First-party image versions are baked
 into each release's drivers/templates, so the version bump carries them.
+
+When an update touches the migration child (an image bump, for example), the
+services driver scales the `process-*`, `pubsub-sqs`, and control services to
+zero before executing, so the migrator never runs against live workers, and
+restores their task counts and autoscaling afterwards -- whether the update
+succeeds, fails, or the driver is interrupted. Ingest pauses for the migration;
+queries keep serving. `MIGRATION_SCALE_DOWN=always` does this on every update,
+`never` skips it.
+
+If a migration failed and left the database dirty, the migrator exits with
+`migration is dirty` on every run. Re-run the services driver with
+`MIGRATION_FORCE_DIRTY=true`: the migrator rewinds the dirty record to the
+previous version and re-runs the failed migration (each migration is a single
+transaction, so a failed one left no partial schema). It is a no-op on a clean
+database, so it can stay on.
 
 ## Teardown
 
