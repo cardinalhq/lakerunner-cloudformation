@@ -11,6 +11,29 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v1.7.17
+
+**Image bump.** Default `MaestroImage` v1.97.16 → v1.99.10 (digest-pinned).
+
+Maestro v1.99.10 extends Investigation Storyboards: acts (a storyboard is
+updated by appending an act), shareable public links with per-org and
+per-storyboard controls, link-preview cards, folders, and semantic + full-text
+search in `storyboard__find`. It adds saved queries in Logs Explore,
+text-box dashboard variables, dashboard short links (`/l/<code>`), and a
+rich Slack alert card with the UI's chart. Fixes `histogram_*` queries over
+histogram metrics, Test alert returning 500, and deleted alert rules lingering
+as `deletion_pending`; picks up dependency security fixes.
+
+mcp-gateway applies seventeen new additive migrations to the `maestro`
+database at startup (storyboard shares, acts, folders, search index, saved
+queries, short links). The search index uses `vector`, which the db-init
+container already creates. No new parameters. New environment variables are
+all optional with safe defaults; `MAESTRO_TRUSTED_PROXY_HOPS` is left unset,
+which keeps the previous `trust proxy` behaviour.
+
+Upgrade action: redeploy the services stack. Only the maestro task
+definition changes; the migrator does not rerun.
+
 ## v1.7.16
 
 **Fix: the services driver now waits for the stopped writers to actually
