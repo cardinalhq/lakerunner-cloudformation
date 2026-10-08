@@ -75,6 +75,12 @@ def _sizing_param_specs(defaults: dict) -> list[dict]:
     traces = services["lakerunner-process-traces"]
     pubsub = services["lakerunner-pubsub-sqs"]
 
+    def _min_replicas(cfg: dict) -> int:
+        autoscaling = cfg.get("autoscaling")
+        if autoscaling and "min_replicas" in autoscaling:
+            return int(autoscaling["min_replicas"])
+        return int(cfg["replicas"])
+
     def _max_replicas(cfg: dict) -> int:
         autoscaling = cfg.get("autoscaling")
         if autoscaling and "max_replicas" in autoscaling:
@@ -96,14 +102,20 @@ def _sizing_param_specs(defaults: dict) -> list[dict]:
         {"name": "QueryWorkerMemory", "type": "String", "default": str(worker["memory_mib"]),
          "description": "Fargate memory (MiB) for lakerunner-query-worker."},
         # Process tier
+        {"name": "ProcessLogsMinReplicas", "type": "Number", "default": _min_replicas(logs),
+         "min": 1, "description": "Minimum replicas for lakerunner-process-logs (autoscaler floor)."},
         {"name": "ProcessLogsReplicas", "type": "Number", "default": _max_replicas(logs),
          "min": 1, "description": "Maximum desired replicas for lakerunner-process-logs."},
         {"name": "ProcessLogsMemory", "type": "String", "default": str(logs["memory_mib"]),
          "description": "Fargate memory (MiB) for lakerunner-process-logs."},
+        {"name": "ProcessMetricsMinReplicas", "type": "Number", "default": _min_replicas(metrics),
+         "min": 1, "description": "Minimum replicas for lakerunner-process-metrics (autoscaler floor)."},
         {"name": "ProcessMetricsReplicas", "type": "Number", "default": _max_replicas(metrics),
          "min": 1, "description": "Maximum desired replicas for lakerunner-process-metrics."},
         {"name": "ProcessMetricsMemory", "type": "String", "default": str(metrics["memory_mib"]),
          "description": "Fargate memory (MiB) for lakerunner-process-metrics."},
+        {"name": "ProcessTracesMinReplicas", "type": "Number", "default": _min_replicas(traces),
+         "min": 1, "description": "Minimum replicas for lakerunner-process-traces (autoscaler floor)."},
         {"name": "ProcessTracesReplicas", "type": "Number", "default": _max_replicas(traces),
          "min": 1, "description": "Maximum desired replicas for lakerunner-process-traces."},
         {"name": "ProcessTracesMemory", "type": "String", "default": str(traces["memory_mib"]),
@@ -655,10 +667,13 @@ def build() -> Template:
     services_process_params.update({
         "QueueUrl": Ref("QueueUrl"),
         "QueueRoleArn": Ref("QueueRoleArn"),
+        "ProcessLogsMinReplicas": Ref("ProcessLogsMinReplicas"),
         "ProcessLogsReplicas": Ref("ProcessLogsReplicas"),
         "ProcessLogsMemory": Ref("ProcessLogsMemory"),
+        "ProcessMetricsMinReplicas": Ref("ProcessMetricsMinReplicas"),
         "ProcessMetricsReplicas": Ref("ProcessMetricsReplicas"),
         "ProcessMetricsMemory": Ref("ProcessMetricsMemory"),
+        "ProcessTracesMinReplicas": Ref("ProcessTracesMinReplicas"),
         "ProcessTracesReplicas": Ref("ProcessTracesReplicas"),
         "ProcessTracesMemory": Ref("ProcessTracesMemory"),
         "PubsubSqsReplicas": Ref("PubsubSqsReplicas"),

@@ -24,7 +24,7 @@ set -eu
 DEFAULT_TEMPLATE_BASE_URL="https://cardinal-cfn-us-east-1.s3.us-east-1.amazonaws.com/lakerunner"
 TEMPLATE_KEY="cardinal-lakerunner-services.yaml"
 # Baked at publish time (scripts-src/build.sh).  STACK_VERSION defaults to this.
-DEFAULT_STACK_VERSION="v1.7.17"
+DEFAULT_STACK_VERSION="v1.7.18"
 DEFAULT_IMAGE_REGISTRY="public.ecr.aws"
 # Baked, locked registry-relative paths (repo + pinned tag/digest) for the
 # public-ECR images.  Only the registry prefix is operator-supplied.  db-init
@@ -130,6 +130,14 @@ Optional (template defaults preserved when unset):
   PROCESS_TRACES_MEMORY       Fargate task memory (MiB) for process-traces
                               (template default 2048).  Same combo rules; unset
                               keeps the current value.
+  PROCESS_LOGS_MIN_REPLICAS   Minimum process-logs tasks the CPU autoscaler
+                              keeps running (template default 1, cap 10).
+                              Changing it also resets the service's desired
+                              count to it; the autoscaler then re-scales.
+                              Unset keeps the current value.
+  PROCESS_METRICS_MIN_REPLICAS
+                              Same, for process-metrics.
+  PROCESS_TRACES_MIN_REPLICAS Same, for process-traces.
   DB_INIT_IMAGE               Full image URI override for the db-init image
                               (official postgres psql client). Bypasses
                               IMAGE_REGISTRY. Default: the baked, pinned suffix
@@ -301,8 +309,8 @@ PublicDnsName=$PUBLIC_DNS_NAME"
 [ -n "$self_telemetry_endpoint" ] && params="$params
 SelfTelemetryEndpoint=$self_telemetry_endpoint"
 
-# Process-tier Fargate memory (MiB). Passed only when explicitly set, so an
-# existing install's value carries forward on update unless the operator
+# Process-tier Fargate memory (MiB) and autoscaler floors. Passed only when
+# explicitly set, so an existing install's value carries forward on update unless the operator
 # overrides it (like the images above, a bumped template default is otherwise
 # never picked up on update -- but unlike the images we do NOT force these, to
 # avoid clobbering an operator's deliberate sizing).
@@ -312,6 +320,12 @@ ProcessLogsMemory=$PROCESS_LOGS_MEMORY"
 ProcessMetricsMemory=$PROCESS_METRICS_MEMORY"
 [ -n "${PROCESS_TRACES_MEMORY:-}" ] && params="$params
 ProcessTracesMemory=$PROCESS_TRACES_MEMORY"
+[ -n "${PROCESS_LOGS_MIN_REPLICAS:-}" ] && params="$params
+ProcessLogsMinReplicas=$PROCESS_LOGS_MIN_REPLICAS"
+[ -n "${PROCESS_METRICS_MIN_REPLICAS:-}" ] && params="$params
+ProcessMetricsMinReplicas=$PROCESS_METRICS_MIN_REPLICAS"
+[ -n "${PROCESS_TRACES_MIN_REPLICAS:-}" ] && params="$params
+ProcessTracesMinReplicas=$PROCESS_TRACES_MIN_REPLICAS"
 
 params="$params
 LakerunnerMigrateForceDirty=$migration_force_dirty"

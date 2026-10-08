@@ -11,6 +11,21 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v1.7.18
+
+**New parameters.** `ProcessLogsMinReplicas`, `ProcessMetricsMinReplicas` and
+`ProcessTracesMinReplicas` (default 1, the previous hardcoded value) set the
+CPU autoscaler's floor for each process-* service, which is also created at that
+count. The services driver passes them from `PROCESS_LOGS_MIN_REPLICAS`,
+`PROCESS_METRICS_MIN_REPLICAS` and `PROCESS_TRACES_MIN_REPLICAS`; unset keeps
+the current value. Each must not exceed its `Process*Replicas` cap (default 10).
+
+Changing a minimum also sets that service's desired count to it, so a service
+the autoscaler had scaled above the new minimum briefly drops to it and is
+re-scaled on CPU.
+
+No upgrade action.
+
 ## v1.7.17
 
 **Image bump.** Default `MaestroImage` v1.97.16 → v1.99.10 (digest-pinned).
