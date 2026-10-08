@@ -88,10 +88,13 @@ def test_no_storage_profile_or_api_keys_params(td):
 
 def test_per_service_tunable_parameters(td):
     for n in (
+        "ProcessLogsMinReplicas",
         "ProcessLogsReplicas",
         "ProcessLogsMemory",
+        "ProcessMetricsMinReplicas",
         "ProcessMetricsReplicas",
         "ProcessMetricsMemory",
+        "ProcessTracesMinReplicas",
         "ProcessTracesReplicas",
         "ProcessTracesMemory",
         "PubsubSqsReplicas",
@@ -226,10 +229,10 @@ def test_pubsub_sqs_task_definition_uses_yaml_defaults(td):
     assert not isinstance(mem, dict), f"PubsubSqs Memory unexpectedly templated: {mem!r}"
 
 
-def test_process_services_start_at_one_replica(td):
-    """process-* are created at min_replicas (1); native ECS CPU autoscaling
-    scales them up to the Process*Replicas cap. Launching at the max would
-    triple the steady-state Fargate footprint on every deploy."""
+def test_process_services_start_at_min_replicas(td):
+    """process-* are created at Process*MinReplicas (default 1); native ECS CPU
+    autoscaling scales them up to the Process*Replicas cap. Launching at the max
+    would triple the steady-state Fargate footprint on every deploy."""
     services = {
         logical_id: r
         for logical_id, r in td["Resources"].items()
@@ -237,12 +240,16 @@ def test_process_services_start_at_one_replica(td):
     }
     for logical_id in ("ProcessLogsService", "ProcessMetricsService", "ProcessTracesService"):
         dc = services[logical_id]["Properties"]["DesiredCount"]
-        assert dc == 1, f"{logical_id} should be created at 1 replica; got {dc!r}"
+        min_param = logical_id.removesuffix("Service") + "MinReplicas"
+        assert dc == {"Ref": min_param}, f"{logical_id} DesiredCount: {dc!r}"
+        assert td["Parameters"][min_param]["Default"] == "1"
+        assert td["Parameters"][min_param]["MinValue"] == 1
 
 
 def test_process_services_have_cpu_scalable_target(td):
-    """Each process-* service has a CPU autoscaling target spanning min(1) to its
-    Process*Replicas cap, scoped to the right ECS service."""
+    """Each process-* service has a CPU autoscaling target spanning its
+    Process*MinReplicas floor to its Process*Replicas cap, scoped to the right
+    ECS service."""
     targets = {
         logical_id: r
         for logical_id, r in td["Resources"].items()
@@ -258,7 +265,7 @@ def test_process_services_have_cpu_scalable_target(td):
         props = targets[logical_id]["Properties"]
         assert props["ServiceNamespace"] == "ecs"
         assert props["ScalableDimension"] == "ecs:service:DesiredCount"
-        assert props["MinCapacity"] == 1
+        assert props["MinCapacity"] == {"Ref": max_param.replace("Replicas", "MinReplicas")}
         assert props["MaxCapacity"] == {"Ref": max_param}
         # ResourceId points at this service via service/<cluster>/<name>.
         resource_id = props["ResourceId"]["Fn::Sub"]

@@ -232,6 +232,24 @@ def build() -> Template:
             Description="Fargate memory (MiB) for lakerunner-process-traces.",
         )
     )
+    # Autoscaler floor for process-*; each service is also created at this count.
+    for prefix, cfg in (
+        ("ProcessLogs", logs_cfg),
+        ("ProcessMetrics", metrics_cfg),
+        ("ProcessTraces", traces_cfg),
+    ):
+        t.add_parameter(
+            Parameter(
+                f"{prefix}MinReplicas",
+                Type="Number",
+                MinValue=1,
+                Default=str(_min_replicas(cfg)),
+                Description=(
+                    "Minimum replicas the CPU autoscaler keeps running. Must not "
+                    f"exceed {prefix}Replicas."
+                ),
+            )
+        )
     t.add_parameter(
         Parameter(
             "PubsubSqsReplicas",
@@ -267,15 +285,15 @@ def build() -> Template:
             },
             {
                 "label": "Process Logs tunables",
-                "parameters": ["ProcessLogsReplicas", "ProcessLogsMemory"],
+                "parameters": ["ProcessLogsMinReplicas", "ProcessLogsReplicas", "ProcessLogsMemory"],
             },
             {
                 "label": "Process Metrics tunables",
-                "parameters": ["ProcessMetricsReplicas", "ProcessMetricsMemory"],
+                "parameters": ["ProcessMetricsMinReplicas", "ProcessMetricsReplicas", "ProcessMetricsMemory"],
             },
             {
                 "label": "Process Traces tunables",
-                "parameters": ["ProcessTracesReplicas", "ProcessTracesMemory"],
+                "parameters": ["ProcessTracesMinReplicas", "ProcessTracesReplicas", "ProcessTracesMemory"],
             },
             {
                 "label": "Pubsub-SQS tunables",
@@ -314,7 +332,7 @@ def build() -> Template:
     # ---------------------------------------------------------------------
     # Per-service blocks (log group, task def, ECS service).
     #
-    # process-* services are created at their min replica count; a native ECS
+    # process-* services are created at Process*MinReplicas; a native ECS
     # Application Auto Scaling target-tracking policy (CPU) then scales them up
     # to Process*Replicas. Starting at the max would launch ~3x the steady-state
     # task count on every deploy (and can blow the account's Fargate vCPU
@@ -327,8 +345,9 @@ def build() -> Template:
             "config": logs_cfg,
             "cpu": logs_cfg["cpu"],
             "memory_mib": Ref("ProcessLogsMemory"),
-            "desired_count": _min_replicas(logs_cfg),
+            "desired_count": Ref("ProcessLogsMinReplicas"),
             "output_name": "ProcessLogsServiceName",
+            "min_replicas_param": "ProcessLogsMinReplicas",
             "max_replicas_param": "ProcessLogsReplicas",
             # Temporary hack until tracked fields get a Maestro UI: override the
             # default set of log fields rolled up into the log_field_values fast
@@ -358,8 +377,9 @@ def build() -> Template:
             "config": metrics_cfg,
             "cpu": metrics_cfg["cpu"],
             "memory_mib": Ref("ProcessMetricsMemory"),
-            "desired_count": _min_replicas(metrics_cfg),
+            "desired_count": Ref("ProcessMetricsMinReplicas"),
             "output_name": "ProcessMetricsServiceName",
+            "min_replicas_param": "ProcessMetricsMinReplicas",
             "max_replicas_param": "ProcessMetricsReplicas",
         },
         {
@@ -367,8 +387,9 @@ def build() -> Template:
             "config": traces_cfg,
             "cpu": traces_cfg["cpu"],
             "memory_mib": Ref("ProcessTracesMemory"),
-            "desired_count": _min_replicas(traces_cfg),
+            "desired_count": Ref("ProcessTracesMinReplicas"),
             "output_name": "ProcessTracesServiceName",
+            "min_replicas_param": "ProcessTracesMinReplicas",
             "max_replicas_param": "ProcessTracesReplicas",
         },
         {
@@ -426,7 +447,7 @@ def build() -> Template:
                 ecs_service=ecs_service,
                 service_key=spec["service_key"],
                 config=spec["config"],
-                min_replicas=_min_replicas(spec["config"]),
+                min_replicas_param=spec["min_replicas_param"],
                 max_replicas_param=spec["max_replicas_param"],
             )
 
@@ -439,7 +460,7 @@ def _add_cpu_autoscaling(
     ecs_service,
     service_key: str,
     config: dict,
-    min_replicas: int,
+    min_replicas_param: str,
     max_replicas_param: str,
 ):
     """Attach a CPU target-tracking autoscaler to a process-* ECS service.
@@ -461,7 +482,7 @@ def _add_cpu_autoscaling(
                 "service/${ClusterName}/${ServiceName}",
                 ServiceName=GetAtt(ecs_service, "Name"),
             ),
-            MinCapacity=min_replicas,
+            MinCapacity=Ref(min_replicas_param),
             MaxCapacity=Ref(max_replicas_param),
         )
     )
@@ -545,7 +566,7 @@ def _max_replicas(service_cfg: dict) -> int:
 
 
 def _min_replicas(service_cfg: dict) -> int:
-    """Initial ECS DesiredCount for an autoscaling-eligible service.
+    """Process*MinReplicas default for an autoscaling-eligible service.
 
     The service is created at this count; the CPU target-tracking policy scales
     it up to the Process*Replicas cap under load. Falls back to `replicas` if
