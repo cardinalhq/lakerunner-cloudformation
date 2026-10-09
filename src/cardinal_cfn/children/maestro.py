@@ -184,6 +184,18 @@ def build() -> Template:
             ),
         )
     )
+    t.add_parameter(
+        Parameter(
+            "McpApiKeySecretArn",
+            Type="String",
+            Description=(
+                "ARN of the cardinal-mcp-api-key secret. Mounted into maestro "
+                "and mcp-gateway as MAESTRO_MCP_API_KEY: maestro's system key "
+                "for MCP callers, and the gateway's credential for its reverse "
+                "hops into maestro."
+            ),
+        )
+    )
 
     # MigrationComplete is unused on purpose (same convention as services-*).
     # The root passes the migration-stack output through this parameter so
@@ -353,6 +365,7 @@ def build() -> Template:
                     "DbSecretArn",
                     "LicenseSecretArn",
                     "AdminApiKeySecretArn",
+                    "McpApiKeySecretArn",
                     "MigrationComplete",
                 ],
             },
@@ -458,6 +471,13 @@ def build() -> Template:
         ),
     ]
 
+    # Shared by maestro (accepts it as X-CardinalHQ-API-Key, granting a
+    # superadmin service context) and mcp-gateway (sends it on reverse hops).
+    mcp_api_key_secret = Secret(
+        Name="MAESTRO_MCP_API_KEY",
+        ValueFrom=Sub("${McpApiKeySecretArn}:key::"),
+    )
+
     mcp_gateway_container = ContainerDefinition(
         Name="mcp-gateway",
         Image=maestro_image_ref,
@@ -477,11 +497,27 @@ def build() -> Template:
                 Name="MCP_MIGRATE_RECOVER_FROM_DIRTY",
                 Value=Ref("McpMigrateRecoverFromDirty"),
             ),
+            # Mounts the per-org aggregator at /org/{orgId}/mcp, the backend
+            # behind maestro's /api/orgs/{orgId}/mcp (and /mcp under OAuth).
+            # Without it those maestro routes 404 and external MCP clients
+            # (Claude Code, Codex, Copilot) have nothing to talk to.
+            Environment(Name="GATEWAY_AGGREGATOR_ENABLED", Value="true"),
+            # Attribute audit + rate limits to the per-user identity maestro
+            # stamps in X-CardinalHQ-Auth-* rather than one shared bucket.
+            # Safe only because the port is loopback-only (see above).
+            Environment(Name="GATEWAY_AGGREGATOR_TRUSTED_HEADERS", Value="true"),
+            # Reverse hops (outcomes tools, kube fan-out) go back into maestro
+            # over loopback, authenticated with MAESTRO_MCP_API_KEY.
+            Environment(
+                Name="MAESTRO_BASE_URL",
+                Value=f"http://localhost:{maestro_port}",
+            ),
         ],
         # mcp-gateway loads its license via license-go; LICENSE_DATA env var
         # is honored (priority > LICENSE_FILE > /app/license/license.json).
         Secrets=list(db_secrets) + [
             Secret(Name="LICENSE_DATA", ValueFrom=Ref("LicenseSecretArn")),
+            mcp_api_key_secret,
         ],
         DependsOn=[{"ContainerName": "db-init", "Condition": "SUCCESS"}],
         LogConfiguration=LogConfiguration(
@@ -588,6 +624,7 @@ def build() -> Template:
                 Name="MAESTRO_BOOTSTRAP_LAKERUNNER_ADMIN_API_KEY",
                 ValueFrom=Sub("${AdminApiKeySecretArn}:key::"),
             ),
+            mcp_api_key_secret,
         ],
         DependsOn=[
             {"ContainerName": "db-init", "Condition": "SUCCESS"},

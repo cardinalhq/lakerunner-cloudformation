@@ -359,8 +359,9 @@ delete_ingest_bucket() {
     aws s3api delete-bucket --bucket "$INGEST_BUCKET"
 }
 
-# 4b -- secrets (DB master + license + admin-key; all force-deleted with no
-# recovery window since the user accepted destructive cleanup)
+# 4b -- secrets (DB master + license + admin-key + mcp-api-key; all
+# force-deleted with no recovery window since the user accepted destructive
+# cleanup)
 delete_secrets() {
     for sid in $SECRET_IDS; do
         if ! aws secretsmanager describe-secret --secret-id "$sid" >/dev/null 2>&1; then

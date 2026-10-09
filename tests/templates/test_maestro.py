@@ -137,6 +137,40 @@ def test_mcp_gateway_runs_without_api_key(td):
     assert env["MCP_ALLOW_NO_AUTH"] == "true"
 
 
+def test_mcp_gateway_serves_aggregator_behind_maestro(td):
+    """maestro's /api/orgs/{orgId}/mcp proxies to the gateway aggregator,
+    which only mounts with GATEWAY_AGGREGATOR_ENABLED."""
+    env = {e["Name"]: e["Value"] for e in _container(td, "mcp-gateway")["Environment"]}
+    assert env["GATEWAY_AGGREGATOR_ENABLED"] == "true"
+    assert env["GATEWAY_AGGREGATOR_TRUSTED_HEADERS"] == "true"
+    assert env["MAESTRO_BASE_URL"] == "http://localhost:4200"
+
+
+def test_mcp_gateway_is_not_load_balanced(td):
+    # Trusted identity headers are only safe while maestro is the gateway's
+    # sole caller, so the gateway port must never get a target group.
+    service = next(
+        r for r in td["Resources"].values() if r["Type"] == "AWS::ECS::Service"
+    )
+    names = {lb["ContainerName"] for lb in service["Properties"]["LoadBalancers"]}
+    assert "mcp-gateway" not in names
+
+
+def test_mcp_api_key_on_maestro_and_gateway_only(td):
+    """MAESTRO_MCP_API_KEY is a superadmin credential: maestro accepts it, the
+    gateway sends it on reverse hops, nothing else mounts it."""
+    task_def = next(
+        r for r in td["Resources"].values() if r["Type"] == "AWS::ECS::TaskDefinition"
+    )
+    holders = set()
+    for c in task_def["Properties"]["ContainerDefinitions"]:
+        for s in c.get("Secrets", []):
+            if s["Name"] == "MAESTRO_MCP_API_KEY":
+                assert s["ValueFrom"] == {"Fn::Sub": "${McpApiKeySecretArn}:key::"}
+                holders.add(c["Name"])
+    assert holders == {"maestro", "mcp-gateway"}
+
+
 def test_maestro_and_dex_are_essential(td):
     task_def = next(
         r for r in td["Resources"].values() if r["Type"] == "AWS::ECS::TaskDefinition"

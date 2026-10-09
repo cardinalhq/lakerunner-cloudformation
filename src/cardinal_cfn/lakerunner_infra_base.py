@@ -13,7 +13,7 @@ Resources created:
   maestro) with tier-specific inter-tier ingress; all egress.
 - 1 shared ECS task execution role + 5 per-tier task roles.
 - 1 cooked bucket (durable; cooked-only output; Retain).
-- license + admin-key secrets (Retain, named cardinal-*).
+- license + admin-key + mcp-api-key secrets (Retain, named cardinal-*).
 
 No org-content SSM params: Lakerunner installs admin-key-only (the admin-api
 binary seeds its first key from the cardinal-admin-key secret via
@@ -26,14 +26,15 @@ RDS/service ARNs. Instead they scope by NAME PATTERN:
 
 - secrets -> arn:...:secret:cardinal-* (requires the rds master secret to
   be named cardinal-db-master and base's secrets cardinal-license /
-  cardinal-admin-key).
+  cardinal-admin-key / cardinal-mcp-api-key).
 - S3 -> the cooked bucket this stack creates (by name).
 - process tier -> sts:AssumeRole on cardinal-satellite-access* (the poller
   assumes each satellite's access role, which carries the real S3/SQS perms;
   there is no local ingest queue here).
 
-Outputs all SG IDs, role ARNs, the cooked bucket name, and the license/admin
-secret ARNs so rds + services (wired by the deploy driver) can consume them.
+Outputs all SG IDs, role ARNs, the cooked bucket name, and the
+license/admin/mcp secret ARNs so rds + services (wired by the deploy driver)
+can consume them.
 """
 
 from __future__ import annotations
@@ -200,6 +201,16 @@ def build() -> Template:
         ),
         MinLength=1,
     ))
+    mcp_api_key_secret_name = t.add_parameter(Parameter(
+        "McpApiKeySecretName",
+        Type="String",
+        Default="cardinal-mcp-api-key",
+        Description=(
+            "Secrets Manager name for Maestro's MCP system key. Must match the "
+            "cardinal-* pattern the task roles grant."
+        ),
+        MinLength=1,
+    ))
     license_data = add_no_echo_parameter(
         t,
         "LicenseData",
@@ -242,6 +253,7 @@ def build() -> Template:
                 "parameters": [
                     "LicenseSecretName",
                     "AdminKeySecretName",
+                    "McpApiKeySecretName",
                 ],
             },
         ],
@@ -726,8 +738,8 @@ def build() -> Template:
     )
 
     # ----------------------------------------------------------------------
-    # Application secrets (license, admin-key). Named cardinal-* so the task
-    # roles' name-pattern secret access resolves them.
+    # Application secrets (license, admin-key, mcp-api-key). Named cardinal-*
+    # so the task roles' name-pattern secret access resolves them.
     # ----------------------------------------------------------------------
     license_secret = t.add_resource(
         _retain(
@@ -758,6 +770,32 @@ def build() -> Template:
                     ExcludePunctuation=True,
                 ),
                 Tags=_tags(component="admin-key"),
+            )
+        )
+    )
+
+    # Maestro's MCP system key (MAESTRO_MCP_API_KEY). Shared by the maestro
+    # and mcp-gateway containers: the gateway presents it on its reverse hops
+    # into maestro (outcomes, kube). It also authenticates external MCP
+    # clients as a superadmin service account, so treat it as an admin
+    # credential.
+    mcp_api_key_secret = t.add_resource(
+        _retain(
+            Secret(
+                "McpApiKeySecret",
+                Name=Ref(mcp_api_key_secret_name),
+                Description=(
+                    "Maestro MCP system key. JSON shape "
+                    '{"key": "<random>"} so the ECS secret pointer '
+                    '":key::" resolves at task launch.'
+                ),
+                GenerateSecretString=GenerateSecretString(
+                    SecretStringTemplate="{}",
+                    GenerateStringKey="key",
+                    PasswordLength=64,
+                    ExcludePunctuation=True,
+                ),
+                Tags=_tags(component="mcp-api-key"),
             )
         )
     )
@@ -794,6 +832,8 @@ def build() -> Template:
           Ref(license_secret))
     _emit("AdminKeySecretArn", "ARN of the first-boot admin key secret.",
           Ref(admin_key_secret))
+    _emit("McpApiKeySecretArn", "ARN of the Maestro MCP system key secret.",
+          Ref(mcp_api_key_secret))
 
     return t
 
@@ -814,8 +854,8 @@ def _ecs_tasks_trust() -> dict:
 
 def _cardinal_secret_arn_pattern():
     # Secrets Manager appends a random 6-char suffix to physical ARNs, so the
-    # trailing wildcard matches cardinal-db-master, cardinal-license, and
-    # cardinal-admin-key regardless of suffix.
+    # trailing wildcard matches cardinal-db-master, cardinal-license,
+    # cardinal-admin-key, and cardinal-mcp-api-key regardless of suffix.
     return Sub(
         "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:"
         "${AWS::AccountId}:secret:cardinal-*"

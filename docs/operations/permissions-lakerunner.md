@@ -38,7 +38,7 @@ One per child stack. Trust is always `ecs-tasks.amazonaws.com`.
 | `ProcessRole` | process-{logs,metrics,traces} + pubsub-sqs. | db-master + license secret read; `s3:GetObject` / `s3:PutObject` / `s3:DeleteObject` / `s3:ListBucket` on the ingest bucket; `sqs:ReceiveMessage` / `sqs:DeleteMessage` / `sqs:GetQueueAttributes` on the ingest queue; `bedrock:InvokeModel{,WithResponseStream}` on `foundation-model/*`. |
 | `ControlRole` | sweeper + monitoring + admin-api + alert-evaluator. | db-master + license + admin-key secret read; `s3:GetObject` / `s3:DeleteObject` / `s3:ListBucket` on the ingest bucket (sweeper). No ECS API -- process-* autoscaling is now native ECS Application Auto Scaling (its own service-linked role). |
 | `OtelRole` | otel-gateway collector. | License secret read; CW Logs writes only. |
-| `MaestroRole` | maestro + dex sidecar. | db-master + license + admin-key secret read. |
+| `MaestroRole` | maestro + dex sidecar. | db-master + license + admin-key + mcp-api-key secret read. |
 
 ### Service roles in `cardinal-satellite-cwmetrics` (optional add-on)
 

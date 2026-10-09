@@ -11,6 +11,34 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## Unreleased
+
+**External MCP clients now work against a CFN install.** The bundled
+mcp-gateway now runs with `GATEWAY_AGGREGATOR_ENABLED=true` and
+`GATEWAY_AGGREGATOR_TRUSTED_HEADERS=true`, so Maestro's authenticated
+`https://<maestro-host>/api/orgs/<orgId>/mcp` endpoint is live. Before this, that
+route returned 404. MCP clients (Claude Code, Codex, GitHub Copilot) connect
+there with an `X-CardinalHQ-API-Key` header. The gateway port is still
+loopback-only, with no target group and no security-group ingress.
+
+**New secret `cardinal-mcp-api-key`** (Retain, generated). infra-base creates it
+and outputs `McpApiKeySecretArn`. The services stack takes a new required
+`McpApiKeySecretArn` parameter, which the driver wires from infra-base by name.
+The secret is mounted as `MAESTRO_MCP_API_KEY` in the maestro and mcp-gateway
+containers. The gateway uses it to authenticate its loopback calls back into
+Maestro (the outcomes and kube tools). Maestro also accepts it as a superadmin
+service-account key, so treat it like an admin credential and do not hand it out
+as a per-user MCP key. A new optional infra-base parameter,
+`McpApiKeySecretName` (driver: `MCP_API_KEY_SECRET_NAME`), overrides the name.
+No IAM change is needed, because the existing `cardinal-*` secret grant covers
+it.
+
+Upgrade action: redeploy infra-base **first**, then the services stack. If you
+update services before infra-base, the driver fails because the
+`McpApiKeySecretArn` output is missing. The Maestro task is replaced in a
+rolling deploy. No data-bearing resource is replaced. For teardown,
+`cardinal-mcp-api-key` joins the list of fixed-name secrets to force-delete.
+
 ## v1.7.9
 
 **Image bumps.** Default `LakerunnerImage` v1.87.2 → v1.88.3 and

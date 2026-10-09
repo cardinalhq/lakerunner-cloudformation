@@ -166,6 +166,8 @@ _INFRA_SETUP_PARAMS = [
      "ARN of the cardinal-license secret (infra output)."),
     ("AdminKeySecretArn", "String", None,
      "ARN of the cardinal-admin-key secret (infra output)."),
+    ("McpApiKeySecretArn", "String", None,
+     "ARN of the cardinal-mcp-api-key secret (infra output)."),
     ("ClusterName", "String", None,
      "Name of the ECS cluster (customer-supplied)."),
     ("ClusterArn", "String", None,
@@ -696,6 +698,7 @@ def build() -> Template:
         "DexExtraUsers": Ref("DexExtraUsers"),
         "OidcSuperadminEmails": Ref("OidcSuperadminEmails"),
         "AdminApiKeySecretArn": Ref("AdminKeySecretArn"),
+        "McpApiKeySecretArn": Ref("McpApiKeySecretArn"),
         "OrganizationId": Ref("OrganizationId"),
         "OrgName": Ref("OrgName"),
     }, depends_on=["Migration"], condition="DeployMaestroEnabled")

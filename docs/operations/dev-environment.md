@@ -141,8 +141,8 @@ shows `... 0 failed`, the cooked bucket is non-empty, and logging into Maestro
 Use `dev-scripts/teardown-cardinal.sh`. It deletes the five stacks in
 **reverse** dependency order, empties + removes the data buckets, and
 force-deletes the retained fixed-name secrets (`cardinal-license` /
-`cardinal-admin-key` / `cardinal-db-master`) that would otherwise block a fresh
-re-create. The VPC and ECS cluster are left untouched. It is idempotent (safe to
+`cardinal-admin-key` / `cardinal-mcp-api-key` / `cardinal-db-master`) that would
+otherwise block a fresh re-create. The VPC and ECS cluster are left untouched. It is idempotent (safe to
 re-run if interrupted) and gated behind `CONFIRM=DELETE`.
 
 ```sh

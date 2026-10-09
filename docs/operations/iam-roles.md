@@ -51,6 +51,7 @@ ARNs the ExecutionRole must read. Aggregated:
 | `DbMasterSecretArn` | migration (configdb-init, migrator, keepalive), query (query-api, query-worker), process (process-{logs,metrics,traces}, pubsub-sqs), control (admin-api, alert-evaluator, monitoring, sweeper), maestro (db-init, mcp-gateway, maestro) |
 | `LicenseSecretArn` | query, process, control, otel, maestro (every container that pulls LICENSE_DATA) |
 | `AdminKeySecretArn` | control (admin-api), maestro (maestro) |
+| `McpApiKeySecretArn` | maestro (maestro, mcp-gateway) |
 
 No container pulls from SSM Parameter Store: the stacks create no SSM
 parameters (the `/cardinal/satellites` delivery path was removed in v1.6.0).
@@ -60,7 +61,7 @@ parameters (the `/cardinal/satellites` delivery path was removed in v1.6.0).
 ```text
 ResolveCardinalSecrets:  secretsmanager:GetSecretValue,DescribeSecret
                          on arn:${Partition}:secretsmanager:<region>:<acct>:secret:cardinal-*
-                         (name pattern; covers cardinal-db-master/license/admin-key)
+                         (name pattern; covers cardinal-db-master/license/admin-key/mcp-api-key)
 
 Managed: arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
          (ECR pull + CloudWatch Logs CreateLogStream/PutLogEvents)
@@ -74,7 +75,8 @@ needed and operators maintaining a custom execution role may drop it.
 **Why a `cardinal-*` name pattern, not threaded ARN refs?** `lakerunner_infra_base.py`
 deploys before the RDS stack, so it cannot reference the RDS master secret ARN.
 The db-master secret is therefore named `cardinal-db-master` (and base creates
-`cardinal-license` / `cardinal-admin-key`), letting the ExecutionRole scope to
+`cardinal-license` / `cardinal-admin-key` / `cardinal-mcp-api-key`), letting the
+ExecutionRole scope to
 the `cardinal-*` Secrets Manager name pattern. The SSM grant is likewise scoped
 to the install's own `/cardinal/*` parameter namespace.
 
@@ -223,8 +225,10 @@ on `otel-raw/`), SQS, Bedrock, ECS API.
 
 **What the containers do at runtime:**
 - `db-init`: runs Maestro's SQL migrations.
-- `mcp-gateway`: serves MCP protocol on an internal port; talks to
-  lakerunner query-api via Cloud Map.
+- `mcp-gateway`: serves MCP protocol on a loopback-only port; talks to
+  lakerunner query-api via Cloud Map. External MCP clients reach it only
+  through maestro's authenticated `/api/orgs/{orgId}/mcp` route; it calls
+  back into maestro over localhost with `MAESTRO_MCP_API_KEY`.
 - `wait-for-mcp`: localhost poll.
 - `maestro`: web UI + REST API. Talks to lrdb, calls lakerunner via
   internal endpoints (Cloud Map), bootstrap admin key passed in via env.
@@ -235,7 +239,7 @@ on `otel-raw/`), SQS, Bedrock, ECS API.
 
 **Required policy (TaskRole):**
 ```text
-ReadSecrets:    secretsmanager:Get/DescribeSecret on [DbMasterSecretArn, LicenseSecretArn, AdminKeySecretArn]
+ReadSecrets:    secretsmanager:Get/DescribeSecret on [DbMasterSecretArn, LicenseSecretArn, AdminKeySecretArn, McpApiKeySecretArn]
 CloudWatchLogs: logs:CreateLogStream,PutLogEvents on tier log groups
 ```
 

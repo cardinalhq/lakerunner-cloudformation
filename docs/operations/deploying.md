@@ -89,8 +89,9 @@ keeps the stack out of the harder-to-recover `UPDATE_ROLLBACK_FAILED` state.
 
 Teardown deletes the five stacks in reverse dependency order and then removes
 the retained, fixed-name survivors (the `cardinal-license` /
-`cardinal-admin-key` / `cardinal-db-master` secrets, the cooked and raw
-buckets, the RDS final snapshot) that would otherwise block a fresh install.
+`cardinal-admin-key` / `cardinal-mcp-api-key` / `cardinal-db-master` secrets,
+the cooked and raw buckets, the RDS final snapshot) that would otherwise block a
+fresh install.
 `cardinal-satellite-cwmetrics`, if deployed, is deleted first. The exact
 sequence is under "Burn it down" in [`dev-environment.md`](dev-environment.md);
 pass `DEPLOYER_ROLE_ARN` there too when a service role is in use.

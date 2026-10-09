@@ -54,7 +54,8 @@ without executing it.
 ### 1. infra-base
 
 Creates the IAM roles, security groups, cooked S3 bucket, and the
-`cardinal-license` / `cardinal-admin-key` secrets. No upstream.
+`cardinal-license` / `cardinal-admin-key` / `cardinal-mcp-api-key` secrets. No
+upstream.
 
 - Required: `STACK_NAME`, `REGION`, `VPC_ID`, `CLUSTER_ARN`, `LICENSE_DATA` (or `LICENSE_DATA_FILE`).
 - App ALB visibility (the ALB itself lives in step 5; its security-group ingress
@@ -161,8 +162,8 @@ into each release's drivers/templates, so the version bump carries them.
 The product assumes a single install per account/region. Tear down by deleting
 the five stacks in reverse order and removing the retained, fixed-name
 resources that block a future re-create. The exact sequence (and the survivors
-to delete: `cardinal-license` / `cardinal-admin-key` / `cardinal-db-master`
-secrets, the cooked + raw buckets, the RDS final snapshot) is documented under
+to delete: `cardinal-license` / `cardinal-admin-key` /
+`cardinal-mcp-api-key` / `cardinal-db-master` secrets, the cooked + raw buckets, the RDS final snapshot) is documented under
 "Burn it down" in [`dev-environment.md`](dev-environment.md).
 
 ## Reference
