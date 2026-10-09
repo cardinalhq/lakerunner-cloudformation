@@ -97,6 +97,7 @@ Optional (template defaults preserved when unset):
                                Access config (template default 'false': not set).
   LICENSE_SECRET_NAME          (template default cardinal-license).
   ADMIN_KEY_SECRET_NAME        (template default cardinal-admin-key).
+  MCP_API_KEY_SECRET_NAME      (template default cardinal-mcp-api-key).
   EXECUTION_ROLE_POLICY_ARNS   Comma-separated managed-policy ARNs to attach to
                                the ECS task execution role (e.g. ECR pull-through
                                import, cross-account ECR, KMS decrypt).
@@ -170,6 +171,8 @@ ConfigureBucketPublicAccessBlock=$CONFIGURE_BUCKET_PUBLIC_ACCESS_BLOCK"
 LicenseSecretName=$LICENSE_SECRET_NAME"
 [ -n "${ADMIN_KEY_SECRET_NAME:-}" ] && params="$params
 AdminKeySecretName=$ADMIN_KEY_SECRET_NAME"
+[ -n "${MCP_API_KEY_SECRET_NAME:-}" ] && params="$params
+McpApiKeySecretName=$MCP_API_KEY_SECRET_NAME"
 
 # Optional execution-role extra managed policies (pasted JSON and/or ARNs).
 EXEC_EXTRA_ARNS=""
