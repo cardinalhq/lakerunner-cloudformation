@@ -69,6 +69,11 @@ services:
       command: ["/app/bin/lakerunner", "sysinfo"]
     environment:
       LAKERUNNER_PROCESSING_LOGS_COMPACT_TARGET_FILE_SIZE: "2097152"
+      # lakerunner defaults log workers to one sequential slot, which idles the
+      # CPU during S3/DB I/O and keeps a task under the autoscaler's CPU target.
+      # A second slot overlaps that I/O; WORKER_SLOTS stays 1, so native index
+      # builds remain serialized pod-wide.
+      LAKERUNNER_SCALING_PIPELINE_DEPTH: "2"
 
   lakerunner-process-metrics:
     signal_type: metrics
