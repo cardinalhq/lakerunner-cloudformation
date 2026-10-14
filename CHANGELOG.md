@@ -11,6 +11,17 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v1.7.19
+
+**Changed default.** process-logs now sets `LAKERUNNER_SCALING_PIPELINE_DEPTH=2`
+(lakerunner's log-worker default is 1). Each task works two items at once so
+S3 and database I/O overlaps processing; native index builds stay serialized
+(`LAKERUNNER_SCALING_WORKER_SLOTS` remains 1). Previously a backlogged task
+idled at roughly 40% CPU, below the 50% autoscaling target, so it never scaled
+out. Expect higher per-task CPU and somewhat higher memory and scratch-disk use.
+
+No upgrade action. Updating the services stack rolls process-logs.
+
 ## v1.7.18
 
 **New parameters.** `ProcessLogsMinReplicas`, `ProcessMetricsMinReplicas` and

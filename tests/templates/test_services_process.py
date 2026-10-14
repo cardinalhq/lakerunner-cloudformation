@@ -466,6 +466,14 @@ def test_other_process_services_have_no_tracked_fields_env(td):
         )
 
 
+def test_process_logs_pipelines_two_slots(td):
+    """process-logs overlaps I/O with a second pipeline slot; lakerunner's
+    log-worker default of 1 is sequential and idles the CPU on S3/DB I/O."""
+    env = _env(td, "ProcessLogsTaskDef")
+    assert env.get("LAKERUNNER_SCALING_PIPELINE_DEPTH") == "2"
+    assert "LAKERUNNER_SCALING_WORKER_SLOTS" not in env
+
+
 # ---------------------------------------------------------------------------
 # B → C boundary
 # ---------------------------------------------------------------------------
