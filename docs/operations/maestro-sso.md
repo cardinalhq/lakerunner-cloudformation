@@ -2,8 +2,8 @@
 
 By default Maestro users log in through the bundled DEX with local accounts
 (`DEX_ADMIN_*`, `DEX_EXTRA_USERS`). To use the customer's own SSO instead, point
-Maestro at their OIDC IdP — Okta, Entra ID, Keycloak, or anything that issues
-OIDC tokens. This is how Cardinal's own production Maestro runs (against
+Maestro at their OIDC IdP — Okta, Keycloak, or anything that issues
+OIDC tokens (Entra ID through a broker; see below). This is how Cardinal's own production Maestro runs (against
 Keycloak, which brokers Google).
 
 Setting `OIDC_ISSUER_URL` replaces DEX: the services stack drops the dex
@@ -40,7 +40,7 @@ is required.
 | `OIDC_DISPLAY_NAME_CLAIMS` | `name,preferred_username,email` | |
 | `OIDC_GROUPS_CLAIM` | `groups` | |
 | `OIDC_EXTERNAL_ID_CLAIM` | `sub` | Persistent account key; changing it on a live install is a migration event. |
-| `OIDC_TRUST_UNVERIFIED_EMAILS` | `false` | For IdPs that omit `email_verified` (often Entra ID). |
+| `OIDC_TRUST_UNVERIFIED_EMAILS` | `false` | For IdPs that omit `email_verified`. |
 | `MCP_OAUTH_ENABLED` | `false` | OAuth sign-in for MCP clients on `/mcp`; needs an external issuer. |
 | `MCP_OAUTH_ISSUER` | `OIDC_ISSUER_URL` | Authorization server advertised to MCP clients. |
 | `MCP_OAUTH_AUDIENCE` | `<base URL>/mcp` | `aud` accepted on `/mcp` only. |
@@ -62,3 +62,52 @@ STACK_NAME=cardinal-lakerunner-services REGION=us-east-1 ... \
 
 Unset variables keep the stack's current values on update. To go back to DEX,
 pass `PARAMS="OidcIssuerUrl="` along with `DEX_ADMIN_PASSWORD_HASH`.
+
+## Microsoft Entra ID
+
+Entra ID cannot be Maestro's issuer directly. Maestro's UI requests only
+`openid profile email` and sends the resulting access token. Entra issues that
+token for Microsoft Graph (`aud` `00000003-0000-0000-c000-000000000000`), and a
+Graph token cannot be verified by anyone but Graph. Broker Entra through
+Keycloak (or Okta) and point Maestro at the broker.
+
+In Entra (**App registrations → New registration**):
+
+- Platform: **Web**, redirect URI
+  `https://<keycloak-host>/realms/<realm>/broker/entra/endpoint`.
+- **Certificates & secrets → New client secret**. Keycloak holds this secret,
+  not Maestro.
+- **Token configuration → Add optional claim → ID → `email`**, so users whose
+  UPN differs from their mail address still get an email.
+- Note the **Directory (tenant) ID** and **Application (client) ID**.
+
+In Keycloak, in the realm Maestro will use:
+
+- **Identity providers → OpenID Connect v1.0**, alias `entra`:
+    - Discovery endpoint:
+      `https://login.microsoftonline.com/<tenant-id>/v2.0/.well-known/openid-configuration`
+    - Client ID / secret: from the Entra app registration.
+    - Client authentication: **Client secret sent as post**.
+    - Default scopes: `openid profile email`.
+    - Trust email: **on** (Entra sends no `email_verified`).
+- The `maestro-ui` public client and `groups` mapper from
+  <https://docs.cardinalhq.io/maestro/install/oidc#keycloak>, with redirect URI
+  `https://<host>/*`.
+- Optional: **Authentication → Browser flow → Identity Provider Redirector**,
+  default provider `entra`, to skip the Keycloak login page.
+
+Entra puts group object IDs (GUIDs), not names, in its `groups` claim. Either
+map an Entra group to the Keycloak `maestro-superadmin` group with an identity
+provider mapper (**Claim to Group**, claim `groups`, value the Entra group's
+object ID), or grant superadmin by email.
+
+```sh
+OIDC_ISSUER_URL=https://auth.example.com/realms/example \
+OIDC_SUPERADMIN_GROUP=maestro-superadmin \
+DEX_ADMIN_EMAIL=owner@example.com \
+STACK_NAME=cardinal-lakerunner-services REGION=us-east-1 ... \
+  ./deploy-lakerunner-services.sh
+```
+
+These are the Keycloak values: Maestro sees only Keycloak, and the defaults for
+`OIDC_AUDIENCE` and `OIDC_JWKS_URL` already fit it.

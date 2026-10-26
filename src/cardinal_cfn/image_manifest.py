@@ -13,8 +13,8 @@ import sys
 from cardinal_cfn.defaults import load_defaults
 
 # Which cardinal-defaults.yaml images.* keys each stack runs. The list is the
-# full scan/mirror surface for the stack, including external/utility images that
-# the drivers handle via per-image overrides (busybox, the ghcr db-init).
+# full scan/mirror surface for the stack, including the db-init image (which
+# also has a full-URI driver override, DB_INIT_IMAGE).
 STACK_IMAGE_KEYS = {
     "satellite": ["otel"],
     "lakerunner": ["lakerunner", "maestro", "dex", "db_init"],
