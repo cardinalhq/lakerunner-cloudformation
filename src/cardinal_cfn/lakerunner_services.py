@@ -27,6 +27,7 @@ is optional.
 import os
 
 from troposphere import (
+    And,
     Template,
     Parameter,
     Ref,
@@ -41,6 +42,7 @@ from troposphere import (
 from troposphere.cloudformation import Stack
 from troposphere.servicediscovery import PrivateDnsNamespace
 
+from cardinal_cfn.children.maestro import EXTERNAL_OIDC_PARAMS, add_external_oidc_parameters
 from cardinal_cfn.install_id import install_id_short, install_id_long
 from cardinal_cfn.parameters import add_parameter_group_metadata, add_no_echo_parameter
 from cardinal_cfn.images import add_image_override
@@ -344,12 +346,17 @@ def build() -> Template:
         "DexAdminEmail",
         Type="String",
         Default="admin@cardinal.local",
-        Description="Email address for the DEX local-DB admin login.",
+        Description=(
+            "Email address for the DEX local-DB admin login, and the owner of "
+            "the org Maestro pre-populates. With an external IdP, set it to "
+            "the owner's IdP email."
+        ),
     ))
     add_no_echo_parameter(
         t, "DexAdminPasswordHash",
         description=(
-            "Bcrypt hash ($2a$/$2b$/$2y$) of the DEX admin password. Required."
+            "Bcrypt hash ($2a$/$2b$/$2y$) of the DEX admin password. Required "
+            "unless OidcIssuerUrl names an external IdP."
         ),
     )
     add_no_echo_parameter(
@@ -370,6 +377,7 @@ def build() -> Template:
             "Default matches DexAdminEmail."
         ),
     ))
+    add_external_oidc_parameters(t)
     t.add_parameter(Parameter(
         "OrganizationId",
         Type="String",
@@ -505,6 +513,8 @@ def build() -> Template:
                             "OidcSuperadminEmails",
                             "OrganizationId", "OrgName",
                             "TemplateBaseUrl"]},
+            {"label": "Maestro external OIDC IdP (replaces DEX)",
+             "parameters": [name for name, *_ in EXTERNAL_OIDC_PARAMS]},
         ],
     )
 
@@ -512,6 +522,32 @@ def build() -> Template:
     # Conditions
     # ---------------------------------------------------------------------
     t.add_condition("DeployMaestroEnabled", Equals(Ref("DeployMaestro"), "Yes"))
+
+    # Same refusals as the maestro helm chart: DEX needs its admin hash, and
+    # MCP OAuth cannot work against DEX (no client registration for connectors).
+    t.add_rule("DexAdminPasswordHashRequired", {
+        "RuleCondition": And(
+            Equals(Ref("DeployMaestro"), "Yes"),
+            Equals(Ref("OidcIssuerUrl"), ""),
+        ),
+        "Assertions": [{
+            "Assert": Not(Equals(Ref("DexAdminPasswordHash"), "")),
+            "AssertDescription": (
+                "DexAdminPasswordHash is required unless OidcIssuerUrl names "
+                "an external IdP."
+            ),
+        }],
+    })
+    t.add_rule("McpOauthRequiresExternalOidc", {
+        "RuleCondition": Equals(Ref("McpOauthEnabled"), "true"),
+        "Assertions": [{
+            "Assert": Not(Equals(Ref("OidcIssuerUrl"), "")),
+            "AssertDescription": (
+                "McpOauthEnabled=true requires OidcIssuerUrl: the bundled DEX "
+                "cannot issue tokens for MCP connectors."
+            ),
+        }],
+    })
 
     # Self-telemetry exports to a driver-supplied OTLP/HTTP endpoint (typically
     # the satellite collector's CollectorEndpoint). An empty endpoint disables
@@ -725,6 +761,7 @@ def build() -> Template:
         "DexAdminPasswordHash": Ref("DexAdminPasswordHash"),
         "DexExtraUsers": Ref("DexExtraUsers"),
         "OidcSuperadminEmails": Ref("OidcSuperadminEmails"),
+        **{name: Ref(name) for name, *_ in EXTERNAL_OIDC_PARAMS},
         "AdminApiKeySecretArn": Ref("AdminKeySecretArn"),
         "OrganizationId": Ref("OrganizationId"),
         "OrgName": Ref("OrgName"),

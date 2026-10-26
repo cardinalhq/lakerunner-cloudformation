@@ -219,11 +219,33 @@ def test_lakerunner_services_single_queue():
 
 def test_lakerunner_services_requires_dex_admin_password_hash():
     """Maestro/DEX will not start without DEX_ADMIN_PASSWORD_HASH, so the
-    wrapper must validate it as a REQUIRED env var (collect-all-missing)."""
-    text = (SCRIPTS_DIR / "deploy-lakerunner-services.sh").read_text()
-    assert 'missing="$missing DEX_ADMIN_PASSWORD_HASH"' in text, (
-        "DEX_ADMIN_PASSWORD_HASH is not in the required-vars validation"
+    wrapper requires it -- unless OIDC_ISSUER_URL replaces DEX."""
+    script = SCRIPTS_DIR / "deploy-lakerunner-services.sh"
+
+    def missing_line(env):
+        result = subprocess.run(
+            ["sh", str(script)], capture_output=True, text=True,
+            env={"PATH": TEST_PATH, **env},
+        )
+        miss = [ln for ln in (result.stdout + result.stderr).splitlines()
+                if "missing required" in ln]
+        assert miss, result.stderr
+        return miss[0]
+
+    assert "DEX_ADMIN_PASSWORD_HASH" in missing_line({})
+    assert "DEX_ADMIN_PASSWORD_HASH" not in missing_line(
+        {"OIDC_ISSUER_URL": "https://idp.example.com"}
     )
+
+
+def test_lakerunner_services_maps_every_external_oidc_env():
+    """Each maestro external-OIDC parameter is settable from the env var of the
+    same name the maestro helm chart uses."""
+    from cardinal_cfn.children.maestro import EXTERNAL_OIDC_PARAMS
+
+    text = (SCRIPTS_DIR / "deploy-lakerunner-services.sh").read_text()
+    for param, env_name, *_ in EXTERNAL_OIDC_PARAMS:
+        assert f"{env_name}={param}" in text, f"{env_name} not mapped to {param}"
 
 
 def test_lakerunner_services_supports_alb_scheme():

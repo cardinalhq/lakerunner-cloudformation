@@ -179,6 +179,30 @@ def test_dex_extra_users_param_and_forwarded_to_maestro(td):
     assert maestro["DexExtraUsers"] == {"Ref": "DexExtraUsers"}
 
 
+def test_external_oidc_params_forwarded_to_maestro(td):
+    from cardinal_cfn.children.maestro import EXTERNAL_OIDC_PARAMS
+
+    maestro = td["Resources"]["Maestro"]["Properties"]["Parameters"]
+    for name, *_ in EXTERNAL_OIDC_PARAMS:
+        assert name in td["Parameters"], f"root missing {name}"
+        assert maestro[name] == {"Ref": name}
+
+
+def test_external_oidc_rules(td):
+    """Mirror the maestro chart: DEX needs its admin hash, and MCP OAuth needs
+    an external issuer."""
+    dex = td["Rules"]["DexAdminPasswordHashRequired"]
+    assert {"Fn::Equals": [{"Ref": "OidcIssuerUrl"}, ""]} in dex["RuleCondition"]["Fn::And"]
+    assert dex["Assertions"][0]["Assert"] == {
+        "Fn::Not": [{"Fn::Equals": [{"Ref": "DexAdminPasswordHash"}, ""]}]
+    }
+    mcp = td["Rules"]["McpOauthRequiresExternalOidc"]
+    assert mcp["RuleCondition"] == {"Fn::Equals": [{"Ref": "McpOauthEnabled"}, "true"]}
+    assert mcp["Assertions"][0]["Assert"] == {
+        "Fn::Not": [{"Fn::Equals": [{"Ref": "OidcIssuerUrl"}, ""]}]
+    }
+
+
 def test_self_telemetry_endpoint_param(td):
     """The locked SelfTelemetry=[No] toggle is gone; a real configurable
     SelfTelemetryEndpoint (String, default "") takes its place."""

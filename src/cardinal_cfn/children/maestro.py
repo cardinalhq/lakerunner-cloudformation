@@ -12,7 +12,9 @@ Owns a SINGLE ECS Fargate service running a five-container task definition:
   5. dex          (Essential=True, listens on the DEX OIDC port; renders its
                     own config from CFN-supplied OIDC params -- DexAdminEmail,
                     DexAdminPasswordHash, OidcSuperadminEmails -- via the dex
-                    image's gomplate entrypoint, so no dex-init sidecar)
+                    image's gomplate entrypoint, so no dex-init sidecar).
+                    Omitted, with its target group, listener rule and log
+                    group, when OidcIssuerUrl names a customer-supplied IdP.
 
 Container dependsOn graph: db-init -> mcp-gateway -> wait-for-mcp -> maestro.
 Both maestro and dex attach to the shared cardinal HTTPS listener via two
@@ -25,7 +27,11 @@ The shared ALB and its certificate are owned by the alb child stack.
 """
 
 from troposphere import (
+    Condition,
+    Equals,
     GetAtt,
+    If,
+    Not,
     Output,
     Parameter,
     Ref,
@@ -70,6 +76,80 @@ _DEX_KEY = "maestro-dex"
 # Listener-rule registration keys (see listener_priorities.py).
 _MAESTRO_LISTENER_KEY = "maestro-https"
 _DEX_LISTENER_KEY = "maestro-dex"
+
+# Customer-supplied OIDC IdP settings, mirroring the maestro helm chart's
+# OIDC_* / MCP_OAUTH_* env vars. A non-empty OidcIssuerUrl replaces the bundled
+# DEX. The root re-declares these via add_external_oidc_parameters() and the
+# services driver sets each from the same-named environment variable.
+# (parameter, env var, kind, description); "str" is omitted from the container
+# env when empty, "bool" is always passed.
+EXTERNAL_OIDC_PARAMS = [
+    ("OidcIssuerUrl", "OIDC_ISSUER_URL", "str",
+     "Issuer URL of a customer-supplied OIDC IdP (Okta, Entra ID, Keycloak, "
+     "...). Set to replace the bundled DEX; empty keeps DEX."),
+    ("OidcClientId", "OIDC_CLIENT_ID", "str",
+     "OAuth client_id the maestro UI sends to the external IdP (a public "
+     "PKCE client). Empty defaults to OidcAudience. Ignored with DEX."),
+    ("OidcAudience", "OIDC_AUDIENCE", "str",
+     "Expected aud claim on external IdP tokens. Empty means maestro-ui. "
+     "Ignored with DEX."),
+    ("OidcJwksUrl", "OIDC_JWKS_URL", "str",
+     "External IdP JWKS URL. Empty means "
+     "<issuer>/protocol/openid-connect/certs (Keycloak); set it for other "
+     "IdPs, e.g. <issuer>/v1/keys for Okta. Ignored with DEX."),
+    ("OidcSuperadminGroup", "OIDC_SUPERADMIN_GROUP", "str",
+     "IdP group whose members get maestro superadmin. Empty leaves "
+     "maestro's default (maestro-superadmin) and does not request the "
+     "groups scope."),
+    ("OidcEmailClaim", "OIDC_EMAIL_CLAIM", "str",
+     "Token claim holding the user's email. Empty means email."),
+    ("OidcEmailVerifiedClaim", "OIDC_EMAIL_VERIFIED_CLAIM", "str",
+     "Token claim holding the email-verified flag. Empty means "
+     "email_verified."),
+    ("OidcDisplayNameClaims", "OIDC_DISPLAY_NAME_CLAIMS", "str",
+     "Comma-separated claims tried for the display name. Empty means "
+     "name,preferred_username,email."),
+    ("OidcGroupsClaim", "OIDC_GROUPS_CLAIM", "str",
+     "Token claim holding group membership. Empty means groups."),
+    ("OidcExternalIdClaim", "OIDC_EXTERNAL_ID_CLAIM", "str",
+     "Token claim used as the persistent account key. Empty means sub. "
+     "Changing it on a live install is a migration event."),
+    ("OidcTrustUnverifiedEmails", "OIDC_TRUST_UNVERIFIED_EMAILS", "bool",
+     "When true, accept emails the IdP does not mark verified (e.g. Entra "
+     "ID, which omits email_verified)."),
+    ("McpOauthEnabled", "MCP_OAUTH_ENABLED", "bool",
+     "When true, MCP clients sign in to /mcp with OAuth against the external "
+     "IdP instead of an API key. Requires OidcIssuerUrl."),
+    ("McpOauthIssuer", "MCP_OAUTH_ISSUER", "str",
+     "Authorization server advertised to MCP clients. Empty uses "
+     "OidcIssuerUrl; its tokens must still carry iss=OidcIssuerUrl."),
+    ("McpOauthAudience", "MCP_OAUTH_AUDIENCE", "str",
+     "aud accepted on /mcp only. Empty means <base URL>/mcp."),
+    ("McpOauthAsMetadataProxy", "MCP_OAUTH_AS_METADATA_PROXY", "bool",
+     "When true, maestro serves /.well-known/oauth-authorization-server "
+     "mirrored from the issuer (for IdPs such as Keycloak realms that "
+     "publish only OIDC discovery)."),
+    ("McpOauthSelfSignup", "MCP_OAUTH_SELF_SIGNUP", "bool",
+     "When true, a new user signing in through an MCP connector gets a "
+     "personal workspace even with self-signup off."),
+]
+
+
+def add_external_oidc_parameters(t: Template) -> None:
+    for name, _, kind, description in EXTERNAL_OIDC_PARAMS:
+        if kind == "bool":
+            t.add_parameter(Parameter(
+                name, Type="String", Default="false",
+                AllowedValues=["true", "false"], Description=description,
+            ))
+        else:
+            t.add_parameter(Parameter(
+                name, Type="String", Default="", Description=description,
+            ))
+
+
+def _env_if(condition: str, name: str, value):
+    return If(condition, Environment(Name=name, Value=value), Ref("AWS::NoValue"))
 
 
 def build() -> Template:
@@ -328,6 +408,16 @@ def build() -> Template:
             "an org in the Maestro UI after their first login."
         ),
     )
+    add_external_oidc_parameters(t)
+
+    # ---------------------------------------------------------------------
+    # Conditions
+    # ---------------------------------------------------------------------
+    t.add_condition("UseBundledDex", Equals(Ref("OidcIssuerUrl"), ""))
+    t.add_condition("McpOauthOn", Equals(Ref("McpOauthEnabled"), "true"))
+    for name, _, kind, _ in EXTERNAL_OIDC_PARAMS:
+        if kind == "str" and name != "OidcIssuerUrl":
+            t.add_condition(f"Has{name}", Not(Equals(Ref(name), "")))
 
     # ---------------------------------------------------------------------
     # Console parameter grouping
@@ -382,6 +472,10 @@ def build() -> Template:
                     "OidcSuperadminEmails",
                 ],
             },
+            {
+                "label": "External OIDC IdP (replaces DEX)",
+                "parameters": [name for name, *_ in EXTERNAL_OIDC_PARAMS],
+            },
         ],
     )
 
@@ -390,7 +484,9 @@ def build() -> Template:
     # ---------------------------------------------------------------------
     db_init_lg = t.add_resource(services_common.build_log_group(service_key=_DB_INIT_KEY))
     maestro_lg = t.add_resource(services_common.build_log_group(service_key=_MAESTRO_KEY))
-    dex_lg = t.add_resource(services_common.build_log_group(service_key=_DEX_KEY))
+    dex_lg = services_common.build_log_group(service_key=_DEX_KEY)
+    dex_lg.Condition = "UseBundledDex"
+    t.add_resource(dex_lg)
 
     # ---------------------------------------------------------------------
     # Container definitions (inlined: services_common.build_task_definition
@@ -525,33 +621,52 @@ def build() -> Template:
             # not configured" placeholder instead of mounting routes.
             Environment(
                 Name="OIDC_ISSUER_URL",
-                Value=Sub("https://${AlbDnsName}/dex"),
+                Value=If(
+                    "UseBundledDex",
+                    Sub("https://${AlbDnsName}/dex"),
+                    Ref("OidcIssuerUrl"),
+                ),
             ),
-            Environment(Name="OIDC_CLIENT_ID", Value=Ref("DexClientId")),
-            Environment(Name="OIDC_AUDIENCE", Value=Ref("DexClientId")),
-            # Maestro defaults to Keycloak's JWKS path
-            # (<issuer>/protocol/openid-connect/certs) but Dex serves keys
-            # at <issuer>/keys, so we have to override it here.
-            Environment(
-                Name="OIDC_JWKS_URL",
-                Value=Sub("https://${AlbDnsName}/dex/keys"),
-            ),
+            # With DEX these are pinned to DexClientId and the DEX JWKS path
+            # (maestro defaults to Keycloak's <issuer>/protocol/openid-connect/
+            # certs, but Dex serves keys at <issuer>/keys). With an external
+            # IdP each is passed only when set, leaving maestro's defaults.
+            *[
+                If(
+                    "UseBundledDex",
+                    Environment(Name=env_name, Value=dex_value),
+                    _env_if(f"Has{param}", env_name, Ref(param)),
+                )
+                for env_name, param, dex_value in (
+                    ("OIDC_CLIENT_ID", "OidcClientId", Ref("DexClientId")),
+                    ("OIDC_AUDIENCE", "OidcAudience", Ref("DexClientId")),
+                    ("OIDC_JWKS_URL", "OidcJwksUrl", Sub("https://${AlbDnsName}/dex/keys")),
+                )
+            ],
             # DEX_* kept for any tooling that still reads the legacy names.
-            Environment(
-                Name="DEX_ISSUER_URL",
-                Value=Sub("https://${AlbDnsName}/dex"),
-            ),
-            Environment(Name="DEX_CLIENT_ID", Value=Ref("DexClientId")),
-            # Maestro fetches the JWKS from the ALB's HTTPS endpoint, but the
-            # bundled self-signed cert isn't trusted by Node's TLS stack so
+            _env_if("UseBundledDex", "DEX_ISSUER_URL", Sub("https://${AlbDnsName}/dex")),
+            _env_if("UseBundledDex", "DEX_CLIENT_ID", Ref("DexClientId")),
+            # Maestro fetches the DEX JWKS from the ALB's HTTPS endpoint, but
+            # the bundled self-signed cert isn't trusted by Node's TLS stack so
             # undici's fetch fails before it can read the keys, surfacing as
             # "JWT verification failed: fetch failed" and a 401 on /api/me.
-            # The CA-signed-cert path leaves this unset.
-            Environment(Name="NODE_TLS_REJECT_UNAUTHORIZED", Value="0"),
+            # An external IdP is reached over its own trusted cert, so TLS
+            # verification stays on.
+            _env_if("UseBundledDex", "NODE_TLS_REJECT_UNAUTHORIZED", "0"),
             # Email allowlist that grants maestro superadmin. The dex login
             # token has groups=[], so without this the DEX admin lands on
             # /onboard with no way to bootstrap an org.
             Environment(Name="OIDC_SUPERADMIN_EMAILS", Value=Ref("OidcSuperadminEmails")),
+            *[
+                _env_if(f"Has{param}", env_name, Ref(param))
+                if kind == "str"
+                else Environment(Name=env_name, Value=Ref(param))
+                for param, env_name, kind, _ in EXTERNAL_OIDC_PARAMS
+                if param not in ("OidcIssuerUrl", "OidcClientId", "OidcAudience", "OidcJwksUrl")
+            ],
+            # MCP OAuth discovery needs the public origin (the chart derives
+            # it from its base URL the same way).
+            _env_if("McpOauthOn", "MAESTRO_BASE_URL", Sub("https://${AlbDnsName}")),
             # Idempotent seed-if-missing bootstrap: org + owner + a
             # shared_cardinal lakerunner datasource (auto_add_to_all_orgs).
             # Both URLs point at the in-cluster Cloud Map names (query-api
@@ -562,6 +677,8 @@ def build() -> Template:
             # attachments stay in place for any external/admin-UI callers.
             # NODE_TLS_REJECT_UNAUTHORIZED=0 above is still needed for the
             # DEX issuer / JWKS fetch, which continues to go via the ALB.
+            # The owner email must match the owner's login, so with an
+            # external IdP set DexAdminEmail to their IdP email.
             Environment(Name="MAESTRO_BOOTSTRAP_ORG_ID", Value=Ref("OrganizationId")),
             Environment(Name="MAESTRO_BOOTSTRAP_ORG_NAME", Value=Ref("OrgName")),
             Environment(Name="MAESTRO_BOOTSTRAP_OWNER_EMAIL", Value=Ref("DexAdminEmail")),
@@ -657,7 +774,7 @@ def build() -> Template:
                 mcp_gateway_container,
                 wait_for_mcp_container,
                 maestro_container,
-                dex_container,
+                If("UseBundledDex", dex_container, Ref("AWS::NoValue")),
             ],
             Tags=cardinal_tags(component="compute", role=_SERVICE_KEY),
         )
@@ -684,24 +801,24 @@ def build() -> Template:
         )
     )
 
-    dex_tg = t.add_resource(
-        services_common.build_target_group(
-            service_key=_DEX_LISTENER_KEY,
-            vpc_id_param="VpcId",
-            port=dex_port,
-            # Dex serves all routes under its configured path_prefix; the
-            # default "/healthz" returns 404 once the prefix is set.
-            health_check_path="/dex/healthz",
-        )
+    dex_tg = services_common.build_target_group(
+        service_key=_DEX_LISTENER_KEY,
+        vpc_id_param="VpcId",
+        port=dex_port,
+        # Dex serves all routes under its configured path_prefix; the
+        # default "/healthz" returns 404 once the prefix is set.
+        health_check_path="/dex/healthz",
     )
-    dex_listener_rule = t.add_resource(
-        services_common.build_listener_rule(
-            service_key=_DEX_LISTENER_KEY,
-            target_group_ref=dex_tg,
-            listener_arn_param="HttpsListenerArn",
-            path_patterns=["/dex/*"],
-        )
+    dex_tg.Condition = "UseBundledDex"
+    t.add_resource(dex_tg)
+    dex_listener_rule = services_common.build_listener_rule(
+        service_key=_DEX_LISTENER_KEY,
+        target_group_ref=dex_tg,
+        listener_arn_param="HttpsListenerArn",
+        path_patterns=["/dex/*"],
     )
+    dex_listener_rule.Condition = "UseBundledDex"
+    t.add_resource(dex_listener_rule)
 
     # ---------------------------------------------------------------------
     # ECS Service (inlined like otel.py, because the LoadBalancers list has
@@ -742,17 +859,27 @@ def build() -> Template:
                     ContainerPort=maestro_port,
                     TargetGroupArn=Ref(maestro_tg),
                 ),
-                EcsLoadBalancer(
-                    ContainerName="dex",
-                    ContainerPort=dex_port,
-                    TargetGroupArn=Ref(dex_tg),
+                If(
+                    "UseBundledDex",
+                    EcsLoadBalancer(
+                        ContainerName="dex",
+                        ContainerPort=dex_port,
+                        TargetGroupArn=Ref(dex_tg),
+                    ),
+                    Ref("AWS::NoValue"),
                 ),
             ],
             Tags=cardinal_tags(component="compute", role=_SERVICE_KEY),
             # ECS validates that target groups are attached to a listener at
             # service-create time; depend on both ListenerRules to avoid the
-            # race.
-            DependsOn=[maestro_listener_rule.title, dex_listener_rule.title],
+            # race. DependsOn cannot name a conditional resource, so the DEX
+            # rule's dependency rides a conditional Ref in Metadata.
+            DependsOn=[maestro_listener_rule.title],
+            Metadata={
+                "DexListenerRule": If(
+                    "UseBundledDex", Ref(dex_listener_rule), Ref("AWS::NoValue")
+                )
+            },
         )
     )
 
@@ -760,7 +887,9 @@ def build() -> Template:
     # Outputs
     # ---------------------------------------------------------------------
     t.add_output(Output("MaestroUrl", Value=Sub("https://${AlbDnsName}/")))
-    t.add_output(Output("DexUrl", Value=Sub("https://${AlbDnsName}/dex/")))
+    t.add_output(Output(
+        "DexUrl", Value=Sub("https://${AlbDnsName}/dex/"), Condition="UseBundledDex"
+    ))
     t.add_output(Output("MaestroServiceName", Value=GetAtt(service, "Name")))
 
     return t

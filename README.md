@@ -25,7 +25,7 @@ the Maestro UI.
 
 1. **`cardinal-lakerunner-infra-base`** (`deploy-lakerunner-infra-base.sh`) — creates IAM roles, security groups, the cooked S3 bucket, and the license/admin-key secrets.
 1. **`cardinal-lakerunner-infra-rds`** (`deploy-lakerunner-infra-rds.sh`) — creates the RDS Postgres database.
-1. **`cardinal-lakerunner-services`** (`deploy-lakerunner-services.sh`) — creates the app ALB, the query/process/control services, and maestro+dex.
+1. **`cardinal-lakerunner-services`** (`deploy-lakerunner-services.sh`) — creates the app ALB, the query/process/control services, and Maestro (logging in through the bundled DEX, or the customer's own OIDC IdP — see [`maestro-sso.md`](docs/operations/maestro-sso.md)).
 
 `cardinal-lakerunner-services` is a root template with nested children: `alb`,
 `cert`, `migration`, `services-query`, `services-process`, `services-control`,
@@ -77,6 +77,7 @@ See [`docs/air-gapped-images.md`](docs/air-gapped-images.md).
 - [`production-deploy.md`](docs/operations/production-deploy.md) — production install path (admins)
 - [`dev-environment.md`](docs/operations/dev-environment.md) — dev/test install, self-telemetry validation, teardown
 - [`certificates.md`](docs/operations/certificates.md) — TLS certificate options
+- [`maestro-sso.md`](docs/operations/maestro-sso.md) — Maestro login through the customer's SSO (OIDC IdP) instead of DEX
 - [`deploying.md`](docs/operations/deploying.md) — using a CloudFormation service role
 - [`permissions-infrastructure.md`](docs/operations/permissions-infrastructure.md) — what the deployer principal needs
 - [`permissions-lakerunner.md`](docs/operations/permissions-lakerunner.md) — what the running application has access to

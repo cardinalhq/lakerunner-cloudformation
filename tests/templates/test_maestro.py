@@ -7,9 +7,47 @@ import pytest
 from cardinal_cfn.children import maestro
 
 
+_NO_VALUE = {"Ref": "AWS::NoValue"}
+
+
+def _render(conditions):
+    """The template with Fn::If, AWS::NoValue and conditional resources and
+    outputs resolved for the given condition values (unlisted Has* = false)."""
+    raw = json.loads(maestro.build().to_json())
+
+    def resolve(node):
+        if isinstance(node, dict):
+            if set(node) == {"Fn::If"}:
+                cond, yes, no = node["Fn::If"]
+                return resolve(yes if conditions.get(cond, False) else no)
+            out = {k: resolve(v) for k, v in node.items()}
+            return {k: v for k, v in out.items() if v != _NO_VALUE}
+        if isinstance(node, list):
+            return [v for v in (resolve(x) for x in node) if v != _NO_VALUE]
+        return node
+
+    for section in ("Resources", "Outputs"):
+        raw[section] = {
+            k: v for k, v in raw[section].items()
+            if conditions.get(v.get("Condition"), True)
+        }
+    return resolve(raw)
+
+
 @pytest.fixture
 def td():
-    return json.loads(maestro.build().to_json())
+    return _render({"UseBundledDex": True, "McpOauthOn": False})
+
+
+@pytest.fixture
+def td_ext():
+    return _render({
+        "UseBundledDex": False,
+        "McpOauthOn": True,
+        "HasOidcClientId": True,
+        "HasOidcJwksUrl": True,
+        "HasOidcSuperadminGroup": True,
+    })
 
 
 # ---------------------------------------------------------------------------
@@ -449,3 +487,63 @@ def test_service_is_pure_on_demand(td):
     items = svc["Properties"]["CapacityProviderStrategy"]
     assert items == [{"CapacityProvider": "FARGATE", "Weight": 1}]
     assert all("Base" not in i for i in items)
+
+
+# ---------------------------------------------------------------------------
+# External OIDC IdP (replaces the bundled DEX)
+# ---------------------------------------------------------------------------
+
+
+def _env(td):
+    return {e["Name"]: e["Value"] for e in _container(td, "maestro")["Environment"]}
+
+
+def test_external_oidc_parameters_declared(td):
+    for name, _, kind, _ in maestro.EXTERNAL_OIDC_PARAMS:
+        p = td["Parameters"][name]
+        assert p["Default"] == ("false" if kind == "bool" else "")
+
+
+def test_external_oidc_removes_dex(td_ext):
+    task_def = next(
+        r for r in td_ext["Resources"].values() if r["Type"] == "AWS::ECS::TaskDefinition"
+    )
+    names = [c["Name"] for c in task_def["Properties"]["ContainerDefinitions"]]
+    assert "dex" not in names
+    types = [r["Type"] for r in td_ext["Resources"].values()]
+    assert types.count("AWS::ElasticLoadBalancingV2::TargetGroup") == 1
+    assert types.count("AWS::ElasticLoadBalancingV2::ListenerRule") == 1
+    assert types.count("AWS::Logs::LogGroup") == 2
+    svc = next(r for r in td_ext["Resources"].values() if r["Type"] == "AWS::ECS::Service")
+    assert [lb["ContainerName"] for lb in svc["Properties"]["LoadBalancers"]] == ["maestro"]
+    assert "DexUrl" not in td_ext["Outputs"]
+
+
+def test_external_oidc_maestro_env(td_ext):
+    env = _env(td_ext)
+    assert env["OIDC_ISSUER_URL"] == {"Ref": "OidcIssuerUrl"}
+    assert env["OIDC_CLIENT_ID"] == {"Ref": "OidcClientId"}
+    assert env["OIDC_JWKS_URL"] == {"Ref": "OidcJwksUrl"}
+    assert env["OIDC_SUPERADMIN_GROUP"] == {"Ref": "OidcSuperadminGroup"}
+    # Unset optional settings fall through to maestro's defaults.
+    assert "OIDC_AUDIENCE" not in env
+    assert "OIDC_EMAIL_CLAIM" not in env
+    # The external IdP's cert is trusted; only DEX needs TLS verification off.
+    for n in ("NODE_TLS_REJECT_UNAUTHORIZED", "DEX_ISSUER_URL", "DEX_CLIENT_ID"):
+        assert n not in env
+    assert env["MCP_OAUTH_ENABLED"] == {"Ref": "McpOauthEnabled"}
+    assert env["MAESTRO_BASE_URL"] == {"Fn::Sub": "https://${AlbDnsName}"}
+
+
+def test_bundled_dex_maestro_env(td):
+    env = _env(td)
+    assert env["OIDC_ISSUER_URL"] == {"Fn::Sub": "https://${AlbDnsName}/dex"}
+    assert env["OIDC_CLIENT_ID"] == {"Ref": "DexClientId"}
+    assert env["OIDC_AUDIENCE"] == {"Ref": "DexClientId"}
+    assert env["OIDC_JWKS_URL"] == {"Fn::Sub": "https://${AlbDnsName}/dex/keys"}
+    assert env["NODE_TLS_REJECT_UNAUTHORIZED"] == "0"
+    assert "OIDC_SUPERADMIN_GROUP" not in env
+    assert "MAESTRO_BASE_URL" not in env
+    for _, env_name, kind, _ in maestro.EXTERNAL_OIDC_PARAMS:
+        if kind == "bool":
+            assert env_name in env
