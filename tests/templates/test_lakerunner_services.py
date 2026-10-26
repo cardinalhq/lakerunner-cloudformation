@@ -73,6 +73,7 @@ def test_data_plane_params(td):
         "DbMasterSecretArn",
         "LicenseSecretArn",
         "AdminKeySecretArn",
+        "McpApiKeySecretArn",
         "QueueUrl",
         "QueueRoleArn",
     ):
@@ -201,6 +202,18 @@ def test_external_oidc_rules(td):
     assert mcp["Assertions"][0]["Assert"] == {
         "Fn::Not": [{"Fn::Equals": [{"Ref": "OidcIssuerUrl"}, ""]}]
     }
+
+
+def test_mcp_api_key_secret_forwarded_to_maestro_only(td):
+    """The MCP system key is a superadmin credential: only Maestro gets it."""
+    for name, res in td["Resources"].items():
+        if res["Type"] != "AWS::CloudFormation::Stack":
+            continue
+        params = res["Properties"]["Parameters"]
+        if name == "Maestro":
+            assert params["McpApiKeySecretArn"] == {"Ref": "McpApiKeySecretArn"}
+        else:
+            assert "McpApiKeySecretArn" not in params, name
 
 
 def test_self_telemetry_endpoint_param(td):

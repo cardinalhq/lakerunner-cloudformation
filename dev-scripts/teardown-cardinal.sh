@@ -38,7 +38,8 @@ Optional (stack name overrides; defaults shown):
 
 Optional (survivor handling):
   KEEP_SECRETS=true           Skip force-delete of cardinal-license /
-                              cardinal-admin-key / cardinal-db-master.
+                              cardinal-admin-key / cardinal-mcp-api-key /
+                              cardinal-db-master.
   KEEP_BUCKETS=true           Skip empty+delete of the cooked / otel-raw buckets.
   DELETE_SNAPSHOTS=true       Also delete RDS snapshots whose id starts with the
                               RDS stack name (default: keep them; they cost only
@@ -65,7 +66,7 @@ SAT_SERVICES_STACK="${SAT_SERVICES_STACK:-cardinal-satellite-services}"
 SAT_INFRA_STACK="${SAT_INFRA_STACK:-cardinal-satellite-infra-base}"
 RDS_STACK="${RDS_STACK:-cardinal-lakerunner-infra-rds}"
 INFRA_BASE_STACK="${INFRA_BASE_STACK:-cardinal-lakerunner-infra-base}"
-SECRETS="cardinal-license cardinal-admin-key cardinal-db-master"
+SECRETS="cardinal-license cardinal-admin-key cardinal-mcp-api-key cardinal-db-master"
 
 # Reverse-dependency delete order.
 STACKS="$SERVICES_STACK $SAT_SERVICES_STACK $SAT_INFRA_STACK $RDS_STACK $INFRA_BASE_STACK"

@@ -60,7 +60,7 @@ def test_dropped_rds_param(td):
 def test_no_threaded_arn_params(td):
     """Name-pattern IAM means no threaded secret/queue ARN params."""
     for n in ("DbMasterSecretArn", "LicenseSecretArn", "AdminKeySecretArn",
-              "QueueArn", "BucketName"):
+              "McpApiKeySecretArn", "QueueArn", "BucketName"):
         assert n not in td["Parameters"], f"unexpected threaded param: {n}"
 
 
@@ -206,7 +206,7 @@ def test_all_task_roles_use_name_pattern_secrets(td):
         assert res["Fn::Sub"].endswith(":secret:cardinal-*")
         blob = json.dumps(stmts)
         for threaded in ("DbMasterSecretArn", "LicenseSecretArn",
-                         "AdminKeySecretArn"):
+                         "AdminKeySecretArn", "McpApiKeySecretArn"):
             assert threaded not in blob, f"{role} threads {threaded}"
 
 
@@ -326,6 +326,15 @@ def test_admin_key_secret_named_and_retained(td):
     assert td["Parameters"]["AdminKeySecretName"]["Default"] == "cardinal-admin-key"
 
 
+def test_mcp_api_key_secret_named_and_retained(td):
+    s = td["Resources"]["McpApiKeySecret"]
+    assert s["DeletionPolicy"] == "Retain"
+    assert s["Properties"]["Name"] == {"Ref": "McpApiKeySecretName"}
+    assert td["Parameters"]["McpApiKeySecretName"]["Default"] == "cardinal-mcp-api-key"
+    gen = s["Properties"]["GenerateSecretString"]
+    assert gen["GenerateStringKey"] == "key"
+
+
 # ---------------------------------------------------------------------------
 # Task 6: outputs
 # ---------------------------------------------------------------------------
@@ -348,5 +357,6 @@ def test_all_outputs_present(td):
         "CookedBucketName",
         "LicenseSecretArn",
         "AdminKeySecretArn",
+        "McpApiKeySecretArn",
     ):
         assert o in td["Outputs"], f"missing output: {o}"
