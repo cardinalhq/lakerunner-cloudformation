@@ -19,17 +19,12 @@ deploy path (no console deploys, no hand-edited image URLs).
 cache root (or any mirror that preserves the upstream path) and every
 first-party image resolves under it with one knob.
 
-### External / utility images are special-cased
+### The db-init image
 
-Two images are not on our public ECR and are **not** governed by
-`IMAGE_REGISTRY`. They keep their own full-URI override env vars (default: the
-template default), so you mirror them however your registry organizes
-third-party content:
-
-- `busybox` (`public.ecr.aws/docker/library/busybox`, the dex-init shell) —
-  override with `DEX_INIT_IMAGE`.
-- `initcontainer-grafana` (`ghcr.io/cardinalhq/...`, the db-init psql client) —
-  override with `DB_INIT_IMAGE`.
+The db-init psql client is the official postgres image on public ECR
+(`public.ecr.aws/docker/library/postgres`), so it also resolves under
+`IMAGE_REGISTRY`. `DB_INIT_IMAGE` remains a full-URI override for mirrors that
+lay it out differently.
 
 ## Image lists (mirror + scan)
 
@@ -39,17 +34,16 @@ pull, scan, and mirror FROM (independent of `IMAGE_REGISTRY`):
 - `generated-templates/satellite-images.txt` — the satellite stack.
 - `generated-templates/lakerunner-images.txt` — the lakerunner application stack.
 
-First-party images are digest-pinned (multi-arch index digests; tasks run
-ARM64). Current refs:
+Every image is digest-pinned (multi-arch index digests; tasks run ARM64); the
+files hold the exact refs for a given release. The images:
 
-| Stack | Image | IMAGE_REGISTRY? |
+| Stack | Image | Override |
 |---|---|---|
-| satellite | `public.ecr.aws/cardinalhq.io/cardinalhq-otel-collector:v1.8.0@sha256:9906…` | yes |
-| lakerunner | `public.ecr.aws/cardinalhq.io/lakerunner:v1.40.4@sha256:532a…` | yes |
-| lakerunner | `public.ecr.aws/cardinalhq.io/maestro:v1.50.0@sha256:642e…` | yes |
-| lakerunner | `public.ecr.aws/cardinalhq.io/dex-customization:v0.1.0@sha256:a1d0…` | yes |
-| lakerunner | `public.ecr.aws/docker/library/busybox:1.37` | no — `DEX_INIT_IMAGE` |
-| lakerunner | `ghcr.io/cardinalhq/initcontainer-grafana:latest` | no — `DB_INIT_IMAGE` |
+| satellite | `public.ecr.aws/cardinalhq.io/cardinalhq-otel-collector` | `IMAGE_REGISTRY` |
+| lakerunner | `public.ecr.aws/cardinalhq.io/lakerunner` | `IMAGE_REGISTRY` |
+| lakerunner | `public.ecr.aws/cardinalhq.io/maestro` | `IMAGE_REGISTRY` |
+| lakerunner | `public.ecr.aws/cardinalhq.io/dex-customization` (bundled DEX only) | `IMAGE_REGISTRY` |
+| lakerunner | `public.ecr.aws/docker/library/postgres` (db-init) | `IMAGE_REGISTRY`, or `DB_INIT_IMAGE` |
 
 ## Mirroring with an ECR pull-through cache (recommended)
 
@@ -65,9 +59,7 @@ aws ecr create-pull-through-cache-rule \
 IMAGE_REGISTRY=<acct>.dkr.ecr.<region>.amazonaws.com/aws-public
 ```
 
-A single public-ECR pull-through cache covers every first-party image (and the
-busybox utility image, if you also point `DEX_INIT_IMAGE` at it). The
-`ghcr.io` db-init image needs its own mirror/rule (set `DB_INIT_IMAGE`).
+A single public-ECR pull-through cache covers every image.
 
 First-pull IAM note: on the first pull of a not-yet-cached image, the ECS task
 **execution role** needs `ecr:BatchImportUpstreamImage` plus repository
@@ -128,15 +120,13 @@ Lakerunner application stack:
 
 ```sh
 IMAGE_REGISTRY=<acct>.dkr.ecr.<region>.amazonaws.com/aws-public \
-  DEX_INIT_IMAGE=<acct>.dkr.ecr.<region>.amazonaws.com/aws-public/docker/library/busybox:1.37 \
-  DB_INIT_IMAGE=<your-mirror>/initcontainer-grafana:<tag> \
   STACK_NAME=... REGION=... INFRA_BASE_STACK=... INFRA_RDS_STACK=... \
   SATELLITE_INFRA_BASE_STACK=... CLUSTER_ARN=... CLUSTER_NAME=... \
   VPC_ID=... PRIVATE_SUBNETS=... ORGANIZATION_ID=... DEX_ADMIN_PASSWORD_HASH=... \
   ./scripts/deploy-lakerunner-services.sh
 ```
 
-Leave `IMAGE_REGISTRY` unset to pull first-party images from the public default.
+Leave `IMAGE_REGISTRY` unset to pull from the public default.
 
 ## Stack version
 
