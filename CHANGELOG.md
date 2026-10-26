@@ -11,6 +11,30 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v1.7.20
+
+**New parameters: Maestro login through a customer-supplied OIDC IdP.** Setting
+`OidcIssuerUrl` points Maestro at the customer's IdP (Okta, Entra ID, Keycloak,
+...) instead of the bundled DEX. The parameters mirror the maestro helm chart's
+`OIDC_*` / `MCP_OAUTH_*` settings, and the services driver sets each from the env
+var of the same name: `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, `OIDC_AUDIENCE`,
+`OIDC_JWKS_URL`, `OIDC_SUPERADMIN_GROUP`, `OIDC_EMAIL_CLAIM`,
+`OIDC_EMAIL_VERIFIED_CLAIM`, `OIDC_DISPLAY_NAME_CLAIMS`, `OIDC_GROUPS_CLAIM`,
+`OIDC_EXTERNAL_ID_CLAIM`, `OIDC_TRUST_UNVERIFIED_EMAILS`, `MCP_OAUTH_ENABLED`,
+`MCP_OAUTH_ISSUER`, `MCP_OAUTH_AUDIENCE`, `MCP_OAUTH_AS_METADATA_PROXY`,
+`MCP_OAUTH_SELF_SIGNUP`. See
+[`docs/operations/maestro-sso.md`](docs/operations/maestro-sso.md).
+
+With `OidcIssuerUrl` set, the stack removes the dex container, its target group,
+`/dex` listener rule and log group, and Maestro keeps TLS verification on
+(`NODE_TLS_REJECT_UNAUTHORIZED=0` is now set only with DEX).
+`DEX_ADMIN_PASSWORD_HASH` is required only when DEX is in use; a stack Rule
+enforces it, and another refuses `McpOauthEnabled=true` without an external
+issuer.
+
+No upgrade action. With the defaults (DEX), updating the services stack rolls
+the maestro task to pick up the new, all-default env vars.
+
 ## v1.7.19
 
 **Changed default.** process-logs now sets `LAKERUNNER_SCALING_PIPELINE_DEPTH=2`

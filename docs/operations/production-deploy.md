@@ -14,7 +14,11 @@ For a throwaway test/upgrade environment instead, see
   internet-facing), and an ECS Fargate cluster — both customer-supplied.
 - AWS CLI v2 + `jq`, and credentials for the target account/region.
 - A Cardinal **license** token (passed as `LICENSE_DATA` / `LICENSE_DATA_FILE`).
-- A bcrypt **DEX admin password hash** (`DEX_ADMIN_PASSWORD_HASH`).
+- Maestro login, one of:
+  - a bcrypt **DEX admin password hash** (`DEX_ADMIN_PASSWORD_HASH`) for the
+    bundled DEX's local accounts, or
+  - the customer's **OIDC IdP** (`OIDC_ISSUER_URL`, with a public PKCE client
+    registered) — see [`maestro-sso.md`](maestro-sso.md).
 - A TLS certificate for the Maestro HTTPS listener — see
   [`certificates.md`](certificates.md) (ACM recommended; self-signed is
   auto-generated on first create if none supplied).
@@ -111,16 +115,18 @@ lakerunner-services rewiring is needed. Deploy any time after step 3.
 
 ### 5. lakerunner-services (the application tier)
 
-Creates the app ALB, the query/process/control services, and maestro+dex. Pulls
+Creates the app ALB, the query/process/control services, and maestro (+ dex
+unless `OIDC_ISSUER_URL` is set). Pulls
 DB/role/SG outputs from infra-base + infra-rds, and `RawQueueUrl` /
 `LakerunnerAccessRoleArn` from satellite-infra-base. Self-telemetry is wired
 automatically by pulling `CollectorEndpoint` from satellite-services.
 
-- Required: `STACK_NAME`, `REGION`, `INFRA_BASE_STACK`, `INFRA_RDS_STACK`, `SATELLITE_INFRA_BASE_STACK`, `ORGANIZATION_ID`, `CLUSTER_ARN`, `CLUSTER_NAME`, `VPC_ID`, `PRIVATE_SUBNETS` (CSV), `DEX_ADMIN_PASSWORD_HASH`.
+- Required: `STACK_NAME`, `REGION`, `INFRA_BASE_STACK`, `INFRA_RDS_STACK`, `SATELLITE_INFRA_BASE_STACK`, `ORGANIZATION_ID`, `CLUSTER_ARN`, `CLUSTER_NAME`, `VPC_ID`, `PRIVATE_SUBNETS` (CSV), `DEX_ADMIN_PASSWORD_HASH` (unless `OIDC_ISSUER_URL` is set).
 - App ALB visibility: `ALB_SCHEME=internet-facing` + `PUBLIC_SUBNETS` (CSV) for a public Maestro; must agree with the infra-base `ALB_SCHEME`/CIDR settings.
 - Certificate: `CERTIFICATE_ARN`, or `CERTIFICATE_BODY[_FILE]` + `CERTIFICATE_PRIVATE_KEY[_FILE]` (+ optional `CERTIFICATE_CHAIN[_FILE]`). Unset on first create → self-signed; on update the existing cert is kept. See [`certificates.md`](certificates.md).
 - Self-telemetry: leave `SELF_TELEMETRY_ENDPOINT` unset to auto-pull the collector endpoint from `SATELLITE_SERVICES_STACK` (default `cardinal-satellite-services`); set it to override.
 - Bucket mapping: Maestro's bootstrap registers only the install's own output bucket (`MAESTRO_BOOTSTRAP_BUCKET_*`, wired to the cooked bucket). The satellite raw bucket is mapped to the org by hand in the Maestro superadmin UI — see "After the install" below. `SATELLITE_CONFIG` / `SATELLITES_PARAM_NAME` / `CENTRAL_COLLECTOR_NAME` were removed in v1.6.0; the driver writes no SSM parameter.
+- Maestro login: the bundled DEX by default, or the customer's own OIDC IdP via `OIDC_ISSUER_URL` and friends — see [`maestro-sso.md`](maestro-sso.md).
 - Optional: `DEX_ADMIN_EMAIL`, `OIDC_SUPERADMIN_EMAILS`, `DEX_CLIENT_ID`, `SERVICE_NAMESPACE_NAME`, `DB_INIT_IMAGE`, `IMAGE_REGISTRY` (see [`air-gapped-images.md`](../air-gapped-images.md)).
 - Migrations: `MIGRATION_SCALE_DOWN=auto|always|never` (default `auto`), `MIGRATION_FORCE_DIRTY=true|false` (default `true`) -- see "Upgrades" below.
 

@@ -24,7 +24,7 @@ set -eu
 DEFAULT_TEMPLATE_BASE_URL="https://cardinal-cfn-us-east-1.s3.us-east-1.amazonaws.com/lakerunner"
 TEMPLATE_KEY="cardinal-lakerunner-services.yaml"
 # Baked at publish time (scripts-src/build.sh).  STACK_VERSION defaults to this.
-DEFAULT_STACK_VERSION="v1.7.19"
+DEFAULT_STACK_VERSION="v1.7.20"
 DEFAULT_IMAGE_REGISTRY="public.ecr.aws"
 # Baked, locked registry-relative paths (repo + pinned tag/digest) for the
 # public-ECR images.  Only the registry prefix is operator-supplied.  db-init
@@ -57,9 +57,9 @@ Required:
                               no default). MUST match the value used on
                               lakerunner-infra-base and on every satellite.
   DEX_ADMIN_PASSWORD_HASH     bcrypt hash for the Maestro/DEX admin login.
-                              REQUIRED: DEX will not start without it ("no
-                              password hash provided") and MaestroService rolls
-                              back.
+                              REQUIRED unless OIDC_ISSUER_URL is set: DEX will
+                              not start without it ("no password hash
+                              provided") and MaestroService rolls back.
 
 Optional (template defaults preserved when unset):
   STACK_VERSION               Published template version to deploy. Default: the
@@ -84,7 +84,9 @@ Optional (template defaults preserved when unset):
   CERTIFICATE_BODY_FILE       PEM cert body (path) -- fallback for CERTIFICATE_BODY.
   CERTIFICATE_PRIVATE_KEY_FILE PEM private key (path) -- fallback for CERTIFICATE_PRIVATE_KEY.
   CERTIFICATE_CHAIN_FILE      PEM chain (path) -- fallback for CERTIFICATE_CHAIN.
-  DEX_ADMIN_EMAIL             (template default admin@cardinal.local).
+  DEX_ADMIN_EMAIL             (template default admin@cardinal.local).  Also
+                              the owner of the org Maestro pre-populates; with
+                              OIDC_ISSUER_URL set, use the owner's IdP email.
   DEX_CLIENT_ID               (template default maestro-ui).
   DEX_EXTRA_USERS             JSON array of additional DEX login accounts, each
                               with an "email" and a bcrypt "hash" (optional
@@ -95,6 +97,35 @@ Optional (template defaults preserved when unset):
   DEX_EXTRA_USERS_FILE        Path to a JSON file with the same content --
                               fallback for DEX_EXTRA_USERS.
   OIDC_SUPERADMIN_EMAILS      (template default admin@cardinal.local).
+
+  Customer-supplied OIDC IdP for Maestro login (Okta, Entra ID, Keycloak, ...).
+  Setting OIDC_ISSUER_URL replaces the bundled DEX: its container, target group
+  and /dex listener rule are removed and DEX_* settings are ignored.  Register
+  a public (PKCE) SPA client in the IdP with redirect URI https://<host>/, where
+  <host> is PUBLIC_DNS_NAME (or the ALB DNS name).  These are the maestro helm
+  chart's env vars, passed to the Maestro container under the same names.
+  Unset keeps the stack's current value on update (template default on create);
+  to go back to DEX, pass PARAMS="OidcIssuerUrl=".
+  OIDC_ISSUER_URL             IdP issuer URL.
+  OIDC_CLIENT_ID              OAuth client_id (default: OIDC_AUDIENCE).
+  OIDC_AUDIENCE               Expected token aud (default: maestro-ui).
+  OIDC_JWKS_URL               JWKS URL (default: Keycloak's
+                              <issuer>/protocol/openid-connect/certs; e.g.
+                              <issuer>/v1/keys for Okta).
+  OIDC_SUPERADMIN_GROUP       IdP group granted superadmin.
+  OIDC_EMAIL_CLAIM            Claim mapping overrides (defaults: email,
+  OIDC_EMAIL_VERIFIED_CLAIM   email_verified, name,preferred_username,email,
+  OIDC_DISPLAY_NAME_CLAIMS    groups, sub).  Changing OIDC_EXTERNAL_ID_CLAIM
+  OIDC_GROUPS_CLAIM           on a live install is a migration event.
+  OIDC_EXTERNAL_ID_CLAIM
+  OIDC_TRUST_UNVERIFIED_EMAILS  true|false (default false).
+  MCP_OAUTH_ENABLED           true|false (default false).  OAuth sign-in for
+                              MCP clients on /mcp; requires OIDC_ISSUER_URL.
+  MCP_OAUTH_ISSUER            Authorization server advertised to MCP clients
+                              (default: OIDC_ISSUER_URL).
+  MCP_OAUTH_AUDIENCE          aud accepted on /mcp (default: <base URL>/mcp).
+  MCP_OAUTH_AS_METADATA_PROXY true|false (default false).
+  MCP_OAUTH_SELF_SIGNUP       true|false (default false).
   SATELLITE_SERVICES_STACK    Source of CollectorEndpoint for lakerunner self-
                               telemetry (default cardinal-satellite-services).
                               Self-telemetry is on by default: the wrapper reads
@@ -194,7 +225,7 @@ missing=""
 [ -z "${CLUSTER_NAME:-}" ] && missing="$missing CLUSTER_NAME"
 [ -z "${VPC_ID:-}" ] && missing="$missing VPC_ID"
 [ -z "${PRIVATE_SUBNETS:-}" ] && missing="$missing PRIVATE_SUBNETS"
-[ -z "${DEX_ADMIN_PASSWORD_HASH:-}" ] && missing="$missing DEX_ADMIN_PASSWORD_HASH"
+[ -z "${DEX_ADMIN_PASSWORD_HASH:-}" ] && [ -z "${OIDC_ISSUER_URL:-}" ] && missing="$missing DEX_ADMIN_PASSWORD_HASH"
 if [ -n "$missing" ]; then
     usage >&2
     echo "[deploy-lakerunner-services] ERROR: missing required: $(echo "$missing" | sed 's/^ //; s/ /, /g')" >&2
@@ -450,6 +481,32 @@ DexAdminPasswordHash=$DEX_ADMIN_PASSWORD_HASH"
 DexClientId=$DEX_CLIENT_ID"
 [ -n "${OIDC_SUPERADMIN_EMAILS:-}" ] && params="$params
 OidcSuperadminEmails=$OIDC_SUPERADMIN_EMAILS"
+
+# External OIDC IdP: each env var maps to the same-named stack parameter.
+for oidc_map in \
+    OIDC_ISSUER_URL=OidcIssuerUrl \
+    OIDC_CLIENT_ID=OidcClientId \
+    OIDC_AUDIENCE=OidcAudience \
+    OIDC_JWKS_URL=OidcJwksUrl \
+    OIDC_SUPERADMIN_GROUP=OidcSuperadminGroup \
+    OIDC_EMAIL_CLAIM=OidcEmailClaim \
+    OIDC_EMAIL_VERIFIED_CLAIM=OidcEmailVerifiedClaim \
+    OIDC_DISPLAY_NAME_CLAIMS=OidcDisplayNameClaims \
+    OIDC_GROUPS_CLAIM=OidcGroupsClaim \
+    OIDC_EXTERNAL_ID_CLAIM=OidcExternalIdClaim \
+    OIDC_TRUST_UNVERIFIED_EMAILS=OidcTrustUnverifiedEmails \
+    MCP_OAUTH_ENABLED=McpOauthEnabled \
+    MCP_OAUTH_ISSUER=McpOauthIssuer \
+    MCP_OAUTH_AUDIENCE=McpOauthAudience \
+    MCP_OAUTH_AS_METADATA_PROXY=McpOauthAsMetadataProxy \
+    MCP_OAUTH_SELF_SIGNUP=McpOauthSelfSignup
+do
+    eval "oidc_val=\${${oidc_map%%=*}:-}"
+    if [ -n "$oidc_val" ]; then
+        params="$params
+${oidc_map#*=}=$oidc_val"
+    fi
+done
 
 # Additional DEX login accounts.  Inline DEX_EXTRA_USERS rides PARAMS, which is
 # newline-delimited -- but the value is JSON, where newlines are only ever

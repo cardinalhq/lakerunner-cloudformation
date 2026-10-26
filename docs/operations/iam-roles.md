@@ -219,7 +219,7 @@ on `otel-raw/`), SQS, Bedrock, ECS API.
 
 | Service(s) | Containers |
 |---|---|
-| `MaestroService` | db-init, mcp-gateway, wait-for-mcp, maestro, dex-init, dex |
+| `MaestroService` | db-init, mcp-gateway, wait-for-mcp, maestro, dex (bundled DEX only) |
 
 **What the containers do at runtime:**
 - `db-init`: runs Maestro's SQL migrations.
@@ -230,8 +230,8 @@ on `otel-raw/`), SQS, Bedrock, ECS API.
   internal endpoints (Cloud Map), bootstrap admin key passed in via env.
   Provisions the org and its output-bucket storage line through lakerunner's
   admin API; additional buckets are mapped in its superadmin UI.
-- `dex-init`: bootstraps DEX storage in lrdb.
-- `dex`: DEX OIDC IDP. Stores state in lrdb.
+- `dex`: DEX OIDC IdP with local accounts; in-memory state, no AWS access.
+  Omitted when `OidcIssuerUrl` points Maestro at the customer's IdP.
 
 **Required policy (TaskRole):**
 ```text
