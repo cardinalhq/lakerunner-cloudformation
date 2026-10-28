@@ -114,6 +114,9 @@ EXTERNAL_OIDC_PARAMS = [
     ("OidcExternalIdClaim", "OIDC_EXTERNAL_ID_CLAIM", "str",
      "Token claim used as the persistent account key. Empty means sub. "
      "Changing it on a live install is a migration event."),
+    ("OidcBearerToken", "OIDC_BEARER_TOKEN", "str",
+     "Token the UI sends as its bearer: access or id. Empty means access. "
+     "Set id for Amazon Cognito, whose access tokens carry no aud or email."),
     ("OidcTrustUnverifiedEmails", "OIDC_TRUST_UNVERIFIED_EMAILS", "bool",
      "When true, accept emails the IdP does not mark verified (e.g. Entra "
      "ID, which omits email_verified)."),

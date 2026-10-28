@@ -118,6 +118,7 @@ Optional (template defaults preserved when unset):
   OIDC_DISPLAY_NAME_CLAIMS    groups, sub).  Changing OIDC_EXTERNAL_ID_CLAIM
   OIDC_GROUPS_CLAIM           on a live install is a migration event.
   OIDC_EXTERNAL_ID_CLAIM
+  OIDC_BEARER_TOKEN           access|id (default access); id for Cognito.
   OIDC_TRUST_UNVERIFIED_EMAILS  true|false (default false).
   MCP_OAUTH_ENABLED           true|false (default false).  OAuth sign-in for
                               MCP clients on /mcp; requires OIDC_ISSUER_URL.
@@ -494,6 +495,7 @@ for oidc_map in \
     OIDC_DISPLAY_NAME_CLAIMS=OidcDisplayNameClaims \
     OIDC_GROUPS_CLAIM=OidcGroupsClaim \
     OIDC_EXTERNAL_ID_CLAIM=OidcExternalIdClaim \
+    OIDC_BEARER_TOKEN=OidcBearerToken \
     OIDC_TRUST_UNVERIFIED_EMAILS=OidcTrustUnverifiedEmails \
     MCP_OAUTH_ENABLED=McpOauthEnabled \
     MCP_OAUTH_ISSUER=McpOauthIssuer \

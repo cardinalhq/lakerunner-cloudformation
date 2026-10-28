@@ -41,6 +41,7 @@ is required.
 | `OIDC_GROUPS_CLAIM` | `groups` | |
 | `OIDC_EXTERNAL_ID_CLAIM` | `sub` | Persistent account key; changing it on a live install is a migration event. |
 | `OIDC_TRUST_UNVERIFIED_EMAILS` | `false` | For IdPs that omit `email_verified`. |
+| `OIDC_BEARER_TOKEN` | `access` | `id` makes the UI send the ID token; needed for Amazon Cognito. |
 | `MCP_OAUTH_ENABLED` | `false` | OAuth sign-in for MCP clients on `/mcp`; needs an external issuer. |
 | `MCP_OAUTH_ISSUER` | `OIDC_ISSUER_URL` | Authorization server advertised to MCP clients. |
 | `MCP_OAUTH_AUDIENCE` | `<base URL>/mcp` | `aud` accepted on `/mcp` only. |
@@ -69,7 +70,9 @@ Entra ID cannot be Maestro's issuer directly. Maestro's UI requests only
 `openid profile email` and sends the resulting access token. Entra issues that
 token for Microsoft Graph (`aud` `00000003-0000-0000-c000-000000000000`), and a
 Graph token cannot be verified by anyone but Graph. Broker Entra through
-Keycloak (or Okta) and point Maestro at the broker.
+Keycloak (or Okta) and point Maestro at the broker, or, when no broker is an
+option, federate Entra into an Amazon Cognito user pool and use
+[Cognito](#amazon-cognito) as the issuer.
 
 In Entra (**App registrations → New registration**):
 
@@ -111,3 +114,32 @@ STACK_NAME=cardinal-lakerunner-services REGION=us-east-1 ... \
 
 These are the Keycloak values: Maestro sees only Keycloak, and the defaults for
 `OIDC_AUDIENCE` and `OIDC_JWKS_URL` already fit it.
+
+## Amazon Cognito
+
+A Cognito user pool works as the issuer, including one that federates Entra ID
+(**Sign-in experience → Federated identity provider sign-in → OpenID Connect**,
+with the Entra app registration's client id and secret). Cognito access tokens
+carry no `aud`, `azp` or `email`, so set `OIDC_BEARER_TOKEN=id` to have the UI
+send the ID token, which has `aud` (the app client id), `email`,
+`email_verified` and `cognito:groups`.
+
+In the user pool, create an app client: public (no secret), authorization code
+grant with PKCE, callback URL `https://<host>/`, sign-out URL `https://<host>/`,
+scopes `openid profile email`.
+
+```sh
+OIDC_ISSUER_URL=https://cognito-idp.<region>.amazonaws.com/<pool-id> \
+OIDC_JWKS_URL=https://cognito-idp.<region>.amazonaws.com/<pool-id>/.well-known/jwks.json \
+OIDC_AUDIENCE=<app client id> \
+OIDC_BEARER_TOKEN=id \
+OIDC_GROUPS_CLAIM=cognito:groups \
+OIDC_SUPERADMIN_GROUP=maestro-superadmin \
+DEX_ADMIN_EMAIL=owner@example.com \
+STACK_NAME=cardinal-lakerunner-services REGION=us-east-1 ... \
+  ./deploy-lakerunner-services.sh
+```
+
+`OIDC_CLIENT_ID` defaults to `OIDC_AUDIENCE`. `OIDC_GROUPS_CLAIM` and
+`OIDC_SUPERADMIN_GROUP` are only needed for group-based superadmin (a Cognito
+group named `maestro-superadmin`); otherwise grant it by email.
