@@ -134,12 +134,13 @@ OIDC_JWKS_URL=https://cognito-idp.<region>.amazonaws.com/<pool-id>/.well-known/j
 OIDC_AUDIENCE=<app client id> \
 OIDC_BEARER_TOKEN=id \
 OIDC_GROUPS_CLAIM=cognito:groups \
-OIDC_SUPERADMIN_GROUP=maestro-superadmin \
 DEX_ADMIN_EMAIL=owner@example.com \
 STACK_NAME=cardinal-lakerunner-services REGION=us-east-1 ... \
   ./deploy-lakerunner-services.sh
 ```
 
-`OIDC_CLIENT_ID` defaults to `OIDC_AUDIENCE`. `OIDC_GROUPS_CLAIM` and
-`OIDC_SUPERADMIN_GROUP` are only needed for group-based superadmin (a Cognito
-group named `maestro-superadmin`); otherwise grant it by email.
+`OIDC_CLIENT_ID` defaults to `OIDC_AUDIENCE`. `OIDC_GROUPS_CLAIM` is only
+needed for group-based superadmin (a Cognito group named `maestro-superadmin`,
+the default); otherwise grant it by email. Do not set `OIDC_SUPERADMIN_GROUP`:
+any value makes the UI request a `groups` scope, which Cognito does not offer
+and rejects with `invalid_scope`.
