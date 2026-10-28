@@ -527,6 +527,7 @@ def test_external_oidc_maestro_env(td_ext):
     assert env["OIDC_SUPERADMIN_GROUP"] == {"Ref": "OidcSuperadminGroup"}
     # Unset optional settings fall through to maestro's defaults.
     assert "OIDC_AUDIENCE" not in env
+    assert "OIDC_BEARER_TOKEN" not in env
     assert "OIDC_EMAIL_CLAIM" not in env
     # The external IdP's cert is trusted; only DEX needs TLS verification off.
     for n in ("NODE_TLS_REJECT_UNAUTHORIZED", "DEX_ISSUER_URL", "DEX_CLIENT_ID"):
