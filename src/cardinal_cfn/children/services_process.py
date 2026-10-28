@@ -1,11 +1,12 @@
 """services-process.yaml nested stack: lakerunner process-* and pubsub-sqs services.
 
-Owns four ECS Fargate services that ingest from SQS and write to S3:
+Owns nine ECS Fargate services that ingest from SQS and write to S3:
 
 - pubsub-sqs (signal_type: common, fixed shape, replicas-only tunable)
-- process-logs (signal_type: logs, replicas + memory tunable)
-- process-metrics (signal_type: metrics, replicas + memory tunable)
-- process-traces (signal_type: traces, replicas + memory tunable)
+- process-<signal>-<role>, one per PROCESS_ROLES entry (lakerunner #1966: a
+  worker runs exactly one role, named by LAKERUNNER_PROCESS_ROLE; there is no
+  combined mode). Every role of a signal shares that signal's Process*Memory /
+  Process*MinReplicas / Process*Replicas tunables.
 
 None of these services attach to the ALB. The process-* services are created
 at one replica (min_replicas) and scale on CPU via native ECS Application Auto
@@ -39,11 +40,26 @@ from cardinal_cfn.parameters import (
     add_parameter_group_metadata,
 )
 
+# The role table is fixed by the lakerunner binary (internal/metricsprocessing/
+# process_role.go); the helm chart renders the same set.
+PROCESS_ROLES = {
+    "logs": ["ingest", "compact"],
+    "metrics": ["partition", "materialize", "compact", "rollup"],
+    "traces": ["ingest", "compact"],
+}
+
+# shortcut: the seeded metric partition layout is 16 partitions and changes only
+# by hand; the materialize role may never run more owners than partitions, so
+# its autoscaler is capped here and the binary checks the layout on start.
+# Upgrade to a parameter when repartitioning lands in lakerunner.
+METRIC_PARTITIONS = 16
+
+
 def build() -> Template:
     t = Template()
     t.set_description(
-        "Cardinal services-process: lakerunner pubsub-sqs and process-logs/"
-        "metrics/traces ECS services. None attach to the ALB."
+        "Cardinal services-process: lakerunner pubsub-sqs and one "
+        "process-<signal>-<role> ECS service per worker role. None attach to the ALB."
     )
 
     defaults = load_defaults()
@@ -178,8 +194,8 @@ def build() -> Template:
             Type="Number",
             Default=str(_max_replicas(logs_cfg)),
             Description=(
-                "Maximum replicas the CPU autoscaler may scale "
-                "lakerunner-process-logs to. The service is created at "
+                "Maximum replicas the CPU autoscaler may scale each "
+                "lakerunner-process-logs-<role> service to. Each is created at "
                 "min_replicas and scales up to this cap under load."
             ),
         )
@@ -189,7 +205,7 @@ def build() -> Template:
             "ProcessLogsMemory",
             Type="String",
             Default=str(logs_cfg["memory_mib"]),
-            Description="Fargate memory (MiB) for lakerunner-process-logs.",
+            Description="Fargate memory (MiB) for every lakerunner-process-logs-<role> task.",
         )
     )
     t.add_parameter(
@@ -198,8 +214,8 @@ def build() -> Template:
             Type="Number",
             Default=str(_max_replicas(metrics_cfg)),
             Description=(
-                "Maximum replicas the CPU autoscaler may scale "
-                "lakerunner-process-metrics to. The service is created at "
+                "Maximum replicas the CPU autoscaler may scale each "
+                "lakerunner-process-metrics-<role> service to. Each is created at "
                 "min_replicas and scales up to this cap under load."
             ),
         )
@@ -209,7 +225,7 @@ def build() -> Template:
             "ProcessMetricsMemory",
             Type="String",
             Default=str(metrics_cfg["memory_mib"]),
-            Description="Fargate memory (MiB) for lakerunner-process-metrics.",
+            Description="Fargate memory (MiB) for every lakerunner-process-metrics-<role> task.",
         )
     )
     t.add_parameter(
@@ -218,8 +234,8 @@ def build() -> Template:
             Type="Number",
             Default=str(_max_replicas(traces_cfg)),
             Description=(
-                "Maximum replicas the CPU autoscaler may scale "
-                "lakerunner-process-traces to. The service is created at "
+                "Maximum replicas the CPU autoscaler may scale each "
+                "lakerunner-process-traces-<role> service to. Each is created at "
                 "min_replicas and scales up to this cap under load."
             ),
         )
@@ -229,7 +245,7 @@ def build() -> Template:
             "ProcessTracesMemory",
             Type="String",
             Default=str(traces_cfg["memory_mib"]),
-            Description="Fargate memory (MiB) for lakerunner-process-traces.",
+            Description="Fargate memory (MiB) for every lakerunner-process-traces-<role> task.",
         )
     )
     # Autoscaler floor for process-*; each service is also created at this count.
@@ -245,8 +261,8 @@ def build() -> Template:
                 MinValue=1,
                 Default=str(_min_replicas(cfg)),
                 Description=(
-                    "Minimum replicas the CPU autoscaler keeps running. Must not "
-                    f"exceed {prefix}Replicas."
+                    "Minimum replicas the CPU autoscaler keeps running for each "
+                    f"role service of this signal. Must not exceed {prefix}Replicas."
                 ),
             )
         )
@@ -339,59 +355,58 @@ def build() -> Template:
     # quota). pubsub-sqs has no autoscaler, so its DesiredCount is the
     # PubsubSqsReplicas parameter directly.
     # ---------------------------------------------------------------------
-    services = [
-        {
-            "service_key": "process-logs",
-            "config": logs_cfg,
-            "cpu": logs_cfg["cpu"],
-            "memory_mib": Ref("ProcessLogsMemory"),
-            "desired_count": Ref("ProcessLogsMinReplicas"),
-            "output_name": "ProcessLogsServiceName",
-            "min_replicas_param": "ProcessLogsMinReplicas",
-            "max_replicas_param": "ProcessLogsReplicas",
-            # Temporary hack until tracked fields get a Maestro UI: override the
-            # default set of log fields rolled up into the log_field_values fast
-            # tag-value lookup table at ingest. process-logs is the only task
-            # that reads this (the lone GetLogTrackedFields caller is the
-            # log-ingest worklane). Per-org admin-API config still wins.
-            #
-            # LAKERUNNER_FEATURES_LOG_EMBEDDED_C2_INDEX turns on the LKIDX004 C2
-            # text index inside every log .lkrn bundle at ingest. Default ON as
-            # of lakerunner v1.90.0 — turning it on changes what a segment IS,
-            # not just what it costs (newly written segments carry a C2 root
-            # older readers can't open). See kb/specs/lkrn-format/embedded-c2-admission.md
-            # in the lakerunner repo.
-            "extra_env": [
-                Environment(
-                    Name="LAKERUNNER_LOG_TRACKED_FIELDS",
-                    Value="service_name,environment_type,installation,proc_name,partition_id",
-                ),
-                Environment(
-                    Name="LAKERUNNER_FEATURES_LOG_EMBEDDED_C2_INDEX",
-                    Value="true",
-                ),
-            ],
-        },
-        {
-            "service_key": "process-metrics",
-            "config": metrics_cfg,
-            "cpu": metrics_cfg["cpu"],
-            "memory_mib": Ref("ProcessMetricsMemory"),
-            "desired_count": Ref("ProcessMetricsMinReplicas"),
-            "output_name": "ProcessMetricsServiceName",
-            "min_replicas_param": "ProcessMetricsMinReplicas",
-            "max_replicas_param": "ProcessMetricsReplicas",
-        },
-        {
-            "service_key": "process-traces",
-            "config": traces_cfg,
-            "cpu": traces_cfg["cpu"],
-            "memory_mib": Ref("ProcessTracesMemory"),
-            "desired_count": Ref("ProcessTracesMinReplicas"),
-            "output_name": "ProcessTracesServiceName",
-            "min_replicas_param": "ProcessTracesMinReplicas",
-            "max_replicas_param": "ProcessTracesReplicas",
-        },
+    # Temporary hack until tracked fields get a Maestro UI: override the
+    # default set of log fields rolled up into the log_field_values fast
+    # tag-value lookup table at ingest. Only the logs ingest role reads this
+    # (the lone GetLogTrackedFields caller is the log-ingest worklane). Per-org
+    # admin-API config still wins.
+    #
+    # LAKERUNNER_FEATURES_LOG_EMBEDDED_C2_INDEX turns on the LKIDX004 C2
+    # text index inside every log .lkrn bundle at ingest. Default ON as
+    # of lakerunner v1.90.0 — turning it on changes what a segment IS,
+    # not just what it costs (newly written segments carry a C2 root
+    # older readers can't open). See kb/specs/lkrn-format/embedded-c2-admission.md
+    # in the lakerunner repo.
+    logs_ingest_env = [
+        Environment(
+            Name="LAKERUNNER_LOG_TRACKED_FIELDS",
+            Value="service_name,environment_type,installation,proc_name,partition_id",
+        ),
+        Environment(
+            Name="LAKERUNNER_FEATURES_LOG_EMBEDDED_C2_INDEX",
+            Value="true",
+        ),
+    ]
+    signal_cfgs = {"logs": logs_cfg, "metrics": metrics_cfg, "traces": traces_cfg}
+    services = []
+    for signal, roles in PROCESS_ROLES.items():
+        prefix = f"Process{signal.capitalize()}"
+        for role in roles:
+            extra_env = [Environment(Name="LAKERUNNER_PROCESS_ROLE", Value=role)]
+            if (signal, role) == ("logs", "ingest"):
+                extra_env += logs_ingest_env
+            materialize = (signal, role) == ("metrics", "materialize")
+            if materialize:
+                # The binary refuses to start when this disagrees with the
+                # active layout, so a hand-grown layout fails loudly.
+                extra_env.append(
+                    Environment(Name="LAKERUNNER_METRIC_PARTITIONS", Value=str(METRIC_PARTITIONS))
+                )
+            services.append(
+                {
+                    "service_key": f"process-{signal}-{role}",
+                    "config": signal_cfgs[signal],
+                    "cpu": signal_cfgs[signal]["cpu"],
+                    "memory_mib": Ref(f"{prefix}Memory"),
+                    "desired_count": Ref(f"{prefix}MinReplicas"),
+                    "output_name": f"{prefix}{role.capitalize()}ServiceName",
+                    "min_replicas_param": f"{prefix}MinReplicas",
+                    "max_replicas_param": f"{prefix}Replicas",
+                    "max_capacity": METRIC_PARTITIONS if materialize else None,
+                    "extra_env": extra_env,
+                }
+            )
+    services.append(
         {
             "service_key": "pubsub-sqs",
             "config": pubsub_cfg,
@@ -413,8 +428,8 @@ def build() -> Template:
                 Environment(Name="SQS_REGION", Value=Ref("AWS::Region")),
                 Environment(Name="SQS_ROLE_ARN", Value=Ref("QueueRoleArn")),
             ],
-        },
-    ]
+        }
+    )
 
     for spec in services:
         ecs_service = _build_service_block(
@@ -428,7 +443,7 @@ def build() -> Template:
             base_env=base_env,
             base_secrets=base_secrets,
             extra_env=spec.get("extra_env"),
-            # Autoscaled workers (process-{logs,metrics,traces}) take the
+            # Autoscaled workers (process-<signal>-<role>) take the
             # build-time "lakerunner_capacity" knob (default "fallback": Base=1
             # on-demand guarantees the first NEW task of a rolling upgrade places
             # even in a transient FARGATE_SPOT shortage, while scale-out replicas
@@ -449,6 +464,7 @@ def build() -> Template:
                 config=spec["config"],
                 min_replicas_param=spec["min_replicas_param"],
                 max_replicas_param=spec["max_replicas_param"],
+                max_capacity=spec.get("max_capacity"),
             )
 
     return t
@@ -462,8 +478,12 @@ def _add_cpu_autoscaling(
     config: dict,
     min_replicas_param: str,
     max_replicas_param: str,
+    max_capacity: int | None = None,
 ):
     """Attach a CPU target-tracking autoscaler to a process-* ECS service.
+
+    `max_capacity` replaces the Process*Replicas cap with a literal (the
+    materialize role's partition count).
 
     Uses native ECS Application Auto Scaling (no RoleARN -> the account's
     AWSServiceRoleForApplicationAutoScaling_ECSService service-linked role,
@@ -483,7 +503,7 @@ def _add_cpu_autoscaling(
                 ServiceName=GetAtt(ecs_service, "Name"),
             ),
             MinCapacity=Ref(min_replicas_param),
-            MaxCapacity=Ref(max_replicas_param),
+            MaxCapacity=max_capacity if max_capacity is not None else Ref(max_replicas_param),
         )
     )
     t.add_resource(

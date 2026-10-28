@@ -150,25 +150,28 @@ Optional (template defaults preserved when unset):
                               output).  Maestro/Dex OIDC issuer and redirect
                               URLs are derived from it, so the certificate must
                               match it.  Unset: the raw ALB DNS name is used.
-  PROCESS_LOGS_MEMORY         Fargate task memory (MiB) for process-logs
+  PROCESS_LOGS_MEMORY         Fargate task memory (MiB) for each process-logs-*
+                              role task (ingest, compact)
                               (template default 4096).  Must be a valid Fargate
                               CPU/memory combo (at 1 vCPU: 2048-8192).  Unset
                               keeps the stack's current value on update (template
                               default on create) -- set it to apply a new size.
-  PROCESS_METRICS_MEMORY      Fargate task memory (MiB) for process-metrics
+  PROCESS_METRICS_MEMORY      Fargate task memory (MiB) for each process-metrics-*
+                              role task (partition, materialize, compact, rollup)
                               (template default 2048).  Same combo rules; unset
                               keeps the current value.
-  PROCESS_TRACES_MEMORY       Fargate task memory (MiB) for process-traces
+  PROCESS_TRACES_MEMORY       Fargate task memory (MiB) for each process-traces-*
+                              role task (ingest, compact)
                               (template default 2048).  Same combo rules; unset
                               keeps the current value.
-  PROCESS_LOGS_MIN_REPLICAS   Minimum process-logs tasks the CPU autoscaler
-                              keeps running (template default 1, cap 10).
+  PROCESS_LOGS_MIN_REPLICAS   Minimum tasks per process-logs-* role service the
+                              CPU autoscaler keeps running (default 1, cap 10).
                               Changing it also resets the service's desired
                               count to it; the autoscaler then re-scales.
                               Unset keeps the current value.
   PROCESS_METRICS_MIN_REPLICAS
-                              Same, for process-metrics.
-  PROCESS_TRACES_MIN_REPLICAS Same, for process-traces.
+                              Same, for the process-metrics-* role services.
+  PROCESS_TRACES_MIN_REPLICAS Same, for the process-traces-* role services.
   DB_INIT_IMAGE               Full image URI override for the db-init image
                               (official postgres psql client). Bypasses
                               IMAGE_REGISTRY. Default: the baked, pinned suffix

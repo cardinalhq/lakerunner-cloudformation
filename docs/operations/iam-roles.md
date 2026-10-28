@@ -131,13 +131,13 @@ Bedrock, ECS UpdateService.
 
 | Service(s) | Containers |
 |---|---|
-| `ProcessLogsService` | process-logs |
-| `ProcessMetricsService` | process-metrics |
-| `ProcessTracesService` | process-traces |
+| `ProcessLogs{Ingest,Compact}Service` | process-logs-{ingest,compact} |
+| `ProcessMetrics{Partition,Materialize,Compact,Rollup}Service` | process-metrics-{partition,materialize,compact,rollup} |
+| `ProcessTraces{Ingest,Compact}Service` | process-traces-{ingest,compact} |
 | `PubsubSqsService` | pubsub-sqs |
 
 **What the containers do at runtime:**
-- `process-{logs,metrics,traces}`: consume SQS notifications about new
+- `process-<signal>-<role>` (one role per service, `LAKERUNNER_PROCESS_ROLE`): consume SQS notifications about new
   `otel-raw/` uploads; download the raw OTLP files from S3; transform
   to cooked Parquet; write back to S3 under `db/`. May call Bedrock
   foundation models for enrichment (see PR -- per-tier roles spec).

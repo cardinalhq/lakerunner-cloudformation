@@ -11,6 +11,64 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v1.7.21
+
+**Image bumps: lakerunner v1.92.0 → v1.98.1, maestro v1.99.10 → v1.127.3.**
+
+**Resource replacement: one process service per worker role.** lakerunner
+v1.94+ runs each `process-<signal>` worker as exactly one role, named by
+`LAKERUNNER_PROCESS_ROLE`, and refuses to start without it (there is no
+combined mode). `services-process` therefore replaces the three
+`process-{logs,metrics,traces}` ECS services with eight, mirroring the helm
+chart (lakerunner chart 4.0+):
+
+| signal  | services |
+|---------|----------|
+| logs    | `process-logs-ingest`, `process-logs-compact` |
+| metrics | `process-metrics-partition`, `process-metrics-materialize`, `process-metrics-compact`, `process-metrics-rollup` |
+| traces  | `process-traces-ingest`, `process-traces-compact` |
+
+Each role service gets its own task definition, CloudWatch log group
+(`/cardinal/process-<signal>-<role>`, the old `/cardinal/process-<signal>`
+groups are deleted) and CPU autoscaler. The existing `Process{Logs,Metrics,
+Traces}{Memory,MinReplicas,Replicas}` parameters are unchanged in name and
+default but now apply to **every role service of that signal**, so the
+steady-state task count rises from 3 to 8 at the default floor of 1, and the
+autoscaler ceiling is per role. `process-metrics-materialize` is capped at 16
+tasks, the seeded metric partition layout, and carries
+`LAKERUNNER_METRIC_PARTITIONS=16` so the binary refuses a layout that no longer
+matches. The `ProcessLogsServiceName` / `ProcessMetricsServiceName` /
+`ProcessTracesServiceName` outputs are replaced by one
+`Process<Signal><Role>ServiceName` output per service.
+
+Upgrade action: update the services stack. The migration service runs the
+lakerunner v1.98.1 schema migrations first; the old process services are
+deleted and the new ones created in the same update (expect a short ingest
+pause while the new tasks start; SQS buffers the notifications). Check the
+account's Fargate vCPU quota covers the larger task count. Nothing else to set.
+
+Notable upstream changes carried by these images:
+
+- lakerunner v1.93–v1.98: pre-ingest metric partitioning for every org (the
+  `metric.partitioned_ingest` setting is gone; counter_increase materialization
+  is credited by the partition owners); process workers split by role (above);
+  a durable native query daemon per query-worker pod with resident registry and
+  block-index state; series-sharded range folds and a closed-wave partial cache
+  for metric queries; an opt-in `series_blocks` SSE query format with gzip
+  streams (maestro v1.127 requests it); a large PromQL conformance pass (native
+  and delta histograms, subqueries, vector matching, `*_over_time` folds,
+  remote-write names kept verbatim); logs `line_format` field references and
+  nested attribute values ingested as JSON text; alert evaluation closes
+  incidents of disabled or deleted rules; Go 1.27.3.
+- maestro v1.100–v1.127: Investigation Storyboards (live per-session
+  investigations, supervision with verdicts and relayed owner decisions,
+  tags, visibility and sharing, public links, Story generation, sessions
+  panel, phone layouts); log field extraction from any JSON-valued field;
+  redesigned invitation and alert emails; license-expiry banner for org owners;
+  `MAESTRO_RELIABILITY_ENABLED` defaults back to off; Bedrock Converse omits
+  temperature for Claude 5 / Opus 4.7+; the `:latest` maestro image tag is no
+  longer published (this stack pins by digest and is unaffected).
+
 ## v1.7.20
 
 **New parameters: Maestro login through a customer-supplied OIDC IdP.** Setting
