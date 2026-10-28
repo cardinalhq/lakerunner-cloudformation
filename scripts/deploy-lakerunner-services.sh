@@ -24,15 +24,15 @@ set -eu
 DEFAULT_TEMPLATE_BASE_URL="https://cardinal-cfn-us-east-1.s3.us-east-1.amazonaws.com/lakerunner"
 TEMPLATE_KEY="cardinal-lakerunner-services.yaml"
 # Baked at publish time (scripts-src/build.sh).  STACK_VERSION defaults to this.
-DEFAULT_STACK_VERSION="v1.7.20"
+DEFAULT_STACK_VERSION="v1.7.21"
 DEFAULT_IMAGE_REGISTRY="public.ecr.aws"
 # Baked, locked registry-relative paths (repo + pinned tag/digest) for the
 # public-ECR images.  Only the registry prefix is operator-supplied.  db-init
 # (official postgres psql client) is baked too -- this stack is always on
 # public.ecr.aws -- so a redeploy always carries the pinned default;
 # DB_INIT_IMAGE remains a full-URI escape hatch.
-LAKERUNNER_IMAGE_SUFFIX="cardinalhq.io/lakerunner:v1.92.0@sha256:2276d22b5ee9f8ef6aa6ec3d26ebb17903b41a4c62cc38e0ea4ca930b0a3afa3"
-MAESTRO_IMAGE_SUFFIX="cardinalhq.io/maestro:v1.99.10@sha256:0a481f56f516c81bdc6ca75186ebaa3fe73035738844e690f35d504f8b3b170e"
+LAKERUNNER_IMAGE_SUFFIX="cardinalhq.io/lakerunner:v1.98.1@sha256:8199dc12cb546b3ee2fae80f0c4409a6cff8bc198d5554797f8e8210091d5cc7"
+MAESTRO_IMAGE_SUFFIX="cardinalhq.io/maestro:v1.127.3@sha256:2210b3488b0c8c5ec1d4fabcae34decb7bcbfa034299bca4667698090796c4fa"
 DEX_IMAGE_SUFFIX="cardinalhq.io/dex-customization:v0.5.0@sha256:3fd7766b7a089948bfbe504ea4b23671b2257e2fed0247ac638c9902aca4aebd"
 DB_INIT_IMAGE_SUFFIX="docker/library/postgres:18-alpine@sha256:96d56f7f57c6aacd1fcb908bc83b345ec5f83231ee486dd66a1baadce274db88"
 
@@ -151,25 +151,28 @@ Optional (template defaults preserved when unset):
                               output).  Maestro/Dex OIDC issuer and redirect
                               URLs are derived from it, so the certificate must
                               match it.  Unset: the raw ALB DNS name is used.
-  PROCESS_LOGS_MEMORY         Fargate task memory (MiB) for process-logs
+  PROCESS_LOGS_MEMORY         Fargate task memory (MiB) for each process-logs-*
+                              role task (ingest, compact)
                               (template default 4096).  Must be a valid Fargate
                               CPU/memory combo (at 1 vCPU: 2048-8192).  Unset
                               keeps the stack's current value on update (template
                               default on create) -- set it to apply a new size.
-  PROCESS_METRICS_MEMORY      Fargate task memory (MiB) for process-metrics
+  PROCESS_METRICS_MEMORY      Fargate task memory (MiB) for each process-metrics-*
+                              role task (partition, materialize, compact, rollup)
                               (template default 2048).  Same combo rules; unset
                               keeps the current value.
-  PROCESS_TRACES_MEMORY       Fargate task memory (MiB) for process-traces
+  PROCESS_TRACES_MEMORY       Fargate task memory (MiB) for each process-traces-*
+                              role task (ingest, compact)
                               (template default 2048).  Same combo rules; unset
                               keeps the current value.
-  PROCESS_LOGS_MIN_REPLICAS   Minimum process-logs tasks the CPU autoscaler
-                              keeps running (template default 1, cap 10).
+  PROCESS_LOGS_MIN_REPLICAS   Minimum tasks per process-logs-* role service the
+                              CPU autoscaler keeps running (default 1, cap 10).
                               Changing it also resets the service's desired
                               count to it; the autoscaler then re-scales.
                               Unset keeps the current value.
   PROCESS_METRICS_MIN_REPLICAS
-                              Same, for process-metrics.
-  PROCESS_TRACES_MIN_REPLICAS Same, for process-traces.
+                              Same, for the process-metrics-* role services.
+  PROCESS_TRACES_MIN_REPLICAS Same, for the process-traces-* role services.
   DB_INIT_IMAGE               Full image URI override for the db-init image
                               (official postgres psql client). Bypasses
                               IMAGE_REGISTRY. Default: the baked, pinned suffix

@@ -119,9 +119,17 @@ def test_no_cpu_parameters_for_process_or_pubsub(td):
 # ---------------------------------------------------------------------------
 
 
-def test_creates_four_ecs_services(td):
+PROCESS_TASK_DEFS = [
+    f"Process{sig.capitalize()}{role.capitalize()}TaskDef"
+    for sig, roles in services_process.PROCESS_ROLES.items()
+    for role in roles
+]
+PROCESS_SERVICES = [t.removesuffix("TaskDef") + "Service" for t in PROCESS_TASK_DEFS]
+
+
+def test_creates_one_service_per_role_plus_pubsub(td):
     services = [r for r in td["Resources"].values() if r["Type"] == "AWS::ECS::Service"]
-    assert len(services) == 4
+    assert len(services) == 9
 
 
 def test_no_target_groups(td):
@@ -145,9 +153,14 @@ def test_no_service_attaches_load_balancers(td):
 
 def test_expected_service_logical_ids_present(td):
     expected_suffixes = {
-        "ProcessLogsService",
-        "ProcessMetricsService",
-        "ProcessTracesService",
+        "ProcessLogsIngestService",
+        "ProcessLogsCompactService",
+        "ProcessMetricsPartitionService",
+        "ProcessMetricsMaterializeService",
+        "ProcessMetricsCompactService",
+        "ProcessMetricsRollupService",
+        "ProcessTracesIngestService",
+        "ProcessTracesCompactService",
         "PubsubSqsService",
     }
     found = {
@@ -165,11 +178,11 @@ def test_expected_service_logical_ids_present(td):
 
 def test_each_service_has_unique_log_group_with_14_day_retention(td):
     log_groups = [r for r in td["Resources"].values() if r["Type"] == "AWS::Logs::LogGroup"]
-    assert len(log_groups) == 4
+    assert len(log_groups) == 9
     for lg in log_groups:
         assert lg["Properties"]["RetentionInDays"] == 14
     names = {json.dumps(lg["Properties"].get("LogGroupName")) for lg in log_groups}
-    assert len(names) == 4, "log groups must have distinct names"
+    assert len(names) == 9, "log groups must have distinct names"
 
 
 # ---------------------------------------------------------------------------
@@ -188,9 +201,9 @@ def test_no_internally_managed_iam_roles(td):
 # ---------------------------------------------------------------------------
 
 
-def test_four_task_definitions(td):
+def test_nine_task_definitions(td):
     task_defs = [r for r in td["Resources"].values() if r["Type"] == "AWS::ECS::TaskDefinition"]
-    assert len(task_defs) == 4
+    assert len(task_defs) == 9
 
 
 def test_task_definition_memory_uses_parameter_refs_for_process_services(td):
@@ -201,12 +214,12 @@ def test_task_definition_memory_uses_parameter_refs_for_process_services(td):
         if r["Type"] == "AWS::ECS::TaskDefinition"
     }
 
-    expected_mem_refs = {
-        "ProcessLogsTaskDef": "ProcessLogsMemory",
-        "ProcessMetricsTaskDef": "ProcessMetricsMemory",
-        "ProcessTracesTaskDef": "ProcessTracesMemory",
-    }
-    for logical_id, expected_ref in expected_mem_refs.items():
+    for logical_id in PROCESS_TASK_DEFS:
+        # Every role of a signal shares that signal's memory parameter.
+        expected_ref = logical_id.removesuffix("TaskDef")
+        for role in ("Ingest", "Compact", "Partition", "Materialize", "Rollup"):
+            expected_ref = expected_ref.removesuffix(role)
+        expected_ref += "Memory"
         td_res = task_defs[logical_id]
         mem = td_res["Properties"]["Memory"]
         assert isinstance(mem, dict) and mem.get("Ref") == expected_ref, (
@@ -238,12 +251,20 @@ def test_process_services_start_at_min_replicas(td):
         for logical_id, r in td["Resources"].items()
         if r["Type"] == "AWS::ECS::Service"
     }
-    for logical_id in ("ProcessLogsService", "ProcessMetricsService", "ProcessTracesService"):
+    for logical_id in PROCESS_SERVICES:
         dc = services[logical_id]["Properties"]["DesiredCount"]
-        min_param = logical_id.removesuffix("Service") + "MinReplicas"
+        min_param = _signal_prefix(logical_id) + "MinReplicas"
         assert dc == {"Ref": min_param}, f"{logical_id} DesiredCount: {dc!r}"
         assert td["Parameters"][min_param]["Default"] == "1"
         assert td["Parameters"][min_param]["MinValue"] == 1
+
+
+def _signal_prefix(logical_id):
+    """'ProcessMetricsMaterializeService' -> 'ProcessMetrics'."""
+    for sig in ("Logs", "Metrics", "Traces"):
+        if logical_id.startswith("Process" + sig):
+            return "Process" + sig
+    raise AssertionError(logical_id)
 
 
 def test_process_services_have_cpu_scalable_target(td):
@@ -256,9 +277,8 @@ def test_process_services_have_cpu_scalable_target(td):
         if r["Type"] == "AWS::ApplicationAutoScaling::ScalableTarget"
     }
     expected = {
-        "ProcessLogsScalableTarget": ("ProcessLogsService", "ProcessLogsReplicas"),
-        "ProcessMetricsScalableTarget": ("ProcessMetricsService", "ProcessMetricsReplicas"),
-        "ProcessTracesScalableTarget": ("ProcessTracesService", "ProcessTracesReplicas"),
+        svc.removesuffix("Service") + "ScalableTarget": (svc, _signal_prefix(svc) + "Replicas")
+        for svc in PROCESS_SERVICES
     }
     assert set(targets) == set(expected), f"unexpected scalable targets: {set(targets)}"
     for logical_id, (service_id, max_param) in expected.items():
@@ -266,7 +286,11 @@ def test_process_services_have_cpu_scalable_target(td):
         assert props["ServiceNamespace"] == "ecs"
         assert props["ScalableDimension"] == "ecs:service:DesiredCount"
         assert props["MinCapacity"] == {"Ref": max_param.replace("Replicas", "MinReplicas")}
-        assert props["MaxCapacity"] == {"Ref": max_param}
+        if service_id == "ProcessMetricsMaterializeService":
+            # Never more owners than partitions in the seeded layout.
+            assert props["MaxCapacity"] == services_process.METRIC_PARTITIONS == 16
+        else:
+            assert props["MaxCapacity"] == {"Ref": max_param}
         # ResourceId points at this service via service/<cluster>/<name>.
         resource_id = props["ResourceId"]["Fn::Sub"]
         assert resource_id[0] == "service/${ClusterName}/${ServiceName}"
@@ -281,9 +305,8 @@ def test_process_services_have_cpu_target_tracking_policy(td):
         if r["Type"] == "AWS::ApplicationAutoScaling::ScalingPolicy"
     }
     expected = {
-        "ProcessLogsCpuScalingPolicy": "ProcessLogsScalableTarget",
-        "ProcessMetricsCpuScalingPolicy": "ProcessMetricsScalableTarget",
-        "ProcessTracesCpuScalingPolicy": "ProcessTracesScalableTarget",
+        svc.removesuffix("Service") + "CpuScalingPolicy": svc.removesuffix("Service") + "ScalableTarget"
+        for svc in PROCESS_SERVICES
     }
     assert set(policies) == set(expected), f"unexpected scaling policies: {set(policies)}"
     for logical_id, target_id in expected.items():
@@ -336,12 +359,9 @@ def test_process_replicas_params_default_to_autoscaler_max(td):
 
 
 def test_outputs_required(td):
-    for n in (
-        "ProcessLogsServiceName",
-        "ProcessMetricsServiceName",
-        "ProcessTracesServiceName",
-        "PubsubSqsServiceName",
-    ):
+    for n in [svc.removesuffix("Service") + "ServiceName" for svc in PROCESS_SERVICES] + [
+        "PubsubSqsServiceName"
+    ]:
         assert n in td["Outputs"], f"missing output: {n}"
 
 
@@ -422,8 +442,8 @@ def test_no_container_command_uses_shell_wrapper(td):
 
 
 def test_process_services_have_no_sqs_env(td):
-    """process-logs/metrics/traces never consume SQS: no SQS_* env vars."""
-    for task_def_id in ("ProcessLogsTaskDef", "ProcessMetricsTaskDef", "ProcessTracesTaskDef"):
+    """process-* role services never consume SQS: no SQS_* env vars."""
+    for task_def_id in PROCESS_TASK_DEFS:
         env = _env(td, task_def_id)
         for n in ("SQS_QUEUE_URL", "SQS_REGION", "SQS_ROLE_ARN", "PUBSUB_SQS_ENV"):
             assert n not in env, f"{task_def_id} unexpectedly has {n}"
@@ -435,8 +455,8 @@ def test_process_services_have_no_sqs_env(td):
 
 
 def test_process_services_have_no_autoregister_env(td):
-    """process-logs/metrics/traces must NOT carry the auto-registration env vars."""
-    for task_def_id in ("ProcessLogsTaskDef", "ProcessMetricsTaskDef", "ProcessTracesTaskDef"):
+    """process-* role services must NOT carry the auto-registration env vars."""
+    for task_def_id in PROCESS_TASK_DEFS:
         env = _env(td, task_def_id)
         bad = [k for k in env if "AUTOREGISTER" in k.upper()]
         assert not bad, f"{task_def_id} unexpectedly has autoregister env var(s): {bad}"
@@ -450,16 +470,18 @@ def test_process_services_have_no_autoregister_env(td):
 def test_process_logs_sets_tracked_fields_env(td):
     """process-logs carries the explicit tracked-fields override consumed by
     the log-ingest worklane (the lone GetLogTrackedFields caller)."""
-    env = _env(td, "ProcessLogsTaskDef")
+    env = _env(td, "ProcessLogsIngestTaskDef")
     assert env.get("LAKERUNNER_LOG_TRACKED_FIELDS") == (
         "service_name,environment_type,installation,proc_name,partition_id"
     ), env.get("LAKERUNNER_LOG_TRACKED_FIELDS")
 
 
 def test_other_process_services_have_no_tracked_fields_env(td):
-    """Only process-logs reads tracked fields; metrics/traces/pubsub must not
-    carry the override."""
-    for task_def_id in ("ProcessMetricsTaskDef", "ProcessTracesTaskDef", "PubsubSqsTaskDef"):
+    """Only the logs ingest role reads tracked fields; every other task must
+    not carry the override."""
+    for task_def_id in [t for t in PROCESS_TASK_DEFS if t != "ProcessLogsIngestTaskDef"] + [
+        "PubsubSqsTaskDef"
+    ]:
         env = _env(td, task_def_id)
         assert "LAKERUNNER_LOG_TRACKED_FIELDS" not in env, (
             f"{task_def_id} unexpectedly has LAKERUNNER_LOG_TRACKED_FIELDS"
@@ -469,9 +491,37 @@ def test_other_process_services_have_no_tracked_fields_env(td):
 def test_process_logs_pipelines_two_slots(td):
     """process-logs overlaps I/O with a second pipeline slot; lakerunner's
     log-worker default of 1 is sequential and idles the CPU on S3/DB I/O."""
-    env = _env(td, "ProcessLogsTaskDef")
+    env = _env(td, "ProcessLogsIngestTaskDef")
     assert env.get("LAKERUNNER_SCALING_PIPELINE_DEPTH") == "2"
     assert "LAKERUNNER_SCALING_WORKER_SLOTS" not in env
+
+
+# ---------------------------------------------------------------------------
+# One role per service (lakerunner #1966)
+# ---------------------------------------------------------------------------
+
+
+def test_every_process_task_names_its_role(td):
+    """lakerunner >= v1.94 refuses to start a process-<signal> worker without
+    LAKERUNNER_PROCESS_ROLE; each service names exactly its own role."""
+    for sig, roles in services_process.PROCESS_ROLES.items():
+        for role in roles:
+            env = _env(td, f"Process{sig.capitalize()}{role.capitalize()}TaskDef")
+            assert env["LAKERUNNER_PROCESS_ROLE"] == role
+            container = _container(td, f"Process{sig.capitalize()}{role.capitalize()}TaskDef")
+            assert container["Command"][-1] == f"process-{sig}"
+    assert "LAKERUNNER_PROCESS_ROLE" not in _pubsub_sqs_env_names(td)
+
+
+def test_materialize_pins_partition_count(td):
+    """Only the materialize owner checks the layout; the other roles leave the
+    variable unset (an empty value skips the check in the binary)."""
+    for task_def_id in PROCESS_TASK_DEFS:
+        env = _env(td, task_def_id)
+        if task_def_id == "ProcessMetricsMaterializeTaskDef":
+            assert env["LAKERUNNER_METRIC_PARTITIONS"] == "16"
+        else:
+            assert "LAKERUNNER_METRIC_PARTITIONS" not in env
 
 
 # ---------------------------------------------------------------------------
@@ -530,6 +580,6 @@ def test_process_workers_are_pure_on_demand_by_default(td):
     # The shipped default (lakerunner_capacity: ondemand) disables Spot on the
     # lakerunner side, so process-* run pure on-demand FARGATE. The "fallback"
     # (spot scale-out) strategy is covered in test_services_common.py.
-    for suffix in ("ProcessLogsService", "ProcessMetricsService", "ProcessTracesService"):
+    for suffix in PROCESS_SERVICES:
         assert _service_strategy(td, suffix) == {"FARGATE"}, suffix
         _assert_on_demand(_service_items(td, suffix))
