@@ -11,6 +11,16 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v1.7.22
+
+**Image bump: maestro v1.127.3 → v1.128.0.** First maestro that reads
+`OIDC_BEARER_TOKEN` (the `OidcBearerToken` parameter added in v1.7.21); on
+v1.127.3 the parameter was silently ignored, so Cognito installs always sent
+the access token. Cognito operators: set `OidcBearerToken=id` and make
+`OidcIssuerUrl` the user-pool URL
+(`https://cognito-idp.<region>.amazonaws.com/<pool-id>`), which is what Cognito
+puts in `iss` regardless of any custom hosted-UI domain.
+
 ## v1.7.21
 
 **Image bumps: lakerunner v1.92.0 → v1.98.1, maestro v1.99.10 → v1.127.3.**

@@ -24,7 +24,7 @@ set -eu
 DEFAULT_TEMPLATE_BASE_URL="https://cardinal-cfn-us-east-1.s3.us-east-1.amazonaws.com/lakerunner"
 TEMPLATE_KEY="cardinal-lakerunner-services.yaml"
 # Baked at publish time (scripts-src/build.sh).  STACK_VERSION defaults to this.
-DEFAULT_STACK_VERSION="v1.7.21"
+DEFAULT_STACK_VERSION="v1.7.22"
 DEFAULT_IMAGE_REGISTRY="public.ecr.aws"
 # Baked, locked registry-relative paths (repo + pinned tag/digest) for the
 # public-ECR images.  Only the registry prefix is operator-supplied.  db-init
@@ -32,7 +32,7 @@ DEFAULT_IMAGE_REGISTRY="public.ecr.aws"
 # public.ecr.aws -- so a redeploy always carries the pinned default;
 # DB_INIT_IMAGE remains a full-URI escape hatch.
 LAKERUNNER_IMAGE_SUFFIX="cardinalhq.io/lakerunner:v1.98.1@sha256:8199dc12cb546b3ee2fae80f0c4409a6cff8bc198d5554797f8e8210091d5cc7"
-MAESTRO_IMAGE_SUFFIX="cardinalhq.io/maestro:v1.127.3@sha256:2210b3488b0c8c5ec1d4fabcae34decb7bcbfa034299bca4667698090796c4fa"
+MAESTRO_IMAGE_SUFFIX="cardinalhq.io/maestro:v1.128.0@sha256:d50fd91ff06ff731339d38227e30e23466e15797a30a8cd22eefea321918f21d"
 DEX_IMAGE_SUFFIX="cardinalhq.io/dex-customization:v0.5.0@sha256:3fd7766b7a089948bfbe504ea4b23671b2257e2fed0247ac638c9902aca4aebd"
 DB_INIT_IMAGE_SUFFIX="docker/library/postgres:18-alpine@sha256:96d56f7f57c6aacd1fcb908bc83b345ec5f83231ee486dd66a1baadce274db88"
 
