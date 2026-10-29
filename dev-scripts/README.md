@@ -59,6 +59,20 @@ Env: `KEEP_SECRETS` / `KEEP_BUCKETS` / `DELETE_SNAPSHOTS`, stack-name overrides,
 `DEPLOYER_ROLE_ARN`. See `--help` and
 [`dev-environment.md`](../docs/operations/dev-environment.md).
 
+## scale-cardinal.sh (current)
+
+Scales every ECS service in the test cluster to 0 to stop Fargate spend between
+upgrade tests, and back again. RDS, the ALBs and the NAT gateway keep running.
+`down` saves each service's desired count and autoscaling floor to
+`~/.cardinal-scale-<cluster>.tsv`; `up` restores from it. Both are CFN drift:
+the next services deploy re-applies `DesiredCount` but not the process-tier
+autoscaling `MinCapacity`, so run `up` around any upgrade test.
+
+```sh
+REGION=us-east-1 CLUSTER=<cluster name> dev-scripts/scale-cardinal.sh down
+REGION=us-east-1 CLUSTER=<cluster name> dev-scripts/scale-cardinal.sh up
+```
+
 ## sweep-stranded-resources.sh (current)
 
 When a stack delete fails part-way and leaves `DELETE_FAILED` /
