@@ -94,9 +94,13 @@ EXTERNAL_OIDC_PARAMS = [
      "Expected aud claim on external IdP tokens. Empty means maestro-ui. "
      "Ignored with DEX."),
     ("OidcJwksUrl", "OIDC_JWKS_URL", "str",
-     "External IdP JWKS URL. Empty means "
-     "<issuer>/protocol/openid-connect/certs (Keycloak); set it for other "
-     "IdPs, e.g. <issuer>/v1/keys for Okta. Ignored with DEX."),
+     "External IdP JWKS URL. Empty means the jwks_uri from the issuer's "
+     "discovery document (<issuer>/.well-known/openid-configuration), or "
+     "Keycloak's path if discovery is unreachable. Ignored with DEX."),
+    ("OidcExpectedIssuer", "OIDC_EXPECTED_ISSUER", "str",
+     "iss value maestro requires on tokens. Empty means OidcIssuerUrl. Set "
+     "it when the discovery document at OidcIssuerUrl names a different "
+     "issuer (e.g. Cognito behind a custom URL)."),
     ("OidcSuperadminGroup", "OIDC_SUPERADMIN_GROUP", "str",
      "IdP group whose members get maestro superadmin. Empty leaves "
      "maestro's default (maestro-superadmin) and does not request the "
@@ -120,12 +124,17 @@ EXTERNAL_OIDC_PARAMS = [
     ("OidcTrustUnverifiedEmails", "OIDC_TRUST_UNVERIFIED_EMAILS", "bool",
      "When true, accept emails the IdP does not mark verified (e.g. Entra "
      "ID, which omits email_verified)."),
+    ("OidcDebug", "OIDC_DEBUG", "bool",
+     "When true, maestro logs a summary of each distinct sign-in token "
+     "(issuer, audience, algorithm, claim names; never email or name "
+     "values) to troubleshoot IdP compatibility."),
     ("McpOauthEnabled", "MCP_OAUTH_ENABLED", "bool",
      "When true, MCP clients sign in to /mcp with OAuth against the external "
      "IdP instead of an API key. Requires OidcIssuerUrl."),
     ("McpOauthIssuer", "MCP_OAUTH_ISSUER", "str",
      "Authorization server advertised to MCP clients. Empty uses "
-     "OidcIssuerUrl; its tokens must still carry iss=OidcIssuerUrl."),
+     "OidcIssuerUrl; its tokens must still carry the expected issuer "
+     "(OidcExpectedIssuer, else OidcIssuerUrl)."),
     ("McpOauthAudience", "MCP_OAUTH_AUDIENCE", "str",
      "aud accepted on /mcp only. Empty means <base URL>/mcp."),
     ("McpOauthAsMetadataProxy", "MCP_OAUTH_AS_METADATA_PROXY", "bool",

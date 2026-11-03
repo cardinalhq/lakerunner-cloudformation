@@ -29,10 +29,11 @@ is required.
 
 | Env var | Default | Notes |
 |---|---|---|
-| `OIDC_ISSUER_URL` | (DEX) | Issuer URL; must match the tokens' `iss` exactly. |
+| `OIDC_ISSUER_URL` | (DEX) | Issuer URL. The UI reads `<issuer>/.well-known/openid-configuration` from it; tokens must carry it as `iss` unless `OIDC_EXPECTED_ISSUER` is set. |
+| `OIDC_EXPECTED_ISSUER` | `OIDC_ISSUER_URL` | The `iss` Maestro requires, when the discovery document at `OIDC_ISSUER_URL` names a different issuer. Maestro v1.128.4+. |
 | `OIDC_CLIENT_ID` | `OIDC_AUDIENCE` | Client id the UI sends to the IdP. |
 | `OIDC_AUDIENCE` | `maestro-ui` | Expected `aud` (differs from the client id on Okta custom auth servers). |
-| `OIDC_JWKS_URL` | `<issuer>/protocol/openid-connect/certs` | Keycloak's path; set it for other IdPs (Okta: `<issuer>/v1/keys`). |
+| `OIDC_JWKS_URL` | discovery `jwks_uri` | Maestro v1.128.4+ reads it from the discovery document, falling back to Keycloak's `<issuer>/protocol/openid-connect/certs`. Set it only when Maestro must reach the keys on a different URL. |
 | `OIDC_SUPERADMIN_EMAILS` | `admin@cardinal.local` | Emails granted superadmin. |
 | `OIDC_SUPERADMIN_GROUP` | `maestro-superadmin` | Group granted superadmin; setting it also requests the `groups` scope. |
 | `OIDC_EMAIL_CLAIM` | `email` | Claim mapping overrides for IdPs whose tokens differ from Keycloak's. |
@@ -42,6 +43,7 @@ is required.
 | `OIDC_EXTERNAL_ID_CLAIM` | `sub` | Persistent account key; changing it on a live install is a migration event. |
 | `OIDC_TRUST_UNVERIFIED_EMAILS` | `false` | For IdPs that omit `email_verified`. |
 | `OIDC_BEARER_TOKEN` | `access` | `id` makes the UI send the ID token; needed for Amazon Cognito. |
+| `OIDC_DEBUG` | `false` | Log a summary of each distinct sign-in token (issuer, audience, algorithm, claim names; never email or name values). Maestro v1.128.4+. |
 | `MCP_OAUTH_ENABLED` | `false` | OAuth sign-in for MCP clients on `/mcp`; needs an external issuer. |
 | `MCP_OAUTH_ISSUER` | `OIDC_ISSUER_URL` | Authorization server advertised to MCP clients. |
 | `MCP_OAUTH_AUDIENCE` | `<base URL>/mcp` | `aud` accepted on `/mcp` only. |
@@ -144,3 +146,22 @@ needed for group-based superadmin (a Cognito group named `maestro-superadmin`,
 the default); otherwise grant it by email. Do not set `OIDC_SUPERADMIN_GROUP`:
 any value makes the UI request a `groups` scope, which Cognito does not offer
 and rejects with `invalid_scope`.
+
+## Troubleshooting
+
+Maestro v1.128.4 and later check the OIDC settings against the IdP at
+startup and log one `OIDC endpoints: …` line, plus an `OIDC check <code>: …`
+line for each problem it finds (for example `issuer_differs_from_discovery`,
+`jwks_unreachable`, `scope_unsupported`, `cognito_access_token`). Each message
+names the setting that fixes it.
+
+Find them in the Maestro container's CloudWatch log stream right after a
+deploy. The same checks are available on demand as
+`/app/entrypoint.sh oidc-doctor [--token <jwt>]` wherever you have a shell
+in the image (for example `kubectl exec` on Kubernetes); `--token` verifies
+a real token end to end and prints only its issuer, audience, algorithm and
+claim names.
+
+A `JWT issuer mismatch` warning now includes the token's `iss` and the value
+Maestro expected. If the token's issuer is right for your IdP, set
+`OIDC_EXPECTED_ISSUER` to it.
