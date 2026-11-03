@@ -11,6 +11,31 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v1.7.23
+
+**Image bump: maestro v1.128.0 → v1.128.4.** This maestro reads the issuer's
+OIDC discovery document (`<OidcIssuerUrl>/.well-known/openid-configuration`)
+and takes the signing keys from its `jwks_uri` unless `OidcJwksUrl` is set.
+It also logs OIDC compatibility checks at startup (`OIDC check <code>: …`
+lines in the Maestro log stream), and the `JWT issuer mismatch` warning now
+shows the token's `iss` next to the expected one.
+
+**New parameters (external IdP):**
+
+- `OidcExpectedIssuer` (default empty = `OidcIssuerUrl`): the `iss` Maestro
+  requires. Set it when the discovery document at `OidcIssuerUrl` names a
+  different issuer, e.g. a custom URL fronting Amazon Cognito. Symptom
+  without it: sign-in succeeds, then every API call 401s and the Maestro log
+  shows `JWT issuer mismatch`.
+- `OidcDebug` (default `false`): log a summary of each distinct sign-in token
+  (issuer, audience, algorithm, claim names; never email or name values).
+
+`OidcJwksUrl` is now optional for any IdP that publishes discovery; existing
+values keep working. No resource replacements.
+
+Note: the v1.128.4 image is not cosign-signed (the release workflow's signing
+step failed); it is otherwise the normally built and smoke-tested release.
+
 ## v1.7.22
 
 **Image bump: maestro v1.127.3 → v1.128.0.** First maestro that reads
