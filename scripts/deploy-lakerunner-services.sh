@@ -109,9 +109,11 @@ Optional (template defaults preserved when unset):
   OIDC_ISSUER_URL             IdP issuer URL.
   OIDC_CLIENT_ID              OAuth client_id (default: OIDC_AUDIENCE).
   OIDC_AUDIENCE               Expected token aud (default: maestro-ui).
-  OIDC_JWKS_URL               JWKS URL (default: Keycloak's
-                              <issuer>/protocol/openid-connect/certs; e.g.
-                              <issuer>/v1/keys for Okta).
+  OIDC_JWKS_URL               JWKS URL (default: the issuer discovery
+                              document's jwks_uri).
+  OIDC_EXPECTED_ISSUER        iss required on tokens (default:
+                              OIDC_ISSUER_URL); set when the discovery
+                              document names a different issuer.
   OIDC_SUPERADMIN_GROUP       IdP group granted superadmin.
   OIDC_EMAIL_CLAIM            Claim mapping overrides (defaults: email,
   OIDC_EMAIL_VERIFIED_CLAIM   email_verified, name,preferred_username,email,
@@ -120,6 +122,8 @@ Optional (template defaults preserved when unset):
   OIDC_EXTERNAL_ID_CLAIM
   OIDC_BEARER_TOKEN           access|id (default access); id for Cognito.
   OIDC_TRUST_UNVERIFIED_EMAILS  true|false (default false).
+  OIDC_DEBUG                  true|false (default false).  Log a summary
+                              of each sign-in token (no email/name values).
   MCP_OAUTH_ENABLED           true|false (default false).  OAuth sign-in for
                               MCP clients on /mcp; requires OIDC_ISSUER_URL.
   MCP_OAUTH_ISSUER            Authorization server advertised to MCP clients
@@ -492,6 +496,7 @@ for oidc_map in \
     OIDC_CLIENT_ID=OidcClientId \
     OIDC_AUDIENCE=OidcAudience \
     OIDC_JWKS_URL=OidcJwksUrl \
+    OIDC_EXPECTED_ISSUER=OidcExpectedIssuer \
     OIDC_SUPERADMIN_GROUP=OidcSuperadminGroup \
     OIDC_EMAIL_CLAIM=OidcEmailClaim \
     OIDC_EMAIL_VERIFIED_CLAIM=OidcEmailVerifiedClaim \
@@ -500,6 +505,7 @@ for oidc_map in \
     OIDC_EXTERNAL_ID_CLAIM=OidcExternalIdClaim \
     OIDC_BEARER_TOKEN=OidcBearerToken \
     OIDC_TRUST_UNVERIFIED_EMAILS=OidcTrustUnverifiedEmails \
+    OIDC_DEBUG=OidcDebug \
     MCP_OAUTH_ENABLED=McpOauthEnabled \
     MCP_OAUTH_ISSUER=McpOauthIssuer \
     MCP_OAUTH_AUDIENCE=McpOauthAudience \
