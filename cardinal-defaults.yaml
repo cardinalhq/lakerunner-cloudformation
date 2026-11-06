@@ -19,8 +19,8 @@ api_keys:
 # so the two cannot drift; any change to LakerunnerImage retriggers migrations.
 # ---------------------------------------------------------------------------
 images:
-  lakerunner: "public.ecr.aws/cardinalhq.io/lakerunner:v1.98.1@sha256:8199dc12cb546b3ee2fae80f0c4409a6cff8bc198d5554797f8e8210091d5cc7"
-  maestro:    "public.ecr.aws/cardinalhq.io/maestro:v1.128.4@sha256:6a4ed62296a487a398631f4abaae4090fe42b29a0244af536cd62a3855592ea6"
+  lakerunner: "public.ecr.aws/cardinalhq.io/lakerunner:v1.98.4@sha256:2bb4d842186e10d90537c3bed4a3eab6dccaea7a1de52b3dbbf4f187cb667f0d"
+  maestro:    "public.ecr.aws/cardinalhq.io/maestro:v1.129.2@sha256:de503753e4a8a300ad09924bd7ee18df7ed028dc063d7a8eb3533990b7dfee05"
   otel:       "public.ecr.aws/cardinalhq.io/cardinalhq-otel-collector:v1.10.0@sha256:ad9d6459d2d231a4ea0b709347587e4c3dc43eb82e169e915305d9ddae73540c"
   dex:        "public.ecr.aws/cardinalhq.io/dex-customization:v0.5.0@sha256:3fd7766b7a089948bfbe504ea4b23671b2257e2fed0247ac638c9902aca4aebd"
   db_init:    "public.ecr.aws/docker/library/postgres:18-alpine@sha256:96d56f7f57c6aacd1fcb908bc83b345ec5f83231ee486dd66a1baadce274db88"
