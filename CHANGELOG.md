@@ -11,6 +11,18 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v1.7.24
+
+**Image bumps: lakerunner v1.98.1 → v1.98.4, maestro v1.128.4 → v1.129.2.**
+No new or changed parameters, no new migrations, no upgrade action.
+
+- lakerunner now serves Logs search-box queries (`|~ "(?i)text"`) from the
+  token index by default instead of a regex scan of every log body
+  (`QUERY_LOG_DEFAULT_TOKEN_SEARCH` now defaults on).
+- maestro: Logs Explore message search is case-insensitive again (and indexed
+  with this lakerunner); service suggestion rows show the real `service_name`;
+  storyboard UI updates.
+
 ## v1.7.23
 
 **Image bump: maestro v1.128.0 → v1.128.4.** This maestro reads the issuer's
