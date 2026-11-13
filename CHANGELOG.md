@@ -11,6 +11,15 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v1.7.26
+
+**Image bump: maestro v1.129.6 → v1.129.7.** No new or changed parameters, no
+new migrations, no upgrade action.
+
+- maestro: Settings → API Keys now labels the organization's keys "API Keys"
+  ("Create API Key") instead of "Ingest API Keys". Same keys, no behaviour
+  change: one key both sends data to Lakerunner and queries it.
+
 ## v1.7.25
 
 **Image bump: maestro v1.129.2 → v1.129.6.** No new or changed parameters, no
