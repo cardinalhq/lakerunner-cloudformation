@@ -11,6 +11,22 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v1.7.25
+
+**Image bump: maestro v1.129.2 → v1.129.6.** No new or changed parameters, no
+upgrade action. Maestro applies two small additive schema migrations of its own
+on startup (webhook delivery-attempt log, SLO publisher state); lakerunner is
+unchanged, so lakerunner migrations do not re-run.
+
+- maestro: Explore → Logs columns can be resized and reordered by dragging
+  their headers (layout saved per browser; Columns → Reset restores it).
+- maestro: Last 1, 5 and 10 minutes time-range presets.
+- maestro: log rows open expanded by default, with a Collapse all / Expand all
+  toggle; a click still opens or closes a single row.
+- maestro: saved queries show live results as variables are edited.
+- maestro: alert webhook deliveries record each attempt with its HTTP status,
+  and the webhook timeout is configurable per notification group.
+
 ## v1.7.24
 
 **Image bumps: lakerunner v1.98.1 → v1.98.4, maestro v1.128.4 → v1.129.2.**
