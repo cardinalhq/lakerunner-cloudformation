@@ -11,6 +11,18 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v1.7.27
+
+**Image bump: maestro v1.129.7 → v1.129.8.** No new or changed parameters, no
+upgrade action. Maestro applies one small additive schema migration of its own
+on startup (a nullable "created by" column on organization API keys); lakerunner
+is unchanged, so lakerunner migrations do not re-run.
+
+- maestro: organization members, not only owners, can now open Settings → API
+  Keys and create API keys. Members can revoke the keys they created; owners
+  can still revoke any key. Viewers have no access. Keys created before this
+  version can only be revoked by an owner.
+
 ## v1.7.26
 
 **Image bump: maestro v1.129.6 → v1.129.7.** No new or changed parameters, no
