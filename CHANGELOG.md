@@ -11,6 +11,19 @@ install up to date, read every entry from the version you are on up to your
 target version and apply the noted upgrade actions. Earliest recorded version is
 v0.0.114.
 
+## v1.7.28
+
+**Image bump: maestro v1.129.8 → v1.129.10.** No new or changed parameters, no
+upgrade action. Maestro applies one small additive schema migration of its own
+on startup (a nullable progress column on storyboard milestones); lakerunner is
+unchanged, so lakerunner migrations do not re-run.
+
+- maestro: storyboards open on an Overview of every milestone, and each
+  milestone shows its progress (In progress / Decided / Unverified) apart from
+  whether the evidence supports it. The Illustrate action is removed. Existing
+  `?scene=N` links still open the same milestone.
+- maestro: Explore → Logs service and level filters no longer get stuck.
+
 ## v1.7.27
 
 **Image bump: maestro v1.129.7 → v1.129.8.** No new or changed parameters, no
